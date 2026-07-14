@@ -37,7 +37,7 @@ Required for the MVP, as implemented and verified for the 1.0 release:
 Explicitly post-MVP or current-develop follow-up work still on the product roadmap:
 
 - Landed after the original 1.0 cut-line in current backend/RPC: persistent permission rules, session tree/fork/clone/labels/names/caller-supplied branch-summary APIs, full LSP symbols/definitions/references with bounded on-disk sync, backend multimodal/image attachment replay/storage/provider serialization, configurable `task` subagents, the runtime-owned background job registry, and base prompt metadata.
-- 1.1 candidates that remain active: unified settings and reload diagnostics, broader live-provider smoke automation, plugin core-service proxy expansion, frontend/TUI consumption of existing session-tree contracts, automatic LSP server recipes, unsaved-buffer/incremental LSP sync, and RPC upload/input plumbing for attachments. Provider-generated branch summaries and Anthropic interactive OAuth are deferred unless their product/API prerequisites become concrete; AVA keeps caller-supplied branch summaries, provider-generated compaction summaries, and API-key plus stored/env OAuth bearer support.
+- 1.1 candidates that remain active: unified settings and reload diagnostics, broader live-provider smoke automation, plugin core-service proxy expansion, frontend/TUI consumption of existing session-tree contracts, automatic LSP server recipes, unsaved-buffer/incremental LSP sync, and attachment UX beyond the implemented RPC path/inline-upload input. Provider-generated branch summaries and Anthropic interactive OAuth are deferred unless their product/API prerequisites become concrete; AVA keeps caller-supplied branch summaries, provider-generated compaction summaries, and API-key plus stored/env OAuth bearer support.
 - 1.2+ candidates: HTTP/server daemon mode, plugin marketplace/package manager/remote install, extension UI bridge, advanced MCP HTTP/OAuth/subscriptions/sampling/elicitation/pagination/resources, public/default parallel ordinary tool execution beyond the current internal read/search opt-in, OS-level plugin/shell sandboxing, dynamic custom-provider registration, and broader chained multi-agent orchestration beyond the native `task` slice.
 - Later research: in-process native plugin ABI only if AVA accepts the crash/memory/C++ ABI support burden.
 
@@ -56,7 +56,7 @@ The local reference material lives under `docs/reference-code/`. The most releva
 | Agent runtime | Evented runtime, lifecycle events, steering/follow-up queues, abort propagation, sequential/parallel tool execution. |
 | Providers | Provider registry, model capabilities, environment credential discovery, OAuth refresh, provider compatibility shims. |
 | Sessions | Append-only JSONL with tree entries, migrations, session fork/clone/switch, compaction summaries. |
-| RPC | JSONL protocol, bidirectional commands/events, model/session controls, prompt steering, extension UI bridge. |
+| RPC | AVA-specific JSONL v1 protocol, bidirectional commands/events, model/session controls, resolver replies, and prompt steering. It is not ACP; stable ACP v1 uses the separate `ava --acp` endpoint, while an AVA-RPC-specific extension UI bridge remains deferred. |
 | Tools | Pluggable operations, read/write/edit/bash/grep/find/ls, streaming tool updates, output truncation, robust edit diffs. |
 | Compaction | Automatic/manual compaction, cut-point selection, retained recent context, branch summaries. |
 | Extensions | Event hooks, custom tools, commands, providers, UI requests, message interception. |
@@ -212,7 +212,7 @@ Missing or incomplete:
 
 1.0 target:
 
-- RPC is stable enough for editor integrations and test harnesses.
+- AVA RPC v1 is stable for subprocess automation and test harnesses. Standards-based editor integration uses the separate stable `ava --acp` endpoint; client filesystem/terminal routing and official-SDK plus opt-in acpx interoperability are implemented independently without altering RPC v1. Zed 1.9.0 is manual verified for the captured confined lifecycle/tool/permission/client-filesystem/client-terminal and cancellation flows; JetBrains/CodeCompanion configuration is documented but was not executed here.
 - Print mode stays simple and script-friendly.
 - Server mode remains deferred until stdio RPC is proven.
 
@@ -258,7 +258,7 @@ Scope:
 
 - Update stale product/version docs that still describe print, RPC, AGENTS loading, manual compaction records, and export as deferred.
 - Update stale docs that still describe OAuth refresh, permission audit persistence, and atomic file writes as future work.
-- Keep `docs/headless-protocol.md` as the current contract for the RPC MVP.
+- Keep `docs/rpc-protocol.md` as the normative RPC v1 client contract and `docs/headless-protocol.md` for shared headless behavior.
 - Add an explicit 1.0 backend capability checklist to product planning.
 - Make version docs clearly historical when they describe old deferred status.
 - Cross-check `README.md`, `docs/CONFIG.md`, `docs/USAGE.md`, `docs/TESTING.md`, `docs/headless-protocol.md`, and `docs/product/*.md` against current code before starting Phase 2.

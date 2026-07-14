@@ -1,12 +1,16 @@
 #include "sys.h"
 #include "ava/tools/ignore_rules.h"
+#include "ava/tools/secure_workspace.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <fstream>
+#include <sstream>
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <unistd.h>
 
 namespace ava::tools {
 
@@ -147,13 +151,14 @@ bool is_generated_dir(std::filesystem::path const& path)
   return name == "build" || name == "node_modules" || name == "target" || name == "dist";
 }
 
-IgnoreMatcher::IgnoreMatcher(std::filesystem::path workspace_dir) : workspace_dir_(std::move(workspace_dir))
+IgnoreMatcher::IgnoreMatcher(std::filesystem::path workspace_dir, std::shared_ptr<SecureWorkspace> secure_workspace)
+    : workspace_dir_(std::move(workspace_dir)), secure_workspace_(std::move(secure_workspace))
 {
 }
 
-ava::core::Result<IgnoreMatcher> IgnoreMatcher::load(std::filesystem::path const& workspace_dir)
+ava::core::Result<IgnoreMatcher> IgnoreMatcher::load(std::filesystem::path const& workspace_dir, std::shared_ptr<SecureWorkspace> secure_workspace)
 {
-  IgnoreMatcher matcher(workspace_dir);
+  IgnoreMatcher matcher(workspace_dir, std::move(secure_workspace));
   auto loaded = matcher.load_rules();
   if (!loaded)
     return std::unexpected(loaded.error());
@@ -215,6 +220,32 @@ ava::core::Result<void> IgnoreMatcher::load_rules()
   if (!root_loaded)
     return std::unexpected(root_loaded.error());
 
+  if (secure_workspace_)
+  {
+    std::size_t visited = 0;
+    auto walked = secure_workspace_->visit_tree([&](SecureWorkspaceDirectoryEntry const& entry) -> ava::core::Result<SecureWorkspaceWalkAction> {
+      if (++visited > kMaxIgnoreRuleWalkEntries)
+      {
+        auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "too many files while loading .gitignore rules");
+        error.with_context("workspace", workspace_dir_.string());
+        error.with_context("max_visited", std::to_string(kMaxIgnoreRuleWalkEntries));
+        return std::unexpected(std::move(error));
+      }
+      if (entry.type == SecureWorkspaceNodeType::Directory && (is_git_dir(entry.absolute_path) || is_generated_dir(entry.absolute_path)))
+        return SecureWorkspaceWalkAction::SkipDirectory;
+      if (entry.type == SecureWorkspaceNodeType::RegularFile && entry.name == ".gitignore" && entry.absolute_path.parent_path() != workspace_dir_)
+      {
+        auto loaded = load_file(entry.absolute_path);
+        if (!loaded)
+          return std::unexpected(std::move(loaded.error()));
+      }
+      return SecureWorkspaceWalkAction::Continue;
+    });
+    if (!walked)
+      return std::unexpected(std::move(walked.error()));
+    return {};
+  }
+
   std::error_code iter_error;
   std::size_t visited = 0;
   for (std::filesystem::recursive_directory_iterator it(workspace_dir_, iter_error), end; it != end; it.increment(iter_error))
@@ -254,18 +285,63 @@ ava::core::Result<void> IgnoreMatcher::load_rules()
 
 ava::core::Result<void> IgnoreMatcher::load_file(std::filesystem::path const& ignore_file)
 {
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(ignore_file, status_error);
-  if (status_error || std::filesystem::is_symlink(status))
-    return {};
-
-  std::ifstream file(ignore_file, std::ios::binary);
-  if (!file)
-    return {};
+  std::ifstream file;
+  std::istringstream secure_file;
+  std::istream* input = nullptr;
+  if (secure_workspace_)
+  {
+    auto opened = secure_workspace_->open_regular_file(ignore_file);
+    if (!opened)
+    {
+      if (opened.error().category() == ava::core::ErrorCategory::NotFound || opened.error().category() == ava::core::ErrorCategory::PermissionDenied)
+        return {};
+      return std::unexpected(std::move(opened.error()));
+    }
+    constexpr std::size_t kMaxIgnoreFileBytes = 1024U * 1024U;
+    if (opened->size() > kMaxIgnoreFileBytes)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, ".gitignore exceeds secure read limit");
+      error.with_context("path", ignore_file.string());
+      error.with_context("max_bytes", std::to_string(kMaxIgnoreFileBytes));
+      return std::unexpected(std::move(error));
+    }
+    std::string content;
+    content.reserve(static_cast<std::size_t>(opened->size()));
+    std::array<char, 4096> buffer{};
+    while (true)
+    {
+      auto const count = ::read(opened->fd(), buffer.data(), buffer.size());
+      if (count < 0)
+      {
+        if (errno == EINTR)
+          continue;
+        auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed while securely reading .gitignore");
+        error.with_context("path", ignore_file.string());
+        error.with_context("cause", std::generic_category().message(errno));
+        return std::unexpected(std::move(error));
+      }
+      if (count == 0)
+        break;
+      content.append(buffer.data(), static_cast<std::size_t>(count));
+    }
+    secure_file.str(std::move(content));
+    input = &secure_file;
+  }
+  else
+  {
+    std::error_code status_error;
+    auto const status = std::filesystem::symlink_status(ignore_file, status_error);
+    if (status_error || std::filesystem::is_symlink(status))
+      return {};
+    file.open(ignore_file, std::ios::binary);
+    if (!file)
+      return {};
+    input = &file;
+  }
 
   auto const base_relative = relative_to_workspace(ignore_file.parent_path());
   std::string line;
-  while (std::getline(file, line))
+  while (std::getline(*input, line))
   {
     if (!line.empty() && line.back() == '\r')
       line.pop_back();
@@ -316,7 +392,7 @@ ava::core::Result<void> IgnoreMatcher::load_file(std::filesystem::path const& ig
     rules_.push_back(std::move(rule));
   }
 
-  if (!file.eof() && file.fail())
+  if (!input->eof() && input->fail())
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed while reading .gitignore");
     error.with_context("path", ignore_file.string());

@@ -1026,7 +1026,8 @@ int run_tui(ShellState state)
     auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_options(), target_session_id);
     if (!opened)
       return std::unexpected(std::move(opened.error()));
-    state.session = std::move(*opened);
+    if (auto replaced = ava::app::replace_runtime_session(state.session, std::move(*opened)); !replaced)
+      return std::unexpected(std::move(replaced.error()));
     return state_snapshot(status_prefix + target_session_id);
   };
   auto open_selector_branch = [&state, &open_session_selector_target, session_selector_sort, session_selector_show_archived](
@@ -1390,7 +1391,8 @@ int run_tui(ShellState state)
         auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_options(), value);
         if (!opened)
           return std::unexpected(std::move(opened.error()));
-        state.session = std::move(*opened);
+        if (auto replaced = ava::app::replace_runtime_session(state.session, std::move(*opened)); !replaced)
+          return std::unexpected(std::move(replaced.error()));
         return state_snapshot("session opened");
       }});
   std::cout << std::flush;

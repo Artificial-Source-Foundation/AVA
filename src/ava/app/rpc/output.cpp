@@ -1,10 +1,9 @@
 #include "sys.h"
 #include "ava/app/rpc/output.h"
-
 #include "ava/app/rpc/protocol.h"
 #include "ava/app/rpc/serialization.h"
-
 #include "ava/core/ids.h"
+#include "ava/core/json.h"
 
 #include <utility>
 
@@ -53,8 +52,16 @@ ResolverEventPayload resolver_queue_payload(std::string payload_json)
 
 ava::core::VoidResult write_record(RpcOutput& output, std::string_view record)
 {
+  auto safe_record = ava::core::json::is_valid_utf8(record) ? std::string(record) : ava::core::json::replace_invalid_utf8(record);
+  if (!ava::core::json::is_valid_utf8(safe_record))
+  {
+    safe_record =
+        "{\"id\":\"\",\"type\":\"response\",\"success\":false,\"error\":{\"category\":\"unknown\",\"code\":\"internal_error\","
+        "\"message\":\"RPC output encoding failure\",\"details\":\"RPC output encoding failure\"}}\n";
+  }
+
   std::unique_lock lock(output.mutex);
-  output.out << record;
+  output.out << safe_record;
   output.out.flush();
   if (!output.out)
   {
@@ -106,7 +113,7 @@ EventEnvelope resolver_event_envelope(std::string name, std::string request_id, 
   envelope.session_id = std::move(session_id);
   envelope.request_id = std::move(request_id);
   envelope.correlation_id = std::move(correlation_id);
-  envelope.name = std::move(name);
+  envelope.name = is_rpc_event_name(name) ? std::move(name) : std::string("error");
   envelope.payload_type = payload_type_for_resolver_event(envelope.name);
   envelope.payload_json = std::move(payload_json);
   return envelope;
@@ -122,7 +129,7 @@ EventEnvelope resolver_event_envelope(std::string name, std::string request_id, 
   envelope.session_id = std::move(session_id);
   envelope.request_id = std::move(request_id);
   envelope.correlation_id = std::move(correlation_id);
-  envelope.name = std::move(name);
+  envelope.name = is_rpc_event_name(name) ? std::move(name) : std::string("error");
   envelope.payload_type = std::string(ava::app::to_string(payload.payload_type));
   envelope.payload_json = std::move(payload.json);
   return envelope;
@@ -156,13 +163,15 @@ ava::core::VoidResult write_skipped_queue_events(RpcOutput& output, RuntimeSessi
   return {};
 }
 
-ava::core::VoidResult write_follow_up_errors(RpcOutput& output, std::vector<QueuedRpcMessage> const& follow_ups, std::string_view reason)
+ava::core::VoidResult write_follow_up_errors(RpcOutput& output, RpcRunState& run_state, std::vector<QueuedRpcMessage> const& follow_ups,
+                                             std::string_view reason)
 {
   for (auto const& queued : follow_ups)
   {
     auto const error = reason == "canceled" ? canceled_error() : skipped_follow_up_error(reason);
     if (auto written = write_error(output, queued.request_id, error); !written)
       return written;
+    complete_outstanding_request(run_state, queued.request_id);
   }
   return {};
 }

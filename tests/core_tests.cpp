@@ -7,7 +7,9 @@
 #include "debug.h"
 
 void run_core_mode_tests();
+void run_acp_tests();
 void run_session_tests();
+void run_session_run_controller_tests();
 void run_core_json_permission_tests();
 void run_app_command_classification_tests();
 void run_app_command_registry_tests();
@@ -46,7 +48,9 @@ struct TestSuite
 
 constexpr std::array kTestSuites{
     TestSuite{"core_mode", run_core_mode_tests},
+    TestSuite{"acp", run_acp_tests},
     TestSuite{"session", run_session_tests},
+    TestSuite{"session_run_controller", run_session_run_controller_tests},
     TestSuite{"core_json_permission", run_core_json_permission_tests},
     TestSuite{"app_command_classification", run_app_command_classification_tests},
     TestSuite{"app_command_registry", run_app_command_registry_tests},

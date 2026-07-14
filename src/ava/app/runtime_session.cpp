@@ -8,6 +8,7 @@
 #include "ava/app/runtime_reasoning.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
+#include "ava/core/ids.h"
 
 #include <filesystem>
 #include <memory>
@@ -140,10 +141,27 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   auto const workspace_dir = options.workspace_dir.empty() ? *cwd : options.workspace_dir;
   auto const current_dir = options.current_dir.empty() ? workspace_dir : options.current_dir;
 
-  auto registry = ava::config::load_model_registry(options.paths);
-  if (!registry)
-    return std::unexpected(registry.error());
-  auto model = ava::config::select_default_model(*registry);
+  if (options.pin_model_override && !options.default_model_override)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "pinned runtime model override is missing"));
+  }
+
+  ava::config::ModelRegistry registry;
+  if (options.pin_model_override)
+  {
+    registry.default_provider_id = options.default_model_override->provider_id;
+    registry.default_model_id = options.default_model_override->model_id;
+    registry.models = {*options.default_model_override};
+    registry.scoped_model_cycle = std::nullopt;
+  }
+  else
+  {
+    auto loaded_registry = ava::config::load_model_registry(options.paths);
+    if (!loaded_registry)
+      return std::unexpected(loaded_registry.error());
+    registry = std::move(*loaded_registry);
+  }
+  auto model = options.default_model_override.value_or(ava::config::select_default_model(registry));
 
   bool created = true;
   bool append_session_start = true;
@@ -172,10 +190,17 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   }
   else if (options.requested_session_id)
   {
-    auto resolved = resolve_session_id(workspace_dir, options.paths.sessions_dir, *options.requested_session_id);
-    if (!resolved)
-      return std::unexpected(resolved.error());
-    store = ava::session::SessionStore::open(workspace_dir, *resolved, options.paths.sessions_dir);
+    if (options.exact_session_id)
+    {
+      store = ava::session::SessionStore::open(workspace_dir, *options.requested_session_id, options.paths.sessions_dir);
+    }
+    else
+    {
+      auto resolved = resolve_session_id(workspace_dir, options.paths.sessions_dir, *options.requested_session_id);
+      if (!resolved)
+        return std::unexpected(resolved.error());
+      store = ava::session::SessionStore::open(workspace_dir, *resolved, options.paths.sessions_dir);
+    }
     created = false;
   }
   else if (options.continue_last_session)
@@ -200,15 +225,47 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   if (!store)
     return std::unexpected(store.error());
 
+  ava::session::SessionLease lease;
+  auto acquire_runtime_lease = [&]() -> ava::core::VoidResult {
+    if (options.sessionless || !lease.canonical_path().empty())
+      return {};
+    auto acquired = ava::session::SessionLease::acquire(store->session_path());
+    if (!acquired)
+      return std::unexpected(std::move(acquired.error()));
+    lease = std::move(*acquired);
+    return {};
+  };
+  if (!created || options.fork_session_id)
+  {
+    if (auto acquired = acquire_runtime_lease(); !acquired)
+      return std::unexpected(std::move(acquired.error()));
+  }
+
   std::optional<std::vector<ava::session::SessionEntry>> loaded_entries;
   if (!created || options.fork_session_id)
   {
-    auto entries = store->load();
+    auto entries = options.session_read_limits ? store->load_bounded(*options.session_read_limits) : store->load();
     if (!entries)
       return std::unexpected(std::move(entries.error()));
-    if (auto persisted_model = runtime::latest_persisted_model(*registry, *entries))
-      model = std::move(*persisted_model);
+    if (!options.pin_model_override)
+    {
+      if (auto persisted_model = runtime::latest_persisted_model(registry, *entries))
+        model = std::move(*persisted_model);
+    }
     loaded_entries = std::move(*entries);
+    if (options.expected_original_cwd)
+    {
+      auto summary = store->inspect_bounded(options.session_read_limits.value_or(ava::session::SessionReadLimits{}));
+      if (!summary)
+        return std::unexpected(std::move(summary.error()));
+      auto const persisted_cwd = summary->original_cwd.empty() ? workspace_dir : summary->original_cwd;
+      if (persisted_cwd != *options.expected_original_cwd)
+      {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "requested cwd does not match persisted session cwd");
+        error.with_context("persisted_cwd", persisted_cwd.string()).with_context("requested_cwd", options.expected_original_cwd->string());
+        return std::unexpected(std::move(error));
+      }
+    }
   }
 
   std::optional<RuntimeReasoningSelection> reasoning;
@@ -225,10 +282,12 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   {
     if (append_session_start)
     {
-      auto appended = runtime::append_session_start(*store, options.mode, model, prompt_state->base_prompt, prompt_state->context_sources.size());
+      auto appended = runtime::append_session_start(*store, options.mode, model, prompt_state->base_prompt, prompt_state->context_sources.size(), current_dir);
       if (!appended)
         return std::unexpected(appended.error());
     }
+    if (auto acquired = acquire_runtime_lease(); !acquired)
+      return std::unexpected(std::move(acquired.error()));
   }
 
   if (options.initial_session_name && !options.fork_session_id)
@@ -239,6 +298,7 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   }
 
   RuntimeSession session{.store = std::move(*store),
+                         .lease = std::move(lease),
                          .mode = options.mode,
                          .model = std::move(model),
                          .base_prompt = std::move(prompt_state->base_prompt),
@@ -252,9 +312,10 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
                          .freshness_sources = std::move(prompt_state->freshness_sources),
                          .system_prompt = std::move(prompt_state->system_prompt),
                          .reasoning = std::move(reasoning),
-                         .scoped_model_cycle = registry->scoped_model_cycle,
+                         .scoped_model_cycle = registry.scoped_model_cycle,
                          .created = created,
                          .sessionless = options.sessionless,
+                         .run_controller = std::make_unique<SessionRunController>(),
                          .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>(),
                          .offline = options.offline};
 
@@ -265,6 +326,45 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   }
 
   return session;
+}
+
+ava::core::VoidResult replace_runtime_session(RuntimeSession& destination, RuntimeSession replacement)
+{
+  // Owner append routes retain controller state plus a Store reference. Stop
+  // and join every old worker before retiring that state, then it is safe to
+  // move the old store out under ordinary memberwise assignment.
+  auto old_jobs = std::move(destination.background_jobs);
+  if (old_jobs)
+  {
+    old_jobs->request_stop_all();
+    old_jobs.reset();
+  }
+  destination.run_controller.reset();
+  destination = std::move(replacement);
+  return {};
+}
+
+ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(RuntimeSession& session, ava::session::SessionMetadataUpdate update)
+{
+  auto entries = session.store.load();
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  auto entry = ava::session::make_session_metadata_entry(std::move(update), entries->empty() ? std::string{} : entries->back().id);
+  if (!entry)
+    return std::unexpected(std::move(entry.error()));
+  if (auto appended = session.append_owned(*entry); !appended)
+    return std::unexpected(std::move(appended.error()));
+  entries->push_back(std::move(*entry));
+  return ava::session::session_metadata_from_entries(*entries);
+}
+
+ava::core::VoidResult append_runtime_mode_change(RuntimeSession& session, ava::agent::Mode mode)
+{
+  return session.append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                         .parent_id = "",
+                                                         .type = ava::session::EntryType::ModeChange,
+                                                         .timestamp = ava::session::now_timestamp(),
+                                                         .data_json = "{\"mode\":\"" + ava::agent::to_string(mode) + "\"}"});
 }
 
 std::string to_string(RuntimeFreshnessSourceKind kind)

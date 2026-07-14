@@ -1,5 +1,6 @@
 #include "ava/provider/gemini_provider.h"
 #include "ava/provider/provider_utils.h"
+#include "ava/core/ids.h"
 #include "ava/core/json.h"
 
 #include <cctype>
@@ -16,7 +17,8 @@ constexpr std::string_view kDefaultGeminiBaseUrl = "https://generativelanguage.g
 struct GeminiParseState
 {
   std::optional<TokenUsage> usage = std::nullopt;
-  std::string stop_reason = {};
+  std::optional<ProviderFinishReason> finish_reason = std::nullopt;
+  std::string fallback_tool_call_prefix;
   bool parsed_content = false;
   bool error_seen = false;
 };
@@ -340,19 +342,9 @@ void merge_usage(TokenUsage& target, TokenUsage const& source)
     target.total_tokens = source.total_tokens;
 }
 
-std::string normalized_finish_reason(std::string_view reason)
+ProviderFinishReason normalized_finish_reason(std::string_view reason)
 {
-  if (reason == "STOP")
-    return "completed";
-  if (reason == "MAX_TOKENS")
-    return "max_tokens";
-  if (reason == "SAFETY" || reason == "RECITATION" || reason == "BLOCKLIST" || reason == "PROHIBITED_CONTENT" || reason == "SPII")
-  {
-    return "content_filter";
-  }
-  if (reason == "MALFORMED_FUNCTION_CALL" || reason == "UNEXPECTED_TOOL_CALL")
-    return "tool_calls";
-  return std::string(reason);
+  return normalize_provider_finish_reason(ProviderProtocol::Gemini, reason);
 }
 
 std::string sanitized_gemini_body_snippet(std::string_view body)
@@ -374,7 +366,7 @@ void append_error_event(std::vector<StreamEvent>& events, std::string message)
       StreamEvent{.type = StreamEventType::Error, .text = "", .tool_call_id = "", .tool_name = "", .error_message = std::move(message), .usage = std::nullopt});
 }
 
-void append_done_event(std::vector<StreamEvent>& events, std::optional<TokenUsage> usage, std::string stop_reason)
+void append_done_event(std::vector<StreamEvent>& events, std::optional<TokenUsage> usage, std::optional<ProviderFinishReason> finish_reason)
 {
   events.push_back(StreamEvent{.type = StreamEventType::Done,
                                .text = "",
@@ -382,7 +374,7 @@ void append_done_event(std::vector<StreamEvent>& events, std::optional<TokenUsag
                                .tool_name = "",
                                .error_message = "",
                                .usage = std::move(usage),
-                               .stop_reason = std::move(stop_reason)});
+                               .finish_reason = finish_reason});
 }
 
 void append_function_call_events(std::vector<StreamEvent>& events, std::string_view function_call, std::size_t candidate_index, std::size_t part_index,
@@ -397,7 +389,7 @@ void append_function_call_events(std::vector<StreamEvent>& events, std::string_v
   }
   auto id = ava::core::json::string_field(function_call, "id").value_or("");
   if (id.empty())
-    id = "gemini_call_" + std::to_string(candidate_index) + "_" + std::to_string(part_index);
+    id = state.fallback_tool_call_prefix + "_" + std::to_string(candidate_index) + "_" + std::to_string(part_index);
   auto args = ava::core::json::object_field(function_call, "args").value_or("{}");
   if (!is_valid_json_object(args))
   {
@@ -445,8 +437,18 @@ void append_response_events(std::vector<StreamEvent>& events, GeminiParseState& 
   }
   if (auto block_reason = prompt_block_reason(body); !block_reason.empty())
   {
-    state.error_seen = true;
-    append_error_event(events, "Gemini prompt was blocked: " + block_reason);
+    state.finish_reason = normalize_provider_finish_reason(ProviderProtocol::Gemini, block_reason);
+    if (state.finish_reason == ProviderFinishReason::Refusal)
+    {
+      // A prompt-level safety block is a semantic refusal even though Gemini
+      // returns no candidate content.
+      state.parsed_content = true;
+    }
+    else
+    {
+      state.error_seen = true;
+      append_error_event(events, "Gemini prompt was blocked: " + block_reason);
+    }
     return;
   }
 
@@ -464,7 +466,7 @@ void append_response_events(std::vector<StreamEvent>& events, GeminiParseState& 
     }
     if (auto const finish_reason = ava::core::json::string_field(candidate, "finishReason"); finish_reason && !finish_reason->empty())
     {
-      state.stop_reason = normalized_finish_reason(*finish_reason);
+      state.finish_reason = normalized_finish_reason(*finish_reason);
     }
   }
 }
@@ -476,9 +478,9 @@ void append_event_for_data(std::vector<StreamEvent>& events, GeminiParseState& s
   if (data == "[DONE]")
   {
     done_seen = true;
-    append_done_event(events, std::move(state.usage), std::move(state.stop_reason));
+    append_done_event(events, std::move(state.usage), state.finish_reason);
     state.usage = std::nullopt;
-    state.stop_reason.clear();
+    state.finish_reason = std::nullopt;
     return;
   }
   saw_data = true;
@@ -578,13 +580,21 @@ ava::core::Result<std::vector<StreamEvent>> GeminiProvider::parse_response(HttpR
   return stream ? parse_gemini_sse_response(response) : parse_gemini_response(response);
 }
 
+GeminiStreamParser::GeminiStreamParser() : fallback_tool_call_prefix_(ava::core::make_id("gemini_call"))
+{
+}
+
 ava::core::Result<std::vector<StreamEvent>> GeminiStreamParser::append(std::string_view chunk)
 {
   std::vector<StreamEvent> events;
   pending_line_.append(chunk);
   std::size_t line_start = 0;
   std::size_t search_from = scan_offset_;
-  GeminiParseState state{.usage = usage_, .stop_reason = stop_reason_, .parsed_content = false, .error_seen = error_seen_};
+  GeminiParseState state{.usage = usage_,
+                         .finish_reason = finish_reason_,
+                         .fallback_tool_call_prefix = fallback_tool_call_prefix_,
+                         .parsed_content = false,
+                         .error_seen = error_seen_};
   while (true)
   {
     auto const newline = pending_line_.find('\n', search_from);
@@ -598,7 +608,7 @@ ava::core::Result<std::vector<StreamEvent>> GeminiStreamParser::append(std::stri
     pending_line_.erase(0, line_start);
   scan_offset_ = pending_line_.size();
   usage_ = std::move(state.usage);
-  stop_reason_ = std::move(state.stop_reason);
+  finish_reason_ = state.finish_reason;
   error_seen_ = error_seen_ || state.error_seen;
   return events;
 }
@@ -606,7 +616,11 @@ ava::core::Result<std::vector<StreamEvent>> GeminiStreamParser::append(std::stri
 ava::core::Result<std::vector<StreamEvent>> GeminiStreamParser::finish()
 {
   std::vector<StreamEvent> events;
-  GeminiParseState state{.usage = usage_, .stop_reason = stop_reason_, .parsed_content = false, .error_seen = error_seen_};
+  GeminiParseState state{.usage = usage_,
+                         .finish_reason = finish_reason_,
+                         .fallback_tool_call_prefix = fallback_tool_call_prefix_,
+                         .parsed_content = false,
+                         .error_seen = error_seen_};
   if (!pending_line_.empty())
   {
     append_events_for_sse_line(events, state, saw_data_, done_seen_, error_seen_, data_, std::move(pending_line_));
@@ -620,10 +634,10 @@ ava::core::Result<std::vector<StreamEvent>> GeminiStreamParser::finish()
   }
   if (saw_data_ && !done_seen_ && !error_seen_ && !state.error_seen)
   {
-    append_done_event(events, std::move(state.usage), std::move(state.stop_reason));
+    append_done_event(events, std::move(state.usage), state.finish_reason);
   }
   usage_ = std::nullopt;
-  stop_reason_.clear();
+  finish_reason_ = std::nullopt;
   saw_data_ = false;
   done_seen_ = false;
   error_seen_ = false;
@@ -655,7 +669,7 @@ ava::core::Result<std::vector<StreamEvent>> parse_gemini_response(HttpResponse c
   if (response.status_code < 200 || response.status_code >= 300)
     return gemini_http_error(response);
   std::vector<StreamEvent> events;
-  GeminiParseState state;
+  GeminiParseState state{.fallback_tool_call_prefix = ava::core::make_id("gemini_call")};
   if (!is_json_object_shape(response.body))
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "Gemini response was malformed JSON");
@@ -669,13 +683,13 @@ ava::core::Result<std::vector<StreamEvent>> parse_gemini_response(HttpResponse c
   if (!state.parsed_content)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "Gemini response content is missing");
-    if (!state.stop_reason.empty())
-      error.with_context("stop_reason", state.stop_reason);
+    if (state.finish_reason.has_value())
+      error.with_context("finish_reason", std::string(to_string(*state.finish_reason)));
     if (!response.body.empty())
       error.with_context("body_snippet", sanitized_gemini_body_snippet(response.body));
     return std::unexpected(std::move(error));
   }
-  append_done_event(events, std::move(state.usage), std::move(state.stop_reason));
+  append_done_event(events, std::move(state.usage), state.finish_reason);
   return events;
 }
 

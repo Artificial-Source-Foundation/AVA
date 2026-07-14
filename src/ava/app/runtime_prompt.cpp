@@ -17,6 +17,7 @@
 #include "ava/lsp/configured_provider.h"
 #include "ava/core/error.h"
 #include "ava/core/fingerprint.h"
+#include "ava/core/ids.h"
 
 #include <algorithm>
 #include <array>
@@ -522,6 +523,21 @@ bool is_agent_loop_canceled_error(ava::core::Error const& error)
   return error.message() == "agent loop canceled" || error.message() == "transport retry canceled" || error.message() == "transport request canceled";
 }
 
+StopReason outcome_reason_for_error(ava::core::Error const& error)
+{
+  if (is_agent_loop_canceled_error(error))
+    return StopReason::UserCanceled;
+  if (error.message().find("maximum tool iterations") != std::string::npos)
+    return StopReason::MaxToolCalls;
+  if (error.message().find("provider output event limit") != std::string::npos)
+    return StopReason::MaxTurns;
+  if (error.category() == ava::core::ErrorCategory::Tool)
+    return StopReason::ToolError;
+  if (error.category() == ava::core::ErrorCategory::Session || error.category() == ava::core::ErrorCategory::Io)
+    return StopReason::PersistenceError;
+  return StopReason::ProviderError;
+}
+
 constexpr std::size_t kMaxPromptFileReferences = 5;
 constexpr std::size_t kPromptReferenceMaxBytes = 32 * 1024;
 constexpr std::size_t kPromptReferenceMaxLines = 300;
@@ -594,18 +610,14 @@ ava::tools::ToolContext prompt_file_reference_context(RuntimeSession& session, R
                                  .spill_dir = session.store.session_path().parent_path() / "spill",
                                  .mode = session.mode,
                                  .permission_resolver = options.permission_resolver,
-                                 .permission_audit_sink = [&store = session.store, session_mutex = options.session_mutex](
-                                                              ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
-                                   if (session_mutex)
-                                   {
-                                     std::lock_guard lock(*session_mutex);
-                                     return ava::agent::append_permission_decision(store, event);
-                                   }
-                                   return ava::agent::append_permission_decision(store, event);
+                                 .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+                                   return ava::agent::append_permission_decision(session.owner_append_route(), event);
                                  },
                                  .cancel_requested = options.cancel_requested,
                                  .permission_tool_name = "file_reference",
                                  .permission_actor = "user",
+                                 .exact_file_access = options.exact_file_access,
+                                 .command_executor = options.command_executor,
                                  .session_id = session.store.session_id(),
                                  .provider_id = session.model.provider_id,
                                  .model_id = session.model.model_id,
@@ -660,6 +672,45 @@ ava::core::Result<std::string> expand_prompt_file_references(RuntimeSession& ses
 
 }  // namespace
 
+ava::core::RuntimeTerminalOutcome runtime_outcome_for_stop_reason(StopReason reason) noexcept
+{
+  switch (reason)
+  {
+    case StopReason::Completed:
+      return ava::core::RuntimeTerminalOutcome::Completed;
+    case StopReason::UserCanceled:
+      return ava::core::RuntimeTerminalOutcome::Cancelled;
+    case StopReason::MaxTurns:
+    case StopReason::MaxToolCalls:
+    case StopReason::NoProgress:
+      return ava::core::RuntimeTerminalOutcome::MaxTurnRequests;
+    case StopReason::Deadline:
+    case StopReason::ProviderError:
+    case StopReason::ToolError:
+    case StopReason::PersistenceError:
+      return ava::core::RuntimeTerminalOutcome::Error;
+  }
+  return ava::core::RuntimeTerminalOutcome::Error;
+}
+
+StopReason stop_reason_for_runtime_outcome(ava::core::RuntimeTerminalOutcome outcome) noexcept
+{
+  switch (outcome)
+  {
+    case ava::core::RuntimeTerminalOutcome::Completed:
+    case ava::core::RuntimeTerminalOutcome::MaxTokens:
+    case ava::core::RuntimeTerminalOutcome::Refusal:
+      return StopReason::Completed;
+    case ava::core::RuntimeTerminalOutcome::MaxTurnRequests:
+      return StopReason::MaxTurns;
+    case ava::core::RuntimeTerminalOutcome::Cancelled:
+      return StopReason::UserCanceled;
+    case ava::core::RuntimeTerminalOutcome::Error:
+      return StopReason::ProviderError;
+  }
+  return StopReason::ProviderError;
+}
+
 ava::core::Result<RuntimePromptState> select_runtime_prompt_state(RuntimeSession const& session, ava::agent::Mode mode)
 {
   return runtime::load_runtime_prompt_state(session.paths, session.model, mode, session.workspace_dir, session.current_dir,
@@ -689,12 +740,105 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
 {
   if (session.offline || options.offline)
     return std::unexpected(offline_provider_error("prompt"));
+  if (!session.run_controller)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));
+  auto const request_id = options.request_id.value_or(ava::core::make_id("run"));
+  auto const admission = session.run_controller->inspect_admission(RunRequest{.request_id = request_id});
+  if (admission == AdmissionDisposition::JoinExistingOutcome)
+  {
+    auto joined = session.run_controller->wait_outcome(request_id);
+    if (!joined)
+      return std::unexpected(std::move(joined.error()));
+    if (joined->reason == StopReason::PersistenceError && joined->error)
+      return std::unexpected(*joined->error);
+    return ava::agent::AgentLoopResult{.final_text = {},
+                                       .usage = std::nullopt,
+                                       .cost_usd = std::nullopt,
+                                       .provider_iterations = 0,
+                                       .tool_calls = 0,
+                                       .initial_context_messages = 0,
+                                       .used_compacted_context = false,
+                                       .tool_iterations = 0,
+                                       .outcome = runtime_outcome_for_stop_reason(joined->reason),
+                                       .tool_timeline = {}};
+  }
+  if (admission == AdmissionDisposition::RejectDifferentRequest)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session already has an active run for a different request");
+    error.with_context("request_id", request_id);
+    return std::unexpected(std::move(error));
+  }
+  auto admitted = session.run_controller->admit(RunRequest{.request_id = request_id});
+  if (!admitted)
+    return std::unexpected(std::move(admitted.error()));
+  return run_admitted_prompt(session, user_message, provider, transport, options, std::move(*admitted));
+}
 
-  auto plugin_observer_options = plugin_event_observer_options(session, options.permission_resolver, options.session_mutex);
-  plugin_observer_options.cancel_requested = options.cancel_requested;
-  auto event_sink = make_plugin_event_observer_sink(std::move(plugin_observer_options), options.event_sink);
+ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(RuntimeSession& session, std::string const& user_message,
+                                                                   ava::provider::Provider const& provider, ava::provider::Transport& transport,
+                                                                   RuntimeRunOptions const& options, ActiveRunGuard guard)
+{
+  auto fail_run = [&guard](ava::core::Error error) -> ava::core::Result<ava::agent::AgentLoopResult> {
+    auto completed = guard.complete(RunOutcome{.run_id = {}, .reason = outcome_reason_for_error(error), .error = error});
+    if (completed && completed->reason == StopReason::PersistenceError && completed->error)
+      return std::unexpected(*completed->error);
+    return std::unexpected(std::move(error));
+  };
+  if (session.offline || options.offline)
+    return fail_run(offline_provider_error("prompt"));
+  if (!session.run_controller)
+    return fail_run(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));
+  if (!guard.active())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime prompt admission is inactive"));
+  if (auto transitioned = guard.transition(RunPhase::BuildingContext); !transitioned)
+    return fail_run(std::move(transitioned.error()));
+
+  // Hook permission audits can overlap provider/tool work, so use this run's
+  // immutable route rather than the legacy direct store callback. Isolated
+  // runs bypass ambient plugin event hooks entirely.
+  auto append_route = guard.append_route(session.store);
+  RuntimeEventSink event_sink = options.event_sink;
+  if (!options.isolate_project_resources)
+  {
+    auto plugin_observer_options = plugin_event_observer_options(session, options.permission_resolver, options.session_mutex);
+    plugin_observer_options.permission_audit_sink = [append_route](ava::tools::PermissionAuditEvent const& event) {
+      return ava::agent::append_permission_decision(append_route, event);
+    };
+    plugin_observer_options.cancel_requested = options.cancel_requested;
+    event_sink = make_plugin_event_observer_sink(std::move(plugin_observer_options), options.event_sink);
+  }
   auto runtime_options = options;
+  runtime_options.active_append_route = append_route;
+  auto const caller_cancel_requested = runtime_options.cancel_requested;
+  runtime_options.cancel_requested = [guard_token = guard.stop_token(), caller_cancel_requested] {
+    return guard_token.stop_requested() || (caller_cancel_requested && caller_cancel_requested());
+  };
   runtime_options.event_sink = event_sink;
+  auto take_steering_messages = runtime_options.take_steering_messages;
+  runtime_options.take_steering_messages = [&session, take_steering_messages]() -> ava::core::Result<std::vector<std::string>> {
+    if (!take_steering_messages)
+      return std::vector<std::string>{};
+    auto messages = take_steering_messages();
+    if (!messages)
+      return std::unexpected(std::move(messages.error()));
+    auto const run_id = session.run_controller->snapshot().run_id;
+    for (auto const& message : *messages)
+    {
+      // Frontends retain their own bounded visible queues. Controller overflow
+      // rejects only the extra steering item at this adapter boundary; it must
+      // not abort an otherwise healthy run or discard already admitted input.
+      static_cast<void>(session.run_controller->wake(RunCommand{.kind = RunCommand::Kind::Steering, .correlation_id = run_id, .message = message}));
+    }
+    auto commands = session.run_controller->take_commands(run_id);
+    if (!commands)
+      return std::unexpected(std::move(commands.error()));
+    std::vector<std::string> accepted;
+    accepted.reserve(commands->size());
+    for (auto& command : *commands)
+      if (command.kind == RunCommand::Kind::Steering)
+        accepted.push_back(std::move(command.message));
+    return accepted;
+  };
   if (runtime_options.observation && runtime_options.observation->enabled())
   {
     if (runtime_options.trace_context.run_id.empty())
@@ -719,33 +863,40 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
                                             .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
                                             .workspace_dir = session.workspace_dir});
 
-  auto expanded_user_message = expand_prompt_file_references(session, user_message, runtime_options);
+  auto expanded_user_message = runtime_options.expand_prompt_file_references ? expand_prompt_file_references(session, user_message, runtime_options)
+                                                                             : ava::core::Result<std::string>(user_message);
   if (!expanded_user_message)
-    return std::unexpected(std::move(expanded_user_message.error()));
+    return fail_run(std::move(expanded_user_message.error()));
 
   auto session_event = base_event_locked(session, RuntimeEventType::SessionStart, options.session_mutex);
   if (auto emitted = emit_event(event_sink, session_event); !emitted)
   {
-    return std::unexpected(std::move(emitted.error()));
+    return fail_run(std::move(emitted.error()));
   }
 
   auto user_event = base_event_locked(session, RuntimeEventType::UserMessage, options.session_mutex);
   user_event.text = *expanded_user_message;
   if (auto emitted = emit_event(event_sink, user_event); !emitted)
   {
-    return std::unexpected(std::move(emitted.error()));
+    return fail_run(std::move(emitted.error()));
   }
 
-  auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
-      .global_config_file = session.paths.ava_config_dir / "lsp.json",
-      .project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "lsp.json" : std::filesystem::path{},
-      .workspace_root = session.workspace_dir,
-      .mode = session.mode,
-      .permission_resolver = runtime_options.permission_resolver,
-  });
-  std::shared_ptr<ava::lsp::DiagnosticsProvider> configured_lsp_provider = lsp_provider ? *lsp_provider : nullptr;
-  auto loaded_subagents = ava::agent::load_subagents(
-      ava::agent::SubagentLoadOptions{.workspace_root = session.workspace_dir, .include_project_agents = project_resources_trusted(session.project_trust)});
+  std::shared_ptr<ava::lsp::DiagnosticsProvider> configured_lsp_provider;
+  std::vector<ava::agent::SubagentDefinition> subagents;
+  if (!runtime_options.isolate_project_resources)
+  {
+    auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
+        .global_config_file = session.paths.ava_config_dir / "lsp.json",
+        .project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "lsp.json" : std::filesystem::path{},
+        .workspace_root = session.workspace_dir,
+        .mode = session.mode,
+        .permission_resolver = runtime_options.permission_resolver,
+    });
+    configured_lsp_provider = lsp_provider ? *lsp_provider : nullptr;
+    subagents = ava::agent::load_subagents(ava::agent::SubagentLoadOptions{.workspace_root = session.workspace_dir,
+                                                                           .include_project_agents = project_resources_trusted(session.project_trust)})
+                    .subagents;
+  }
 
   std::optional<ava::core::Error> sink_error;
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
@@ -762,11 +913,21 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       .stream = runtime_options.stream,
       .model_supports_tools = session.model.supports_tools.value_or(true),
       .model_supports_streaming = session.model.supports_streaming.value_or(true),
-      .include_project_resources = project_resources_trusted(session.project_trust),
-      .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
-      .plugin_project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{},
-      .plugin_enablement_file = session.paths.ava_state_dir / "plugin-enablement.json",
-      .subagents = loaded_subagents.subagents,
+      .include_project_resources = !runtime_options.isolate_project_resources && project_resources_trusted(session.project_trust),
+      .plugin_global_plugins_dir = runtime_options.isolate_project_resources ? std::filesystem::path{} : session.paths.ava_config_dir / "plugins",
+      .plugin_project_plugins_dir = !runtime_options.isolate_project_resources && project_resources_trusted(session.project_trust)
+                                        ? session.workspace_dir / ".ava" / "plugins"
+                                        : std::filesystem::path{},
+      .plugin_enablement_file = runtime_options.isolate_project_resources ? std::filesystem::path{} : session.paths.ava_state_dir / "plugin-enablement.json",
+      .session_mcp_config = session.mcp_config,
+      .exact_builtin_tool_names = runtime_options.exact_builtin_tool_names,
+      .require_descriptor_secure_workspace = runtime_options.require_descriptor_secure_workspace,
+      .announce_execution_after_permission = runtime_options.announce_execution_after_permission,
+      .redact_permission_audit_arguments = runtime_options.redact_permission_audit_arguments,
+      .require_explicit_file_permissions = runtime_options.require_explicit_file_permissions,
+      .exact_file_access = runtime_options.exact_file_access,
+      .command_executor = runtime_options.command_executor,
+      .subagents = std::move(subagents),
       .tool_visibility = session.tool_visibility,
       .model_input_modalities = session.model.input_modalities,
       .model_max_output_tokens = session.model.max_output_tokens,
@@ -857,7 +1018,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
         event.tool_name = stream_event.tool_name;
         event.status = ava::provider::to_string(stream_event.type);
         event.error_message = stream_event.error_message;
-        event.stop_reason = stream_event.stop_reason;
+        if (stream_event.finish_reason)
+          event.stop_reason = std::string(ava::provider::to_string(*stream_event.finish_reason));
         event.reasoning_format = stream_event.reasoning_format;
         event.reasoning_redacted = stream_event.redacted;
         event.reasoning_signature_present = stream_event.reasoning_signature_present || !stream_event.reasoning_signature.empty();
@@ -888,13 +1050,29 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       },
       .background_jobs = session.background_jobs,
       .session_mutex = runtime_options.session_mutex,
+      .append_entry = append_route,
+      .parent_notification_sink = session.owner_append_route(),
+      .on_phase = [&guard, &runtime_options](ava::agent::RunPhase phase) -> ava::core::VoidResult {
+        if (phase == ava::agent::RunPhase::Completing && runtime_options.on_terminal_commit)
+        {
+          if (auto committed = runtime_options.on_terminal_commit(); !committed)
+            return committed;
+        }
+        if (auto transitioned = guard.transition(phase); !transitioned)
+          return transitioned;
+        if (runtime_options.on_phase)
+          return runtime_options.on_phase(phase);
+        return {};
+      },
       .model_pricing = session.model.pricing,
       .observation = runtime_options.observation,
       .trace_context = runtime_options.trace_context});
 
   auto result = loop.run_turn(*expanded_user_message, runtime_options.image_attachments, session.store, provider, *runtime_transport);
   if (sink_error)
-    return std::unexpected(std::move(*sink_error));
+  {
+    return fail_run(std::move(*sink_error));
+  }
   if (!result)
   {
     auto event =
@@ -908,24 +1086,34 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       event.reason = result.error().message();
     }
     static_cast<void>(emit_event(event_sink, event));
-    return std::unexpected(result.error());
+    return fail_run(result.error());
   }
 
   auto assistant_event = base_event_locked(session, RuntimeEventType::AssistantMessage, options.session_mutex);
   assistant_event.text = result->final_text;
   if (auto emitted = emit_event(event_sink, assistant_event); !emitted)
   {
-    return std::unexpected(std::move(emitted.error()));
+    return fail_run(std::move(emitted.error()));
   }
 
   auto done_event = base_event_locked(session, RuntimeEventType::Done, options.session_mutex);
-  done_event.stop_reason = result->stop_reason;
+  done_event.stop_reason = std::string(ava::core::to_string(result->outcome));
   done_event.provider_iterations = result->provider_iterations;
   done_event.tool_calls = result->tool_calls;
   if (auto emitted = emit_event(event_sink, done_event); !emitted)
   {
-    return std::unexpected(std::move(emitted.error()));
+    return fail_run(std::move(emitted.error()));
   }
+  if (auto transitioned = guard.transition(RunPhase::Completing); !transitioned)
+    return fail_run(std::move(transitioned.error()));
+  auto const proposed_reason = stop_reason_for_runtime_outcome(result->outcome);
+  auto completed = guard.complete(RunOutcome{.run_id = {}, .reason = proposed_reason});
+  if (!completed)
+    return std::unexpected(std::move(completed.error()));
+  if (completed->reason == StopReason::PersistenceError && completed->error)
+    return std::unexpected(*completed->error);
+  if (completed->reason != proposed_reason)
+    result->outcome = runtime_outcome_for_stop_reason(completed->reason);
 
   return result;
 }

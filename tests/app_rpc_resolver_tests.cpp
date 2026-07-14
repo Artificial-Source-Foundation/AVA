@@ -58,6 +58,50 @@ void test_app_rpc_resolver_payload_builders_preserve_wire_shapes()
          "typed queue resolver envelope keeps payload family and top-level aliases");
 }
 
+void test_app_rpc_resolver_write_failure_releases_waiters()
+{
+  auto const root = temp_root() / "app-rpc-resolver-write-failure";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = app_test_paths(root);
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC resolver write failure test opens runtime session");
+  if (!session)
+    return;
+
+  ava::app::rpc::PendingResolverState pending_state;
+  ava::app::rpc::RpcRunState run_state;
+  std::mutex session_mutex;
+  std::ostringstream stream;
+  stream.setstate(std::ios::badbit);
+  ava::app::rpc::RpcOutput output(stream);
+  output.on_write_failure = [&] { static_cast<void>(ava::app::rpc::cancel_pending_resolvers(pending_state)); };
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session, session_mutex, nullptr, "prompt-write-fail");
+  auto result = resolver(ava::permissions::PermissionPrompt{.permission_request_id = "permreq_write_fail",
+                                                            .operation = ava::permissions::Operation::ReadFile,
+                                                            .mode = ava::agent::Mode::Build,
+                                                            .workspace_dir = workspace,
+                                                            .target_path = workspace / "note.txt",
+                                                            .command = "",
+                                                            .tool_name = "read_file",
+                                                            .reason = "test write failure",
+                                                            .risk = ava::permissions::PermissionRisk::Low,
+                                                            .diff_preview = "",
+                                                            .diff_truncated = false});
+  bool no_pending = false;
+  {
+    std::lock_guard lock(pending_state.mutex);
+    no_pending = pending_state.permission_requests.empty() && pending_state.question_requests.empty();
+  }
+  expect(!result && result.error().category() == ava::core::ErrorCategory::Io && no_pending,
+         "RPC resolver output failure cancels and removes pending waits without a user timeout");
+}
+
 void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
 {
   auto const root = temp_root() / "app-rpc-policy-auto-allow";
@@ -203,8 +247,9 @@ void test_app_rpc_permission_reply_session_grant_flow()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("first grant done")),
-                                       sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("second grant done"))});
+  ava::tests::FakeTransport transport(
+      {sse_response(read_file_call_sse(outside_path.generic_string(), "call_read_first")), sse_response(final_text_sse("first grant done")),
+       sse_response(read_file_call_sse(outside_path.generic_string(), "call_read_second")), sse_response(final_text_sse("second grant done"))});
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
@@ -666,6 +711,7 @@ void test_app_rpc_question_reply_selected_options_flow()
 void run_app_rpc_resolver_tests()
 {
   test_app_rpc_resolver_payload_builders_preserve_wire_shapes();
+  test_app_rpc_resolver_write_failure_releases_waiters();
   test_app_rpc_permission_policy_auto_allows_before_resolver_event();
   test_app_rpc_permission_reply_allow_and_deny_flows();
   test_app_rpc_permission_reply_session_grant_flow();

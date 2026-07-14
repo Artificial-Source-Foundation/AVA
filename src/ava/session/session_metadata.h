@@ -1,9 +1,9 @@
 #pragma once
 
 #include "ava/session/session_store.h"
-
 #include "ava/core/result.h"
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,6 +26,10 @@ struct SessionMetadataView
   std::string branch_from_entry_id = {};
   std::string branch_origin = {};
   std::string actor = {};
+  // Canonical cwd captured once when the session is created. This is runtime
+  // metadata, not an ACP binding; adapters may use it without rebasing the
+  // session on client-selected state.
+  std::filesystem::path original_cwd = {};
 };
 
 struct SessionMetadataUpdate
@@ -38,6 +42,7 @@ struct SessionMetadataUpdate
   std::string branch_from_entry_id = {};
   std::string branch_origin = {};
   std::string actor = "rpc";
+  std::optional<std::filesystem::path> original_cwd = std::nullopt;
 };
 
 [[nodiscard]] ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::vector<SessionEntry> const& entries);

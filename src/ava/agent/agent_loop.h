@@ -1,10 +1,12 @@
 #pragma once
 
 #include "ava/observability/run_observer.h"
+#include "ava/agent/agent_loop_session.h"
 #include "ava/agent/background_job_registry.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"
+#include "ava/agent/run_phase.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/agent/tool_visibility.h"
 #include "ava/config/model_config.h"
@@ -14,6 +16,7 @@
 #include "ava/provider/provider.h"
 #include "ava/lsp/lsp_client.h"
 #include "ava/core/result.h"
+#include "ava/core/runtime_outcome.h"
 
 #include <cstddef>
 #include <filesystem>
@@ -23,6 +26,15 @@
 #include <optional>
 #include <string>
 #include <vector>
+
+namespace ava::mcp {
+struct McpConfig;
+}
+
+namespace ava::tools {
+class ExactFileAccess;
+class CommandExecutor;
+} // namespace ava::tools
 
 namespace ava::agent {
 
@@ -105,6 +117,14 @@ struct AgentLoopOptions
   std::filesystem::path plugin_global_plugins_dir = {};
   std::filesystem::path plugin_project_plugins_dir = {};
   std::filesystem::path plugin_enablement_file = {};
+  std::shared_ptr<ava::mcp::McpConfig const> session_mcp_config = nullptr;
+  std::optional<std::vector<std::string>> exact_builtin_tool_names = std::nullopt;
+  bool require_descriptor_secure_workspace = false;
+  bool announce_execution_after_permission = false;
+  bool redact_permission_audit_arguments = false;
+  bool require_explicit_file_permissions = false;
+  std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
+  std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
   std::vector<SubagentDefinition> subagents = {};
   ToolVisibilityOptions tool_visibility = {};
   std::vector<std::string> model_input_modalities = {"text"};
@@ -124,6 +144,14 @@ struct AgentLoopOptions
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Transport>>()> background_transport_factory = nullptr;
   std::shared_ptr<BackgroundJobRegistry> background_jobs = nullptr;
   std::mutex* session_mutex = nullptr;
+  // Immutable generation route for records produced by this run.
+  SessionAppendSink append_entry = nullptr;
+  // Stable session-owner route for parent notices produced by background
+  // children. Unlike append_entry it remains valid between generations.
+  SessionAppendSink parent_notification_sink = nullptr;
+  // Called at real loop boundaries; errors abort the loop rather than being
+  // swallowed as observer-only state.
+  std::function<ava::core::VoidResult(RunPhase)> on_phase = nullptr;
   std::optional<ava::config::ModelPricing> model_pricing = std::nullopt;
   bool parallel_read_search_tools = false;
   std::size_t parallel_read_search_max_workers = 4;
@@ -144,7 +172,7 @@ struct AgentLoopResult
   std::size_t initial_context_messages = 0;
   bool used_compacted_context = false;
   std::size_t tool_iterations = 0;
-  std::string stop_reason = "unknown";
+  ava::core::RuntimeTerminalOutcome outcome = ava::core::RuntimeTerminalOutcome::Error;
   std::vector<ToolTimelineEntry> tool_timeline;
 };
 

@@ -17,23 +17,58 @@ namespace ava::app::rpc {
 std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
 {
   return std::jthread([options = std::move(options)](std::stop_token stop_token) mutable {
-    std::optional<QueuedRpcMessage> next_follow_up;
+    auto publish_terminal = [&](std::string const& request_id, ava::core::Result<std::string> result, bool allow_follow_up,
+                                std::string_view terminal_reason) -> ava::core::Result<RpcFollowUpTransition> {
+      RpcFollowUpTransition transition;
+      if (allow_follow_up)
+      {
+        begin_prompt_terminal_publication(options.run_state);
+      }
+      else
+      {
+        transition.kind = RpcFollowUpTransitionKind::Deactivated;
+        transition.cleared = begin_terminal_publication(options.run_state);
+      }
 
-    auto finish_with_queue_cleanup = [&](std::string_view reason) {
-      auto cleared = deactivate_and_clear_queued_messages(options.run_state);
-      if (next_follow_up)
+      auto fail_publication = [&](ava::core::Error error) -> ava::core::Result<RpcFollowUpTransition> {
+        complete_terminal_publication(options.run_state, request_id);
+        return std::unexpected(std::move(error));
+      };
+
+      ava::core::VoidResult written;
+      if (result)
+        written = write_success(options.output, request_id, *result);
+      else
+        written = write_error(options.output, request_id, result.error());
+      if (!written)
+        return fail_publication(std::move(written.error()));
+
+      if (allow_follow_up)
+        transition = transition_after_prompt_terminal_response(options.run_state);
+
+      if (transition.kind == RpcFollowUpTransitionKind::Activated)
       {
-        cleared.follow_up_messages.push_back(std::move(*next_follow_up));
-        next_follow_up.reset();
+        auto started_event = *transition.follow_up;
+        started_event.correlation_id = started_event.request_id;
+        if (auto started = write_queue_event(options.output, options.session, options.session_mutex, "follow_up_started", started_event); !started)
+          return fail_publication(std::move(started.error()));
       }
-      if (auto written = write_skipped_queue_events(options.output, options.session, options.session_mutex, cleared, reason); !written)
+      else
       {
-        record_async_error(options.run_state, std::move(written.error()));
+        auto const reason = transition.kind == RpcFollowUpTransitionKind::Skipped ? std::string_view("canceled") : terminal_reason;
+        if (auto skipped = write_skipped_queue_events(options.output, options.session, options.session_mutex, transition.cleared, reason); !skipped)
+          return fail_publication(std::move(skipped.error()));
+        if (auto follow_up_errors = write_follow_up_errors(options.output, options.run_state, transition.cleared.follow_up_messages, reason); !follow_up_errors)
+          return fail_publication(std::move(follow_up_errors.error()));
       }
-      if (auto written = write_follow_up_errors(options.output, cleared.follow_up_messages, reason); !written)
-      {
-        record_async_error(options.run_state, std::move(written.error()));
-      }
+
+      complete_terminal_publication(options.run_state, request_id);
+      return transition;
+    };
+
+    auto abandon_after_output_failure = [&](ava::core::Error error) {
+      record_async_error(options.run_state, std::move(error));
+      static_cast<void>(deactivate_and_clear_queued_messages(options.run_state));
     };
 
     std::string prompt_provider_id;
@@ -45,29 +80,17 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
         ensure_prompt_runtime_options(options.paths, prompt_provider_id, std::move(options.runtime_options), options.auth_transport, "prompt");
     if (!prompt_options)
     {
-      if (auto written = write_error(options.output, options.request_id, prompt_options.error()); !written)
-      {
-        record_async_error(options.run_state, std::move(written.error()));
-      }
-      finish_with_queue_cleanup("prompt_start_failed");
+      auto published = publish_terminal(options.request_id, std::unexpected(std::move(prompt_options.error())), false, "prompt_start_failed");
+      if (!published)
+        abandon_after_output_failure(std::move(published.error()));
       return;
     }
     auto policy_permission_resolver = prompt_options->permission_resolver;
 
-    auto prepare_next_follow_up = [&]() -> std::optional<QueuedRpcMessage> {
-      auto follow_up = take_next_follow_up_message(options.run_state);
-      if (!follow_up)
-      {
-        set_active_run(options.run_state, false);
-        return std::nullopt;
-      }
-      set_active_request_id(options.run_state, follow_up->request_id);
-      return follow_up;
-    };
-
-    auto run_one_prompt = [&](std::string const& request_id, std::string const& message, std::vector<ava::session::ImageAttachmentRef> image_attachments,
-                              auto&& before_terminal_response) -> ava::core::VoidResult {
+    auto run_one_prompt = [&](std::string const& request_id, std::string const& message,
+                              std::vector<ava::session::ImageAttachmentRef> image_attachments) -> ava::core::Result<std::string> {
       set_active_request_id(options.run_state, request_id);
+      prompt_options->request_id = request_id;
       prompt_options->image_attachments = std::move(image_attachments);
       prompt_options->cancel_requested = [&run_state = options.run_state, stop_token] { return stop_token.stop_requested() || cancel_requested(run_state); };
       prompt_options->session_mutex = &options.session_mutex;
@@ -82,9 +105,7 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
         for (auto const& item : queued)
         {
           if (auto written = write_queue_event(options.output, options.session, options.session_mutex, "steer_applied", item); !written)
-          {
             return std::unexpected(std::move(written.error()));
-          }
           messages.push_back(item.message);
         }
         return messages;
@@ -113,72 +134,26 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
         return std::unexpected(std::move(written.error()));
       }
       if (!result)
-      {
-        before_terminal_response();
-        if (auto written = write_error(options.output, request_id, result.error()); !written)
-        {
-          return std::unexpected(std::move(written.error()));
-        }
-        return {};
-      }
-      before_terminal_response();
-      if (auto written = write_success(options.output, request_id, prompt_result_json(session_id_snapshot(options.session, options.session_mutex), *result));
-          !written)
-      {
-        return std::unexpected(std::move(written.error()));
-      }
-      return {};
+        return std::unexpected(std::move(result.error()));
+      return prompt_result_json(session_id_snapshot(options.session, options.session_mutex), *result);
     };
 
-    auto prompt_run =
-        run_one_prompt(options.request_id, options.message, std::move(options.image_attachments), [&] { next_follow_up = prepare_next_follow_up(); });
-    if (!prompt_run)
+    std::string request_id = options.request_id;
+    auto prompt_run = run_one_prompt(request_id, options.message, std::move(options.image_attachments));
+    while (true)
     {
-      record_async_error(options.run_state, std::move(prompt_run.error()));
-      finish_with_queue_cleanup("prompt_start_failed");
-      return;
-    }
-
-    while (!cancel_requested(options.run_state))
-    {
-      if (!next_follow_up)
-        break;
-      auto follow_up = std::move(*next_follow_up);
-      next_follow_up.reset();
-      set_active_request_id(options.run_state, follow_up.request_id);
-      auto started_event = follow_up;
-      started_event.correlation_id = follow_up.request_id;
-      if (auto written = write_queue_event(options.output, options.session, options.session_mutex, "follow_up_started", started_event); !written)
+      auto published = publish_terminal(request_id, std::move(prompt_run), true, "run_completed_before_safe_point");
+      if (!published)
       {
-        record_async_error(options.run_state, std::move(written.error()));
-        finish_with_queue_cleanup("prompt_start_failed");
+        abandon_after_output_failure(std::move(published.error()));
         return;
       }
-      auto follow_up_run = run_one_prompt(follow_up.request_id, follow_up.message, {}, [&] { next_follow_up = prepare_next_follow_up(); });
-      if (!follow_up_run)
-      {
-        record_async_error(options.run_state, std::move(follow_up_run.error()));
-        finish_with_queue_cleanup("prompt_start_failed");
+      if (published->kind != RpcFollowUpTransitionKind::Activated)
         return;
-      }
-    }
 
-    bool const canceled = cancel_requested(options.run_state);
-    auto cleared = deactivate_and_clear_queued_messages(options.run_state);
-    if (next_follow_up)
-    {
-      cleared.follow_up_messages.push_back(std::move(*next_follow_up));
-      next_follow_up.reset();
-    }
-    if (auto written = write_skipped_queue_events(options.output, options.session, options.session_mutex, cleared,
-                                                  canceled ? "canceled" : "run_completed_before_safe_point");
-        !written)
-    {
-      record_async_error(options.run_state, std::move(written.error()));
-    }
-    if (auto written = write_follow_up_errors(options.output, cleared.follow_up_messages, canceled ? "canceled" : "run_completed_before_safe_point"); !written)
-    {
-      record_async_error(options.run_state, std::move(written.error()));
+      auto follow_up = std::move(*published->follow_up);
+      request_id = follow_up.request_id;
+      prompt_run = run_one_prompt(request_id, follow_up.message, {});
     }
   });
 }

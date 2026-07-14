@@ -1,0 +1,13 @@
+{"id":"protocol","type":"get_protocol"}
+{"id":"state","type":"get_state"}
+{"id":"prompt","type":"prompt","message":"hello"}
+{"id":"steer","type":"steer","message":"focus"}
+{"id":"follow","type":"follow_up","message":"continue"}
+{"id":"permission","type":"permission_reply","request_id":"permission-1","correlation_id":"prompt","decision":"deny","reason":"operator denied"}
+{"id":"question","type":"question_reply","request_id":"question-1","correlation_id":"prompt","selected":"yes"}
+{"id":"session","type":"fork_session","session_name":"branch","labels":["rpc"]}
+{"id":"model","type":"set_model","provider":"openai","model":"gpt-5.5"}
+{"id":"reasoning","type":"set_reasoning","reasoning_level":"low"}
+{"id":"command","type":"run_bash","command":"printf ok"}
+{"id":"plugin","type":"inspect_plugin","plugin_id":"com.example.tool"}
+{"id":"mcp","type":"inspect_mcp_server","server_id":"demo"}

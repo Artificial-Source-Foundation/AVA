@@ -8,6 +8,7 @@ add_library(ava_session
   "session_store.cpp"
   "session_tree.cpp"
   "stats.cpp"
+  "transcript.cpp"
   "validation.cpp"
   "validation_fields.cpp"
 )

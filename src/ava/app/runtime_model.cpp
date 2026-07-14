@@ -94,14 +94,10 @@ ava::core::Error incompatible_model_switch_error(ava::config::ModelInfo const& m
   return error;
 }
 
-ava::core::VoidResult validate_model_switch_history(RuntimeSession const& session, ava::config::ModelInfo const& target)
+ava::core::VoidResult validate_model_history_entries(std::vector<ava::session::SessionEntry> const& entries, ava::config::ModelInfo const& target)
 {
-  auto entries = session.store.load();
-  if (!entries)
-    return std::unexpected(std::move(entries.error()));
-
-  auto replay_start = entries->begin();
-  for (auto it = entries->begin(); it != entries->end(); ++it)
+  auto replay_start = entries.begin();
+  for (auto it = entries.begin(); it != entries.end(); ++it)
   {
     if (it->type == ava::session::EntryType::Compaction)
       replay_start = std::next(it);
@@ -109,7 +105,7 @@ ava::core::VoidResult validate_model_switch_history(RuntimeSession const& sessio
 
   std::size_t image_count = 0;
   std::size_t total_image_bytes = 0;
-  for (auto it = replay_start; it != entries->end(); ++it)
+  for (auto it = replay_start; it != entries.end(); ++it)
   {
     auto const& entry = *it;
     if ((entry.type == ava::session::EntryType::ToolCall || entry.type == ava::session::EntryType::ToolResult) && !target.supports_tools.value_or(false))
@@ -173,6 +169,15 @@ ava::core::VoidResult validate_model_switch_history(RuntimeSession const& sessio
 }
 
 }  // namespace
+
+ava::core::VoidResult validate_runtime_model_history(ava::session::SessionStore const& store, ava::config::ModelInfo const& target,
+                                                     ava::session::SessionReadLimits read_limits)
+{
+  auto entries = store.load_bounded(read_limits);
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  return validate_model_history_entries(*entries, target);
+}
 
 std::optional<ava::config::ModelInfo> latest_persisted_model(ava::config::ModelRegistry const& registry, std::vector<ava::session::SessionEntry> const& entries)
 {
@@ -269,7 +274,7 @@ ava::core::Result<bool> switch_runtime_model(RuntimeSession& session, ava::confi
   if (session.model.provider_id == model.provider_id && session.model.model_id == model.model_id)
     return false;
 
-  auto compatible = runtime::validate_model_switch_history(session, model);
+  auto compatible = runtime::validate_runtime_model_history(session.store, model, ava::session::SessionReadLimits{});
   if (!compatible)
     return std::unexpected(std::move(compatible.error()));
 
@@ -279,7 +284,7 @@ ava::core::Result<bool> switch_runtime_model(RuntimeSession& session, ava::confi
     return std::unexpected(std::move(prompt_state.error()));
 
   auto const previous = session.model;
-  auto appended = runtime::append_model_change(session.store, previous, model);
+  auto appended = session.append_owned(runtime::make_model_change_entry(previous, model));
   if (!appended)
     return std::unexpected(std::move(appended.error()));
 

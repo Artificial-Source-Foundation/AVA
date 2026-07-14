@@ -1,4 +1,16 @@
 add_library(ava_app
+  "acp/client_tools.cpp"
+  "acp/codec.cpp"
+  "acp/content.cpp"
+  "acp/envelope_intent.cpp"
+  "acp/peer.cpp"
+  "acp/permission.cpp"
+  "acp/protocol.cpp"
+  "acp/service.cpp"
+  "acp/session.cpp"
+  "acp/session_update.cpp"
+  "acp/transport.cpp"
+  "acp_mode.cpp"
   "app.cpp"
   "browser_open.cpp"
   "clipboard_image.cpp"
@@ -27,7 +39,9 @@ add_library(ava_app
   "project_trust.cpp"
   "print_mode.cpp"
   "reasoning_controls.cpp"
+  "rpc/catalog.cpp"
   "rpc/handlers.cpp"
+  "rpc/input.cpp"
   "rpc/output.cpp"
   "rpc/prompt_worker.cpp"
   "rpc/protocol.cpp"
@@ -39,12 +53,16 @@ add_library(ava_app
   "rpc/session_commands.cpp"
   "rpc_mode.cpp"
   "runtime.cpp"
+  "runtime_catalog.cpp"
   "runtime_compaction.cpp"
+  "runtime_credentials.cpp"
   "runtime_json.cpp"
   "runtime_model.cpp"
   "runtime_prompt.cpp"
   "runtime_reasoning.cpp"
   "runtime_retry.cpp"
+  "runtime_sessions.cpp"
+  "session_run_controller.cpp"
   "runtime_session.cpp"
 )
 
@@ -53,6 +71,8 @@ target_include_directories(ava_app
     "${CMAKE_SOURCE_DIR}/src"
     "${AVA_GENERATED_INCLUDE_DIR}"
 )
+
+target_link_libraries(ava_app PRIVATE nlohmann_json::nlohmann_json)
 
 ava_apply_debugging(ava_app)
 ava_apply_warnings(ava_app)

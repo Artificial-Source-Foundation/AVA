@@ -1470,6 +1470,10 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
   {
     return run_sessions_command(session, command_argument(request.command, "/sessions"));
   }
+  if (request.command == "/recover-persistence")
+  {
+    return run_recover_persistence_command(session);
+  }
   if (starts_with_command(request.command, "/fork"))
   {
     return run_fork_command(session, command_argument(request.command, "/fork"));

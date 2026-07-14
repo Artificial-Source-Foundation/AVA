@@ -42,7 +42,7 @@ Internal parallel read/search opt-in evidence (2026-07-09 M1/M2 local): `ava_tes
 | Native local terminal coding agent in C++23 | `cmake --build --preset dev`, `ava_tests.core_mode`, `ava_tests.app_runtime`, `README.md` build/run docs. |
 | Interactive TUI entry point and non-TTY line shell | `ava_tests.tui_composer`, `ava_tests.app_runtime`, `ava_cli.headless_print_*`, opt-in `ava_tui.tmux_smoke`. |
 | Print mode, text/JSONL output, piped stdin, and TTY-bound terminal-control sanitization | `ava_tests.app_print`, `ava_cli.headless_print_positional_prompt`, `ava_cli.headless_print_prompt_overrides`, `ava_cli.headless_mode_json_alias`. |
-| Stdio JSONL RPC mode | `ava_tests.app_rpc`, `ava_tests.app_rpc_queue`, `ava_tests.app_rpc_resolver`, `ava_cli.headless_rpc_contract`, `docs/headless-protocol.md`; dedicated RPC JSONL import/share remains deferred and documented. |
+| Stdio JSONL RPC mode | `ava_tests.app_rpc`, `ava_tests.app_rpc_queue`, `ava_tests.app_rpc_resolver`, `ava_cli.headless_rpc_contract`, `docs/rpc-protocol.md` / `docs/headless-protocol.md`; dedicated RPC JSONL import/share remains deferred and documented. |
 | Session resume by latest workspace session and id/prefix | `ava_tests.session`, `ava_tests.app_runtime`, `ava_cli.headless_print_session_startup_options`. |
 | Direct positional one-shot prompt UX | `ava_cli.headless_print_positional_prompt`, `ava_tests.app_print`. |
 | Sessionless/ephemeral `--no-session` mode | `ava_cli.headless_print_no_session`, `ava_tests.session`. |
@@ -69,8 +69,8 @@ Internal parallel read/search opt-in evidence (2026-07-09 M1/M2 local): `ava_tes
 | Sequential tool-call loop with validation, permissions, audit, and bounded outputs | `ava_tests.agent_tool_dispatcher`, `ava_tests.tools`, `ava_tests.agent_loop`, `ava_cli.headless_rpc_tool_failure`, `ava_cli.headless_e2e_model_smoke`. The default-off internal read/search parallel option is separately covered by `ava_tests.tool_scheduler`, `ava_tests.agent_loop`, and focused sanitizer suites, but remains backend-only with no public flag or full-binary smoke. |
 | RPC steering and follow-up queues while a prompt is running | `ava_tests.app_rpc_queue`, `ava_cli.headless_rpc_active_run_rejection`, opt-in `ava_tui.tmux_smoke` active-run queue checks. |
 | Cooperative cancellation through RPC and runtime boundaries | `ava_tests.agent_loop_resilience`, `ava_cli.headless_rpc_cancel`, `ava_cli.headless_rpc_bash_process_cleanup`. |
-| User-facing interrupt/abort/resume continuation semantics | `ava_tests.tui_composer`, `ava_tests.app_rpc_queue`, `ava_cli.headless_rpc_cancel`, `docs/USAGE.md`, `docs/headless-protocol.md`. |
-| Explicit steer-now, queue-next, restore-draft, cancel/interrupt, and resume-later vocabulary | `ava_tests.app_rpc_queue`, `ava_tests.tui_composer`, opt-in `ava_tui.tmux_smoke` active-run queue checks, `docs/USAGE.md`, `docs/headless-protocol.md`. |
+| User-facing interrupt/abort/resume continuation semantics | `ava_tests.tui_composer`, `ava_tests.app_rpc_queue`, `ava_cli.headless_rpc_cancel`, `docs/USAGE.md`, `docs/rpc-protocol.md` / `docs/headless-protocol.md`. |
+| Explicit steer-now, queue-next, restore-draft, cancel/interrupt, and resume-later vocabulary | `ava_tests.app_rpc_queue`, `ava_tests.tui_composer`, opt-in `ava_tui.tmux_smoke` active-run queue checks, `docs/USAGE.md`, `docs/rpc-protocol.md` / `docs/headless-protocol.md`. |
 
 ## Built-In Tools
 
@@ -92,8 +92,8 @@ Internal parallel read/search opt-in evidence (2026-07-09 M1/M2 local): `ava_tes
 | Session grants, durable rules, protected files, and audit entries | `ava_tests.permission_rules`, `ava_tests.session`, `ava_cli.headless_rpc_permission_grant`, `ava_cli.headless_rpc_permission_grant_lifecycle`. |
 | Hard-deny paths for unsafe or model-writable policy locations | `ava_tests.permission_rules`, `ava_tests.tools`, `ava_tests.app_runtime`. |
 | Project trust boundary for project-local executable/plugin/config resources | `ava_tests.app_runtime`, `ava_tests.app_command_registry`, `ava_tests.app_rpc`, opt-in `ava_tui.tmux_smoke` `/trust` checks. |
-| Rule-management UX for list/audit/explain/add/remove/diagnose/export | `ava_tests.permission_rules`, `ava_tests.app_rpc_resolver`, `ava_cli.headless_rpc_permission_reply`, `ava_cli.headless_rpc_permission_grant_lifecycle`, opt-in `ava_tui.tmux_smoke` `/permissions` checks, `docs/USAGE.md`, `docs/CONFIG.md`, `docs/headless-protocol.md`. |
-| Clear denial explanations in TUI, RPC, and headless output | `ava_tests.tui_composer`, `ava_tests.tools`, `ava_tests.app_print`, `ava_cli.headless_rpc_permission_reply`, `ava_cli.headless_rpc_tool_failure`, `docs/headless-protocol.md`. |
+| Rule-management UX for list/audit/explain/add/remove/diagnose/export | `ava_tests.permission_rules`, `ava_tests.app_rpc_resolver`, `ava_cli.headless_rpc_permission_reply`, `ava_cli.headless_rpc_permission_grant_lifecycle`, opt-in `ava_tui.tmux_smoke` `/permissions` checks, `docs/USAGE.md`, `docs/CONFIG.md`, `docs/rpc-protocol.md` / `docs/headless-protocol.md`. |
+| Clear denial explanations in TUI, RPC, and headless output | `ava_tests.tui_composer`, `ava_tests.tools`, `ava_tests.app_print`, `ava_cli.headless_rpc_permission_reply`, `ava_cli.headless_rpc_tool_failure`, `docs/rpc-protocol.md` / `docs/headless-protocol.md`. |
 | Side-effect security review checklist | `docs/engineering/side-effect-safety-checklist.md`, `docs/TESTING.md`. |
 
 ## Sessions And Conversation History
@@ -102,11 +102,11 @@ Internal parallel read/search opt-in evidence (2026-07-09 M1/M2 local): `ava_tes
 | --- | --- |
 | Append-only JSONL storage with resume/list | `ava_tests.session`, `ava_cli.headless_rpc_validate_session`. |
 | Compaction, export, stats, usage/cost, model/reasoning changes | `ava_tests.session`, `ava_tests.app_compaction`, `ava_cli.headless_rpc_compact_success`, `ava_cli.headless_rpc_context_export`. |
-| Backend/RPC tree inspection, fork, clone, names, labels, caller-supplied branch summaries | `ava_tests.session`, `ava_tests.app_rpc`, `docs/headless-protocol.md` session metadata/tree/fork/clone/summarize docs. |
+| Backend/RPC tree inspection, fork, clone, names, labels, caller-supplied branch summaries | `ava_tests.session`, `ava_tests.app_rpc`, `docs/rpc-protocol.md` / `docs/headless-protocol.md` session metadata/tree/fork/clone/summarize docs. |
 | User-facing session tree workflow | `ava_tests.tui_composer`, `ava_tests.session`, opt-in `ava_tui.tmux_smoke` session selector/tree checks. |
 | Pi-style session slash commands | `ava_tests.app_command_registry`, `ava_tests.session`, `ava_tests.app_runtime`, `ava_tests.tui_composer`; includes `/export jsonl` and local `/import <path.jsonl> --confirm`. |
-| Markdown, safe self-contained HTML, and raw AVA JSONL export/import | `ava_tests.session`, `ava_tests.app_runtime`, `ava_cli.headless_rpc_context_export`, `docs/headless-protocol.md`, `docs/USAGE.md` export/import docs. |
-| Session migration/versioning policy | `ava_tests.session`, `docs/engineering/session-versioning.md`, `docs/headless-protocol.md` session entry/schema-version notes. |
+| Markdown, safe self-contained HTML, and raw AVA JSONL export/import | `ava_tests.session`, `ava_tests.app_runtime`, `ava_cli.headless_rpc_context_export`, `docs/rpc-protocol.md` / `docs/headless-protocol.md`, `docs/USAGE.md` export/import docs. |
+| Session migration/versioning policy | `ava_tests.session`, `docs/engineering/session-versioning.md`, `docs/rpc-protocol.md` / `docs/headless-protocol.md` session entry/schema-version notes. |
 
 ## Context, Prompts, Skills, And File References
 
@@ -170,7 +170,7 @@ The current TUI rows are either checked with deterministic/PTY evidence or expli
 | Checklist item | Coverage evidence |
 | --- | --- |
 | Image model metadata, sanitized attachment metadata, managed storage, fork/clone copy, replay validation, provider serialization | `ava_tests.session`, `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `ava_tests.provider_gemini`, `ava_tests.config_context_auth_oauth`. |
-| RPC image input plumbing | `ava_tests.app_rpc`, `ava_tests.session`, `docs/headless-protocol.md` image request docs. |
+| RPC image input plumbing | `ava_tests.app_rpc`, `ava_tests.session`, `docs/rpc-protocol.md` / `docs/headless-protocol.md` image request docs. |
 | TUI/user-facing image import | `ava_tests.tui_composer`, `ava_tests.session`, opt-in `ava_tui.tmux_smoke` clipboard-image fallback checks. |
 | Inline preview where terminal capabilities allow plus safe text fallback | `ava_tests.tui_composer`, opt-in `ava_tui.kitty_image_smoke`, opt-in `ava_tui.tmux_smoke`. |
 
@@ -179,12 +179,12 @@ The current TUI rows are either checked with deterministic/PTY evidence or expli
 | Checklist item | Coverage evidence |
 | --- | --- |
 | CTest, fake providers/servers, plugin/MCP fixtures, sanitizer workflow, live-provider smoke opt-in | `tests/CMakeLists.txt`, `docs/TESTING.md`, `ava_tests.provider_live_smoke`, CI workflow badge in `README.md`. |
-| Headless print/RPC smoke coverage | `ava_cli.headless_print_*`, `ava_cli.headless_rpc_*`, `ava_cli.headless_e2e_model_smoke`, `docs/headless-protocol.md`. |
+| Headless print/RPC smoke coverage | `ava_cli.headless_print_*`, `ava_cli.headless_rpc_*`, `ava_cli.headless_e2e_model_smoke`, `docs/rpc-protocol.md` / `docs/headless-protocol.md`. |
 | Pi-parity checklist mapped to coverage | This file. |
 | Provider live-smoke matrix with credential-gated skips | `docs/TESTING.md` provider live-smoke matrix, `ava_tests.provider_live_smoke`, `tests/provider_live_smoke_tests.cpp`, opt-in full-binary `scripts/live-model-dogfood.sh`. |
 | Performance smoke for startup, large transcript render, large tool output, search, and replay | `ava_tests.tui_composer` large-render/large-output/tail-renderer/very-long-transcript budgets, `ava_cli.headless_performance_smoke`, `docs/TESTING.md` performance release thresholds. |
 | TUI regression harness for input/editor/session-tree/permission/tool-card workflows | `ava_tests.tui_composer`, opt-in `ava_tui.tmux_smoke`, opt-in `ava_tui.kitty_image_smoke`, opt-in `ava_tui.osc8_smoke`, `docs/TESTING.md` terminal-smoke guidance. |
-| Documentation consistency before MVP cut | Final docs audit plus corrections in `README.md`, `docs/USAGE.md`, `docs/CONFIG.md`, `docs/TESTING.md`, `docs/headless-protocol.md`, `docs/product/mvp-baseline.md`, `docs/product/mvp-coverage-ledger.md`, and `docs/goals/pi-mvp-parity/*.md`. |
+| Documentation consistency before MVP cut | Final docs audit plus corrections in `README.md`, `docs/USAGE.md`, `docs/CONFIG.md`, `docs/TESTING.md`, `docs/rpc-protocol.md` / `docs/headless-protocol.md`, `docs/product/mvp-baseline.md`, `docs/product/mvp-coverage-ledger.md`, and `docs/goals/pi-mvp-parity/*.md`. |
 
 ## Deferred Follow-Up Rows
 

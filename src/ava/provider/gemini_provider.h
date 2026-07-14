@@ -11,6 +11,7 @@ namespace ava::provider {
 class GeminiStreamParser final : public StreamParser
 {
  public:
+  GeminiStreamParser();
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk) override;
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> finish() override;
 
@@ -19,7 +20,8 @@ class GeminiStreamParser final : public StreamParser
   std::string data_;
   std::size_t scan_offset_ = 0;
   std::optional<TokenUsage> usage_ = std::nullopt;
-  std::string stop_reason_ = {};
+  std::optional<ProviderFinishReason> finish_reason_ = std::nullopt;
+  std::string fallback_tool_call_prefix_;
   bool saw_data_ = false;
   bool done_seen_ = false;
   bool error_seen_ = false;

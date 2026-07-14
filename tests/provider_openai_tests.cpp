@@ -558,13 +558,14 @@ void test_openai_provider_contract()
          "retry streaming transport checks cancellation before dispatching the first attempt");
 
   auto completed = ava::provider::parse_openai_sse("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n");
-  expect(completed && completed->size() == 1 && (*completed)[0].type == ava::provider::StreamEventType::Done && (*completed)[0].stop_reason == "completed",
+  expect(completed && completed->size() == 1 && (*completed)[0].type == ava::provider::StreamEventType::Done &&
+             (*completed)[0].finish_reason == ava::provider::ProviderFinishReason::Completed,
          "OpenAI response.completed event produces done event");
   auto completed_then_done = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
       "data: [DONE]\n\n");
   expect(completed_then_done && completed_then_done->size() == 1 && (*completed_then_done)[0].type == ava::provider::StreamEventType::Done &&
-             (*completed_then_done)[0].stop_reason == "completed",
+             (*completed_then_done)[0].finish_reason == ava::provider::ProviderFinishReason::Completed,
          "OpenAI SSE parser suppresses duplicate done marker after response.completed");
   auto completed_with_usage = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,"
@@ -578,7 +579,8 @@ void test_openai_provider_contract()
   auto incomplete = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\","
       "\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n");
-  expect(incomplete && incomplete->size() == 1 && (*incomplete)[0].type == ava::provider::StreamEventType::Done && (*incomplete)[0].stop_reason == "max_tokens",
+  expect(incomplete && incomplete->size() == 1 && (*incomplete)[0].type == ava::provider::StreamEventType::Done &&
+             (*incomplete)[0].finish_reason == ava::provider::ProviderFinishReason::MaxTokens,
          "OpenAI response.incomplete preserves normalized incomplete reason");
   auto lifecycle = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.created\"}\n\n"
@@ -674,7 +676,7 @@ void test_openai_provider_contract()
                                                                              "\"incomplete_details\":{\"reason\":\"content_filter\"}}"},
                                          false);
   expect(non_stream_incomplete && non_stream_incomplete->size() == 2 && (*non_stream_incomplete)[1].type == ava::provider::StreamEventType::Done &&
-             (*non_stream_incomplete)[1].stop_reason == "content_filter",
+             (*non_stream_incomplete)[1].finish_reason == ava::provider::ProviderFinishReason::Refusal,
          "OpenAI non-stream Responses API preserves incomplete stop reason");
   auto non_stream_empty_incomplete =
       non_stream_provider.parse_response(ava::provider::HttpResponse{.status_code = 200,
@@ -683,7 +685,8 @@ void test_openai_provider_contract()
                                                                              "\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}"},
                                          false);
   expect(non_stream_empty_incomplete && non_stream_empty_incomplete->size() == 1 &&
-             (*non_stream_empty_incomplete)[0].type == ava::provider::StreamEventType::Done && (*non_stream_empty_incomplete)[0].stop_reason == "max_tokens",
+             (*non_stream_empty_incomplete)[0].type == ava::provider::StreamEventType::Done &&
+             (*non_stream_empty_incomplete)[0].finish_reason == ava::provider::ProviderFinishReason::MaxTokens,
          "OpenAI non-stream Responses API accepts empty incomplete terminal response");
 
   if (request)
@@ -953,7 +956,7 @@ void test_openai_compatible_parsing()
            "OpenAI-compatible SSE emits tool call start");
     expect((*stream)[7].type == ava::provider::StreamEventType::Done && (*stream)[7].usage && (*stream)[7].usage->input_tokens == 11 &&
                (*stream)[7].usage->output_tokens == 7 && (*stream)[7].usage->reasoning_tokens == 2 && (*stream)[7].usage->cache_read_tokens == 3 &&
-               (*stream)[7].stop_reason == "tool_calls",
+               (*stream)[7].finish_reason == ava::provider::ProviderFinishReason::ToolCalls,
            "OpenAI-compatible SSE done carries usage and normalized tool stop reason");
   }
 
@@ -970,7 +973,7 @@ void test_openai_compatible_parsing()
              (*non_stream)[1].type == ava::provider::StreamEventType::ReasoningDelta && (*non_stream)[1].text == "think" &&
              (*non_stream)[3].type == ava::provider::StreamEventType::TextDelta && (*non_stream)[3].text == "done" &&
              (*non_stream)[4].type == ava::provider::StreamEventType::Done && (*non_stream)[4].usage && (*non_stream)[4].usage->cache_read_tokens == 1 &&
-             (*non_stream)[4].stop_reason == "completed",
+             (*non_stream)[4].finish_reason == ava::provider::ProviderFinishReason::Completed,
          "OpenAI-compatible non-stream response parses reasoning_content, text, usage, and stop reason");
 
   auto const reasoning_only_length =
@@ -985,7 +988,8 @@ void test_openai_compatible_parsing()
              (*reasoning_only_length)[1].type == ava::provider::StreamEventType::ReasoningDelta &&
              (*reasoning_only_length)[2].type == ava::provider::StreamEventType::ReasoningEnd &&
              (*reasoning_only_length)[3].type == ava::provider::StreamEventType::Done && (*reasoning_only_length)[3].usage &&
-             (*reasoning_only_length)[3].usage->reasoning_tokens == 32 && (*reasoning_only_length)[3].stop_reason == "max_tokens",
+             (*reasoning_only_length)[3].usage->reasoning_tokens == 32 &&
+             (*reasoning_only_length)[3].finish_reason == ava::provider::ProviderFinishReason::MaxTokens,
          "OpenAI-compatible non-stream parser preserves reasoning-only length responses as terminal provider turns");
 
   auto const filtered = moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
@@ -993,7 +997,8 @@ void test_openai_compatible_parsing()
                                                                             .body = "{\"choices\":[{\"finish_reason\":\"content_filter\"}],"
                                                                                     "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":0}}"},
                                                 false);
-  expect(filtered && filtered->size() == 1 && (*filtered)[0].type == ava::provider::StreamEventType::Done && (*filtered)[0].stop_reason == "content_filter",
+  expect(filtered && filtered->size() == 1 && (*filtered)[0].type == ava::provider::StreamEventType::Done &&
+             (*filtered)[0].finish_reason == ava::provider::ProviderFinishReason::Refusal,
          "OpenAI-compatible non-stream parser treats filtered empty responses as completed provider turns");
   auto const empty_stop = moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
                                                                               .headers = {},
@@ -1002,7 +1007,8 @@ void test_openai_compatible_parsing()
                                                                                       "\"completion_tokens\":0,\"total_tokens\":2}}"},
                                                   false);
   expect(empty_stop && empty_stop->size() == 1 && (*empty_stop)[0].type == ava::provider::StreamEventType::Done && (*empty_stop)[0].usage &&
-             (*empty_stop)[0].usage->input_tokens == 2 && (*empty_stop)[0].usage->output_tokens == 0 && (*empty_stop)[0].stop_reason == "completed",
+             (*empty_stop)[0].usage->input_tokens == 2 && (*empty_stop)[0].usage->output_tokens == 0 &&
+             (*empty_stop)[0].finish_reason == ava::provider::ProviderFinishReason::Completed,
          "OpenAI-compatible non-stream parser accepts empty completed output with usage");
 
   auto const unicode_text = std::string("rocket ") + "\xF0\x9F\x9A\x80" + " bad " + "\xEF\xBF\xBD";
@@ -1021,7 +1027,7 @@ void test_openai_compatible_parsing()
                                                                                           "\"finish_reason\":\"provider_custom\"}]}"},
                                                       false);
   expect(unknown_finish && unknown_finish->size() == 2 && (*unknown_finish)[1].type == ava::provider::StreamEventType::Done &&
-             (*unknown_finish)[1].stop_reason == "provider_custom",
+             (*unknown_finish)[1].finish_reason == ava::provider::ProviderFinishReason::Error,
          "OpenAI-compatible non-stream parser preserves unknown finish reasons");
 
   auto const non_stream_tool = moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
@@ -1034,8 +1040,35 @@ void test_openai_compatible_parsing()
              (*non_stream_tool)[0].tool_call_id == "call_9" && (*non_stream_tool)[0].tool_name == "read_file" &&
              (*non_stream_tool)[1].type == ava::provider::StreamEventType::ToolCallDelta &&
              (*non_stream_tool)[2].type == ava::provider::StreamEventType::ToolCallEnd && (*non_stream_tool)[3].type == ava::provider::StreamEventType::Done &&
-             (*non_stream_tool)[3].stop_reason == "tool_calls",
+             (*non_stream_tool)[3].finish_reason == ava::provider::ProviderFinishReason::ToolCalls,
          "OpenAI-compatible non-stream parser emits tool call events");
+
+  ava::provider::HttpResponse const missing_id_response{
+      .status_code = 200,
+      .headers = {},
+      .body = R"({"choices":[{"message":{"tool_calls":[{"function":{"name":"read_file","arguments":"{}"}}]},"finish_reason":"tool_calls"}]})"};
+  auto const first_missing_id = moonshot.parse_response(missing_id_response, false);
+  auto const second_missing_id = moonshot.parse_response(missing_id_response, false);
+  auto const first_fallback = first_missing_id && first_missing_id->size() >= 3 ? (*first_missing_id)[0].tool_call_id : std::string{};
+  auto const second_fallback = second_missing_id && second_missing_id->size() >= 3 ? (*second_missing_id)[0].tool_call_id : std::string{};
+  expect(!first_fallback.empty() && !second_fallback.empty() && first_fallback != second_fallback && (*first_missing_id)[1].tool_call_id == first_fallback &&
+             (*first_missing_id)[2].tool_call_id == first_fallback,
+         "OpenAI-compatible non-stream missing tool-call IDs use distinct per-response fallbacks");
+
+  auto first_parser = moonshot.create_stream_parser();
+  auto second_parser = moonshot.create_stream_parser();
+  auto first_stream_fragment =
+      first_parser->append("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"grep\",\"arguments\":\"{\"}}]}}]}\n\n");
+  auto merged_stream_fragment =
+      first_parser->append("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"}\"}}]}}]}\n\n");
+  auto distinct_stream =
+      second_parser->append("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"grep\",\"arguments\":\"{}\"}}]}}]}\n\n");
+  auto const first_stream_id = first_stream_fragment && first_stream_fragment->size() == 2 ? (*first_stream_fragment)[0].tool_call_id : std::string{};
+  auto const second_stream_id = distinct_stream && distinct_stream->size() == 2 ? (*distinct_stream)[0].tool_call_id : std::string{};
+  expect(!first_stream_id.empty() && !second_stream_id.empty() && first_stream_id != second_stream_id && merged_stream_fragment &&
+             merged_stream_fragment->size() == 1 && (*first_stream_fragment)[1].tool_call_id == first_stream_id &&
+             (*merged_stream_fragment)[0].tool_call_id == first_stream_id,
+         "OpenAI-compatible stream parsers use distinct fallbacks while same-parser index fragments retain one ID");
 
   auto const malformed = moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"choices\":[]}"}, false);
   expect(!malformed && malformed.error().category() == ava::core::ErrorCategory::Provider, "OpenAI-compatible non-stream parser rejects missing messages");
@@ -1338,6 +1371,24 @@ void test_builtin_openai_compatible_provider_contracts()
   }
 }
 
+void test_closed_provider_finish_reason_catalog()
+{
+  bool exhaustive = true;
+  for (auto const& mapping : ava::provider::kProviderFinishReasonCatalog)
+  {
+    exhaustive = exhaustive && ava::provider::normalize_provider_finish_reason(mapping.protocol, mapping.raw_reason) == mapping.reason;
+  }
+  exhaustive =
+      exhaustive &&
+      ava::provider::normalize_provider_finish_reason(ava::provider::ProviderProtocol::OpenAIChat, "provider_custom") ==
+          ava::provider::ProviderFinishReason::Error &&
+      ava::provider::normalize_provider_finish_reason(ava::provider::ProviderProtocol::Gemini, "OTHER") == ava::provider::ProviderFinishReason::Error &&
+      ava::provider::normalize_provider_finish_reason(ava::provider::ProviderProtocol::Gemini, "SAFETY") == ava::provider::ProviderFinishReason::Refusal &&
+      ava::provider::normalize_provider_finish_reason(ava::provider::ProviderProtocol::OpenAIResponses, "incomplete") ==
+          ava::provider::ProviderFinishReason::Error;
+  expect(exhaustive, "provider finish reasons use one closed catalog and unknown/failed terminals cannot become completed");
+}
+
 void test_builtin_provider_registry()
 {
   auto registry = ava::provider::builtin_provider_registry();
@@ -1364,5 +1415,6 @@ void run_provider_openai_tests()
   test_openai_compatible_provider_contract();
   test_openai_compatible_parsing();
   test_builtin_openai_compatible_provider_contracts();
+  test_closed_provider_finish_reason_catalog();
   test_builtin_provider_registry();
 }

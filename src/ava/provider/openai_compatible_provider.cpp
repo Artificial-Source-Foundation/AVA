@@ -3,6 +3,7 @@
 #include "ava/provider/openai_compatible_request.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider_utils.h"
+#include "ava/core/ids.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -17,19 +18,9 @@
 namespace ava::provider {
 namespace {
 
-std::string normalized_finish_reason(std::string_view reason)
+ProviderFinishReason normalized_finish_reason(std::string_view reason)
 {
-  if (reason == "stop")
-    return "completed";
-  if (reason == "length")
-    return "max_tokens";
-  if (reason == "tool_calls" || reason == "function_call")
-    return "tool_calls";
-  if (reason == "content_filter")
-    return "content_filter";
-  if (reason == "refusal")
-    return "refusal";
-  return std::string(reason);
+  return normalize_provider_finish_reason(ProviderProtocol::OpenAIChat, reason);
 }
 
 std::string sanitized_openai_compatible_snippet(std::string_view body)
@@ -57,7 +48,7 @@ void append_finish_reasoning_if_open(std::vector<StreamEvent>& events, bool& rea
   events.insert(events.end(), reasoning_end.begin(), reasoning_end.end());
 }
 
-void append_done(std::vector<StreamEvent>& events, std::optional<TokenUsage> usage, std::string stop_reason)
+void append_done(std::vector<StreamEvent>& events, std::optional<TokenUsage> usage, std::optional<ProviderFinishReason> finish_reason)
 {
   events.push_back(StreamEvent{.type = StreamEventType::Done,
                                .text = "",
@@ -65,7 +56,7 @@ void append_done(std::vector<StreamEvent>& events, std::optional<TokenUsage> usa
                                .tool_name = "",
                                .error_message = "",
                                .usage = std::move(usage),
-                               .stop_reason = std::move(stop_reason)});
+                               .finish_reason = finish_reason});
 }
 
 void append_tool_call_end_events(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids)
@@ -78,14 +69,17 @@ void append_tool_call_end_events(std::vector<StreamEvent>& events, std::map<int,
   open_tool_call_ids.clear();
 }
 
-void append_tool_call_delta_events(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids, std::string_view delta)
+void append_tool_call_delta_events(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids, std::string_view delta,
+                                   std::string_view fallback_tool_call_prefix)
 {
   for (auto const& call : ava::core::json::objects_in_array_field(delta, "tool_calls"))
   {
     auto const index_value = ava::core::json::integer_field(call, "index").value_or(0);
     auto const index = static_cast<int>(index_value);
     auto const function = ava::core::json::object_field(call, "function");
-    auto const id = ava::core::json::string_field(call, "id").value_or("call_" + std::to_string(index));
+    auto id = ava::core::json::string_field(call, "id").value_or("");
+    if (id.empty())
+      id = std::string(fallback_tool_call_prefix) + "_" + std::to_string(index);
     auto const name = function ? ava::core::json::string_field(*function, "name").value_or("") : "";
     if (!open_tool_call_ids.contains(index))
     {
@@ -109,12 +103,13 @@ void append_tool_call_delta_events(std::vector<StreamEvent>& events, std::map<in
 }
 
 void append_choice_delta_events(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids, bool& reasoning_open,
-                                std::string& stop_reason, std::string_view choice, std::string_view reasoning_format)
+                                std::optional<ProviderFinishReason>& finish_reason, std::string_view choice, std::string_view reasoning_format,
+                                std::string_view fallback_tool_call_prefix)
 {
-  if (auto finish_reason = ava::core::json::string_field(choice, "finish_reason"))
+  if (auto raw_finish_reason = ava::core::json::string_field(choice, "finish_reason"))
   {
-    stop_reason = normalized_finish_reason(*finish_reason);
-    if (*finish_reason == "tool_calls" || *finish_reason == "function_call")
+    finish_reason = normalized_finish_reason(*raw_finish_reason);
+    if (*raw_finish_reason == "tool_calls" || *raw_finish_reason == "function_call")
     {
       append_tool_call_end_events(events, open_tool_call_ids);
     }
@@ -156,12 +151,12 @@ void append_choice_delta_events(std::vector<StreamEvent>& events, std::map<int, 
           StreamEvent{.type = StreamEventType::TextDelta, .text = *content, .tool_call_id = "", .tool_name = "", .error_message = "", .usage = std::nullopt});
     }
   }
-  append_tool_call_delta_events(events, open_tool_call_ids, *delta);
+  append_tool_call_delta_events(events, open_tool_call_ids, *delta, fallback_tool_call_prefix);
 }
 
 void append_event_for_data(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids, bool& reasoning_open,
-                           std::optional<TokenUsage>& usage, std::string& stop_reason, bool& saw_data, bool& done_seen, bool& error_seen, std::string_view data,
-                           std::string_view reasoning_format)
+                           std::optional<TokenUsage>& usage, std::optional<ProviderFinishReason>& finish_reason, bool& saw_data, bool& done_seen,
+                           bool& error_seen, std::string_view data, std::string_view reasoning_format, std::string_view fallback_tool_call_prefix)
 {
   if (done_seen || error_seen)
     return;
@@ -169,10 +164,12 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<int, std::
   {
     done_seen = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_format);
+    if (!finish_reason)
+      finish_reason = open_tool_call_ids.empty() ? ProviderFinishReason::Completed : ProviderFinishReason::ToolCalls;
     append_tool_call_end_events(events, open_tool_call_ids);
-    append_done(events, std::move(usage), std::move(stop_reason));
+    append_done(events, std::move(usage), finish_reason);
     usage = std::nullopt;
-    stop_reason.clear();
+    finish_reason = std::nullopt;
     return;
   }
   saw_data = true;
@@ -193,7 +190,7 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<int, std::
     usage = parsed_usage;
   for (auto const& choice : ava::core::json::objects_in_array_field(data, "choices"))
   {
-    append_choice_delta_events(events, open_tool_call_ids, reasoning_open, stop_reason, choice, reasoning_format);
+    append_choice_delta_events(events, open_tool_call_ids, reasoning_open, finish_reason, choice, reasoning_format, fallback_tool_call_prefix);
   }
   if (auto const error_object = ava::core::json::object_field(data, "error"))
   {
@@ -211,8 +208,9 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<int, std::
 }
 
 void append_events_for_sse_line(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids, bool& reasoning_open,
-                                std::optional<TokenUsage>& usage, std::string& stop_reason, bool& saw_data, bool& done_seen, bool& error_seen,
-                                std::string& data, std::string line, std::string_view reasoning_format)
+                                std::optional<TokenUsage>& usage, std::optional<ProviderFinishReason>& finish_reason, bool& saw_data, bool& done_seen,
+                                bool& error_seen, std::string& data, std::string line, std::string_view reasoning_format,
+                                std::string_view fallback_tool_call_prefix)
 {
   if (!line.empty() && line.back() == '\r')
     line.pop_back();
@@ -220,7 +218,8 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events, std::map<int, 
   {
     if (!data.empty())
     {
-      append_event_for_data(events, open_tool_call_ids, reasoning_open, usage, stop_reason, saw_data, done_seen, error_seen, data, reasoning_format);
+      append_event_for_data(events, open_tool_call_ids, reasoning_open, usage, finish_reason, saw_data, done_seen, error_seen, data, reasoning_format,
+                            fallback_tool_call_prefix);
       data.clear();
     }
     return;
@@ -236,22 +235,24 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events, std::map<int, 
   }
 }
 
-ava::core::Result<std::vector<StreamEvent>> parse_chat_completion_message(std::string_view body, std::string_view reasoning_format)
+ava::core::Result<std::vector<StreamEvent>> parse_chat_completion_message(std::string_view body, std::string_view reasoning_format,
+                                                                          std::string_view fallback_tool_call_prefix)
 {
   std::vector<StreamEvent> events;
   auto const usage = parse_openai_usage(body);
-  std::string stop_reason;
+  std::optional<ProviderFinishReason> finish_reason;
   bool parsed_message = false;
+  std::size_t tool_call_index = 0;
   for (auto const& choice : ava::core::json::objects_in_array_field(body, "choices"))
   {
-    if (auto finish_reason = ava::core::json::string_field(choice, "finish_reason"))
+    if (auto raw_finish_reason = ava::core::json::string_field(choice, "finish_reason"))
     {
-      stop_reason = normalized_finish_reason(*finish_reason);
+      finish_reason = normalized_finish_reason(*raw_finish_reason);
     }
     auto const message = ava::core::json::object_field(choice, "message");
     if (!message)
     {
-      if (stop_reason == "content_filter" || stop_reason == "refusal")
+      if (finish_reason == ProviderFinishReason::Refusal)
       {
         parsed_message = true;
         break;
@@ -302,7 +303,10 @@ ava::core::Result<std::vector<StreamEvent>> parse_chat_completion_message(std::s
     for (auto const& tool_call : tool_calls)
     {
       auto const function = ava::core::json::object_field(tool_call, "function");
-      auto const id = ava::core::json::string_field(tool_call, "id").value_or("");
+      auto id = ava::core::json::string_field(tool_call, "id").value_or("");
+      if (id.empty())
+        id = std::string(fallback_tool_call_prefix) + "_" + std::to_string(tool_call_index);
+      ++tool_call_index;
       auto const name = function ? ava::core::json::string_field(*function, "name").value_or("") : "";
       auto const arguments = function ? ava::core::json::string_field(*function, "arguments").value_or("") : "";
       events.push_back(
@@ -312,7 +316,7 @@ ava::core::Result<std::vector<StreamEvent>> parse_chat_completion_message(std::s
       events.push_back(
           StreamEvent{.type = StreamEventType::ToolCallEnd, .text = "", .tool_call_id = id, .tool_name = "", .error_message = "", .usage = std::nullopt});
     }
-    if (!parsed_content && stop_reason != "content_filter" && stop_reason != "refusal")
+    if (!parsed_content && finish_reason != ProviderFinishReason::Refusal)
     {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI-compatible response content is missing"));
     }
@@ -323,13 +327,19 @@ ava::core::Result<std::vector<StreamEvent>> parse_chat_completion_message(std::s
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI-compatible response message is missing"));
   }
-  append_done(events, usage, std::move(stop_reason));
+  if (!finish_reason)
+  {
+    bool const has_tool_call = std::ranges::any_of(events, [](StreamEvent const& event) { return event.type == StreamEventType::ToolCallStart; });
+    finish_reason = has_tool_call ? ProviderFinishReason::ToolCalls : ProviderFinishReason::Completed;
+  }
+  append_done(events, usage, finish_reason);
   return events;
 }
 
 }  // namespace
 
-OpenAICompatibleStreamParser::OpenAICompatibleStreamParser(std::string reasoning_format) : reasoning_format_(std::move(reasoning_format))
+OpenAICompatibleStreamParser::OpenAICompatibleStreamParser(std::string reasoning_format)
+    : reasoning_format_(std::move(reasoning_format)), fallback_tool_call_prefix_(ava::core::make_id("openai_call"))
 {
 }
 
@@ -344,8 +354,8 @@ ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleStreamParser::append
     auto const newline = pending_line_.find('\n', search_from);
     if (newline == std::string::npos)
       break;
-    append_events_for_sse_line(events, open_tool_call_ids_, reasoning_open_, usage_, stop_reason_, saw_data_, done_seen_, error_seen_, data_,
-                               pending_line_.substr(line_start, newline - line_start), reasoning_format_);
+    append_events_for_sse_line(events, open_tool_call_ids_, reasoning_open_, usage_, finish_reason_, saw_data_, done_seen_, error_seen_, data_,
+                               pending_line_.substr(line_start, newline - line_start), reasoning_format_, fallback_tool_call_prefix_);
     line_start = newline + 1;
     search_from = line_start;
   }
@@ -360,14 +370,15 @@ ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleStreamParser::finish
   std::vector<StreamEvent> events;
   if (!pending_line_.empty())
   {
-    append_events_for_sse_line(events, open_tool_call_ids_, reasoning_open_, usage_, stop_reason_, saw_data_, done_seen_, error_seen_, data_,
-                               std::move(pending_line_), reasoning_format_);
+    append_events_for_sse_line(events, open_tool_call_ids_, reasoning_open_, usage_, finish_reason_, saw_data_, done_seen_, error_seen_, data_,
+                               std::move(pending_line_), reasoning_format_, fallback_tool_call_prefix_);
     pending_line_.clear();
   }
   scan_offset_ = 0;
   if (!data_.empty())
   {
-    append_event_for_data(events, open_tool_call_ids_, reasoning_open_, usage_, stop_reason_, saw_data_, done_seen_, error_seen_, data_, reasoning_format_);
+    append_event_for_data(events, open_tool_call_ids_, reasoning_open_, usage_, finish_reason_, saw_data_, done_seen_, error_seen_, data_, reasoning_format_,
+                          fallback_tool_call_prefix_);
     data_.clear();
   }
   append_tool_call_end_events(events, open_tool_call_ids_);
@@ -385,7 +396,7 @@ ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleStreamParser::finish
   done_seen_ = false;
   error_seen_ = false;
   usage_ = std::nullopt;
-  stop_reason_.clear();
+  finish_reason_ = std::nullopt;
   open_tool_call_ids_.clear();
   reasoning_open_ = false;
   return events;
@@ -405,28 +416,31 @@ ava::core::Result<HttpRequest> OpenAICompatibleProvider::build_request(ProviderR
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, options_.provider_name + " credential is required"));
   }
-  for (std::size_t message_index = 0; message_index < request.messages.size(); ++message_index) {
+  for (std::size_t message_index = 0; message_index < request.messages.size(); ++message_index)
+  {
     auto const& message = request.messages[message_index];
-    for (std::size_t part_index = 0; part_index < message.content_parts.size(); ++part_index) {
+    for (std::size_t part_index = 0; part_index < message.content_parts.size(); ++part_index)
+    {
       auto const& part = message.content_parts[part_index];
-      if (part.type != ContentPartType::Image) continue;
-      if (message.role != "user") {
-        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                      options_.provider_name + " image content requires user role");
+      if (part.type != ContentPartType::Image)
+        continue;
+      if (message.role != "user")
+      {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, options_.provider_name + " image content requires user role");
         error.with_context("message_index", std::to_string(message_index));
         error.with_context("content_part_index", std::to_string(part_index));
         return std::unexpected(std::move(error));
       }
-      if (!is_supported_image_mime_type(part.mime_type)) {
-        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                      options_.provider_name + " image MIME type is not supported");
+      if (!is_supported_image_mime_type(part.mime_type))
+      {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, options_.provider_name + " image MIME type is not supported");
         error.with_context("message_index", std::to_string(message_index));
         error.with_context("content_part_index", std::to_string(part_index));
         return std::unexpected(std::move(error));
       }
-      if (part.data_base64.empty() || !is_valid_base64(part.data_base64)) {
-        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                      options_.provider_name + " image content requires verified attachment bytes");
+      if (part.data_base64.empty() || !is_valid_base64(part.data_base64))
+      {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, options_.provider_name + " image content requires verified attachment bytes");
         error.with_context("message_index", std::to_string(message_index));
         error.with_context("content_part_index", std::to_string(part_index));
         return std::unexpected(std::move(error));
@@ -481,7 +495,7 @@ ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleProvider::parse_resp
   }
   if (stream)
     return parse_openai_compatible_sse(response.body, options_.reasoning_format);
-  return parse_chat_completion_message(response.body, options_.reasoning_format);
+  return parse_chat_completion_message(response.body, options_.reasoning_format, ava::core::make_id("openai_call"));
 }
 
 ava::core::Result<std::vector<StreamEvent>> parse_openai_compatible_sse(std::string_view sse, std::string reasoning_format)

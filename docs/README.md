@@ -16,7 +16,11 @@ This is the navigation spine for AVA's user, automation, engineering, and produc
 
 ## Automation And Extension Contracts
 
-- [`headless-protocol.md`](headless-protocol.md): print/RPC JSONL protocol, event envelopes, resolver flows, and headless permission flags.
+- [`rpc-protocol.md`](rpc-protocol.md): normative proprietary AVA RPC v1 client-author contract, catalogs, correlation, compatibility ledger, and examples; it is distinct from JSON-RPC 2.0, ACP, and Pi RPC.
+- [`acp.md`](acp.md): stable ACP v1 JSON-RPC 2.0 editor endpoint, exact Zed/JetBrains/CodeCompanion setup, M6 interoperability evidence, model-truthful prompts, tools/permissions/client routing, limits, and maintenance rules.
+- [`acp-support.json`](acp-support.json): machine-checked ACP v1 support, exact test-only dependency pins, client evidence labels, confinement requirements, and deferred features.
+- [`interop/evidence/README.md`](interop/evidence/README.md): real-client evidence policy and incomplete report template; includes the confined, manually verified Zed 1.9.0 report for the captured flows.
+- [`headless-protocol.md`](headless-protocol.md): behavior shared by print/RPC headless modes, event envelopes, permission flags, credentials, and exits.
 - [`mcp.md`](mcp.md): local stdio MCP configuration and safety boundaries.
 - [`plugin-system.md`](plugin-system.md): local plugin authoring, manifest shape, runner protocol, permissions, diagnostics, and sample plugin.
 - [`plugin-compatibility-policy.md`](plugin-compatibility-policy.md): compatibility, deprecation, and golden-fixture policy for plugin/MCP contracts.

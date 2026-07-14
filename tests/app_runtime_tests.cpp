@@ -69,6 +69,7 @@
 #include <utility>
 #include <vector>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -352,6 +353,7 @@ void test_app_runtime_open_session_and_context_prompt()
   reopen_options.requested_session_id = session_id.substr(0, 12);
   reopen_options.mode = ava::agent::Mode::Plan;
   reopen_options.paths = paths;
+  session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release runtime before reopen"));
   auto reopened = ava::app::open_runtime_session(reopen_options);
   expect(reopened && !reopened->created && reopened->store.session_id() == session_id,
          "runtime session resolves requested session id prefixes without creating a new session");
@@ -3269,8 +3271,23 @@ void test_app_runtime_model_switch_persists_and_reopens()
   ava::app::RuntimeOpenOptions reopen_options = open_options;
   reopen_options.requested_session_id = session_id;
   std::filesystem::remove(paths.models_file, remove_error);
+  auto same_process_contested = ava::app::open_runtime_session(reopen_options);
+  expect(!same_process_contested && same_process_contested.error().message().find("already owned") != std::string::npos,
+         "protocol-neutral runtime ownership excludes a second same-process mode");
+  pid_t const contender = fork();
+  if (contender == 0)
+  {
+    auto contested = ava::app::open_runtime_session(reopen_options);
+    _exit(!contested && contested.error().message().find("already owned") != std::string::npos ? 0 : 1);
+  }
+  int contender_status = 0;
+  if (contender > 0)
+    static_cast<void>(waitpid(contender, &contender_status, 0));
+  expect(contender > 0 && WIFEXITED(contender_status) && WEXITSTATUS(contender_status) == 0,
+         "TUI/print/RPC-style runtime owners contend on the same cross-process session lease");
+  session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "runtime owner released for reopen test"));
   auto reopened = ava::app::open_runtime_session(reopen_options);
-  expect(reopened.has_value(), "runtime model switch reopens persisted session");
+  expect(reopened.has_value(), "runtime releases its lease on normal lifetime end and reopens persisted session");
   expect(reopened && reopened->model.provider_id == "anthropic" && reopened->model.model_id == "claude-test",
          "runtime reopen restores latest persisted model_change");
   bool restored_emoji_quirk = false;
@@ -3605,7 +3622,8 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
   ava::app::RuntimeOpenOptions reopen_options = open_options;
   reopen_options.requested_session_id = session_id;
   auto reopened = ava::app::open_runtime_session(reopen_options);
-  expect(reopened.has_value() && reopened->reasoning && reopened->reasoning->level == "low", "runtime reopen restores latest reasoning selection");
+  expect(!reopened && reopened.error().message().find("already owned") != std::string::npos,
+         "a second runtime cannot inspect reasoning by bypassing the active owner's lease");
 
   auto cleared = ava::app::set_runtime_reasoning(*session, std::nullopt);
   expect(cleared.has_value() && *cleared && !session->reasoning, "runtime reasoning selection can be cleared");
@@ -3627,8 +3645,8 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
     auto switched_back = ava::app::switch_runtime_model(*session, *openai_model);
     expect(switched_back.has_value() && *switched_back && !session->reasoning, "runtime model switches clear active reasoning selection");
     auto reopened_after_switch = ava::app::open_runtime_session(reopen_options);
-    expect(reopened_after_switch.has_value() && !reopened_after_switch->reasoning,
-           "runtime reopen does not resurrect reasoning across model_change boundaries");
+    expect(!reopened_after_switch && reopened_after_switch.error().message().find("already owned") != std::string::npos,
+           "runtime model-change persistence remains exclusively owned until the active runtime ends");
   }
 
   auto no_levels_model = ava::app::resolve_runtime_model(paths, "openai", "no-reasoning-levels");
@@ -3707,6 +3725,7 @@ void test_app_runtime_initial_reasoning_level_option()
     expect(reasoning_changes == 1, "runtime startup reasoning appends one durable reasoning_change entry");
   }
 
+  session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release runtime before startup reasoning reopen"));
   ava::app::RuntimeOpenOptions clear_options = open_options;
   clear_options.requested_session_id = session_id;
   clear_options.initial_reasoning_level = "off";

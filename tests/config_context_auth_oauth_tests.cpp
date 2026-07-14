@@ -289,6 +289,50 @@ void test_context_loader()
     });
     expect(!symlinked && symlinked.error().category() == ava::core::ErrorCategory::Io, "context loader rejects symlinked AGENTS.md files");
   }
+
+  auto const real_ancestor_workspace = root / "real-ancestor" / "workspace";
+  auto const linked_ancestor = root / "linked-ancestor";
+  std::filesystem::create_directories(real_ancestor_workspace);
+  {
+    std::ofstream file(real_ancestor_workspace / "AGENTS.md", std::ios::binary | std::ios::trunc);
+    file << "must not load through linked ancestor\n";
+  }
+  symlink_error.clear();
+  std::filesystem::create_directory_symlink(root / "real-ancestor", linked_ancestor, symlink_error);
+  expect(!symlink_error, "test creates symlinked context ancestor");
+  if (!symlink_error)
+  {
+    auto ancestor = ava::context::load_context_files(ava::context::ContextLoadOptions{
+        .workspace_root = linked_ancestor / "workspace",
+        .current_dir = linked_ancestor / "workspace",
+        .global_agents_file = {},
+        .max_file_bytes = 1024,
+    });
+    expect(!ancestor && ancestor.error().category() == ava::core::ErrorCategory::Io, "context loader rejects symlinks in root ancestors before reading");
+  }
+
+  auto const intermediate_workspace = root / "intermediate-workspace";
+  auto const intermediate_target = root / "intermediate-target";
+  std::filesystem::create_directories(intermediate_workspace);
+  std::filesystem::create_directories(intermediate_target);
+  {
+    std::ofstream file(intermediate_target / "AGENTS.md", std::ios::binary | std::ios::trunc);
+    file << "must not load through intermediate link\n";
+  }
+  symlink_error.clear();
+  std::filesystem::create_directory_symlink(intermediate_target, intermediate_workspace / "nested", symlink_error);
+  expect(!symlink_error, "test creates intermediate symlink below workspace root");
+  if (!symlink_error)
+  {
+    auto intermediate = ava::context::load_context_files(ava::context::ContextLoadOptions{
+        .workspace_root = intermediate_workspace,
+        .current_dir = intermediate_workspace / "nested",
+        .global_agents_file = {},
+        .max_file_bytes = 1024,
+    });
+    expect(!intermediate && intermediate.error().category() == ava::core::ErrorCategory::Io,
+           "context loader rejects symlinked intermediate directories instead of following swapped ancestors");
+  }
 }
 
 void test_skill_loader()

@@ -130,7 +130,7 @@ ava::core::Result<bool> set_runtime_reasoning(RuntimeSession& session, std::opti
   if (runtime::same_reasoning_selection(session.reasoning, selection))
     return false;
 
-  auto appended = runtime::append_reasoning_change(session.store, session.model, selection);
+  auto appended = session.append_owned(runtime::make_reasoning_change_entry(session.model, selection));
   if (!appended)
     return std::unexpected(std::move(appended.error()));
   session.reasoning = std::move(selection);

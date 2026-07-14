@@ -173,10 +173,23 @@ void test_gemini_response_parsing()
              (*response)[1].type == ava::provider::StreamEventType::ToolCallStart && (*response)[1].tool_call_id == "call_1" &&
              (*response)[1].tool_name == "read_file" && (*response)[2].type == ava::provider::StreamEventType::ToolCallDelta &&
              (*response)[2].text.find("README.md") != std::string::npos && (*response)[3].type == ava::provider::StreamEventType::ToolCallEnd &&
-             (*response)[4].type == ava::provider::StreamEventType::Done && (*response)[4].stop_reason == "completed" && (*response)[4].usage &&
-             (*response)[4].usage->input_tokens == 2 && (*response)[4].usage->output_tokens == 3 && (*response)[4].usage->total_tokens == 5 &&
-             (*response)[4].usage->reasoning_tokens == 1 && (*response)[4].usage->cache_read_tokens == 1,
+             (*response)[4].type == ava::provider::StreamEventType::Done && (*response)[4].finish_reason == ava::provider::ProviderFinishReason::Completed &&
+             (*response)[4].usage && (*response)[4].usage->input_tokens == 2 && (*response)[4].usage->output_tokens == 3 &&
+             (*response)[4].usage->total_tokens == 5 && (*response)[4].usage->reasoning_tokens == 1 && (*response)[4].usage->cache_read_tokens == 1,
          "Gemini non-stream response parses text, functionCall, finish reason, and usage");
+
+  auto const missing_id_body = ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body =
+          R"({"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"read_file","args":{"path":"README.md"}}}]},"finishReason":"STOP"}]})"};
+  auto const first_missing_id = provider.parse_response(missing_id_body, false);
+  auto const second_missing_id = provider.parse_response(missing_id_body, false);
+  auto const first_fallback = first_missing_id && first_missing_id->size() >= 3 ? (*first_missing_id)[0].tool_call_id : std::string{};
+  auto const second_fallback = second_missing_id && second_missing_id->size() >= 3 ? (*second_missing_id)[0].tool_call_id : std::string{};
+  expect(!first_fallback.empty() && !second_fallback.empty() && first_fallback != second_fallback && (*first_missing_id)[1].tool_call_id == first_fallback &&
+             (*first_missing_id)[2].tool_call_id == first_fallback,
+         "Gemini missing function-call IDs use globally distinct per-response fallbacks while same-turn fragments merge");
 
   auto const missing_content =
       provider.parse_response(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"candidates":[{"finishReason":"STOP"}]})"}, false);

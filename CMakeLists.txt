@@ -52,6 +52,26 @@ configure_file(
 option(AVA_BUILD_TESTS "Build AVA tests" ON)
 option(AVA_BUILD_DESKTOP_QML "Build the experimental Qt Quick/QML desktop prototype" OFF)
 option(AVA_ENABLE_SANITIZERS "Build AVA with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(AVA_ENABLE_TSAN "Build AVA with ThreadSanitizer (focused coordinator tests only)" OFF)
+if(AVA_ENABLE_SANITIZERS AND AVA_ENABLE_TSAN)
+  message(FATAL_ERROR "AVA_ENABLE_SANITIZERS and AVA_ENABLE_TSAN are mutually exclusive")
+endif()
+
+# ACP keeps JSON implementation details behind its codec. Prefer an installed
+# package so configured offline environments do not need the network; the
+# fallback is an immutable official release artifact.
+find_package(nlohmann_json 3.11 CONFIG QUIET)
+if(NOT TARGET nlohmann_json::nlohmann_json)
+  set(JSON_BuildTests OFF CACHE INTERNAL "" FORCE)
+  set(JSON_Install OFF CACHE INTERNAL "" FORCE)
+  FetchContent_Declare(
+    ava_nlohmann_json
+    URL "https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz"
+    URL_HASH "SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d"
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  FetchContent_MakeAvailable(ava_nlohmann_json)
+endif()
 
 function(ava_apply_debugging target)
   target_link_libraries(${target} PRIVATE ${AICXX_OBJECTS_LIST})
@@ -82,6 +102,10 @@ function(ava_apply_sanitizers target)
   if(AVA_ENABLE_SANITIZERS AND NOT MSVC)
     target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+  endif()
+  if(AVA_ENABLE_TSAN AND NOT MSVC)
+    target_compile_options(${target} PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
+    target_link_options(${target} PRIVATE -fsanitize=thread)
   endif()
 endfunction()
 

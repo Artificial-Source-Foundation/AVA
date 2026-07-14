@@ -4,6 +4,7 @@
 #include "ava/provider/provider_utils.h"
 #include "ava/core/json.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <optional>
@@ -28,12 +29,14 @@ std::string_view trim_ascii(std::string_view value)
 bool anthropic_beta_has_marker(std::string_view value, std::string_view marker)
 {
   std::size_t start = 0;
-  while (start <= value.size()) {
+  while (start <= value.size())
+  {
     auto const comma = value.find(',', start);
-    auto const item =
-        trim_ascii(comma == std::string_view::npos ? value.substr(start) : value.substr(start, comma - start));
-    if (item == marker) return true;
-    if (comma == std::string_view::npos) break;
+    auto const item = trim_ascii(comma == std::string_view::npos ? value.substr(start) : value.substr(start, comma - start));
+    if (item == marker)
+      return true;
+    if (comma == std::string_view::npos)
+      break;
     start = comma + 1;
   }
   return false;
@@ -41,30 +44,18 @@ bool anthropic_beta_has_marker(std::string_view value, std::string_view marker)
 
 std::string anthropic_beta_with_marker(std::string existing, std::string_view marker)
 {
-  if (anthropic_beta_has_marker(existing, marker)) return existing;
-  if (trim_ascii(existing).empty()) return std::string(marker);
+  if (anthropic_beta_has_marker(existing, marker))
+    return existing;
+  if (trim_ascii(existing).empty())
+    return std::string(marker);
   existing += ',';
   existing += marker;
   return existing;
 }
 
-std::string normalized_anthropic_stop_reason(std::string_view reason)
+ProviderFinishReason normalized_anthropic_finish_reason(std::string_view reason)
 {
-  if (reason == "end_turn")
-    return "completed";
-  if (reason == "tool_use")
-    return "tool_calls";
-  if (reason == "max_tokens")
-    return "max_tokens";
-  if (reason == "stop_sequence")
-    return "stop_sequence";
-  if (reason == "content_filter")
-    return "content_filter";
-  if (reason == "pause_turn")
-    return "pause_turn";
-  if (reason == "refusal")
-    return "refusal";
-  return std::string(reason);
+  return normalize_provider_finish_reason(ProviderProtocol::Anthropic, reason);
 }
 
 std::string stream_error_message(std::string_view message)
@@ -121,7 +112,7 @@ void merge_usage(TokenUsage& target, TokenUsage const& source)
 
 void append_event_for_data(std::vector<StreamEvent>& events, std::map<long long, AnthropicStreamParser::ToolBlock>& tools,
                            std::map<long long, AnthropicStreamParser::ReasoningBlock>& reasoning_blocks, std::optional<TokenUsage>& usage,
-                           std::string& stop_reason, bool& saw_data, bool& message_stop_seen, bool& error_seen, std::string_view data)
+                           std::optional<ProviderFinishReason>& finish_reason, bool& saw_data, bool& message_stop_seen, bool& error_seen, std::string_view data)
 {
   auto append_terminal_error = [&](std::string_view message) {
     error_seen = true;
@@ -303,8 +294,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<long long,
     {
       if (auto const raw_stop_reason = ava::core::json::string_field(*delta, "stop_reason"); raw_stop_reason)
       {
-        stop_reason = normalized_anthropic_stop_reason(*raw_stop_reason);
-        if (stop_reason == "refusal")
+        finish_reason = normalized_anthropic_finish_reason(*raw_stop_reason);
+        if (finish_reason == ProviderFinishReason::Refusal)
         {
           if (auto explanation = stop_details_explanation(*delta); !explanation.empty())
           {
@@ -323,15 +314,17 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<long long,
   if (type == "message_stop")
   {
     message_stop_seen = true;
+    if (!finish_reason)
+      finish_reason = tools.empty() ? ProviderFinishReason::Completed : ProviderFinishReason::ToolCalls;
     events.push_back(StreamEvent{.type = StreamEventType::Done,
                                  .text = "",
                                  .tool_call_id = "",
                                  .tool_name = "",
                                  .error_message = "",
                                  .usage = std::move(usage),
-                                 .stop_reason = stop_reason});
+                                 .finish_reason = finish_reason});
     usage = std::nullopt;
-    stop_reason.clear();
+    finish_reason = std::nullopt;
     return;
   }
   if (type == "error")
@@ -353,7 +346,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<long long,
 
 void append_events_for_sse_line(std::vector<StreamEvent>& events, std::map<long long, AnthropicStreamParser::ToolBlock>& tools,
                                 std::map<long long, AnthropicStreamParser::ReasoningBlock>& reasoning_blocks, std::optional<TokenUsage>& usage,
-                                std::string& stop_reason, std::string& data, bool& saw_data, bool& message_stop_seen, bool& error_seen, std::string line)
+                                std::optional<ProviderFinishReason>& finish_reason, std::string& data, bool& saw_data, bool& message_stop_seen,
+                                bool& error_seen, std::string line)
 {
   if (!line.empty() && line.back() == '\r')
     line.pop_back();
@@ -361,7 +355,7 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events, std::map<long 
   {
     if (!data.empty())
     {
-      append_event_for_data(events, tools, reasoning_blocks, usage, stop_reason, saw_data, message_stop_seen, error_seen, data);
+      append_event_for_data(events, tools, reasoning_blocks, usage, finish_reason, saw_data, message_stop_seen, error_seen, data);
       data.clear();
     }
     return;
@@ -395,10 +389,11 @@ std::unique_ptr<StreamParser> AnthropicProvider::create_stream_parser() const
 
 ava::core::VoidResult AnthropicProvider::apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const
 {
-  if (auth.credential_type != "oauth") return {};
-  if (auth.access_token.empty()) {
-    return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Anthropic OAuth token is required"));
+  if (auth.credential_type != "oauth")
+    return {};
+  if (auth.access_token.empty())
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Anthropic OAuth token is required"));
   }
 
   request.headers.erase("x-api-key");
@@ -425,7 +420,7 @@ ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::append(std::s
     auto const newline = pending_line_.find('\n', search_from);
     if (newline == std::string::npos)
       break;
-    append_events_for_sse_line(events, tool_blocks_, reasoning_blocks_, usage_, stop_reason_, data_, saw_data_, message_stop_seen_, error_seen_,
+    append_events_for_sse_line(events, tool_blocks_, reasoning_blocks_, usage_, finish_reason_, data_, saw_data_, message_stop_seen_, error_seen_,
                                pending_line_.substr(line_start, newline - line_start));
     line_start = newline + 1;
     search_from = line_start;
@@ -441,14 +436,14 @@ ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::finish()
   std::vector<StreamEvent> events;
   if (!pending_line_.empty())
   {
-    append_events_for_sse_line(events, tool_blocks_, reasoning_blocks_, usage_, stop_reason_, data_, saw_data_, message_stop_seen_, error_seen_,
+    append_events_for_sse_line(events, tool_blocks_, reasoning_blocks_, usage_, finish_reason_, data_, saw_data_, message_stop_seen_, error_seen_,
                                std::move(pending_line_));
     pending_line_.clear();
   }
   scan_offset_ = 0;
   if (!data_.empty())
   {
-    append_event_for_data(events, tool_blocks_, reasoning_blocks_, usage_, stop_reason_, saw_data_, message_stop_seen_, error_seen_, data_);
+    append_event_for_data(events, tool_blocks_, reasoning_blocks_, usage_, finish_reason_, saw_data_, message_stop_seen_, error_seen_, data_);
     data_.clear();
   }
   if (saw_data_ && !message_stop_seen_ && !error_seen_)
@@ -458,7 +453,7 @@ ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::finish()
   tool_blocks_.clear();
   reasoning_blocks_.clear();
   usage_ = std::nullopt;
-  stop_reason_.clear();
+  finish_reason_ = std::nullopt;
   saw_data_ = false;
   message_stop_seen_ = false;
   error_seen_ = false;
@@ -502,7 +497,8 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(HttpRespons
     return parse_anthropic_sse_response(response);
   std::vector<StreamEvent> events;
   bool parsed_content = false;
-  std::string const stop_reason = normalized_anthropic_stop_reason(ava::core::json::string_field(response.body, "stop_reason").value_or(""));
+  auto const raw_finish_reason = ava::core::json::string_field(response.body, "stop_reason").value_or("");
+  auto finish_reason = normalized_anthropic_finish_reason(raw_finish_reason);
   for (auto const& block : ava::core::json::objects_in_array_field(response.body, "content"))
   {
     auto const type = ava::core::json::string_field(block, "type").value_or("");
@@ -601,7 +597,7 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(HttpRespons
           StreamEvent{.type = StreamEventType::ToolCallEnd, .text = "", .tool_call_id = id, .tool_name = "", .error_message = "", .usage = std::nullopt});
     }
   }
-  if (!parsed_content && stop_reason == "refusal")
+  if (!parsed_content && finish_reason == ProviderFinishReason::Refusal)
   {
     if (has_stop_details(response.body))
     {
@@ -626,13 +622,18 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(HttpRespons
     }
     return std::unexpected(std::move(error));
   }
+  if (raw_finish_reason.empty())
+  {
+    bool const has_tool_call = std::ranges::any_of(events, [](StreamEvent const& event) { return event.type == StreamEventType::ToolCallStart; });
+    finish_reason = has_tool_call ? ProviderFinishReason::ToolCalls : ProviderFinishReason::Completed;
+  }
   events.push_back(StreamEvent{.type = StreamEventType::Done,
                                .text = "",
                                .tool_call_id = "",
                                .tool_name = "",
                                .error_message = "",
                                .usage = parse_anthropic_usage(response.body),
-                               .stop_reason = stop_reason});
+                               .finish_reason = finish_reason});
   return events;
 }
 

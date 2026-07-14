@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/observability/run_observer.h"
+#include "ava/provider/finish_reason.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -160,7 +161,9 @@ struct StreamEvent
   std::string tool_name;
   std::string error_message;
   std::optional<TokenUsage> usage;
-  std::string stop_reason = {};
+  // Present only on a provider terminal event. The value is closed at the
+  // provider boundary; unknown native values normalize to Error.
+  std::optional<ProviderFinishReason> finish_reason = std::nullopt;
   std::string reasoning_format = {};
   std::string reasoning_signature = {};
   std::string reasoning_redacted_data = {};
@@ -275,7 +278,6 @@ void observe_transport_retry(TransportObservation const& observation, std::size_
 [[nodiscard]] bool is_context_overflow_error(ava::core::Error const& error);
 [[nodiscard]] bool is_supported_image_mime_type(std::string_view mime_type);
 [[nodiscard]] bool request_has_image_parts(ProviderRequest const& request);
-[[nodiscard]] ava::core::VoidResult validate_image_content_parts(ProviderRequest const& request,
-                                                                 bool model_supports_images);
+[[nodiscard]] ava::core::VoidResult validate_image_content_parts(ProviderRequest const& request, bool model_supports_images);
 
 }  // namespace ava::provider

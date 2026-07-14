@@ -409,14 +409,105 @@ std::optional<std::string> parse_balanced(std::string_view text, std::size_t sta
   return std::nullopt;
 }
 
+std::size_t valid_utf8_sequence_length(std::string_view value, std::size_t index) noexcept
+{
+  auto const lead = static_cast<unsigned char>(value[index]);
+  if (lead <= 0x7FU)
+    return 1;
+
+  std::size_t length = 0;
+  unsigned int code_point = 0;
+  unsigned int minimum = 0;
+  if (lead >= 0xC2U && lead <= 0xDFU)
+  {
+    length = 2;
+    code_point = lead & 0x1FU;
+    minimum = 0x80U;
+  }
+  else if (lead >= 0xE0U && lead <= 0xEFU)
+  {
+    length = 3;
+    code_point = lead & 0x0FU;
+    minimum = 0x800U;
+  }
+  else if (lead >= 0xF0U && lead <= 0xF4U)
+  {
+    length = 4;
+    code_point = lead & 0x07U;
+    minimum = 0x10000U;
+  }
+  else
+  {
+    return 0;
+  }
+  if (index + length > value.size())
+    return 0;
+  for (std::size_t offset = 1; offset < length; ++offset)
+  {
+    auto const continuation = static_cast<unsigned char>(value[index + offset]);
+    if ((continuation & 0xC0U) != 0x80U)
+      return 0;
+    code_point = (code_point << 6U) | (continuation & 0x3FU);
+  }
+  if (code_point < minimum || code_point > 0x10FFFFU || (code_point >= 0xD800U && code_point <= 0xDFFFU))
+    return 0;
+  return length;
+}
+
 }  // namespace
+
+bool is_valid_utf8(std::string_view value) noexcept
+{
+  for (std::size_t index = 0; index < value.size();)
+  {
+    auto const length = valid_utf8_sequence_length(value, index);
+    if (length == 0)
+      return false;
+    index += length;
+  }
+  return true;
+}
+
+std::string replace_invalid_utf8(std::string_view value)
+{
+  std::string result;
+  result.reserve(value.size());
+  for (std::size_t index = 0; index < value.size();)
+  {
+    auto const length = valid_utf8_sequence_length(value, index);
+    if (length == 0)
+    {
+      result += "\xEF\xBF\xBD";
+      ++index;
+      continue;
+    }
+    result.append(value.substr(index, length));
+    index += length;
+  }
+  return result;
+}
 
 std::string escape(std::string_view value)
 {
   std::string result;
   result.reserve(value.size());
-  for (char const ch : value)
+  for (std::size_t index = 0; index < value.size();)
   {
+    auto const length = valid_utf8_sequence_length(value, index);
+    if (length == 0)
+    {
+      result += "\xEF\xBF\xBD";
+      ++index;
+      continue;
+    }
+    if (length != 1)
+    {
+      result.append(value.substr(index, length));
+      index += length;
+      continue;
+    }
+
+    char const ch = value[index++];
     switch (ch)
     {
       case '"':
@@ -441,7 +532,7 @@ std::string escape(std::string_view value)
         result += "\\f";
         break;
       default:
-        if (static_cast<unsigned char>(ch) < 0x20)
+        if (static_cast<unsigned char>(ch) < 0x20U)
         {
           std::ostringstream escaped;
           escaped << "\\u" << std::hex << std::setw(4) << std::setfill('0') << static_cast<int>(static_cast<unsigned char>(ch));

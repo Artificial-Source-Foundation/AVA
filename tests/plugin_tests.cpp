@@ -76,6 +76,22 @@ std::string read_text(std::filesystem::path const& path)
   return buffer.str();
 }
 
+class PluginWindowExactFileAccess final : public ava::tools::ExactFileAccess
+{
+ public:
+  [[nodiscard]] bool supports_write_text_file() const noexcept override { return false; }
+
+  [[nodiscard]] ava::core::Result<std::string> read_text_file(std::filesystem::path const&, ava::tools::ToolIoCancelCallback) const override
+  {
+    return "remote-one\nremote-two\nremote-three\n";
+  }
+
+  [[nodiscard]] ava::core::VoidResult write_text_file(std::filesystem::path const&, std::string_view, ava::tools::ToolIoCancelCallback) const override
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "exact writes are disabled in this fixture"));
+  }
+};
+
 std::optional<pid_t> read_pid_file_for_test(std::filesystem::path const& path)
 {
   std::ifstream file(path, std::ios::binary);
@@ -233,6 +249,7 @@ ava::app::RuntimeSession plugin_command_test_session(ava::config::XdgPaths const
   trust.trust_file = paths.ava_state_dir / "trusted-projects.json";
   trust.decision = ava::app::ProjectTrustDecision::Trusted;
   return ava::app::RuntimeSession{.store = std::move(*store),
+                                  .lease = {},
                                   .mode = ava::agent::Mode::Build,
                                   .model = std::move(model),
                                   .base_prompt = {},
@@ -1781,6 +1798,41 @@ void test_plugin_core_service_proxy_read_search_slice()
              event.actor.find("plugin:" + plugin_id) != std::string::npos && event.tool_name.find("file.read") != std::string::npos;
     });
     expect(read_prompt && read_audit, "read proxy routes through existing read-file permission prompt and audit context");
+  }
+
+  {
+    auto const plugin_id = std::string("com.example.proxywindow");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json("px_window", "file.read", R"({"path":"visible.txt","offset":2,"limit":1})");
+    install_plugin(plugin_id, "[\"tools\",\"proxy.read\"]", proxy_tool_script(request, response_file, "call_proxy_window"));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    context.exact_file_access = std::make_shared<PluginWindowExactFileAccess>();
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(
+        ava::agent::ProviderToolCall{.id = "call_proxy_window", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    auto const response = read_text(response_file);
+    auto const content = proxy_response_content(response);
+    long long output_lines = -1;
+    long long next_offset = -1;
+    bool has_total_bytes = false;
+    bool has_total_lines = false;
+    if (content)
+    {
+      output_lines = ava::core::json::integer_field(*content, "output_lines").value_or(-1);
+      next_offset = ava::core::json::integer_field(*content, "next_offset_line").value_or(-1);
+      has_total_bytes = ava::core::json::integer_field(*content, "total_bytes").has_value();
+      has_total_lines = ava::core::json::integer_field(*content, "total_lines").has_value();
+    }
+    expect(
+        dispatched && dispatched->success && content && content->find("remote-two") != std::string::npos && output_lines == 1 && next_offset == 3 &&
+            !has_total_bytes && !has_total_lines,
+        std::string("plugin file.read serialization omits unavailable exact-window totals while retaining output and sentinel continuation counts: success=") +
+            (dispatched && dispatched->success ? "true" : "false") + " output_lines=" + std::to_string(output_lines) +
+            " next_offset=" + std::to_string(next_offset) + " has_total_bytes=" + (has_total_bytes ? "true" : "false") +
+            " has_total_lines=" + (has_total_lines ? "true" : "false") + " response=" + response + " content=" + content.value_or("<missing>"));
   }
 
   {

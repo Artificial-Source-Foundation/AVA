@@ -1,73 +1,30 @@
 #include "ava/core/json.h"
 
-#include <algorithm>
-#include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
-
 #include <unistd.h>
 
 namespace {
 
-std::string lowercase(std::string value)
-{
-  std::ranges::transform(value, value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-  return value;
-}
-
-std::string trim(std::string value)
-{
-  auto first = value.begin();
-  while (first != value.end() && std::isspace(static_cast<unsigned char>(*first)) != 0) ++first;
-  auto last = value.end();
-  while (last != first && std::isspace(static_cast<unsigned char>(*(last - 1))) != 0) --last;
-  return std::string(first, last);
-}
-
 std::optional<std::string> read_message()
 {
-  std::optional<std::size_t> content_length;
   std::string line;
-  bool saw_header = false;
-  while (std::getline(std::cin, line))
-  {
-    saw_header = true;
-    if (!line.empty() && line.back() == '\r')
-      line.pop_back();
-    if (line.empty())
-      break;
-    auto const colon = line.find(':');
-    if (colon == std::string::npos)
-      continue;
-    if (lowercase(trim(line.substr(0, colon))) != "content-length")
-      continue;
-    try
-    {
-      content_length = static_cast<std::size_t>(std::stoull(trim(line.substr(colon + 1))));
-    }
-    catch (...)
-    {
-      return std::nullopt;
-    }
-  }
-  if (!saw_header || !content_length)
+  if (!std::getline(std::cin, line))
     return std::nullopt;
-
-  std::string body(*content_length, '\0');
-  std::cin.read(body.data(), static_cast<std::streamsize>(body.size()));
-  if (std::cin.gcount() != static_cast<std::streamsize>(body.size()))
-    return std::nullopt;
-  return body;
+  if (!line.empty() && line.back() == '\r')
+    line.pop_back();
+  return line;
 }
 
 void write_message(std::string_view body)
 {
-  std::cout << "Content-Length: " << body.size() << "\r\n\r\n" << body;
+  std::cout << body << '\n';
   std::cout.flush();
 }
 
@@ -94,6 +51,21 @@ void write_process_group_marker(std::string const& path)
   file << static_cast<long long>(getpgrp()) << '\n';
 }
 
+void write_environment_marker(std::string const& path)
+{
+  if (path.empty())
+    return;
+  auto value = [](char const* name) {
+    auto const* found = std::getenv(name);
+    return found ? std::string(found) : std::string("<unset>");
+  };
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  file << "EXPLICIT=" << value("AVA_MCP_EXPLICIT") << '\n';
+  file << "INHERITED=" << value("AVA_MCP_PARENT_MARKER") << '\n';
+  file << "SECRET=" << value("AVA_MCP_PARENT_SECRET") << '\n';
+  file << "PATH=" << value("PATH") << '\n';
+}
+
 void write_cwd_marker(std::string const& path)
 {
   if (path.empty())
@@ -113,6 +85,8 @@ int main(int argc, char** argv)
   if (argc > 1)
     mode = argv[1];
   std::string const marker_path = argc > 2 ? argv[2] : "";
+  if (mode == "env-marker")
+    write_environment_marker(marker_path);
   if (mode == "stderr-noise")
   {
     std::cerr << std::string(96, 'x') << "mcp-stderr-tail!";
@@ -143,14 +117,24 @@ int main(int argc, char** argv)
       write_message("not-json");
       continue;
     }
+    if (mode == "duplicate-initialize" && *method == "initialize")
+    {
+      write_message("{\"jsonrpc\":\"2.0\",\"id\":" + json_string(*id) +
+                    ",\"result\":{},\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},"
+                    "\"serverInfo\":{\"name\":\"fake-mcp\",\"version\":\"1.0.0\"}}}");
+      continue;
+    }
 
     if (*method == "initialize")
     {
       if (mode == "cwd-marker")
         write_cwd_marker(marker_path);
-      write_message(response(*id,
-                             "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{},\"prompts\":{},\"resources\":{}},"
-                             "\"serverInfo\":{\"name\":\"fake-mcp\",\"version\":\"1.0.0\"}}"));
+      auto const protocol_version = mode == "mismatched-version" ? std::string("\"protocolVersion\":\"2025-03-26\",")
+                                    : mode == "missing-version"  ? std::string{}
+                                                                 : std::string("\"protocolVersion\":\"2024-11-05\",");
+      auto const capabilities =
+          mode == "missing-capabilities" ? std::string{} : std::string("\"capabilities\":{\"tools\":{},\"prompts\":{},\"resources\":{}},");
+      write_message(response(*id, "{" + protocol_version + capabilities + "\"serverInfo\":{\"name\":\"fake-mcp\",\"version\":\"1.0.0\"}}"));
     }
     else if (*method == "tools/list")
     {
@@ -160,10 +144,44 @@ int main(int argc, char** argv)
         std::cerr.flush();
         return 43;
       }
-      write_message(response(*id,
-                             "{\"tools\":[{\"name\":\"echo\",\"description\":\"Echo test tool\","
-                             "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":"
-                             "\"string\"}},\"required\":[\"text\"]}}]}"));
+      auto const params = ava::core::json::object_field(*message, "params").value_or("{}");
+      bool const has_cursor = ava::core::json::field_value_start(params, "cursor").has_value();
+      auto const cursor = ava::core::json::string_field(params, "cursor").value_or("");
+      if (mode == "missing-tools")
+      {
+        write_message(response(*id, "{\"notTools\":[]}"));
+      }
+      else if (mode == "empty-cursor-tools" && !has_cursor)
+      {
+        write_message(response(*id,
+                               "{\"tools\":[{\"name\":\"echo\",\"description\":\"Echo test tool\","
+                               "\"inputSchema\":{\"type\":\"object\"}}],\"nextCursor\":\"\"}"));
+      }
+      else if (mode == "empty-cursor-tools" && has_cursor && cursor.empty())
+      {
+        write_message(response(*id,
+                               "{\"tools\":[{\"name\":\"second\",\"description\":\"Second test tool\","
+                               "\"inputSchema\":{\"type\":\"object\"}}]}"));
+      }
+      else if (mode == "paginated-tools" && cursor.empty())
+      {
+        write_message(response(*id,
+                               "{\"tools\":[{\"name\":\"echo\",\"description\":\"Echo test tool\","
+                               "\"inputSchema\":{\"type\":\"object\"}}],\"nextCursor\":\"page-2\"}"));
+      }
+      else if (mode == "paginated-tools" && cursor == "page-2")
+      {
+        write_message(response(*id,
+                               "{\"tools\":[{\"name\":\"second\",\"description\":\"Second test tool\","
+                               "\"inputSchema\":{\"type\":\"object\"}}]}"));
+      }
+      else
+      {
+        write_message(response(*id,
+                               "{\"tools\":[{\"name\":\"echo\",\"description\":\"Echo test tool\","
+                               "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":"
+                               "\"string\"}},\"required\":[\"text\"]}}]}"));
+      }
     }
     else if (*method == "tools/call")
     {
@@ -206,10 +224,29 @@ int main(int argc, char** argv)
     }
     else if (*method == "prompts/list")
     {
-      write_message(response(*id,
-                             "{\"prompts\":[{\"name\":\"release-notes\",\"description\":\"Draft release notes\","
-                             "\"arguments\":[{\"name\":\"topic\",\"description\":\"Release topic\","
-                             "\"required\":true}]}]}"));
+      auto const params = ava::core::json::object_field(*message, "params").value_or("{}");
+      auto const cursor = ava::core::json::string_field(params, "cursor").value_or("");
+      if (mode == "missing-prompts")
+      {
+        write_message(response(*id, "{\"notPrompts\":[]}"));
+      }
+      else if (mode == "paginated-prompts" && cursor.empty())
+      {
+        write_message(response(*id,
+                               "{\"prompts\":[{\"name\":\"release-notes\",\"description\":\"Draft release notes\","
+                               "\"arguments\":[{\"name\":\"topic\",\"required\":true}]}],\"nextCursor\":\"page-2\"}"));
+      }
+      else if (mode == "paginated-prompts" && cursor == "page-2")
+      {
+        write_message(response(*id, "{\"prompts\":[{\"name\":\"second-prompt\",\"description\":\"Second prompt\"}]}"));
+      }
+      else
+      {
+        write_message(response(*id,
+                               "{\"prompts\":[{\"name\":\"release-notes\",\"description\":\"Draft release notes\","
+                               "\"arguments\":[{\"name\":\"topic\",\"description\":\"Release topic\","
+                               "\"required\":true}]}]}"));
+      }
     }
     else if (*method == "prompts/get")
     {
@@ -226,9 +263,19 @@ int main(int argc, char** argv)
     }
     else if (*method == "resources/list")
     {
+      if (mode == "exit-resources-list")
+      {
+        std::cerr << "fake MCP exited during resources/list";
+        std::cerr.flush();
+        return 45;
+      }
       auto const params = ava::core::json::object_field(*message, "params").value_or("{}");
       auto const cursor = ava::core::json::string_field(params, "cursor").value_or("");
-      if (mode == "paginated-resources" && cursor.empty())
+      if (mode == "missing-resources")
+      {
+        write_message(response(*id, "{\"notResources\":[]}"));
+      }
+      else if (mode == "paginated-resources" && cursor.empty())
       {
         write_message(response(*id,
                                "{\"resources\":[{\"uri\":\"file:///workspace/one.md\",\"name\":\"one\","
@@ -258,9 +305,7 @@ int main(int argc, char** argv)
       auto const uri = ava::core::json::string_field(params, "uri").value_or("");
       if (mode == "resource-blob")
       {
-        write_message(response(*id,
-                               "{\"contents\":[{\"uri\":" + json_string(uri) +
-                                   ",\"mimeType\":\"application/octet-stream\",\"blob\":\"ZmFrZQ==\"}]}"));
+        write_message(response(*id, "{\"contents\":[{\"uri\":" + json_string(uri) + ",\"mimeType\":\"application/octet-stream\",\"blob\":\"ZmFrZQ==\"}]}"));
       }
       else if (mode == "resource-missing-contents")
       {
@@ -268,9 +313,7 @@ int main(int argc, char** argv)
       }
       else
       {
-        write_message(response(*id,
-                               "{\"contents\":[{\"uri\":" + json_string(uri) +
-                                   ",\"mimeType\":\"text/markdown\",\"text\":\"MCP resource content\"}]}"));
+        write_message(response(*id, "{\"contents\":[{\"uri\":" + json_string(uri) + ",\"mimeType\":\"text/markdown\",\"text\":\"MCP resource content\"}]}"));
       }
     }
     else

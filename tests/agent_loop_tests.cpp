@@ -5,6 +5,7 @@
 #include "ava/agent/mode.h"
 #include "ava/config/model_config.h"
 #include "ava/session/session_store.h"
+#include "ava/session/validation.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/core/ids.h"
@@ -211,7 +212,7 @@ void test_agent_loop_text_only_turn()
                                                           .openai_account_id = "acct_123"});
   auto result = loop.run_turn("hi", store, provider, transport);
   expect(result && result->final_text == "hello user" && result->tool_calls == 0 && result->initial_context_messages == 1 && !result->used_compacted_context &&
-             result->tool_iterations == 0 && result->stop_reason == "completed",
+             result->tool_iterations == 0 && result->outcome == ava::core::RuntimeTerminalOutcome::Completed,
          "agent loop returns text-only provider response with status metadata");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("read_file") != std::string::npos,
          "agent loop includes tool schemas in provider request");
@@ -235,7 +236,8 @@ void test_agent_loop_model_capability_gating()
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "capabilities"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"plain\"}"}});
+  ava::tests::FakeTransport transport(
+      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"status\":\"completed\",\"output_text\":\"plain\"}"}});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
                                                           .provider_id = "openai",
@@ -410,7 +412,7 @@ void test_agent_loop_tool_turn_and_continuation()
                                                           .model_pricing = pricing});
   auto result = loop.run_turn("read note", store, provider, transport);
   expect(result && result->final_text == "read it" && result->tool_calls == 1 && result->provider_iterations == 2 && result->initial_context_messages == 1 &&
-             result->tool_iterations == 1 && result->stop_reason == "completed",
+             result->tool_iterations == 1 && result->outcome == ava::core::RuntimeTerminalOutcome::Completed,
          "agent loop runs one sequential tool call then continues to final answer with status metadata");
   expect(transport.requests().size() == 2 && transport.requests()[1].body.find("tool content") != std::string::npos,
          "agent loop sends persisted tool result as continuation context");
@@ -1443,8 +1445,8 @@ void test_agent_loop_non_stream_response()
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "nonstream"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport(
-      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"plain response with data: literal\"}"}});
+  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+      .status_code = 200, .headers = {}, .body = "{\"status\":\"completed\",\"output_text\":\"plain response with data: literal\"}"}});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
                                                           .provider_id = "openai",
@@ -1484,7 +1486,7 @@ void test_agent_loop_compaction_status_metadata()
                                                           .system_prompt = "system prompt",
                                                           .access_token = "token"});
   auto result = loop.run_turn("continue", store, provider, transport);
-  expect(result && result->used_compacted_context && result->initial_context_messages == 2 && result->stop_reason == "completed",
+  expect(result && result->used_compacted_context && result->initial_context_messages == 2 && result->outcome == ava::core::RuntimeTerminalOutcome::Completed,
          "agent loop status metadata reports compacted initial provider context");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("Compacted prior conversation summary") != std::string::npos,
          "agent loop sends compacted context in initial provider request");
@@ -2291,7 +2293,109 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
           ++tool_results;
       }
     }
-    expect(entries && tool_calls == 1 && tool_results == 1, "deduped streamed tool call has one paired result");
+    expect(entries && tool_calls == 1 && tool_results == 1,
+           "same-iteration start/delta/end fragments merge into one finalized provider call and one ACP-compatible lifecycle id");
+  }
+
+  {
+    auto const root = temp_root() / "agent-cross-iteration-duplicate-call-id";
+    std::error_code remove_error;
+    std::filesystem::remove_all(root, remove_error);
+    auto const workspace = root / "workspace";
+    std::filesystem::create_directories(workspace);
+    {
+      std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
+      file << "duplicate id content";
+    }
+    ava::session::SessionStore store(
+        ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "duplicate-call-id"});
+    auto const repeated_call = sse_response(
+        "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_reused\",\"name\":\"read_file\"}\n\n"
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_reused\",\"delta\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}\n\n"
+        "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_reused\"}\n\n"
+        "data: [DONE]\n\n");
+    ava::tests::FakeTransport transport({repeated_call, repeated_call});
+    std::vector<ava::agent::ToolTimelineEntry> tool_events;
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                            .mode = ava::agent::Mode::Build,
+                                                            .provider_id = "openai",
+                                                            .model_id = "gpt-5.5",
+                                                            .system_prompt = "system prompt",
+                                                            .access_token = "token",
+                                                            .on_tool_event = [&tool_events](auto const& event) { tool_events.push_back(event); }});
+    auto result = loop.run_turn("reuse a call id", store, provider, transport);
+    auto entries = store.load();
+    std::size_t tool_calls = 0;
+    std::size_t tool_results = 0;
+    if (entries)
+    {
+      for (auto const& entry : *entries)
+      {
+        tool_calls += entry.type == ava::session::EntryType::ToolCall ? 1U : 0U;
+        tool_results += entry.type == ava::session::EntryType::ToolResult ? 1U : 0U;
+      }
+    }
+    auto validation = entries ? ava::session::validate_session_replay(*entries) : ava::session::SessionReplayValidation{};
+    expect(!result && result.error().category() == ava::core::ErrorCategory::Provider && result.error().message().find("reused") != std::string::npos &&
+               result.error().format().find("call_reused") != std::string::npos && tool_calls == 1 && tool_results == 1 && tool_events.size() == 2 &&
+               validation.ok(),
+           "cross-iteration provider call-id reuse is rejected before a duplicate lifecycle, dispatch, or session record");
+  }
+
+  {
+    auto const root = temp_root() / "agent-cross-prompt-duplicate-call-id";
+    std::error_code remove_error;
+    std::filesystem::remove_all(root, remove_error);
+    auto const workspace = root / "workspace";
+    std::filesystem::create_directories(workspace);
+    {
+      std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
+      file << "persistent duplicate id content";
+    }
+    ava::session::SessionStore store(
+        ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "cross-prompt-duplicate"});
+    auto const tool_call = sse_response(
+        "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_persistent\",\"name\":\"read_file\"}\n\n"
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_persistent\",\"delta\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}\n\n"
+        "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_persistent\"}\n\n"
+        "data: [DONE]\n\n");
+    ava::tests::FakeTransport transport({tool_call,
+                                         sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"first done\"}\n\n"
+                                                      "data: [DONE]\n\n"),
+                                         tool_call});
+    std::vector<ava::provider::StreamEvent> stream_events;
+    auto options = ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                .mode = ava::agent::Mode::Build,
+                                                .provider_id = "openai",
+                                                .model_id = "gpt-5.5",
+                                                .system_prompt = "system prompt",
+                                                .access_token = "token",
+                                                .on_stream_event = [&stream_events](auto const& event) -> ava::core::VoidResult {
+                                                  stream_events.push_back(event);
+                                                  return {};
+                                                }};
+    ava::agent::AgentLoop first_loop(options);
+    auto first = first_loop.run_turn("first prompt", store, provider, transport);
+    auto const events_after_first = stream_events.size();
+    ava::agent::AgentLoop second_loop(std::move(options));
+    auto second = second_loop.run_turn("second prompt", store, provider, transport);
+    auto entries = store.load();
+    std::size_t tool_calls = 0;
+    std::size_t tool_results = 0;
+    if (entries)
+    {
+      for (auto const& entry : *entries)
+      {
+        tool_calls += entry.type == ava::session::EntryType::ToolCall ? 1U : 0U;
+        tool_results += entry.type == ava::session::EntryType::ToolResult ? 1U : 0U;
+      }
+    }
+    auto validation = entries ? ava::session::validate_session_replay(*entries) : ava::session::SessionReplayValidation{};
+    expect(first && !second && second.error().category() == ava::core::ErrorCategory::Provider &&
+               second.error().message().find("persistent session") != std::string::npos &&
+               second.error().format().find("call_persistent") != std::string::npos && tool_calls == 1 && tool_results == 1 &&
+               stream_events.size() == events_after_first && validation.ok(),
+           "cross-prompt provider call-id reuse is rejected before duplicate updates, persistence, or dispatch");
   }
 
   {

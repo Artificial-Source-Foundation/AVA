@@ -49,6 +49,7 @@ struct ManualCompactionRequest
 [[nodiscard]] CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries, CompactionConfig const& config) noexcept;
 [[nodiscard]] CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries, CompactionConfig const& config,
                                                      std::optional<long long> context_window_tokens) noexcept;
+[[nodiscard]] ava::core::Result<SessionEntry> make_manual_compaction_entry(ManualCompactionRequest request);
 [[nodiscard]] ava::core::VoidResult append_manual_compaction(SessionStore& store, ManualCompactionRequest request);
 
 }  // namespace ava::session

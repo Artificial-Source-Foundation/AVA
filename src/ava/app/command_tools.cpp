@@ -33,6 +33,13 @@ void append_spill_fields(std::string& text, std::filesystem::path const& path, b
 
 std::string read_line_summary(ava::tools::TextOutput const& output)
 {
+  if (!output.totals_known)
+  {
+    if (output.output_lines == 0)
+      return "0 retained lines (original total unknown)";
+    return "lines " + std::to_string(output.start_line) + "-" + std::to_string(output.end_line) + " (" + std::to_string(output.output_lines) +
+           " retained; original total unknown)";
+  }
   if (output.output_lines == 0)
     return "0/" + std::to_string(output.total_lines) + " lines";
   return "lines " + std::to_string(output.start_line) + "-" + std::to_string(output.end_line) + "/" + std::to_string(output.total_lines);
@@ -198,14 +205,13 @@ ava::tools::ToolContext make_tool_context(RuntimeSession& session, ava::permissi
                                  .spill_dir = session.store.session_path().parent_path() / "spill",
                                  .mode = session.mode,
                                  .permission_resolver = std::move(permission_resolver),
-                                 .permission_audit_sink = [&store = session.store](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
-                                   return store.append(ava::session::SessionEntry{
-                                       .id = ava::core::make_id("entry"),
-                                       .parent_id = "",
-                                       .type = ava::session::EntryType::PermissionDecision,
-                                       .timestamp = ava::session::now_timestamp(),
-                                       .data_json = ava::tools::permission_audit_data_json(event),
-                                   });
+                                 .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+                                   auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                           .parent_id = "",
+                                                                           .type = ava::session::EntryType::PermissionDecision,
+                                                                           .timestamp = ava::session::now_timestamp(),
+                                                                           .data_json = ava::tools::permission_audit_data_json(event)};
+                                   return session.append_owned(std::move(entry));
                                  },
                                  .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
                                  .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
@@ -285,13 +291,18 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
         text += "; byte cap reached";
       text += "]";
     }
-    auto const read_result_json = "{\"tool\":\"read\",\"ok\":true,\"path\":\"" + ava::core::json::escape(argument) + "\",\"content\":\"" +
-                                  ava::core::json::escape(output->content) + "\",\"truncated\":" + json_bool(output->truncated) +
-                                  ",\"byte_limited\":" + json_bool(output->byte_limited) + ",\"line_limited\":" + json_bool(output->line_limited) +
-                                  ",\"total_bytes\":" + std::to_string(output->total_bytes) + ",\"output_bytes\":" + std::to_string(output->output_bytes) +
-                                  ",\"output_lines\":" + std::to_string(output->output_lines) + ",\"start_line\":" + std::to_string(output->start_line) +
-                                  ",\"end_line\":" + std::to_string(output->end_line) + ",\"total_lines\":" + std::to_string(output->total_lines) +
-                                  (output->next_offset_line > 0 ? ",\"next_offset_line\":" + std::to_string(output->next_offset_line) : std::string{}) + "}";
+    auto read_result_json = "{\"tool\":\"read\",\"ok\":true,\"path\":\"" + ava::core::json::escape(argument) + "\",\"content\":\"" +
+                            ava::core::json::escape(output->content) + "\",\"truncated\":" + json_bool(output->truncated) +
+                            ",\"byte_limited\":" + json_bool(output->byte_limited) + ",\"line_limited\":" + json_bool(output->line_limited);
+    if (output->totals_known)
+      read_result_json += ",\"total_bytes\":" + std::to_string(output->total_bytes);
+    read_result_json += ",\"output_bytes\":" + std::to_string(output->output_bytes) + ",\"output_lines\":" + std::to_string(output->output_lines) +
+                        ",\"start_line\":" + std::to_string(output->start_line) + ",\"end_line\":" + std::to_string(output->end_line);
+    if (output->totals_known)
+      read_result_json += ",\"total_lines\":" + std::to_string(output->total_lines);
+    if (output->next_offset_line > 0)
+      read_result_json += ",\"next_offset_line\":" + std::to_string(output->next_offset_line);
+    read_result_json += "}";
     if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "read", ava::agent::ToolTimelineStatus::Success,
                                            read_line_summary(*output), read_result_json, linked_permission_ids());
         !recorded)
@@ -527,7 +538,10 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
       output += " (timed out)";
     if (bash->truncated)
     {
-      output += " (output truncated to last " + std::to_string(bash->output_lines) + '/' + std::to_string(bash->total_lines) + " lines";
+      if (bash->totals_known)
+        output += " (output truncated to last " + std::to_string(bash->output_lines) + '/' + std::to_string(bash->total_lines) + " lines";
+      else
+        output += " (output truncated to " + std::to_string(bash->output_lines) + " retained lines; original total unknown";
       if (bash->byte_limited)
         output += "; byte cap reached";
       output += ")";
@@ -536,11 +550,16 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
     std::string bash_result_json = "{\"tool\":\"bash\",\"ok\":" + json_bool(bash->exit_code == 0 && !bash->timed_out && !bash->canceled) +
                                    ",\"exit_code\":" + std::to_string(bash->exit_code) + ",\"timed_out\":" + json_bool(bash->timed_out) +
                                    ",\"canceled\":" + json_bool(bash->canceled) + ",\"truncated\":" + json_bool(bash->truncated) +
-                                   ",\"byte_limited\":" + json_bool(bash->byte_limited) + ",\"line_limited\":" + json_bool(bash->line_limited) +
-                                   ",\"total_bytes\":" + std::to_string(bash->total_bytes) + ",\"output_bytes\":" + std::to_string(bash->output_bytes) +
-                                   ",\"total_lines\":" + std::to_string(bash->total_lines) + ",\"output_lines\":" + std::to_string(bash->output_lines) +
-                                   ",\"omitted_lines\":" + std::to_string(bash->omitted_lines) + ",\"output\":\"" + ava::core::json::escape(bash->output) +
-                                   "\"";
+                                   ",\"byte_limited\":" + json_bool(bash->byte_limited) + ",\"line_limited\":" + json_bool(bash->line_limited);
+    if (bash->totals_known)
+      bash_result_json += ",\"total_bytes\":" + std::to_string(bash->total_bytes);
+    bash_result_json += ",\"output_bytes\":" + std::to_string(bash->output_bytes);
+    if (bash->totals_known)
+      bash_result_json += ",\"total_lines\":" + std::to_string(bash->total_lines);
+    bash_result_json += ",\"output_lines\":" + std::to_string(bash->output_lines);
+    if (bash->totals_known)
+      bash_result_json += ",\"omitted_lines\":" + std::to_string(bash->omitted_lines);
+    bash_result_json += ",\"output\":\"" + ava::core::json::escape(bash->output) + "\"";
     append_spill_fields(bash_result_json, bash->spill_path, bash->spill_truncated);
     bash_result_json += "}";
     if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "bash",

@@ -26,7 +26,7 @@ struct ParsedAssistantTurn
   std::vector<ParsedReasoningBlock> reasoning_blocks;
   std::vector<ProviderToolCall> tool_calls;
   std::optional<ava::provider::TokenUsage> usage;
-  std::string stop_reason;
+  std::optional<ava::provider::ProviderFinishReason> finish_reason;
 };
 
 struct ProviderOutputLimits

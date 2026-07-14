@@ -599,6 +599,8 @@ std::string to_string(PermissionResolution resolution)
       return "allow";
     case PermissionResolution::Deny:
       return "deny";
+    case PermissionResolution::Cancel:
+      return "cancel";
   }
   return "deny";
 }

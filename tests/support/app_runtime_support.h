@@ -27,6 +27,8 @@ class BlockingInputBuf final : public std::streambuf
  public:
   void push(std::string text);
   void close();
+  bool wait_until_blocked(std::chrono::milliseconds timeout);
+  bool wait_until_eof_observed(std::chrono::milliseconds timeout);
 
  protected:
   int underflow() override;
@@ -36,6 +38,8 @@ class BlockingInputBuf final : public std::streambuf
   std::condition_variable cv_;
   std::deque<char> buffer_;
   bool closed_ = false;
+  bool blocked_ = false;
+  bool eof_observed_ = false;
   char current_ = 0;
 };
 
@@ -94,7 +98,7 @@ class BlockingResponseTransport final : public ava::provider::Transport
 };
 
 ava::provider::HttpResponse sse_response(std::string body);
-std::string read_file_call_sse(std::string_view path = "note.txt");
+std::string read_file_call_sse(std::string_view path = "note.txt", std::string_view call_id = "call_read");
 std::string write_file_call_sse(std::string_view path, std::string_view content);
 std::string question_call_sse();
 std::string multi_question_call_sse();

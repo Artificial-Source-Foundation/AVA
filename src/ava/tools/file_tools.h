@@ -5,9 +5,11 @@
 #include "ava/agent/question.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/agent/tool_visibility.h"
+#include "ava/tools/tool_io.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
 
+#include <atomic>
 #include <cstddef>
 #include <filesystem>
 #include <functional>
@@ -20,9 +22,14 @@ namespace ava::lsp {
 class DiagnosticsProvider;
 }  // namespace ava::lsp
 
+namespace ava::mcp {
+struct McpConfig;
+}  // namespace ava::mcp
+
 namespace ava::tools {
 
 class MutationQueue;
+class SecureWorkspace;
 
 struct PermissionAuditEvent
 {
@@ -90,6 +97,10 @@ struct ToolContext
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   PermissionAuditSink permission_audit_sink = nullptr;
   ToolProgressSink progress_sink = nullptr;
+  // Strict adapters may expose a distinct pending -> in_progress boundary.
+  // The shared flag keeps multi-permission tools to one execution-start event.
+  bool announce_execution_after_permission = false;
+  std::shared_ptr<std::atomic_bool> execution_started = nullptr;
   std::function<bool()> cancel_requested = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   TaskSubagentRunner task_subagent_runner = nullptr;
@@ -98,6 +109,17 @@ struct ToolContext
   std::string permission_actor = {};
   std::string current_tool_name = {};
   std::string current_call_id = {};
+  // Strict adapters can keep exact arguments in memory for matching while
+  // preventing them from entering durable permission audit records.
+  bool redact_permission_audit_arguments = false;
+  bool require_explicit_file_permissions = false;
+  // Strict adapters share one descriptor-anchored root across permission
+  // identity resolution and the actual built-in file operation.
+  std::shared_ptr<SecureWorkspace> secure_workspace = nullptr;
+  // ToolContext is copied into dispatchers/workers, so immutable adapters share
+  // session ownership rather than storing lifetime-sensitive references.
+  std::shared_ptr<ExactFileAccess const> exact_file_access = nullptr;
+  std::shared_ptr<CommandExecutor const> command_executor = nullptr;
   // An observer-only correlation ID. Provider call IDs remain product/session
   // data and must not cross the trace boundary.
   std::string trace_call_id = {};
@@ -111,6 +133,11 @@ struct ToolContext
   std::filesystem::path mcp_global_config_file = {};
   std::filesystem::path mcp_project_config_file = {};
   bool include_project_mcp_config = true;
+  std::shared_ptr<ava::mcp::McpConfig const> session_mcp_config = nullptr;
+  // Present means compose exactly these built-ins with immutable session MCP
+  // and fail closed on unavailable names, discovery failures, or collisions.
+  std::optional<std::vector<std::string>> exact_builtin_tool_names = std::nullopt;
+  bool require_descriptor_secure_workspace = false;
   std::vector<std::filesystem::path> skill_global_dirs = {};
   std::vector<std::filesystem::path> skill_project_dirs = {};
   bool include_project_skills = true;
@@ -129,6 +156,7 @@ struct TextOutput
   bool truncated = false;
   bool byte_limited = false;
   bool line_limited = false;
+  bool totals_known = true;
   std::size_t total_bytes = 0;
   std::size_t output_bytes = 0;
   std::size_t output_lines = 0;
@@ -167,6 +195,7 @@ struct WriteOptions
                                                                WriteOptions options = {});
 [[nodiscard]] ava::core::Result<FileMutationResult> edit_file(ToolContext const& context, std::filesystem::path const& path, std::string_view old_text,
                                                               std::string_view new_text);
+[[nodiscard]] ava::core::VoidResult announce_tool_execution_start(ToolContext const& context);
 [[nodiscard]] ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permissions::Operation operation,
                                                       std::filesystem::path const& target_path, std::string_view command, std::string_view tool_name,
                                                       std::string_view error_message, std::string_view diff_preview = {}, bool diff_truncated = false);

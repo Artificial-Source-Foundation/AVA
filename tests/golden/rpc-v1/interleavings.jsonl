@@ -1,0 +1,5 @@
+{"schema_version":1,"event_id":"event-q","request_id":"follow-1","correlation_id":"prompt-1","name":"follow_up_queued","type":"follow_up_queued","payload_type":"queue","payload":{"message":"next"}}
+{"id":"prompt-1","type":"response","success":true,"result":{"final_text":"parent"}}
+{"schema_version":1,"event_id":"event-s","request_id":"follow-1","correlation_id":"follow-1","name":"follow_up_started","type":"follow_up_started","payload_type":"queue","payload":{"message":"next"}}
+{"schema_version":1,"event_id":"event-d","request_id":"follow-1","correlation_id":"follow-1","name":"done","type":"done","payload_type":"completion","payload":{"stop_reason":"completed"}}
+{"id":"follow-1","type":"response","success":true,"result":{"final_text":"child"}}

@@ -101,8 +101,9 @@ Permission audit entries record backend policy decisions and resolver outcomes. 
 
 - Required semantic fields: `permission_request_id`, `operation`, `mode`, `tool_name`, `action`, `reason`, and `risk`.
 - Common optional fields: `target_path`, `command`, `resolution`, `resolution_source`, `resolution_reason`, `actor`, and `rule_id`.
-- `action` is `allow`, `ask`, or `deny`; `resolution` is `allow` or `deny` when a prompt has been resolved.
-- `resolution_source` values include `policy`, `resolver`, `session_grant`, `no_resolver`, `resolver_failed`, `persistent_rule`, and `persistent_rule_error`.
+- `action` is `allow`, `ask`, or `deny`; `resolution` is `allow`, `deny`, or `cancel` when a prompt has been resolved.
+- Current `resolution_source` values include `policy`, `resolver`, `session_grant`, `no_resolver`, `resolver_failed`, `persistent_rule`, `persistent_rule_error`, `client_cancel`, `hard_scope`, `session_config`, and `client`.
+- Legacy `acp_hard_policy`, `acp_session_mcp`, `acp_client`, `acp_session_grant`, `acp_client_cancel`, and `acp_client_error` sources are accepted only for read compatibility with older sessions; current writers do not emit them.
 - `risk` values are `low`, `medium`, `high`, and `critical`.
 
 Validation checks that policy `allow`/`deny` entries resolve consistently, that `ask` prompts have matching resolver outcomes when resolved, and that unresolved permission prompts are not crossed by compaction boundaries.

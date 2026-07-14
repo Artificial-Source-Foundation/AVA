@@ -1,18 +1,56 @@
 #include "sys.h"
 #include "ava/context/context_loader.h"
 #include "ava/core/error.h"
-#include "ava/core/json.h"
 
 #include <algorithm>
 #include <array>
-#include <fstream>
+#include <cerrno>
+#include <cstring>
+#include <optional>
 #include <set>
 #include <string_view>
+#include <utility>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#ifdef __linux__
+#include <linux/openat2.h>
+#include <sys/syscall.h>
+#endif
 
 namespace ava::context {
 namespace {
 
 constexpr std::array<std::string_view, 4> kContextFileNames{"AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"};
+
+class UniqueFd
+{
+ public:
+  UniqueFd() = default;
+  explicit UniqueFd(int fd) : fd_(fd) { }
+  ~UniqueFd()
+  {
+    if (fd_ >= 0)
+      ::close(fd_);
+  }
+  UniqueFd(UniqueFd const&) = delete;
+  UniqueFd& operator=(UniqueFd const&) = delete;
+  UniqueFd(UniqueFd&& other) noexcept : fd_(std::exchange(other.fd_, -1)) { }
+  UniqueFd& operator=(UniqueFd&& other) noexcept
+  {
+    if (this != &other)
+    {
+      if (fd_ >= 0)
+        ::close(fd_);
+      fd_ = std::exchange(other.fd_, -1);
+    }
+    return *this;
+  }
+  [[nodiscard]] int get() const noexcept { return fd_; }
+
+ private:
+  int fd_ = -1;
+};
 
 bool is_context_file_name(std::filesystem::path const& path)
 {
@@ -23,134 +61,171 @@ bool is_context_file_name(std::filesystem::path const& path)
 std::filesystem::path normalized_absolute(std::filesystem::path const& path)
 {
   std::error_code error;
-  auto normalized = std::filesystem::weakly_canonical(path, error);
-  if (!error)
-    return normalized.lexically_normal();
-  return std::filesystem::absolute(path, error).lexically_normal();
+  auto absolute = std::filesystem::absolute(path, error);
+  return (error ? path : absolute).lexically_normal();
 }
 
 bool is_same_or_child(std::filesystem::path const& child, std::filesystem::path const& parent)
 {
-  auto const child_text = child.lexically_normal().string();
-  auto const parent_text = parent.lexically_normal().string();
-  if (child_text == parent_text)
-    return true;
-  if (parent_text == "/")
-    return child_text.starts_with('/');
-  return child_text.starts_with(parent_text + "/");
+  auto child_it = child.begin();
+  auto parent_it = parent.begin();
+  for (; parent_it != parent.end(); ++parent_it, ++child_it)
+    if (child_it == child.end() || *child_it != *parent_it)
+      return false;
+  return true;
 }
 
-ava::core::Result<std::string> read_file_limited(std::filesystem::path const& path, std::size_t max_file_bytes)
+ava::core::Error context_io_error(std::string message, std::filesystem::path const& path, int error_number = 0)
 {
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (status_error || std::filesystem::is_symlink(status) || !std::filesystem::is_regular_file(status))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "context file is not a regular file");
-    error.with_context("path", path.string());
-    if (status_error)
-      error.with_context("cause", status_error.message());
-    return std::unexpected(std::move(error));
-  }
+  auto error = ava::core::Error(ava::core::ErrorCategory::Io, std::move(message));
+  error.with_context("path", path.string());
+  if (error_number != 0)
+    error.with_context("cause", std::strerror(error_number));
+  return error;
+}
 
-  std::error_code size_error;
-  auto const size = std::filesystem::file_size(path, size_error);
-  if (size_error || size > max_file_bytes)
+int open_components_no_symlinks(int anchor_fd, std::filesystem::path const& relative, int final_flags)
+{
+  int current = ::dup(anchor_fd);
+  if (current < 0)
+    return -1;
+  auto components = relative.begin();
+  auto const end = relative.end();
+  if (components == end)
+    return current;
+  for (; components != end; ++components)
   {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "context file is too large");
-    error.with_context("path", path.string());
+    auto const name = components->string();
+    if (name.empty() || name == ".")
+      continue;
+    if (name == "..")
+    {
+      ::close(current);
+      errno = EXDEV;
+      return -1;
+    }
+    auto next = components;
+    ++next;
+    int const flags = next == end ? final_flags : O_RDONLY | O_DIRECTORY | O_CLOEXEC;
+    int const opened = ::openat(current, name.c_str(), flags | O_NOFOLLOW);
+    int const saved_errno = errno;
+    ::close(current);
+    if (opened < 0)
+    {
+      errno = saved_errno;
+      return -1;
+    }
+    current = opened;
+  }
+  return current;
+}
+
+int open_beneath_no_symlinks(int anchor_fd, std::filesystem::path const& relative, int flags)
+{
+#ifdef __linux__
+  open_how how{};
+  how.flags = static_cast<std::uint64_t>(flags);
+  how.resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
+  auto const text = relative.empty() ? std::string(".") : relative.generic_string();
+  int const opened = static_cast<int>(::syscall(SYS_openat2, anchor_fd, text.c_str(), &how, sizeof(how)));
+  if (opened >= 0 || errno != ENOSYS)
+    return opened;
+#endif
+  return open_components_no_symlinks(anchor_fd, relative, flags);
+}
+
+ava::core::Result<std::optional<UniqueFd>> open_secure_root(std::filesystem::path const& root, bool missing_ok)
+{
+  auto const absolute = normalized_absolute(root);
+  if (!absolute.is_absolute())
+    return std::unexpected(context_io_error("context root must be absolute", absolute));
+  UniqueFd filesystem_root(::open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
+  if (filesystem_root.get() < 0)
+    return std::unexpected(context_io_error("failed to open filesystem root for context validation", "/", errno));
+  auto relative = absolute.lexically_relative("/");
+  int const fd = open_beneath_no_symlinks(filesystem_root.get(), relative, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (fd < 0)
+  {
+    if (missing_ok && errno == ENOENT)
+      return std::optional<UniqueFd>{};
+    return std::unexpected(context_io_error("failed to open context root without symlinks", absolute, errno));
+  }
+  return std::optional<UniqueFd>(std::in_place, fd);
+}
+
+ava::core::Result<std::optional<std::string>> read_file_beneath(UniqueFd const& root, std::filesystem::path const& relative,
+                                                                std::filesystem::path const& display_path, std::size_t max_file_bytes)
+{
+  int const fd = open_beneath_no_symlinks(root.get(), relative, O_RDONLY | O_CLOEXEC);
+  if (fd < 0)
+  {
+    if (errno == ENOENT)
+      return std::optional<std::string>{};
+    return std::unexpected(context_io_error("failed to open context file without symlinks", display_path, errno));
+  }
+  UniqueFd file(fd);
+  struct stat status{};
+  if (::fstat(file.get(), &status) != 0)
+    return std::unexpected(context_io_error("failed to inspect opened context file", display_path, errno));
+  if (!S_ISREG(status.st_mode))
+    return std::unexpected(context_io_error("context file is not a regular file", display_path));
+  if (status.st_size < 0 || static_cast<std::uintmax_t>(status.st_size) > max_file_bytes)
+  {
+    auto error = context_io_error("context file is too large", display_path);
     error.with_context("max_bytes", std::to_string(max_file_bytes));
-    if (size_error)
-      error.with_context("cause", size_error.message());
-    return std::unexpected(std::move(error));
-  }
-
-  std::ifstream file(path, std::ios::binary);
-  if (!file)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to open context file");
-    error.with_context("path", path.string());
     return std::unexpected(std::move(error));
   }
 
   std::string content;
+  content.reserve(static_cast<std::size_t>(status.st_size));
   std::array<char, 4096> buffer{};
-  while (file)
+  while (true)
   {
-    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-    if (file.gcount() > 0)
-      content.append(buffer.data(), static_cast<std::size_t>(file.gcount()));
-    if (content.size() > max_file_bytes)
+    auto const count = ::read(file.get(), buffer.data(), buffer.size());
+    if (count == 0)
+      break;
+    if (count < 0)
     {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "context file is too large");
-      error.with_context("path", path.string());
+      if (errno == EINTR)
+        continue;
+      return std::unexpected(context_io_error("failed while reading context file", display_path, errno));
+    }
+    if (content.size() > max_file_bytes || static_cast<std::size_t>(count) > max_file_bytes - content.size())
+    {
+      auto error = context_io_error("context file is too large", display_path);
       error.with_context("max_bytes", std::to_string(max_file_bytes));
       return std::unexpected(std::move(error));
     }
+    content.append(buffer.data(), static_cast<std::size_t>(count));
   }
-  if (!file.eof() && file.fail())
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed while reading context file");
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
-  return content;
+  return std::optional<std::string>(std::move(content));
 }
 
-ava::core::VoidResult append_if_present(std::vector<LoadedContextFile>& files, std::set<std::string>& seen_paths, std::filesystem::path const& path,
-                                        ContextSourceType source_type, std::size_t max_file_bytes)
+ava::core::VoidResult append_if_present(std::vector<LoadedContextFile>& files, std::set<std::string>& seen_paths, UniqueFd const& root,
+                                        std::filesystem::path const& root_path, std::filesystem::path const& path, ContextSourceType source_type,
+                                        std::size_t max_file_bytes)
 {
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (status_error)
-    return {};
-  if (std::filesystem::is_symlink(status))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "context file must not be a symlink");
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
-  if (!std::filesystem::is_regular_file(status))
-    return {};
   auto const normalized = normalized_absolute(path);
-  if (!seen_paths.insert(normalized.string()).second)
-    return {};
-  auto content = read_file_limited(path, max_file_bytes);
+  auto const relative = normalized.lexically_relative(root_path);
+  if (relative.empty() || relative.is_absolute() || relative.native().starts_with(".."))
+    return std::unexpected(context_io_error("context file escapes its anchored root", normalized));
+  auto content = read_file_beneath(root, relative, normalized, max_file_bytes);
   if (!content)
-    return std::unexpected(content.error());
-  files.push_back(LoadedContextFile{.path = normalized, .source_type = source_type, .byte_count = content->size(), .content = std::move(*content)});
+    return std::unexpected(std::move(content.error()));
+  if (!*content || !seen_paths.insert(normalized.string()).second)
+    return {};
+  files.push_back(LoadedContextFile{.path = normalized, .source_type = source_type, .byte_count = (*content)->size(), .content = std::move(**content)});
   return {};
 }
 
-ava::core::VoidResult append_first_context_file_from_dir(std::vector<LoadedContextFile>& files, std::set<std::string>& seen_paths,
-                                                         std::filesystem::path const& dir, ContextSourceType source_type, std::size_t max_file_bytes)
+ava::core::VoidResult append_first_context_file_from_dir(std::vector<LoadedContextFile>& files, std::set<std::string>& seen_paths, UniqueFd const& root,
+                                                         std::filesystem::path const& root_path, std::filesystem::path const& dir,
+                                                         ContextSourceType source_type, std::size_t max_file_bytes)
 {
   auto const initial_size = files.size();
   for (auto const name : kContextFileNames)
   {
-    auto appended = append_if_present(files, seen_paths, dir / std::string(name), source_type, max_file_bytes);
-    if (!appended)
-      return appended;
-    if (files.size() != initial_size)
-      return {};
-  }
-  return {};
-}
-
-ava::core::VoidResult append_global_context_file(std::vector<LoadedContextFile>& files, std::set<std::string>& seen_paths,
-                                                 std::filesystem::path const& global_agents_file, std::size_t max_file_bytes)
-{
-  auto const initial_size = files.size();
-  auto appended = append_if_present(files, seen_paths, global_agents_file, ContextSourceType::Global, max_file_bytes);
-  if (!appended || files.size() != initial_size || !is_context_file_name(global_agents_file))
-    return appended;
-
-  for (auto const name : kContextFileNames)
-  {
-    auto const candidate = global_agents_file.parent_path() / std::string(name);
-    if (candidate == global_agents_file)
-      continue;
-    appended = append_if_present(files, seen_paths, candidate, ContextSourceType::Global, max_file_bytes);
+    auto appended = append_if_present(files, seen_paths, root, root_path, dir / std::string(name), source_type, max_file_bytes);
     if (!appended)
       return appended;
     if (files.size() != initial_size)
@@ -202,19 +277,46 @@ ava::core::Result<std::vector<LoadedContextFile>> load_context_files(ContextLoad
 {
   std::vector<LoadedContextFile> files;
   std::set<std::string> seen_paths;
-
-  for (auto const& dir : context_dirs_root_to_current(options.workspace_root, options.current_dir))
+  auto const workspace_root = normalized_absolute(options.workspace_root);
+  auto workspace = open_secure_root(workspace_root, false);
+  if (!workspace)
+    return std::unexpected(std::move(workspace.error()));
+  for (auto const& dir : context_dirs_root_to_current(workspace_root, options.current_dir))
   {
-    auto appended = append_first_context_file_from_dir(files, seen_paths, dir, ContextSourceType::Workspace, options.max_file_bytes);
+    auto appended =
+        append_first_context_file_from_dir(files, seen_paths, **workspace, workspace_root, dir, ContextSourceType::Workspace, options.max_file_bytes);
     if (!appended)
-      return std::unexpected(appended.error());
+      return std::unexpected(std::move(appended.error()));
   }
 
   if (!options.global_agents_file.empty())
   {
-    auto appended = append_global_context_file(files, seen_paths, options.global_agents_file, options.max_file_bytes);
-    if (!appended)
-      return std::unexpected(appended.error());
+    auto const global_root = normalized_absolute(options.global_agents_file.parent_path());
+    auto global = open_secure_root(global_root, true);
+    if (!global)
+      return std::unexpected(std::move(global.error()));
+    if (*global)
+    {
+      auto const initial_size = files.size();
+      auto appended =
+          append_if_present(files, seen_paths, **global, global_root, options.global_agents_file, ContextSourceType::Global, options.max_file_bytes);
+      if (!appended)
+        return std::unexpected(std::move(appended.error()));
+      if (files.size() == initial_size && is_context_file_name(options.global_agents_file))
+      {
+        for (auto const name : kContextFileNames)
+        {
+          auto const candidate = options.global_agents_file.parent_path() / std::string(name);
+          if (candidate == options.global_agents_file)
+            continue;
+          appended = append_if_present(files, seen_paths, **global, global_root, candidate, ContextSourceType::Global, options.max_file_bytes);
+          if (!appended)
+            return std::unexpected(std::move(appended.error()));
+          if (files.size() != initial_size)
+            break;
+        }
+      }
+    }
   }
 
   return files;

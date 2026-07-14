@@ -1,18 +1,23 @@
+#include "tests/support/app_runtime_support.h"
 #include "tests/support/golden.h"
 #include "tests/support/test_harness.h"
 #include "ava/app/headless_policy.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/file_tools.h"
+#include "ava/plugin/enablement.h"
+#include "ava/plugin/tool_broker.h"
 #include "ava/mcp/config.h"
 #include "ava/mcp/protocol.h"
 #include "ava/mcp/stdio_client.h"
 #include "ava/mcp/tool_broker.h"
 #include "ava/permissions/permission.h"
+#include "ava/permissions/permission_rules.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -88,6 +93,7 @@ ava::mcp::McpServerConfig fake_server_config(std::filesystem::path const& root)
                                    .name = "Demo MCP",
                                    .command = AVA_FAKE_MCP_SERVER_PATH,
                                    .args = {},
+                                   .env = {},
                                    .enabled = true,
                                    .scope = ava::mcp::McpServerScope::Project,
                                    .source_path = root / "mcp.json"};
@@ -167,25 +173,75 @@ void test_mcp_config_parsing()
   expect(!duplicate && duplicate.error().message().find("duplicate") != std::string::npos, "MCP config rejects duplicate server ids across scopes");
 }
 
+void test_session_mcp_launch_identity_is_canonical_and_exact()
+{
+  auto const root = temp_root() / "mcp-session-launch-identity";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto const canonical_cwd = std::filesystem::canonical(workspace);
+
+  ava::mcp::McpServerConfig authorized{.id = "demo",
+                                       .name = "Demo",
+                                       .command = "/usr/bin/demo",
+                                       .args = {"alpha beta"},
+                                       .env = {{"Z_VALUE", "two"}, {"A_VALUE", "one"}},
+                                       .enabled = true,
+                                       .scope = ava::mcp::McpServerScope::Project,
+                                       .source_path = {}};
+  auto reordered = authorized;
+  std::ranges::reverse(reordered.env);
+  auto changed_env = authorized;
+  changed_env.env[0].second = "changed";
+  auto changed_argv_boundary = authorized;
+  changed_argv_boundary.args = {"alpha", "beta"};
+
+  auto const identity = ava::mcp::session_mcp_launch_identity(authorized, canonical_cwd);
+  auto const reordered_identity = ava::mcp::session_mcp_launch_identity(reordered, canonical_cwd);
+  auto const changed_env_identity = ava::mcp::session_mcp_launch_identity(changed_env, canonical_cwd);
+  auto const changed_argv_identity = ava::mcp::session_mcp_launch_identity(changed_argv_boundary, canonical_cwd);
+  auto const expected_identity =
+      std::string(R"({"argv":["/usr/bin/demo","alpha beta"],"env":[{"name":"A_VALUE","value":"one"},{"name":"Z_VALUE","value":"two"}],"cwd":")") +
+      ava::core::json::escape(canonical_cwd.string()) + R"(","clean_environment":true})";
+  expect(identity == expected_identity && identity == reordered_identity && identity != changed_env_identity && identity != changed_argv_identity,
+         "session MCP launch identity canonically binds argv boundaries, sorted explicit env values, cwd, and clean environment");
+
+  ava::permissions::PermissionRuleStore const store{.global_rules_file = root / "config" / "permission-rules.json",
+                                                    .workspace_rules_file = workspace / ".ava" / "permission-rules.json",
+                                                    .workspace_dir = workspace};
+  auto rule =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Allow,
+                                                                                                    .operation = ava::permissions::Operation::McpServerLaunch,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "mcp_discovery",
+                                                                                                    .target_path = {},
+                                                                                                    .command = identity,
+                                                                                                    .reason = "authorize exact session MCP launch",
+                                                                                                    .actor = "test_operator"});
+  auto prompt = [&](std::string command) {
+    return ava::permissions::PermissionPrompt{.permission_request_id = "permreq_mcp_identity",
+                                              .operation = ava::permissions::Operation::McpServerLaunch,
+                                              .mode = ava::agent::Mode::Build,
+                                              .workspace_dir = workspace,
+                                              .target_path = {},
+                                              .command = std::move(command),
+                                              .tool_name = "mcp_discovery",
+                                              .reason = "MCP server launch requires explicit approval",
+                                              .risk = ava::permissions::PermissionRisk::High};
+  };
+  auto exact_match = ava::permissions::match_persistent_permission_rule(store, prompt(identity));
+  auto env_mismatch = ava::permissions::match_persistent_permission_rule(store, prompt(changed_env_identity));
+  auto argv_mismatch = ava::permissions::match_persistent_permission_rule(store, prompt(changed_argv_identity));
+  expect(rule && exact_match && *exact_match && (*exact_match)->rule_id == rule->rule_id && env_mismatch && !*env_mismatch && argv_mismatch && !*argv_mismatch,
+         "persistent session MCP launch Allow does not match a changed env value or colliding space-joined argv boundary");
+
+  std::filesystem::remove_all(root, cleanup);
+}
+
 void test_mcp_protocol_parsing()
 {
-  auto const server = fake_server_config("/tmp/mcp-protocol");
-
-  auto content_length = ava::mcp::parse_mcp_content_length("X-Test: ignored\r\n content-length : 42\r\n\r\n", server, 64);
-  expect(content_length && *content_length == 42, content_length
-                                                      ? "MCP protocol parses trimmed case-insensitive Content-Length"
-                                                      : "MCP protocol parses trimmed case-insensitive Content-Length: " + content_length.error().format());
-
-  auto invalid_length = ava::mcp::parse_mcp_content_length("Content-Length: 4x\r\n\r\n", server, 64);
-  expect(!invalid_length && invalid_length.error().message().find("invalid") != std::string::npos, "MCP protocol rejects invalid Content-Length values");
-
-  auto oversized_length = ava::mcp::parse_mcp_content_length("Content-Length: 65\r\n\r\n", server, 64);
-  expect(!oversized_length && oversized_length.error().message().find("size cap") != std::string::npos, "MCP protocol rejects oversized Content-Length values");
-
-  expect(ava::mcp::mcp_header_end_offset("Content-Length: 2\r\n\r\n{}").value_or(0) == 21 &&
-             ava::mcp::mcp_header_end_offset("Content-Length: 2\n\n{}").value_or(0) == 19,
-         "MCP protocol finds CRLF and LF header terminators");
-
   expect(ava::mcp::mcp_response_id("{\"jsonrpc\":\"2.0\",\"id\":\"abc\",\"result\":{}}").value_or("") == "abc" &&
              ava::mcp::mcp_response_id("{\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{}}").value_or("") == "42",
          "MCP protocol parses string and numeric response IDs");
@@ -257,6 +313,21 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   auto malformed = ava::mcp::McpStdioClient::start(malformed_server, fake_client_options(workspace));
   expect(!malformed && malformed.error().message().find("valid JSON object") != std::string::npos, "MCP stdio client contains malformed initialize responses");
 
+  auto duplicate_server = fake_server_config(root);
+  duplicate_server.args = {"duplicate-initialize"};
+  auto duplicate = ava::mcp::McpStdioClient::start(duplicate_server, fake_client_options(workspace));
+  expect(!duplicate && duplicate.error().message().find("valid JSON object with strict bounds") != std::string::npos,
+         "MCP stdio client rejects duplicate JSON object keys from an untrusted session server");
+
+  for (auto const* mode : {"missing-version", "mismatched-version", "missing-capabilities"})
+  {
+    auto version_server = fake_server_config(root);
+    version_server.args = {mode};
+    auto version_client = ava::mcp::McpStdioClient::start(version_server, fake_client_options(workspace));
+    expect(!version_client && version_client.error().message().find("initialize response is malformed") != std::string::npos,
+           std::string("MCP stdio client rejects an incompatible initialize protocol version: ") + mode);
+  }
+
   auto exit_start_server = fake_server_config(root);
   exit_start_server.args = {"exit-initialize"};
   auto exit_start = ava::mcp::McpStdioClient::start(exit_start_server, fake_client_options(workspace));
@@ -295,9 +366,10 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   auto pre_canceled = (*client)->call_tool("echo", "{\"text\":\"hello\"}", [] { return true; });
   expect(!pre_canceled && pre_canceled.error().message().find("canceled") != std::string::npos,
          "MCP stdio client maps cancellation before tools/call to a deterministic canceled error");
-  auto result = (*client)->call_tool("echo", "{\"text\":\"hello\"}");
+  auto result = (*client)->call_tool("echo", "{\n  \"text\": \"hello\"\n}");
   expect(result && !result->is_error && result->content == "MCP call ok",
-         result ? "MCP stdio client calls tools" : "MCP stdio client calls tools: " + result.error().format());
+         result ? "MCP stdio client sends newline-delimited compact JSON to standard stdio servers"
+                : "MCP stdio client sends newline-delimited compact JSON to standard stdio servers: " + result.error().format());
   auto resources = (*client)->list_resources();
   expect(resources && resources->size() == 1 && resources->front().uri == "file:///workspace/notes.md" && resources->front().mime_type == "text/markdown",
          resources ? "MCP stdio client lists resources" : "MCP stdio client lists resources: " + resources.error().format());
@@ -306,6 +378,73 @@ void test_mcp_stdio_client_lists_and_calls_tools()
          resource ? "MCP stdio client reads resources" : "MCP stdio client reads resources: " + resource.error().format());
   auto shutdown = (*client)->shutdown(std::chrono::milliseconds(500));
   expect(shutdown.has_value(), shutdown ? "MCP stdio client shuts down cleanly" : "MCP stdio client shuts down cleanly: " + shutdown.error().format());
+
+  auto paginated_tools_server = fake_server_config(root);
+  paginated_tools_server.args = {"paginated-tools"};
+  auto paginated_tools_client = ava::mcp::McpStdioClient::start(paginated_tools_server, fake_client_options(workspace));
+  expect(paginated_tools_client.has_value(), paginated_tools_client
+                                                 ? "MCP stdio client initializes paginated tool fake server"
+                                                 : "MCP stdio client initializes paginated tool fake server: " + paginated_tools_client.error().format());
+  if (paginated_tools_client)
+  {
+    auto paginated_tools = (*paginated_tools_client)->list_tools();
+    expect(paginated_tools && paginated_tools->size() == 2 && paginated_tools->at(1).name == "second",
+           paginated_tools ? "MCP stdio client follows bounded tool list pagination"
+                           : "MCP stdio client follows bounded tool list pagination: " + paginated_tools.error().format());
+    auto paginated_tools_shutdown = (*paginated_tools_client)->shutdown(std::chrono::milliseconds(500));
+    expect(paginated_tools_shutdown.has_value(), "MCP stdio client shuts down after paginated tools/list");
+  }
+
+  auto empty_cursor_tools_server = fake_server_config(root);
+  empty_cursor_tools_server.args = {"empty-cursor-tools"};
+  auto empty_cursor_tools_client = ava::mcp::McpStdioClient::start(empty_cursor_tools_server, fake_client_options(workspace));
+  expect(empty_cursor_tools_client.has_value(), "MCP stdio client initializes empty-cursor tool fake server");
+  if (empty_cursor_tools_client)
+  {
+    auto empty_cursor_tools = (*empty_cursor_tools_client)->list_tools();
+    expect(empty_cursor_tools && empty_cursor_tools->size() == 2 && empty_cursor_tools->at(1).name == "second",
+           "MCP treats a present empty pagination cursor as an opaque continuation token");
+    expect((*empty_cursor_tools_client)->shutdown(std::chrono::milliseconds(500)).has_value(), "MCP stdio client shuts down after empty-cursor tools/list");
+  }
+
+  auto paginated_prompts_server = fake_server_config(root);
+  paginated_prompts_server.args = {"paginated-prompts"};
+  auto paginated_prompts_client = ava::mcp::McpStdioClient::start(paginated_prompts_server, fake_client_options(workspace));
+  expect(paginated_prompts_client.has_value(), "MCP stdio client initializes paginated prompt fake server");
+  if (paginated_prompts_client)
+  {
+    auto paginated_prompts = (*paginated_prompts_client)->list_prompts();
+    expect(paginated_prompts && paginated_prompts->size() == 2 && paginated_prompts->at(1).name == "second-prompt",
+           "MCP stdio client follows bounded prompt list pagination");
+    expect((*paginated_prompts_client)->shutdown(std::chrono::milliseconds(500)).has_value(), "MCP stdio client shuts down after paginated prompts/list");
+  }
+
+  auto missing_prompts_server = fake_server_config(root);
+  missing_prompts_server.args = {"missing-prompts"};
+  auto missing_prompts_client = ava::mcp::McpStdioClient::start(missing_prompts_server, fake_client_options(workspace));
+  expect(missing_prompts_client.has_value(), "MCP stdio client initializes missing-prompts fake server");
+  if (missing_prompts_client)
+  {
+    auto missing_prompts = (*missing_prompts_client)->list_prompts();
+    expect(!missing_prompts && missing_prompts.error().message().find("prompts field") != std::string::npos,
+           "MCP stdio client rejects prompts/list results without the required prompts array");
+    expect((*missing_prompts_client)->shutdown(std::chrono::milliseconds(500)).has_value(), "MCP stdio client shuts down after malformed prompts/list");
+  }
+
+  auto missing_tools_server = fake_server_config(root);
+  missing_tools_server.args = {"missing-tools"};
+  auto missing_tools_client = ava::mcp::McpStdioClient::start(missing_tools_server, fake_client_options(workspace));
+  expect(missing_tools_client.has_value(), missing_tools_client
+                                               ? "MCP stdio client initializes missing-tools fake server"
+                                               : "MCP stdio client initializes missing-tools fake server: " + missing_tools_client.error().format());
+  if (missing_tools_client)
+  {
+    auto missing_tools = (*missing_tools_client)->list_tools();
+    expect(!missing_tools && missing_tools.error().message().find("tools field") != std::string::npos,
+           "MCP stdio client rejects tools/list results without the required tools array");
+    auto missing_tools_shutdown = (*missing_tools_client)->shutdown(std::chrono::milliseconds(500));
+    expect(missing_tools_shutdown.has_value(), "MCP stdio client shuts down after malformed tools/list");
+  }
 
   auto paginated_server = fake_server_config(root);
   paginated_server.args = {"paginated-resources"};
@@ -320,6 +459,18 @@ void test_mcp_stdio_client_lists_and_calls_tools()
                                : "MCP stdio client follows bounded resource list pagination: " + paginated_resources.error().format());
     auto paginated_shutdown = (*paginated_client)->shutdown(std::chrono::milliseconds(500));
     expect(paginated_shutdown.has_value(), "MCP stdio client shuts down after paginated resources/list");
+  }
+
+  auto missing_resources_server = fake_server_config(root);
+  missing_resources_server.args = {"missing-resources"};
+  auto missing_resources_client = ava::mcp::McpStdioClient::start(missing_resources_server, fake_client_options(workspace));
+  expect(missing_resources_client.has_value(), "MCP stdio client initializes missing-resources fake server");
+  if (missing_resources_client)
+  {
+    auto missing_resources = (*missing_resources_client)->list_resources();
+    expect(!missing_resources && missing_resources.error().message().find("resources field") != std::string::npos,
+           "MCP stdio client rejects resources/list results without the required resources array");
+    expect((*missing_resources_client)->shutdown(std::chrono::milliseconds(500)).has_value(), "MCP stdio client shuts down after malformed resources/list");
   }
 
   auto blob_server = fake_server_config(root);
@@ -737,11 +888,240 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
              : "MCP tool dispatcher does not classify ordinary tool errors containing canceled as cancellation: " + text_dispatched.error().format());
 }
 
+void test_mcp_strict_session_registry_failures_and_nested_cwd()
+{
+  auto const root = temp_root() / "mcp-strict-session";
+  auto const workspace = root / "workspace";
+  auto const nested = workspace / "nested";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(nested);
+
+  auto const paths = ava::tests::app_test_paths(root);
+  auto context_for_servers = [&](std::vector<ava::mcp::McpServerConfig> servers) {
+    ava::tools::ToolContext context;
+    context.workspace_dir = workspace;
+    context.current_dir = nested;
+    context.plugin_global_plugins_dir = paths.ava_config_dir / "plugins";
+    context.plugin_project_plugins_dir = workspace / ".ava" / "plugins";
+    context.plugin_enablement_file = paths.ava_state_dir / "plugin-enablement.json";
+    context.session_mcp_config =
+        std::make_shared<ava::mcp::McpConfig const>(ava::mcp::McpConfig{.servers = std::move(servers), .global_config_file = {}, .project_config_file = {}});
+    context.exact_builtin_tool_names = std::vector<std::string>{};
+    context.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+      return ava::permissions::PermissionResolution::Allow;
+    };
+    return context;
+  };
+  auto context_for = [&](ava::mcp::McpServerConfig server) {
+    std::vector<ava::mcp::McpServerConfig> servers;
+    servers.push_back(std::move(server));
+    return context_for_servers(std::move(servers));
+  };
+
+  auto startup = fake_server_config(root);
+  startup.command = (root / "missing-mcp-server").string();
+  auto startup_failed = ava::agent::ToolDispatcher::create_strict(context_for(std::move(startup)));
+  expect(!startup_failed && startup_failed.error().format().find("mcp_server: demo") != std::string::npos,
+         "strict session MCP registry returns startup failures instead of omitting the mandatory server");
+
+  auto initialize = fake_server_config(root);
+  initialize.args = {"exit-initialize"};
+  auto initialize_failed = ava::agent::ToolDispatcher::create_strict(context_for(std::move(initialize)));
+  expect(!initialize_failed && initialize_failed.error().format().find("initialize") != std::string::npos,
+         "strict session MCP registry returns initialization failures");
+
+  auto tools_list = fake_server_config(root);
+  tools_list.args = {"exit-after-initialize"};
+  auto tools_failed = ava::agent::ToolDispatcher::create_strict(context_for(std::move(tools_list)));
+  expect(!tools_failed && tools_failed.error().format().find("tools/list") != std::string::npos, "strict session MCP registry returns tools/list failures");
+
+  auto resources_list = fake_server_config(root);
+  resources_list.args = {"exit-resources-list"};
+  auto resources_ignored = ava::agent::ToolDispatcher::create_strict(context_for(std::move(resources_list)));
+  expect(resources_ignored && resources_ignored->registered_tool_metadata().size() == 1,
+         "strict session MCP registry mirrors tools/list without legacy MCP resource pseudo-tools");
+
+  auto const plugin_id = "com.example.strict-shadow";
+  auto const plugin_dir = paths.ava_config_dir / "plugins" / plugin_id;
+  write_text(plugin_dir / "plugin.json", ava::tests::app_test_plugin_manifest_json(plugin_id, "Strict Shadow"));
+  auto plugin_enabled =
+      ava::plugin::set_plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, plugin_id, true, ava::plugin::PluginScope::Global);
+  expect(plugin_enabled.has_value(), "strict MCP registry fixture enables an installed plugin tool");
+
+  auto const cwd_marker = root / "session-cwd.txt";
+  auto cwd_server = fake_server_config(root);
+  cwd_server.args = {"cwd-marker", cwd_marker.string()};
+  auto strict_context = context_for(cwd_server);
+  auto strict = ava::agent::ToolDispatcher::create_strict(strict_context);
+  auto const mcp_name = ava::mcp::mcp_model_tool_name("demo", "echo");
+  auto const plugin_name = ava::plugin::plugin_model_tool_name(plugin_id, "todo_add");
+  bool strict_has_mcp = false;
+  bool strict_has_plugin = false;
+  bool strict_has_builtin = false;
+  std::size_t strict_tool_count = 0;
+  if (strict)
+  {
+    auto const metadata_entries = strict->registered_tool_metadata();
+    strict_tool_count = metadata_entries.size();
+    for (auto const& metadata : metadata_entries)
+    {
+      strict_has_mcp = strict_has_mcp || metadata.name == mcp_name;
+      strict_has_plugin = strict_has_plugin || metadata.name == plugin_name;
+      strict_has_builtin = strict_has_builtin || metadata.name == "read_file";
+    }
+  }
+  expect(strict && strict_tool_count == 1 && strict_has_mcp && !strict_has_plugin && !strict_has_builtin &&
+             read_text(cwd_marker) == std::filesystem::canonical(nested).string(),
+         strict ? "strict session registry exposes only valid session MCP tools from persisted current_dir"
+                : "session MCP nested-cwd registry build failed: " + strict.error().format());
+
+  auto legacy_context = strict_context;
+  legacy_context.exact_builtin_tool_names = std::nullopt;
+  auto legacy = ava::agent::ToolDispatcher::create_strict(std::move(legacy_context));
+  bool legacy_has_plugin = false;
+  if (legacy)
+    for (auto const& metadata : legacy->registered_tool_metadata()) legacy_has_plugin = legacy_has_plugin || metadata.name == plugin_name;
+  expect(legacy && legacy_has_plugin, "legacy registry behavior still includes an enabled plugin beside session MCP");
+
+  auto first_collision = fake_server_config(root);
+  first_collision.id = "demo-one";
+  auto second_collision = fake_server_config(root);
+  second_collision.id = "demo_one";
+  auto collision = ava::agent::ToolDispatcher::create_strict(
+      context_for_servers(std::vector<ava::mcp::McpServerConfig>{std::move(first_collision), std::move(second_collision)}));
+  auto const collision_details = collision ? std::string{} : collision.error().format();
+  expect(!collision && collision_details.find("duplicate model tool name") != std::string::npos &&
+             collision_details.find("mcp_demo_one_echo") != std::string::npos && collision_details.find("demo-one") != std::string::npos &&
+             collision_details.find("demo_one") != std::string::npos,
+         "strict session MCP registry rejects cross-server normalized model-name collisions: " + collision_details);
+
+  first_collision = fake_server_config(root);
+  first_collision.id = "demo-one";
+  second_collision = fake_server_config(root);
+  second_collision.id = "demo_one";
+  auto best_effort_context = context_for_servers(std::vector<ava::mcp::McpServerConfig>{std::move(first_collision), std::move(second_collision)});
+  best_effort_context.exact_builtin_tool_names = std::nullopt;
+  auto best_effort = ava::agent::ToolDispatcher::create_strict(std::move(best_effort_context));
+  expect(best_effort.has_value(), "legacy session/global registry keeps best-effort collision shadowing unchanged");
+
+  auto unavailable_context = context_for_servers({});
+  unavailable_context.exact_builtin_tool_names = std::vector<std::string>{"missing_builtin"};
+  auto unavailable = ava::agent::ToolDispatcher::create_strict(std::move(unavailable_context));
+  expect(!unavailable && unavailable.error().message().find("requested built-in tool is unavailable") != std::string::npos,
+         "exact tool composition fails closed when an injected built-in is unavailable");
+
+  std::filesystem::remove_all(root, remove_error);
+}
+
+void test_mcp_session_environment_is_clean()
+{
+  auto const root = temp_root() / "mcp-session-clean-env";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(root);
+  auto const marker = root / "environment.txt";
+  ScopedEnvVar const parent_secret("AVA_MCP_PARENT_SECRET", "must-not-leak");
+  ScopedEnvVar const parent_marker("AVA_MCP_PARENT_MARKER", "parent-marker");
+  ScopedEnvVar const parent_explicit("AVA_MCP_EXPLICIT", "parent-value");
+
+  auto context_for = [&](ava::mcp::McpServerConfig server) {
+    ava::tools::ToolContext context;
+    context.workspace_dir = root;
+    context.current_dir = root;
+    context.session_mcp_config =
+        std::make_shared<ava::mcp::McpConfig const>(ava::mcp::McpConfig{.servers = {std::move(server)}, .global_config_file = {}, .project_config_file = {}});
+    context.exact_builtin_tool_names = std::vector<std::string>{};
+    context.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+      return ava::permissions::PermissionResolution::Allow;
+    };
+    return context;
+  };
+
+  auto server = fake_server_config(root);
+  server.args = {"env-marker", marker.string()};
+  server.env = {{"AVA_MCP_EXPLICIT", "session-value"}};
+  auto trusted_path = ava::agent::ToolDispatcher::create_strict(context_for(server));
+  auto const trusted_marker = read_text(marker);
+  expect(trusted_path && trusted_marker.find("EXPLICIT=session-value") != std::string::npos && trusted_marker.find("INHERITED=<unset>") != std::string::npos &&
+             trusted_marker.find("SECRET=<unset>") != std::string::npos &&
+             trusted_marker.find("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin") != std::string::npos,
+         trusted_path ? "immutable session MCP receives only trusted PATH and explicit environment values"
+                      : "immutable session MCP clean-environment discovery failed: " + trusted_path.error().format());
+
+  server.env = {{"AVA_MCP_EXPLICIT", "session-value"}, {"PATH", "/bounded/session/path"}};
+  auto explicit_path = ava::agent::ToolDispatcher::create_strict(context_for(std::move(server)));
+  auto const explicit_marker = read_text(marker);
+  expect(explicit_path && explicit_marker.find("EXPLICIT=session-value") != std::string::npos &&
+             explicit_marker.find("INHERITED=<unset>") != std::string::npos && explicit_marker.find("SECRET=<unset>") != std::string::npos &&
+             explicit_marker.find("PATH=/bounded/session/path") != std::string::npos,
+         explicit_path ? "immutable session MCP forwards an explicit bounded PATH without parent environment leakage"
+                       : "immutable session MCP explicit-PATH discovery failed: " + explicit_path.error().format());
+
+  std::filesystem::remove_all(root, remove_error);
+}
+
+void test_mcp_ordinary_global_and_project_environment_is_inherited()
+{
+  auto const root = temp_root() / "mcp-ordinary-inherited-env";
+  auto const workspace = root / "workspace";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(workspace);
+  auto const marker = root / "environment.txt";
+  ScopedEnvVar const parent_marker("AVA_MCP_PARENT_MARKER", "parent-marker");
+  ScopedEnvVar const parent_explicit("AVA_MCP_EXPLICIT", "parent-value");
+  ScopedEnvVar const parent_path("PATH", "/untrusted/parent/path");
+
+  auto const global_config = root / "global-mcp.json";
+  auto const args_json = "[\"env-marker\",\"" + ava::core::json::escape(marker.string()) + "\"]";
+  write_text(global_config, mcp_config_json("ordinary-global", AVA_FAKE_MCP_SERVER_PATH, true, args_json));
+  ava::tools::ToolContext context;
+  context.workspace_dir = workspace;
+  context.mcp_global_config_file = global_config;
+  context.include_project_mcp_config = false;
+  context.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto inherited = ava::agent::ToolDispatcher::create_strict(std::move(context));
+  auto const inherited_marker = read_text(marker);
+  expect(inherited && inherited_marker.find("EXPLICIT=parent-value") != std::string::npos &&
+             inherited_marker.find("INHERITED=parent-marker") != std::string::npos &&
+             inherited_marker.find("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin") != std::string::npos,
+         inherited ? "ordinary loaded global MCP inherits benign parent variables and replaces parent PATH with the trusted default"
+                   : "ordinary loaded global MCP environment discovery failed: " + inherited.error().format());
+
+  auto server = fake_server_config(root);
+  server.scope = ava::mcp::McpServerScope::Project;
+  server.args = {"env-marker", marker.string()};
+  server.env = {{"AVA_MCP_EXPLICIT", "project-value"}, {"PATH", "/bounded/project/path"}};
+  auto explicit_path = ava::mcp::McpStdioClient::start(server, fake_client_options(root));
+  expect(explicit_path.has_value(), "ordinary project MCP starts with explicit environment overrides");
+  if (explicit_path)
+    static_cast<void>((*explicit_path)->shutdown());
+  auto const explicit_marker = read_text(marker);
+  expect(explicit_marker.find("EXPLICIT=project-value") != std::string::npos && explicit_marker.find("INHERITED=parent-marker") != std::string::npos &&
+             explicit_marker.find("PATH=/bounded/project/path") != std::string::npos,
+         "ordinary project MCP retains inherited variables while applying exact explicit value and PATH overrides");
+
+  std::filesystem::remove_all(root, remove_error);
+}
+
+void test_mcp_stdio_environment_validation()
+{
+  auto const root = temp_root() / "mcp-environment-validation";
+  auto server = fake_server_config(root);
+  server.env = {{"DUPLICATE", "one"}, {"DUPLICATE", "two"}};
+  auto duplicate = ava::mcp::McpStdioClient::start(server, fake_client_options(root));
+  expect(!duplicate && duplicate.error().message().find("duplicate") != std::string::npos, "MCP stdio rejects duplicate environment names before launch");
+}
+
 }  // namespace
 
 void run_mcp_tests()
 {
   test_mcp_config_parsing();
+  test_session_mcp_launch_identity_is_canonical_and_exact();
   test_mcp_protocol_parsing();
   test_mcp_permission_audit_golden_shape();
   test_mcp_stdio_client_lists_and_calls_tools();
@@ -749,4 +1129,8 @@ void run_mcp_tests()
   test_mcp_tool_dispatcher_audits_permission_denials();
   test_mcp_tool_dispatcher_contains_tool_errors();
   test_mcp_headless_policy_allows_resource_reads();
+  test_mcp_strict_session_registry_failures_and_nested_cwd();
+  test_mcp_session_environment_is_clean();
+  test_mcp_ordinary_global_and_project_environment_is_inherited();
+  test_mcp_stdio_environment_validation();
 }

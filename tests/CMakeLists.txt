@@ -1,3 +1,11 @@
+option(AVA_REQUIRE_ACP_SDK_INTEROP "Require installed official ACP SDK interoperability dependencies" OFF)
+option(AVA_ENABLE_ACPX_INTEROP "Enable the opt-in acpx interoperability smoke" OFF)
+find_program(AVA_NODE_EXECUTABLE NAMES node DOC "Node.js executable used only by ACP interoperability tests")
+
+if(AVA_REQUIRE_ACP_SDK_INTEROP AND NOT AVA_NODE_EXECUTABLE)
+  message(FATAL_ERROR "AVA_REQUIRE_ACP_SDK_INTEROP requires Node.js and installed tests/acp-sdk packages")
+endif()
+
 set(CURSES_NEED_NCURSES TRUE)
 set(CURSES_NEED_WIDE TRUE)
 find_package(Curses REQUIRED)
@@ -26,7 +34,14 @@ add_executable(ava_fake_provider_server "support/fake_provider_server.cpp")
 ava_apply_warnings(ava_fake_provider_server)
 ava_apply_sanitizers(ava_fake_provider_server)
 
+add_executable(ava_rpc_broken_pipe_subprocess_test "rpc_broken_pipe_subprocess_test.cpp")
+add_dependencies(ava_rpc_broken_pipe_subprocess_test ava)
+target_compile_definitions(ava_rpc_broken_pipe_subprocess_test PRIVATE AVA_EXE_PATH="$<TARGET_FILE:ava>")
+ava_apply_warnings(ava_rpc_broken_pipe_subprocess_test)
+ava_apply_sanitizers(ava_rpc_broken_pipe_subprocess_test)
+
 add_executable(ava_tests
+  "acp_tests.cpp"
   "agent_loop_resilience_tests.cpp"
   "agent_loop_tests.cpp"
   "agent_tool_dispatcher_tests.cpp"
@@ -50,6 +65,7 @@ add_executable(ava_tests
   "provider_live_smoke_tests.cpp"
   "provider_openai_tests.cpp"
   "session_tests.cpp"
+  "session_run_controller_tests.cpp"
   "tool_scheduler_tests.cpp"
   "tools_file_tests.cpp"
   "tools_process_network_tests.cpp"
@@ -66,12 +82,16 @@ target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_
 target_compile_definitions(ava_tests PRIVATE AVA_SAMPLE_TODO_PLUGIN_DIR="${CMAKE_SOURCE_DIR}/examples/plugins/todo")
 target_compile_definitions(ava_tests PRIVATE AVA_080_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden/ava-080")
 target_compile_definitions(ava_tests PRIVATE AVA_M1_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/fixtures/eval/m1")
+target_compile_definitions(ava_tests PRIVATE AVA_RPC_V1_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden/rpc-v1")
+target_compile_definitions(ava_tests PRIVATE AVA_ACP_V1_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/acp-v1")
 ava_apply_warnings(ava_tests)
 ava_apply_sanitizers(ava_tests)
 
 set(AVA_TEST_SUITES
   core_mode
+  acp
   session
+  session_run_controller
   core_json_permission
   app_command_classification
   app_command_registry
@@ -104,6 +124,28 @@ foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
 endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+add_test(NAME ava_cli.rpc_broken_pipe_subprocess COMMAND ava_rpc_broken_pipe_subprocess_test)
+set_tests_properties(ava_cli.rpc_broken_pipe_subprocess PROPERTIES TIMEOUT 10)
+
+if(AVA_NODE_EXECUTABLE)
+  set(AVA_ACP_SDK_INTEROP_COMMAND
+    ${AVA_NODE_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/acp-sdk/interop.mjs
+    --ava $<TARGET_FILE:ava>
+    --fake-provider $<TARGET_FILE:ava_fake_provider_server>
+    --root ${CMAKE_BINARY_DIR}/acp-sdk-interop)
+  if(AVA_REQUIRE_ACP_SDK_INTEROP)
+    list(APPEND AVA_ACP_SDK_INTEROP_COMMAND --required)
+  endif()
+  add_test(NAME ava_cli.acp_sdk_interop COMMAND ${AVA_ACP_SDK_INTEROP_COMMAND})
+else()
+  find_program(AVA_SH_EXECUTABLE NAMES sh REQUIRED)
+  add_test(NAME ava_cli.acp_sdk_interop COMMAND ${AVA_SH_EXECUTABLE} -c "exit 77")
+endif()
+set_tests_properties(
+  ava_cli.acp_sdk_interop
+  PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 75 LABELS "acp;interop;official-sdk")
 
 # The M1 fixture manifest is the source of its focused timeout as well as the
 # test-side required-boundary policy. Keep CTest and the scorer pinned to it.
@@ -359,7 +401,92 @@ add_test(
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_mcp_config_errors.cmake)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
+if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
+  message(FATAL_ERROR "AVA_ENABLE_ACPX_INTEROP requires Python 3 for the bounded launcher")
+endif()
 if(Python3_Interpreter_FOUND)
+  add_test(
+    NAME ava_tests.acp_interop_manifest
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/acp_interop_manifest_test.py
+            --source ${CMAKE_SOURCE_DIR})
+  set_tests_properties(ava_tests.acp_interop_manifest PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1" LABELS "acp;interop;offline")
+
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+      NAME ava_tests.live_acp_dogfood_launcher
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/live_acp_dogfood_test.py
+              --source ${CMAKE_SOURCE_DIR})
+    set_tests_properties(ava_tests.live_acp_dogfood_launcher PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1" LABELS "acp;interop;offline")
+  endif()
+
+  if(AVA_ENABLE_ACPX_INTEROP)
+    if(NOT AVA_NODE_EXECUTABLE)
+      message(FATAL_ERROR "AVA_ENABLE_ACPX_INTEROP requires exact Node.js 24.13.1")
+    endif()
+    add_test(
+      NAME ava_cli.acpx_interop
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/acp-acpx/interop.py
+              --ava $<TARGET_FILE:ava>
+              --fake-provider $<TARGET_FILE:ava_fake_provider_server>
+              --node ${AVA_NODE_EXECUTABLE}
+              --acpx ${CMAKE_CURRENT_SOURCE_DIR}/acp-acpx/node_modules/.bin/acpx
+              --root ${CMAKE_BINARY_DIR}/acpx-interop)
+    set_tests_properties(ava_cli.acpx_interop PROPERTIES TIMEOUT 40 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1" LABELS "acp;interop;acpx;opt-in")
+  endif()
+
+  add_test(
+    NAME ava_tests.acp_support_manifest
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/acp_support_manifest_test.py
+            --source ${CMAKE_SOURCE_DIR})
+  set_tests_properties(ava_tests.acp_support_manifest PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_cli.acp_subprocess
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/acp_subprocess_test.py
+            --ava $<TARGET_FILE:ava>
+            --fake-provider $<TARGET_FILE:ava_fake_provider_server>
+            --fake-mcp $<TARGET_FILE:ava_fake_mcp_server>
+            --root ${CMAKE_BINARY_DIR}/acp-subprocess)
+  set_tests_properties(ava_cli.acp_subprocess PROPERTIES TIMEOUT 20 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_cli.rpc_parser_subprocess
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/rpc_parser_subprocess_test.py
+            --ava $<TARGET_FILE:ava>
+            --root ${CMAKE_BINARY_DIR}/rpc-parser-subprocess)
+  set_tests_properties(ava_cli.rpc_parser_subprocess PROPERTIES TIMEOUT 20 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tests.rpc_contract_manifest
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/rpc_contract_manifest_test.py
+            --source ${CMAKE_SOURCE_DIR}
+            --ava $<TARGET_FILE:ava>)
+  set_tests_properties(ava_tests.rpc_contract_manifest PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tests.rpc_python_client
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/rpc_client_tests.py
+            --source ${CMAKE_SOURCE_DIR})
+  set_tests_properties(ava_tests.rpc_python_client PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_cli.rpc_python_client_e2e
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/rpc_client_e2e.py
+            --ava $<TARGET_FILE:ava>
+            --fake-provider $<TARGET_FILE:ava_fake_provider_server>
+            --source ${CMAKE_SOURCE_DIR}
+            --root ${CMAKE_BINARY_DIR}/rpc-python-client-e2e)
+  set_tests_properties(ava_cli.rpc_python_client_e2e PROPERTIES TIMEOUT 45 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
   add_test(
     NAME ava_tui.tmux_smoke
     COMMAND ${Python3_EXECUTABLE}

@@ -8,6 +8,7 @@ add_library(ava_tools
   "lsp_tools.cpp"
   "mutation_queue.cpp"
   "search_tools.cpp"
+  "secure_workspace.cpp"
   "spill_files.cpp"
   "webfetch_tool.cpp"
   "websearch_tool.cpp"

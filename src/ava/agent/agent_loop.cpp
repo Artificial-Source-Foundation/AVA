@@ -25,6 +25,7 @@
 #include <span>
 #include <stop_token>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -44,16 +45,60 @@ ToolDispatchResult synthetic_failed_dispatch_result(ProviderToolCall const& call
       ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = dispatch_error_result_json(call, error)});
 }
 
+ava::core::Result<std::unordered_set<std::string>> persisted_provider_tool_call_ids(ava::session::SessionStore const& store)
+{
+  std::unordered_set<std::string> ids;
+  auto visited = store.visit_entries(ava::session::SessionReadLimits{}, [&ids](ava::session::SessionEntry const& entry) -> ava::core::Result<bool> {
+    if (entry.type != ava::session::EntryType::ToolCall)
+      return true;
+    auto id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
+    if (auto valid = validate_provider_tool_call_id(id); !valid)
+    {
+      auto error = std::move(valid.error());
+      error.with_context("source", "persisted_session_tool_call");
+      return std::unexpected(std::move(error));
+    }
+    ids.insert(std::move(id));
+    return true;
+  });
+  if (!visited)
+  {
+    if (visited.error().category() == ava::core::ErrorCategory::NotFound)
+      return ids;
+    auto error = std::move(visited.error());
+    error.with_context("operation", "seed persistent provider tool-call ids");
+    return std::unexpected(std::move(error));
+  }
+  return ids;
+}
+
 bool is_canceled(AgentLoopOptions const& options)
 {
   return options.cancel_requested && options.cancel_requested();
+}
+
+ava::core::VoidResult publish_phase(AgentLoopOptions const& options, RunPhase phase)
+{
+  if (!options.on_phase)
+    return {};
+  try
+  {
+    return options.on_phase(phase);
+  }
+  catch (...)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "run phase callback threw"));
+  }
 }
 
 ava::core::VoidResult check_canceled(AgentLoopOptions const& options, ava::session::SessionStore& store, std::string_view boundary)
 {
   if (!is_canceled(options))
     return {};
-  static_cast<void>(append_cancel(store, boundary));
+  if (options.append_entry)
+    static_cast<void>(append_cancel(options.append_entry, boundary));
+  else
+    static_cast<void>(append_cancel(store, boundary));
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled");
   error.with_context("boundary", std::string(boundary));
   return std::unexpected(std::move(error));
@@ -136,6 +181,8 @@ std::string subagent_system_prompt(std::string base, std::string_view role_promp
 
 bool permission_decision_cannot_ask(ava::tools::ToolContext const& context, ava::permissions::Operation operation, std::filesystem::path const& target_path)
 {
+  if (context.require_explicit_file_permissions && (operation == ava::permissions::Operation::ReadFile || operation == ava::permissions::Operation::EditFile))
+    return false;
   auto const decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = operation,
       .mode = context.mode,
@@ -306,12 +353,17 @@ void append_background_error_best_effort(ava::session::SessionStore& store, ava:
   static_cast<void>(append_error(store, error));
 }
 
-void append_background_parent_error_best_effort(ava::session::SessionStore store, std::string const& task_id, std::string const& subagent_type,
-                                                ava::core::Error error)
+void append_background_parent_error_best_effort(SessionAppendSink const& parent_append, std::optional<ava::session::SessionStore>& parent_store,
+                                                std::string const& task_id, std::string const& subagent_type, ava::core::Error error)
 {
+  // Parent notifications are owner-routed. A completed/stale parent route
+  // deliberately rejects rather than writing around its append authority.
   error.with_context("background_task_id", task_id);
   error.with_context("subagent_type", subagent_type);
-  static_cast<void>(append_error(store, error));
+  if (parent_append)
+    static_cast<void>(append_error(parent_append, error));
+  else if (parent_store)
+    static_cast<void>(append_error(*parent_store, error));
 }
 
 BackgroundJobCompletion background_failure_completion(BackgroundJobContext const& context, ava::core::Error const& error)
@@ -420,9 +472,9 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     if (options_.session_mutex)
     {
       std::lock_guard lock(*options_.session_mutex);
-      return append_user_message(store, text, attachments);
+      return options_.append_entry ? append_user_message(options_.append_entry, text, attachments) : append_user_message(store, text, attachments);
     }
-    return append_user_message(store, text, attachments);
+    return options_.append_entry ? append_user_message(options_.append_entry, text, attachments) : append_user_message(store, text, attachments);
   };
   auto build_messages_locked = [&]() -> ava::core::Result<BuiltProviderMessages> {
     if (options_.session_mutex)
@@ -437,15 +489,19 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     if (options_.session_mutex)
     {
       std::lock_guard lock(*options_.session_mutex);
-      return append_assistant_message(store, text, tool_call_count, usage, cost_usd);
+      return options_.append_entry ? append_assistant_message(options_.append_entry, text, tool_call_count, usage, cost_usd)
+                                   : append_assistant_message(store, text, tool_call_count, usage, cost_usd);
     }
-    return append_assistant_message(store, text, tool_call_count, usage, cost_usd);
+    return options_.append_entry ? append_assistant_message(options_.append_entry, text, tool_call_count, usage, cost_usd)
+                                 : append_assistant_message(store, text, tool_call_count, usage, cost_usd);
   };
   auto append_reasoning_blocks_locked = [&](std::vector<ParsedReasoningBlock> const& blocks) -> ava::core::VoidResult {
     auto append_all = [&]() -> ava::core::VoidResult {
       for (auto const& block : blocks)
       {
-        if (auto appended = append_reasoning_block(store, block, options_.provider_id, options_.model_id); !appended)
+        if (auto appended = options_.append_entry ? append_reasoning_block(options_.append_entry, block, options_.provider_id, options_.model_id)
+                                                  : append_reasoning_block(store, block, options_.provider_id, options_.model_id);
+            !appended)
         {
           return appended;
         }
@@ -463,33 +519,33 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     if (options_.session_mutex)
     {
       std::lock_guard lock(*options_.session_mutex);
-      return append_tool_call(store, call);
+      return options_.append_entry ? append_tool_call(options_.append_entry, call) : append_tool_call(store, call);
     }
-    return append_tool_call(store, call);
+    return options_.append_entry ? append_tool_call(options_.append_entry, call) : append_tool_call(store, call);
   };
   auto append_tool_result_locked = [&](ToolDispatchResult const& dispatch_result) -> ava::core::VoidResult {
     if (options_.session_mutex)
     {
       std::lock_guard lock(*options_.session_mutex);
-      return append_tool_result(store, dispatch_result);
+      return options_.append_entry ? append_tool_result(options_.append_entry, dispatch_result) : append_tool_result(store, dispatch_result);
     }
-    return append_tool_result(store, dispatch_result);
+    return options_.append_entry ? append_tool_result(options_.append_entry, dispatch_result) : append_tool_result(store, dispatch_result);
   };
   auto append_permission_decision_locked = [&](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
     if (options_.session_mutex)
     {
       std::lock_guard lock(*options_.session_mutex);
-      return append_permission_decision(store, event);
+      return options_.append_entry ? append_permission_decision(options_.append_entry, event) : append_permission_decision(store, event);
     }
-    return append_permission_decision(store, event);
+    return options_.append_entry ? append_permission_decision(options_.append_entry, event) : append_permission_decision(store, event);
   };
   auto append_error_locked = [&](ava::core::Error const& error) -> ava::core::VoidResult {
     if (options_.session_mutex)
     {
       std::lock_guard lock(*options_.session_mutex);
-      return append_error(store, error);
+      return options_.append_entry ? append_error(options_.append_entry, error) : append_error(store, error);
     }
-    return append_error(store, error);
+    return options_.append_entry ? append_error(options_.append_entry, error) : append_error(store, error);
   };
   struct ActiveTurnUserMessage
   {
@@ -505,6 +561,8 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     return messages;
   };
   auto compact_context = [&](std::string_view trigger) -> ava::core::Result<bool> {
+    if (auto phase = publish_phase(options_, RunPhase::Compacting); !phase)
+      return std::unexpected(std::move(phase.error()));
     if (!options_.compact_context)
     {
       auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "context compaction is unavailable");
@@ -529,9 +587,11 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
         if (options_.session_mutex)
         {
           std::lock_guard lock(*options_.session_mutex);
-          return append_replay_user_message(store, message.text, message.image_attachments, message.id);
+          return options_.append_entry ? append_replay_user_message(options_.append_entry, message.text, message.image_attachments, message.id)
+                                       : append_replay_user_message(store, message.text, message.image_attachments, message.id);
         }
-        return append_replay_user_message(store, message.text, message.image_attachments, message.id);
+        return options_.append_entry ? append_replay_user_message(options_.append_entry, message.text, message.image_attachments, message.id)
+                                     : append_replay_user_message(store, message.text, message.image_attachments, message.id);
       }();
       if (!replayed)
         return replayed;
@@ -573,6 +633,18 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     return true;
   };
 
+  auto finalized_ids_result = [&]() {
+    if (options_.session_mutex)
+    {
+      std::lock_guard lock(*options_.session_mutex);
+      return persisted_provider_tool_call_ids(store);
+    }
+    return persisted_provider_tool_call_ids(store);
+  }();
+  if (!finalized_ids_result)
+    return std::unexpected(std::move(finalized_ids_result.error()));
+  auto finalized_provider_tool_call_ids = std::move(*finalized_ids_result);
+
   if (auto not_canceled = check_canceled_locked("before_turn_start"); !not_canceled)
   {
     return std::unexpected(std::move(not_canceled.error()));
@@ -589,6 +661,8 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       return std::unexpected(std::move(not_canceled.error()));
     }
   }
+  if (auto phase = publish_phase(options_, RunPhase::BuildingContext); !phase)
+    return std::unexpected(std::move(phase.error()));
   if (auto appended = append_active_turn_user_message_locked(user_message, image_attachments); !appended)
     return std::unexpected(appended.error());
 
@@ -632,6 +706,12 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     child_options.system_prompt = subagent_system_prompt(options_.system_prompt, request.subagent_system_prompt);
     child_options.tool_visibility = subagent_tool_visibility(options_.tool_visibility, request.tool_preset);
     child_options.max_tool_iterations = std::min<std::size_t>(child_options.max_tool_iterations, 6);
+    // Child history is independent. Never inherit a parent append callback:
+    // it may capture parent run/session ownership and would both mix histories
+    // and outlive the parent.
+    child_options.append_entry = nullptr;
+    child_options.parent_notification_sink = nullptr;
+    child_options.on_phase = nullptr;
     child_options.on_tool_event = nullptr;
     child_options.on_tool_progress = nullptr;
     child_options.on_stream_event = nullptr;
@@ -662,7 +742,13 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
         return std::unexpected(std::move(background_transport.error()));
       auto provider_instance = std::move(*background_provider);
       auto transport_instance = std::move(*background_transport);
-      auto parent_store = store.detached_copy_for_background_persistence();
+      auto parent_append = options_.parent_notification_sink;
+      // A standalone AgentLoop has no RuntimeSession owner. Its detached copy
+      // is proven inactive; RuntimeSession runs always carry the stable owner
+      // sink, never the generation-bound active append route.
+      std::optional<ava::session::SessionStore> parent_store;
+      if (!parent_append)
+        parent_store.emplace(store.detached_copy_for_background_persistence());
       child_options.permission_resolver = nullptr;
       child_options.question_resolver = nullptr;
       child_options.session_mutex = nullptr;
@@ -672,7 +758,8 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
         ava::session::SessionStore child_store;
         AgentLoopOptions child_options;
         std::string prompt;
-        ava::session::SessionStore parent_store;
+        SessionAppendSink parent_append;
+        std::optional<ava::session::SessionStore> parent_store;
         std::string task_id;
         std::string subagent_type;
         std::unique_ptr<ava::provider::Provider> provider_instance;
@@ -681,6 +768,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       auto run_state = std::make_shared<BackgroundTaskRunState>(BackgroundTaskRunState{.child_store = std::move(child_store),
                                                                                        .child_options = std::move(child_options),
                                                                                        .prompt = request.prompt,
+                                                                                       .parent_append = std::move(parent_append),
                                                                                        .parent_store = std::move(parent_store),
                                                                                        .task_id = task_id,
                                                                                        .subagent_type = request.subagent_type,
@@ -702,13 +790,14 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
               if (!context.stop_token.stop_requested())
               {
                 append_background_error_best_effort(run_state->child_store, error);
-                append_background_parent_error_best_effort(std::move(run_state->parent_store), run_state->task_id, run_state->subagent_type, error);
+                append_background_parent_error_best_effort(run_state->parent_append, run_state->parent_store, run_state->task_id, run_state->subagent_type,
+                                                           error);
               }
               return background_failure_completion(context, error);
             }
             return BackgroundJobCompletion{.state = BackgroundJobState::Completed,
                                            .final_text = child_result->final_text,
-                                           .stop_reason = child_result->stop_reason.empty() ? "completed" : child_result->stop_reason};
+                                           .stop_reason = std::string(ava::core::to_string(child_result->outcome))};
           });
       if (!job)
         return std::unexpected(std::move(job.error()));
@@ -733,7 +822,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
                                           .session_path = child_store.session_path(),
                                           .subagent_type = request.subagent_type,
                                           .final_text = child_result->final_text,
-                                          .stop_reason = child_result->stop_reason,
+                                          .stop_reason = std::string(ava::core::to_string(child_result->outcome)),
                                           .provider_iterations = child_result->provider_iterations,
                                           .tool_calls = child_result->tool_calls,
                                           .tool_iterations = child_result->tool_iterations};
@@ -748,16 +837,24 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
                                              options_,
                                              ToolProgressEntry{.call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
                                        },
+                                       .announce_execution_after_permission = options_.announce_execution_after_permission,
                                        .cancel_requested = options_.cancel_requested,
                                        .question_resolver = options_.question_resolver,
                                        .task_subagent_runner = run_task_subagent,
                                        .subagents = subagents,
+                                       .redact_permission_audit_arguments = options_.redact_permission_audit_arguments,
+                                       .require_explicit_file_permissions = options_.require_explicit_file_permissions,
+                                       .exact_file_access = options_.exact_file_access,
+                                       .command_executor = options_.command_executor,
                                        .lsp_diagnostics_provider = options_.lsp_diagnostics_provider,
                                        .plugin_global_plugins_dir = options_.plugin_global_plugins_dir,
                                        .plugin_project_plugins_dir = options_.plugin_project_plugins_dir,
                                        .plugin_enablement_file = options_.plugin_enablement_file,
                                        .include_project_plugins = options_.include_project_resources,
                                        .include_project_mcp_config = options_.include_project_resources,
+                                       .session_mcp_config = options_.session_mcp_config,
+                                       .exact_builtin_tool_names = options_.exact_builtin_tool_names,
+                                       .require_descriptor_secure_workspace = options_.require_descriptor_secure_workspace,
                                        .include_project_skills = options_.include_project_resources,
                                        .session_id = store.session_id(),
                                        .provider_id = options_.provider_id,
@@ -779,20 +876,30 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     }
   }
   std::optional<ToolDispatcher> dispatcher_storage;
-  try
+  if (options_.exact_builtin_tool_names || options_.require_descriptor_secure_workspace)
   {
-    dispatcher_storage.emplace(tool_context);
+    auto strict_dispatcher = ToolDispatcher::create_strict(tool_context);
+    if (!strict_dispatcher)
+      return std::unexpected(std::move(strict_dispatcher.error()));
+    dispatcher_storage.emplace(std::move(*strict_dispatcher));
   }
-  catch (...)
+  else
   {
-    // ToolDispatcher owns a copy of ToolContext. If only that observation
-    // setup cannot be prepared, retry with the exact baseline context.
-    if (!tool_context.observation)
-      throw;
-    auto observation = std::move(tool_context.observation);
-    tool_context.trace_context = {};
-    observation->account_external_failure();
-    dispatcher_storage.emplace(tool_context);
+    try
+    {
+      dispatcher_storage.emplace(tool_context);
+    }
+    catch (...)
+    {
+      // ToolDispatcher owns a copy of ToolContext. If only that observation
+      // setup cannot be prepared, retry with the exact baseline context.
+      if (!tool_context.observation)
+        throw;
+      auto observation = std::move(tool_context.observation);
+      tool_context.trace_context = {};
+      observation->account_external_failure();
+      dispatcher_storage.emplace(tool_context);
+    }
   }
   ToolDispatcher const& dispatcher = *dispatcher_storage;
 
@@ -844,7 +951,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     auto messages = build_messages_locked();
     if (!messages)
       return std::unexpected(messages.error());
-    auto const tool_schemas = options_.model_supports_tools ? ToolDispatcher::tool_schemas_json(tool_context) : std::vector<std::string>{};
+    auto const tool_schemas = options_.model_supports_tools ? dispatcher.registered_tool_schemas_json() : std::vector<std::string>{};
     ava::provider::ProviderRequest provider_request{.provider_id = options_.provider_id,
                                                     .model_id = options_.model_id,
                                                     .system_prompt = options_.system_prompt,
@@ -891,6 +998,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     std::vector<ava::provider::StreamEvent> provider_events;
     std::size_t streamed_assistant_text_bytes = 0;
     std::map<std::string, std::size_t> streamed_tool_argument_bytes;
+    std::unordered_set<std::string> current_provider_tool_call_ids;
     bool processed_stream_chunks = false;
     auto append_stream_events = [&](std::vector<ava::provider::StreamEvent> new_events, bool publish_all_events = true) -> ava::core::VoidResult {
       for (auto& event : new_events)
@@ -919,25 +1027,31 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
           }
           streamed_assistant_text_bytes += event_bytes;
         }
-        else if (event.type == ava::provider::StreamEventType::ToolCallStart)
+        else if (event.type == ava::provider::StreamEventType::ToolCallStart || event.type == ava::provider::StreamEventType::ToolCallDelta ||
+                 event.type == ava::provider::StreamEventType::ToolCallEnd)
         {
           if (auto valid_id = validate_provider_tool_call_id(event.tool_call_id); !valid_id)
           {
             return std::unexpected(std::move(valid_id.error()));
           }
-        }
-        else if (event.type == ava::provider::StreamEventType::ToolCallDelta)
-        {
-          if (auto valid_id = validate_provider_tool_call_id(event.tool_call_id); !valid_id)
+          if (finalized_provider_tool_call_ids.contains(event.tool_call_id))
           {
-            return std::unexpected(std::move(valid_id.error()));
+            auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "provider reused a finalized tool call id in the persistent session");
+            error.with_context("tool_call_id", event.tool_call_id);
+            error.with_context("provider_iteration", std::to_string(result.provider_iterations + 1));
+            error.with_context("hint", "provider tool call ids must remain unique for the complete persistent session");
+            return std::unexpected(std::move(error));
           }
-          auto& bytes = streamed_tool_argument_bytes[event.tool_call_id];
-          if (would_exceed(bytes, event.text.size(), options_.max_tool_argument_bytes))
+          current_provider_tool_call_ids.insert(event.tool_call_id);
+          if (event.type == ava::provider::StreamEventType::ToolCallDelta)
           {
-            return std::unexpected(output_limit_error("tool argument byte limit exceeded", "max_tool_argument_bytes", options_.max_tool_argument_bytes));
+            auto& bytes = streamed_tool_argument_bytes[event.tool_call_id];
+            if (would_exceed(bytes, event.text.size(), options_.max_tool_argument_bytes))
+            {
+              return std::unexpected(output_limit_error("tool argument byte limit exceeded", "max_tool_argument_bytes", options_.max_tool_argument_bytes));
+            }
+            bytes += event.text.size();
           }
-          bytes += event.text.size();
         }
         // Trace parser output before publishing the product event: an observer
         // failure is isolated and cannot suppress or reorder product output.
@@ -994,6 +1108,10 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       return {};
     };
 
+    if (auto phase = publish_phase(options_, RunPhase::AwaitingProvider); !phase)
+      return std::unexpected(std::move(phase.error()));
+    if (auto not_canceled = check_canceled_locked("before_provider_transport"); !not_canceled)
+      return std::unexpected(std::move(not_canceled.error()));
     if (provider_request.stream && effective_transport->supports_streaming())
     {
       auto stream_parser = provider.create_stream_parser();
@@ -1212,6 +1330,24 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       static_cast<void>(append_error_locked(turn.error()));
       return std::unexpected(turn.error());
     }
+    std::unordered_set<std::string> iteration_tool_call_ids;
+    for (auto const& call : turn->tool_calls)
+    {
+      if (!iteration_tool_call_ids.insert(call.id).second)
+        continue;  // One provider turn may merge multiple deltas for one finalized call.
+      if (!current_provider_tool_call_ids.contains(call.id) || finalized_provider_tool_call_ids.contains(call.id))
+      {
+        auto error =
+            ava::core::Error(ava::core::ErrorCategory::Provider, "provider reused or inconsistently finalized a tool call id in the persistent session");
+        error.with_context("tool_call_id", call.id);
+        error.with_context("provider_iteration", std::to_string(result.provider_iterations + 1));
+        error.with_context("hint", "provider tool call ids must remain unique for the complete persistent session");
+        static_cast<void>(append_error_locked(error));
+        return std::unexpected(std::move(error));
+      }
+    }
+    finalized_provider_tool_call_ids.insert(iteration_tool_call_ids.begin(), iteration_tool_call_ids.end());
+
     if (auto not_canceled = check_canceled_locked("before_assistant_append"); !not_canceled)
     {
       return std::unexpected(std::move(not_canceled.error()));
@@ -1231,9 +1367,29 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       accumulated_cost_known = false;
       result.cost_usd = std::nullopt;
     }
+    if (*turn->finish_reason == ava::provider::ProviderFinishReason::Cancelled)
+    {
+      result.final_text = turn->text;
+      result.tool_iterations = tool_iterations;
+      result.outcome = ava::core::RuntimeTerminalOutcome::Cancelled;
+      return result;
+    }
+    // Completing is the terminal arbitration boundary. Establish it before
+    // persisting a terminal assistant so an accepted stop cannot label durable
+    // success as canceled, while a later stop is a bounded no-op.
+    if (turn->tool_calls.empty())
+    {
+      if (auto phase = publish_phase(options_, RunPhase::Completing); !phase)
+        return std::unexpected(std::move(phase.error()));
+    }
     if (auto appended = append_reasoning_blocks_locked(turn->reasoning_blocks); !appended)
     {
       return std::unexpected(appended.error());
+    }
+    if (!turn->tool_calls.empty())
+    {
+      if (auto phase = publish_phase(options_, RunPhase::PersistingAssistant); !phase)
+        return std::unexpected(std::move(phase.error()));
     }
     if (auto appended = append_assistant_message_locked(turn->text, turn->tool_calls.size(), usage, cost_usd); !appended)
     {
@@ -1244,11 +1400,33 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     {
       result.final_text = turn->text;
       result.tool_iterations = tool_iterations;
-      result.stop_reason = turn->stop_reason.empty() ? "completed" : turn->stop_reason;
+      switch (*turn->finish_reason)
+      {
+        case ava::provider::ProviderFinishReason::Completed:
+          result.outcome = ava::core::RuntimeTerminalOutcome::Completed;
+          break;
+        case ava::provider::ProviderFinishReason::MaxTokens:
+          result.outcome = ava::core::RuntimeTerminalOutcome::MaxTokens;
+          break;
+        case ava::provider::ProviderFinishReason::Refusal:
+          result.outcome = ava::core::RuntimeTerminalOutcome::Refusal;
+          break;
+        case ava::provider::ProviderFinishReason::Cancelled:
+          result.outcome = ava::core::RuntimeTerminalOutcome::Cancelled;
+          break;
+        case ava::provider::ProviderFinishReason::ToolCalls:
+        case ava::provider::ProviderFinishReason::Error:
+          result.outcome = ava::core::RuntimeTerminalOutcome::Error;
+          break;
+      }
       return result;
     }
 
+    if (auto phase = publish_phase(options_, RunPhase::PreparingTools); !phase)
+      return std::unexpected(std::move(phase.error()));
     auto dispatch_and_commit_tool = [&](ProviderToolCall const& call) -> ava::core::Result<ToolDispatchResult> {
+      if (auto phase = publish_phase(options_, RunPhase::ExecutingTools); !phase)
+        return std::unexpected(std::move(phase.error()));
       if (auto not_canceled = check_canceled_locked("before_tool_dispatch"); !not_canceled)
       {
         return std::unexpected(std::move(not_canceled.error()));
@@ -1346,6 +1524,10 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     };
 
     auto run_parallel_epoch_and_commit = [&](std::span<ToolScheduleSlot const> epoch) -> ava::core::VoidResult {
+      // A parallel read/search epoch has one visible execution boundary; worker
+      // scheduling itself must not publish duplicate phase changes.
+      if (auto phase = publish_phase(options_, RunPhase::ExecutingTools); !phase)
+        return std::unexpected(std::move(phase.error()));
       if (auto not_canceled = check_canceled_locked("before_parallel_tool_epoch"); !not_canceled)
       {
         return std::unexpected(std::move(not_canceled.error()));
@@ -1484,15 +1666,19 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       }
     }
 
+    if (auto phase = publish_phase(options_, RunPhase::SettlingTools); !phase)
+      return std::unexpected(std::move(phase.error()));
     ++tool_iterations;
     result.tool_iterations = tool_iterations;
     if (tool_iterations >= options_.max_tool_iterations)
     {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "maximum tool iterations reached");
-      error.with_context("max_tool_iterations", std::to_string(options_.max_tool_iterations));
-      static_cast<void>(append_error_locked(error));
-      return std::unexpected(std::move(error));
+      if (auto phase = publish_phase(options_, RunPhase::Completing); !phase)
+        return std::unexpected(std::move(phase.error()));
+      result.outcome = ava::core::RuntimeTerminalOutcome::MaxTurnRequests;
+      return result;
     }
+    if (auto phase = publish_phase(options_, RunPhase::AwaitingProvider); !phase)
+      return std::unexpected(std::move(phase.error()));
   }
 }
 

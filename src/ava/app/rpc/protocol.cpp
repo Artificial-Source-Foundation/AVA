@@ -2,6 +2,7 @@
 #include "ava/app/rpc/protocol.h"
 #include "ava/session/session_store.h"
 #include "ava/core/json.h"
+#include "ava/core/strict_json.h"
 
 #include <algorithm>
 #include <cctype>
@@ -155,7 +156,8 @@ ava::core::Result<std::optional<std::string>> plugin_command_arguments_field(std
     {
       return std::unexpected(invalid_rpc("RPC arguments must be an object"));
     }
-    if (validate && (!arguments || !ava::core::json::is_valid_object(*arguments)))
+    if (validate && (!arguments || ava::core::validate_strict_json(*arguments, kMaxRpcNestingDepth) != ava::core::StrictJsonStatus::Valid ||
+                     !is_json_object_line(*arguments)))
     {
       return std::unexpected(invalid_rpc("RPC string arguments must contain a JSON object"));
     }
@@ -543,11 +545,49 @@ bool command_type_is(std::string_view type, std::initializer_list<std::string_vi
   return std::ranges::any_of(candidates, [type](std::string_view candidate) { return type == candidate; });
 }
 
+bool is_runtime_cancellation_error(ava::core::Error const& error)
+{
+  return error.message() == "agent loop canceled" || error.message() == "transport retry canceled" || error.message() == "transport request canceled";
+}
+
+std::string rpc_error_code(ava::core::Error const& error)
+{
+  for (auto context = error.context().rbegin(); context != error.context().rend(); ++context)
+  {
+    if (context->key == "rpc_error_code" && !context->value.empty())
+      return std::string(stable_rpc_error_code(context->value));
+  }
+  if (is_runtime_cancellation_error(error))
+    return "canceled";
+  switch (error.category())
+  {
+    case ava::core::ErrorCategory::InvalidArgument:
+      return "invalid_request";
+    case ava::core::ErrorCategory::Io:
+      return "io_error";
+    case ava::core::ErrorCategory::NotFound:
+      return "not_found";
+    case ava::core::ErrorCategory::PermissionDenied:
+      return "permission_denied";
+    case ava::core::ErrorCategory::Provider:
+      return "provider_error";
+    case ava::core::ErrorCategory::Session:
+      return "session_error";
+    case ava::core::ErrorCategory::Tool:
+      return "tool_error";
+    case ava::core::ErrorCategory::Unknown:
+      return "internal_error";
+  }
+  return std::string(stable_rpc_error_code("internal_error"));
+}
+
 }  // namespace
 
 ava::core::Error invalid_rpc(std::string message)
 {
-  return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
+  error.with_context("rpc_error_code", "invalid_request");
+  return error;
 }
 
 ava::core::VoidResult validate_protocol_version(RpcCommand const& command)
@@ -565,7 +605,9 @@ ava::core::VoidResult validate_protocol_version(RpcCommand const& command)
 
 std::string rpc_protocol_result_json()
 {
-  return "{\"protocol_version\":" + std::to_string(kRpcProtocolVersion) + ",\"supported_protocol_versions\":[" + std::to_string(kRpcProtocolVersion) +
+  return "{\"protocol_version\":" + std::to_string(kRpcProtocolVersions.protocol) + ",\"supported_protocol_versions\":[" +
+         std::to_string(kRpcProtocolVersions.protocol) + "],\"event_schema_version\":" + std::to_string(kRpcProtocolVersions.event_schema) +
+         ",\"supported_event_schema_versions\":[" + std::to_string(kRpcProtocolVersions.event_schema) +
          "],\"session_entry_version\":" + std::to_string(ava::session::kCurrentSessionEntryVersion) + ",\"supported_session_entry_versions\":[0,1,2," +
          std::to_string(ava::session::kCurrentSessionEntryVersion) +
          "],\"capabilities\":[\"direct_bash_rpc\"],\"direct_command_types\":[\"run_bash\",\"run_command\"]}";
@@ -573,7 +615,7 @@ std::string rpc_protocol_result_json()
 
 std::string parse_error_response_id(std::string_view line)
 {
-  if (!is_json_object_line(line))
+  if (!ava::core::json::is_valid_utf8(line) || !is_json_object_line(line))
     return "";
   auto id = ava::core::json::string_field(line, "id");
   if (!id || id->empty())
@@ -622,9 +664,16 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
 {
   if (!line.empty() && line.back() == '\r')
     line.remove_suffix(1);
+  if (!ava::core::json::is_valid_utf8(line))
+    return std::unexpected(rpc::invalid_rpc("RPC request is not valid UTF-8"));
   if (line.size() > rpc::kMaxRpcLineBytes)
     return std::unexpected(rpc::invalid_rpc("RPC request line is too large"));
-  if (!rpc::is_json_object_line(line) || !ava::core::json::is_valid_object(line))
+  auto const strict_status = ava::core::validate_strict_json(line, rpc::kMaxRpcNestingDepth);
+  if (strict_status == ava::core::StrictJsonStatus::NestingTooDeep)
+    return std::unexpected(rpc::invalid_rpc("RPC JSON nesting exceeds limit"));
+  if (strict_status == ava::core::StrictJsonStatus::DuplicateObjectKey)
+    return std::unexpected(rpc::invalid_rpc("RPC JSON object contains duplicate member names"));
+  if (strict_status != ava::core::StrictJsonStatus::Valid || !rpc::is_json_object_line(line))
     return std::unexpected(rpc::invalid_rpc("malformed RPC JSON object"));
 
   auto id = ava::core::json::string_field(line, "id");
@@ -638,55 +687,89 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   auto protocol_version = rpc::exact_optional_integer_field(line, "protocol_version");
   if (!protocol_version)
     return std::unexpected(std::move(protocol_version.error()));
-  auto request_id = ava::core::json::string_field(line, "request_id");
-  if (auto valid = rpc::validate_optional_rpc_identifier(request_id, "request_id"); !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
-  auto correlation_id = ava::core::json::string_field(line, "correlation_id");
-  if (auto valid = rpc::validate_optional_rpc_identifier(correlation_id, "correlation_id"); !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
-  auto provider = ava::core::json::string_field(line, "provider");
-  if (auto valid = rpc::validate_optional_rpc_identifier(provider, "provider"); !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
-  auto model = ava::core::json::string_field(line, "model");
-  if (auto valid = rpc::validate_optional_rpc_identifier(model, "model"); !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
-  auto plugin_id = ava::core::json::string_field(line, "plugin_id");
-  if (auto valid = rpc::validate_optional_rpc_identifier(plugin_id, "plugin_id"); !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
-  auto name = ava::core::json::string_field(line, "name");
-  if (auto valid = rpc::validate_optional_rpc_identifier(name, "name"); !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
+  auto selected_string = [&](std::string_view key, std::initializer_list<std::string_view> command_types) -> ava::core::Result<std::optional<std::string>> {
+    if (!rpc::command_type_is(*type, command_types))
+      return ava::core::json::string_field(line, key);
+    return rpc::exact_optional_string_field(line, key);
+  };
+
+  auto message = selected_string("message", {"prompt", "steer", "follow_up"});
+  if (!message)
+    return std::unexpected(std::move(message.error()));
+  auto instructions = selected_string("instructions", {"compact"});
+  if (!instructions)
+    return std::unexpected(std::move(instructions.error()));
+  auto request_id = selected_string("request_id", {"permission_reply", "question_reply"});
+  if (!request_id)
+    return std::unexpected(std::move(request_id.error()));
+  if (rpc::command_type_is(*type, {"permission_reply", "question_reply"}))
+    if (auto valid = rpc::validate_optional_rpc_identifier(*request_id, "request_id"); !valid)
+      return std::unexpected(std::move(valid.error()));
+  auto correlation_id = selected_string("correlation_id", {"permission_reply", "question_reply"});
+  if (!correlation_id)
+    return std::unexpected(std::move(correlation_id.error()));
+  if (rpc::command_type_is(*type, {"permission_reply", "question_reply"}))
+    if (auto valid = rpc::validate_optional_rpc_identifier(*correlation_id, "correlation_id"); !valid)
+      return std::unexpected(std::move(valid.error()));
+  auto provider = selected_string("provider", {"set_model", "summarize_branch"});
+  if (!provider)
+    return std::unexpected(std::move(provider.error()));
+  if (rpc::command_type_is(*type, {"set_model", "summarize_branch"}))
+    if (auto valid = rpc::validate_optional_rpc_identifier(*provider, "provider"); !valid)
+      return std::unexpected(std::move(valid.error()));
+  auto model = selected_string("model", {"set_model", "summarize_branch"});
+  if (!model)
+    return std::unexpected(std::move(model.error()));
+  if (rpc::command_type_is(*type, {"set_model", "summarize_branch"}))
+    if (auto valid = rpc::validate_optional_rpc_identifier(*model, "model"); !valid)
+      return std::unexpected(std::move(valid.error()));
+
+  auto plugin_id = selected_string("plugin_id", {"inspect_plugin", "remove_plugin", "enable_plugin", "disable_plugin", "list_plugin_prompts",
+                                                 "get_plugin_prompt", "list_plugin_skills", "get_plugin_skill", "run_plugin_command"});
+  if (!plugin_id)
+    return std::unexpected(std::move(plugin_id.error()));
+  if (rpc::command_type_is(*type, {"inspect_plugin", "remove_plugin", "enable_plugin", "disable_plugin", "list_plugin_prompts", "get_plugin_prompt",
+                                   "list_plugin_skills", "get_plugin_skill", "run_plugin_command"}))
+    if (auto valid = rpc::validate_optional_rpc_identifier(*plugin_id, "plugin_id"); !valid)
+      return std::unexpected(std::move(valid.error()));
+  auto name = selected_string("name", {"invoke_command", "get_plugin_prompt", "get_plugin_skill", "run_plugin_command"});
+  if (!name)
+    return std::unexpected(std::move(name.error()));
+  if (rpc::command_type_is(*type, {"invoke_command", "get_plugin_prompt", "get_plugin_skill", "run_plugin_command"}))
+    if (auto valid = rpc::validate_optional_rpc_identifier(*name, "name"); !valid)
+      return std::unexpected(std::move(valid.error()));
   auto const is_plugin_command = *type == "run_plugin_command";
   auto arguments = rpc::plugin_command_arguments_field(line, is_plugin_command);
   if (!arguments)
-  {
     return std::unexpected(std::move(arguments.error()));
-  }
-  auto server_id = ava::core::json::string_field(line, "server_id");
-  if (auto valid = rpc::validate_optional_rpc_identifier(server_id, "server_id"); !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
-  auto reasoning_budget_tokens = rpc::exact_optional_integer_field(line, "reasoning_budget_tokens");
+  auto server_id = selected_string("server_id", {"inspect_mcp_server", "list_mcp_tools", "restart_mcp_server"});
+  if (!server_id)
+    return std::unexpected(std::move(server_id.error()));
+  if (rpc::command_type_is(*type, {"inspect_mcp_server", "list_mcp_tools", "restart_mcp_server"}))
+    if (auto valid = rpc::validate_optional_rpc_identifier(*server_id, "server_id"); !valid)
+      return std::unexpected(std::move(valid.error()));
+
+  auto reasoning_level = selected_string("reasoning_level", {"set_reasoning"});
+  if (!reasoning_level)
+    return std::unexpected(std::move(reasoning_level.error()));
+  auto reasoning_display = selected_string("reasoning_display", {"set_reasoning"});
+  if (!reasoning_display)
+    return std::unexpected(std::move(reasoning_display.error()));
+  ava::core::Result<std::optional<long long>> reasoning_budget_tokens = std::optional<long long>{};
+  if (*type == "set_reasoning")
+    reasoning_budget_tokens = rpc::exact_optional_integer_field(line, "reasoning_budget_tokens");
   if (!reasoning_budget_tokens)
     return std::unexpected(std::move(reasoning_budget_tokens.error()));
-  auto command_arguments = ava::core::json::string_field(line, "command_arguments");
-  if (auto valid = rpc::validate_optional_rpc_text(command_arguments, "command_arguments", rpc::kMaxRpcLineBytes / 2); !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
+
+  auto decision = selected_string("decision", {"permission_reply"});
+  if (!decision)
+    return std::unexpected(std::move(decision.error()));
+  auto command_arguments = selected_string("command_arguments", {"invoke_command"});
+  if (!command_arguments)
+    return std::unexpected(std::move(command_arguments.error()));
+  if (*type == "invoke_command")
+    if (auto valid = rpc::validate_optional_rpc_text(*command_arguments, "command_arguments", rpc::kMaxRpcLineBytes / 2); !valid)
+      return std::unexpected(std::move(valid.error()));
 
   auto output_path = std::optional<std::string>{};
   if (*type == "export_html")
@@ -712,7 +795,10 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   auto rule_id = std::optional<std::string>{};
   if (rpc::command_type_is(*type, {"permission_rule_remove"}))
   {
-    rule_id = ava::core::json::string_field(line, "rule_id");
+    auto parsed_rule_id = rpc::exact_optional_string_field(line, "rule_id");
+    if (!parsed_rule_id)
+      return std::unexpected(std::move(parsed_rule_id.error()));
+    rule_id = std::move(*parsed_rule_id);
     if (auto valid = rpc::validate_optional_rpc_identifier(rule_id, "rule_id"); !valid)
     {
       return std::unexpected(std::move(valid.error()));
@@ -722,7 +808,10 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   auto grant_id = std::optional<std::string>{};
   if (*type == "permission_grant_revoke")
   {
-    grant_id = ava::core::json::string_field(line, "grant_id");
+    auto parsed_grant_id = rpc::exact_optional_string_field(line, "grant_id");
+    if (!parsed_grant_id)
+      return std::unexpected(std::move(parsed_grant_id.error()));
+    grant_id = std::move(*parsed_grant_id);
     if (auto valid = rpc::validate_optional_rpc_identifier(grant_id, "grant_id"); !valid)
     {
       return std::unexpected(std::move(valid.error()));
@@ -749,38 +838,58 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   }
   if (rpc::command_type_is(*type, {"permission_rule_add"}))
   {
-    action = ava::core::json::string_field(line, "action");
+    auto parsed_action = rpc::exact_optional_string_field(line, "action");
+    if (!parsed_action)
+      return std::unexpected(std::move(parsed_action.error()));
+    action = std::move(*parsed_action);
     if (auto valid = rpc::validate_optional_rpc_identifier(action, "action"); !valid)
     {
       return std::unexpected(std::move(valid.error()));
     }
-    operation = ava::core::json::string_field(line, "operation");
+    auto parsed_operation = rpc::exact_optional_string_field(line, "operation");
+    if (!parsed_operation)
+      return std::unexpected(std::move(parsed_operation.error()));
+    operation = std::move(*parsed_operation);
     if (auto valid = rpc::validate_optional_rpc_identifier(operation, "operation"); !valid)
     {
       return std::unexpected(std::move(valid.error()));
     }
-    scope = ava::core::json::string_field(line, "scope");
+    auto parsed_scope = rpc::exact_optional_string_field(line, "scope");
+    if (!parsed_scope)
+      return std::unexpected(std::move(parsed_scope.error()));
+    scope = std::move(*parsed_scope);
     if (auto valid = rpc::validate_optional_rpc_identifier(scope, "scope"); !valid)
     {
       return std::unexpected(std::move(valid.error()));
     }
-    mode = ava::core::json::string_field(line, "mode");
+    auto parsed_mode = rpc::exact_optional_string_field(line, "mode");
+    if (!parsed_mode)
+      return std::unexpected(std::move(parsed_mode.error()));
+    mode = std::move(*parsed_mode);
     if (auto valid = rpc::validate_optional_rpc_identifier(mode, "mode"); !valid)
     {
       return std::unexpected(std::move(valid.error()));
     }
-    tool_name = ava::core::json::string_field(line, "tool_name");
+    auto parsed_tool_name = rpc::exact_optional_string_field(line, "tool_name");
+    if (!parsed_tool_name)
+      return std::unexpected(std::move(parsed_tool_name.error()));
+    tool_name = std::move(*parsed_tool_name);
     if (auto valid = rpc::validate_optional_rpc_identifier(tool_name, "tool_name"); !valid)
     {
       return std::unexpected(std::move(valid.error()));
     }
-    target_path = ava::core::json::string_field(line, "target_path");
+    auto parsed_target_path = rpc::exact_optional_string_field(line, "target_path");
+    if (!parsed_target_path)
+      return std::unexpected(std::move(parsed_target_path.error()));
+    target_path = std::move(*parsed_target_path);
     if (auto valid = rpc::validate_optional_rpc_text(target_path, "target_path", rpc::kMaxRpcRulePathBytes); !valid)
     {
       return std::unexpected(std::move(valid.error()));
     }
-    auto const path_alias = ava::core::json::string_field(line, "path");
-    if (auto valid = rpc::validate_optional_rpc_text(path_alias, "path", rpc::kMaxRpcRulePathBytes); !valid)
+    auto path_alias = rpc::exact_optional_string_field(line, "path");
+    if (!path_alias)
+      return std::unexpected(std::move(path_alias.error()));
+    if (auto valid = rpc::validate_optional_rpc_text(*path_alias, "path", rpc::kMaxRpcRulePathBytes); !valid)
     {
       return std::unexpected(std::move(valid.error()));
     }
@@ -797,7 +906,10 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   auto reason = std::optional<std::string>{};
   if (rpc::command_type_is(*type, {"permission_reply", "permission_rule_add", "summarize_branch"}))
   {
-    reason = ava::core::json::string_field(line, "reason");
+    auto parsed_reason = rpc::exact_optional_string_field(line, "reason");
+    if (!parsed_reason)
+      return std::unexpected(std::move(parsed_reason.error()));
+    reason = std::move(*parsed_reason);
     if (auto valid = rpc::validate_optional_rpc_text(reason, "reason", rpc::kMaxRpcReasonBytes); !valid)
     {
       return std::unexpected(std::move(valid.error()));
@@ -909,12 +1021,18 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
       return std::unexpected(std::move(valid.error()));
     }
     selected_options = std::move(*parsed_selected_options);
-    answer = ava::core::json::string_field(line, "answer");
+    auto parsed_answer = rpc::exact_optional_string_field(line, "answer");
+    if (!parsed_answer)
+      return std::unexpected(std::move(parsed_answer.error()));
+    answer = std::move(*parsed_answer);
     if (auto valid = rpc::validate_optional_rpc_text(answer, "answer", rpc::kMaxRpcQuestionAnswerBytes); !valid)
     {
       return std::unexpected(std::move(valid.error()));
     }
-    selected = ava::core::json::string_field(line, "selected");
+    auto parsed_selected = rpc::exact_optional_string_field(line, "selected");
+    if (!parsed_selected)
+      return std::unexpected(std::move(parsed_selected.error()));
+    selected = std::move(*parsed_selected);
     if (auto valid = rpc::validate_optional_rpc_text(selected, "selected", rpc::kMaxRpcQuestionAnswerBytes); !valid)
     {
       return std::unexpected(std::move(valid.error()));
@@ -955,30 +1073,30 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
     }
   }
 
-  auto path = rpc::exact_optional_string_field(line, "path");
+  ava::core::Result<std::optional<std::string>> path = std::optional<std::string>{};
+  if (rpc::command_type_is(*type, {"validate_plugin", "install_plugin", "permission_rule_add"}))
+    path = rpc::exact_optional_string_field(line, "path");
   if (!path)
     return std::unexpected(std::move(path.error()));
   if (auto valid = rpc::validate_optional_rpc_text(*path, "path", rpc::kMaxRpcRulePathBytes); !valid)
-  {
     return std::unexpected(std::move(valid.error()));
-  }
 
   return RpcCommand{.id = std::move(*id),
                     .type = std::move(*type),
                     .protocol_version = std::move(*protocol_version),
-                    .message = ava::core::json::string_field(line, "message"),
+                    .message = std::move(*message),
                     .session_id = std::move(session_id),
-                    .provider = std::move(provider),
-                    .model = std::move(model),
-                    .instructions = ava::core::json::string_field(line, "instructions"),
-                    .reasoning_level = ava::core::json::string_field(line, "reasoning_level"),
+                    .provider = std::move(*provider),
+                    .model = std::move(*model),
+                    .instructions = std::move(*instructions),
+                    .reasoning_level = std::move(*reasoning_level),
                     .reasoning_budget_tokens = std::move(*reasoning_budget_tokens),
-                    .reasoning_display = ava::core::json::string_field(line, "reasoning_display"),
-                    .request_id = std::move(request_id),
-                    .correlation_id = std::move(correlation_id),
+                    .reasoning_display = std::move(*reasoning_display),
+                    .request_id = std::move(*request_id),
+                    .correlation_id = std::move(*correlation_id),
                     .grant_id = std::move(grant_id),
                     .rule_id = std::move(rule_id),
-                    .decision = ava::core::json::string_field(line, "decision"),
+                    .decision = std::move(*decision),
                     .action = std::move(action),
                     .operation = std::move(operation),
                     .scope = std::move(scope),
@@ -995,11 +1113,11 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
                     .selected_options = std::move(selected_options),
                     .attachments = std::move(attachments),
                     .images = std::move(images),
-                    .plugin_id = std::move(plugin_id),
-                    .name = std::move(name),
+                    .plugin_id = std::move(*plugin_id),
+                    .name = std::move(*name),
                     .arguments = std::move(*arguments),
-                    .command_arguments = std::move(command_arguments),
-                    .server_id = std::move(server_id),
+                    .command_arguments = std::move(*command_arguments),
+                    .server_id = std::move(*server_id),
                     .output_path = std::move(output_path),
                     .path = std::move(*path),
                     .target_path = std::move(target_path),
@@ -1023,6 +1141,8 @@ std::string serialize_rpc_error_jsonl(std::string_view id, ava::core::Error cons
 {
   std::string json = "{\"id\":\"" + ava::core::json::escape(id) + "\",\"type\":\"response\",\"success\":false,\"error\":{";
   json += rpc::string_field_json("category", ava::core::to_string(error.category()));
+  json += ',';
+  json += rpc::string_field_json("code", rpc::rpc_error_code(error));
   json += ',';
   json += rpc::string_field_json("message", error.message());
   json += ',';

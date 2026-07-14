@@ -13,6 +13,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -61,6 +62,22 @@ bool wait_for_process_group_exit(pid_t pgid)
   }
   return !process_group_exists(pgid);
 }
+
+class RecordingCommandExecutor final : public ava::tools::CommandExecutor
+{
+ public:
+  [[nodiscard]] ava::core::Result<ava::tools::CommandExecutionResult> execute(ava::tools::CommandExecutionRequest request) const override
+  {
+    requests.push_back(std::move(request));
+    if (fail)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "injected command execution failed"));
+    return result;
+  }
+
+  mutable std::vector<ava::tools::CommandExecutionRequest> requests;
+  ava::tools::CommandExecutionResult result;
+  bool fail = false;
+};
 
 class StaticTransport final : public ava::provider::Transport
 {
@@ -120,9 +137,10 @@ void test_bash_tool()
   }
 
   auto capped_output = ava::tools::run_bash(context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_bytes = 4});
-  expect(capped_output && capped_output->exit_code == 0 && capped_output->truncated && capped_output->byte_limited && capped_output->output.size() == 4 &&
-             capped_output->output_bytes == capped_output->output.size() && capped_output->total_bytes > capped_output->output.size(),
-         "run_bash bounds retained output while reporting total bytes");
+  expect(capped_output && capped_output->exit_code == 0 && capped_output->truncated && capped_output->byte_limited && capped_output->totals_known &&
+             capped_output->output.size() == 4 && capped_output->output_bytes == capped_output->output.size() &&
+             capped_output->total_bytes > capped_output->output.size(),
+         "local run_bash bounds retained output while reporting exact total bytes");
 
   ava::tools::ToolContext const line_context{
       .workspace_dir = temp_root(),
@@ -132,9 +150,9 @@ void test_bash_tool()
       }};
   auto line_capped_output = ava::tools::run_bash(line_context, "seq 1 5", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_lines = 2});
   expect(line_capped_output && line_capped_output->exit_code == 0 && line_capped_output->truncated && line_capped_output->line_limited &&
-             !line_capped_output->byte_limited && line_capped_output->output == "4\n5\n" && line_capped_output->total_lines == 5 &&
-             line_capped_output->output_lines == 2 && line_capped_output->omitted_lines == 3,
-         "run_bash retains output by line tail before applying byte caps");
+             !line_capped_output->byte_limited && line_capped_output->totals_known && line_capped_output->output == "4\n5\n" &&
+             line_capped_output->total_lines == 5 && line_capped_output->output_lines == 2 && line_capped_output->omitted_lines == 3,
+         "local run_bash retains output by line tail and reports exact totals before applying byte caps");
 
   std::vector<ava::tools::ToolProgressEvent> bash_progress;
   ava::tools::ToolContext const progress_context{.workspace_dir = temp_root(),
@@ -309,6 +327,45 @@ void test_bash_tool()
   expect(!ask_failed && ask_failed.error().format().find("resolution: resolver_failed") != std::string::npos, "run_bash fails closed when resolver fails");
 }
 
+void test_injected_command_executor()
+{
+  auto const workspace = temp_root() / "injected-command-workspace";
+  std::filesystem::create_directories(workspace);
+  auto executor = std::make_shared<RecordingCommandExecutor>();
+  executor->result = ava::tools::CommandExecutionResult{.exit_code = 0, .output = "one\ntwo\nthree\n"};
+  int prompts = 0;
+  ava::tools::ToolContext context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++prompts;
+        expect(prompt.operation == ava::permissions::Operation::RunCommand, "injected command permission uses the command operation");
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .command_executor = executor};
+  auto result =
+      ava::tools::run_bash(context, "printf 'one two'", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(900), .max_bytes = 8, .max_lines = 2});
+  expect(result && prompts == 1 && executor->requests.size() == 1 && executor->requests.front().argv == std::vector<std::string>({"printf", "one two"}) &&
+             executor->requests.front().cwd == std::filesystem::canonical(workspace) && executor->requests.front().timeout == std::chrono::milliseconds(900) &&
+             executor->requests.front().output_byte_limit == 8 && result->line_limited && result->totals_known && result->total_lines == 3 &&
+             result->total_bytes == executor->result.output.size() && result->output == "three\n",
+         "non-truncated injected command execution receives parsed argv and canonical cwd while local bounds retain exact totals");
+
+  ava::tools::ToolContext denied = context;
+  denied.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Deny;
+  };
+  auto denied_result = ava::tools::run_bash(denied, "touch denied-marker");
+  auto malformed = ava::tools::run_bash(context, "printf ok; touch denied-marker");
+  expect(!denied_result && !malformed && executor->requests.size() == 1 && !std::filesystem::exists(workspace / "denied-marker"),
+         "permission denial and local argv rejection happen before an injected command callback");
+
+  executor->fail = true;
+  auto failed = ava::tools::run_bash(context, "true");
+  expect(!failed && failed.error().message() == "injected command execution failed",
+         "an installed command executor failure never falls back to local fork/exec");
+}
+
 void test_webfetch_tool()
 {
   std::error_code remove_error;
@@ -481,6 +538,7 @@ void test_websearch_tool()
 void run_tools_process_network_tests()
 {
   test_bash_tool();
+  test_injected_command_executor();
   test_webfetch_tool();
   test_websearch_tool();
 }

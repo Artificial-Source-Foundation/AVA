@@ -143,8 +143,8 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(std::vector<ava::pro
     else if (event.type == ava::provider::StreamEventType::Done)
     {
       done = true;
-      if (!event.stop_reason.empty())
-        turn.stop_reason = event.stop_reason;
+      if (event.finish_reason)
+        turn.finish_reason = event.finish_reason;
     }
     else if (event.type == ava::provider::StreamEventType::Error)
     {
@@ -154,9 +154,18 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(std::vector<ava::pro
     }
   }
   finish_reasoning();
-  if (!done && turn.text.empty() && turn.reasoning_blocks.empty() && turn.tool_calls.empty())
+  if (!done)
   {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "provider response was empty"));
+    auto const message = events.empty() ? "provider response was empty" : "provider response ended without a terminal outcome";
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, message));
+  }
+  if (!turn.finish_reason || *turn.finish_reason == ava::provider::ProviderFinishReason::Error)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "provider returned a failed or unrecognized terminal outcome"));
+  }
+  if (*turn.finish_reason == ava::provider::ProviderFinishReason::ToolCalls && turn.tool_calls.empty())
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "provider reported tool calls without a valid tool call"));
   }
   return turn;
 }

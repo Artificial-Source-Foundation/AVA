@@ -1,0 +1,3 @@
+{"id":"req-1","type":"response","success":true,"result":{"protocol_version":1}}
+{"id":"bad-1","type":"response","success":false,"error":{"category":"invalid_argument","code":"invalid_request","message":"malformed RPC JSON object","details":"invalid_argument: malformed RPC JSON object\n  rpc_error_code: invalid_request"}}
+{"schema_version":1,"event_id":"event-1","timestamp":"2026-07-12T00:00:00Z","session_id":"session-1","request_id":"prompt-1","correlation_id":"prompt-1","name":"message_update","type":"message_update","payload_type":"message","payload":{"text":"hello","status":"streaming"},"text":"hello","status":"streaming"}

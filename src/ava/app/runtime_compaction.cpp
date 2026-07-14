@@ -309,8 +309,7 @@ ava::core::Result<std::string> generate_compaction_summary(RuntimeSession const&
     try
     {
       observed_transport.emplace(*summary_transport,
-                                 ava::provider::TransportObservation{.observation = summary_options.observation,
-                                                                      .context = summary_options.trace_context});
+                                 ava::provider::TransportObservation{.observation = summary_options.observation, .context = summary_options.trace_context});
       summary_transport = &*observed_transport;
     }
     catch (...)
@@ -480,13 +479,16 @@ ava::core::Result<bool> compact_runtime_context(RuntimeSession& session, ava::se
         last_current_entries = current_entries->size();
         return false;
       }
-      auto appended = ava::session::append_manual_compaction(store, ava::session::ManualCompactionRequest{.summary = *summary,
-                                                                                                          .instructions = "",
-                                                                                                          .config = *config,
-                                                                                                          .estimated_tokens = estimated_tokens,
-                                                                                                          .threshold_tokens = threshold_tokens,
-                                                                                                          .trigger = trigger_text,
-                                                                                                          .recent_context = *recent_context});
+      auto entry = ava::session::make_manual_compaction_entry(ava::session::ManualCompactionRequest{.summary = *summary,
+                                                                                                    .instructions = "",
+                                                                                                    .config = *config,
+                                                                                                    .estimated_tokens = estimated_tokens,
+                                                                                                    .threshold_tokens = threshold_tokens,
+                                                                                                    .trigger = trigger_text,
+                                                                                                    .recent_context = *recent_context});
+      if (!entry)
+        return std::unexpected(std::move(entry.error()));
+      auto appended = options.active_append_route ? options.active_append_route(std::move(*entry)) : session.append_owned(std::move(*entry));
       if (!appended)
         return std::unexpected(std::move(appended.error()));
       return true;

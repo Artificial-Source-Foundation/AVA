@@ -163,7 +163,7 @@ void run_live_smoke_case(ava::provider::ProviderRegistry& registry, ava::provide
     if (event.type == ava::provider::StreamEventType::Done)
     {
       saw_done = true;
-      stop_reason = event.stop_reason;
+      stop_reason = event.finish_reason ? std::string(ava::provider::to_string(*event.finish_reason)) : std::string{};
     }
   }
   if (!saw_text || !saw_done)

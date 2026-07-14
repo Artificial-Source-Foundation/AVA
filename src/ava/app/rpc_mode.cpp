@@ -3,6 +3,7 @@
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/rpc/handlers.h"
+#include "ava/app/rpc/input.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/prompt_worker.h"
 #include "ava/app/rpc/protocol.h"
@@ -18,8 +19,11 @@
 #include "ava/provider/registry.h"
 
 #include <atomic>
+#include <cerrno>
+#include <cstring>
 #include <filesystem>
 #include <functional>
+#include <iostream>
 #include <istream>
 #include <mutex>
 #include <optional>
@@ -29,10 +33,47 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <signal.h>
+#include <unistd.h>
 #include "debug.h"
 
 namespace ava::app {
 namespace {
+
+class ScopedRpcSignalIgnore
+{
+ public:
+  explicit ScopedRpcSignalIgnore(int signal_number) : signal_number_(signal_number)
+  {
+    struct sigaction ignored{};
+    ignored.sa_handler = SIG_IGN;
+    sigemptyset(&ignored.sa_mask);
+    if (sigaction(signal_number_, &ignored, &previous_) == 0)
+      installed_ = true;
+    else
+      error_number_ = errno;
+  }
+
+  ScopedRpcSignalIgnore(ScopedRpcSignalIgnore const&) = delete;
+  ScopedRpcSignalIgnore& operator=(ScopedRpcSignalIgnore const&) = delete;
+  ScopedRpcSignalIgnore(ScopedRpcSignalIgnore&&) = delete;
+  ScopedRpcSignalIgnore& operator=(ScopedRpcSignalIgnore&&) = delete;
+
+  ~ScopedRpcSignalIgnore()
+  {
+    if (installed_)
+      static_cast<void>(sigaction(signal_number_, &previous_, nullptr));
+  }
+
+  [[nodiscard]] bool installed() const noexcept { return installed_; }
+  [[nodiscard]] int error_number() const noexcept { return error_number_; }
+
+ private:
+  int signal_number_ = 0;
+  int error_number_ = 0;
+  bool installed_ = false;
+  struct sigaction previous_{};
+};
 
 std::filesystem::path resolve_rpc_attachment_path(std::filesystem::path const& current_dir, std::string const& attachment_path)
 {
@@ -118,36 +159,40 @@ struct RpcDirectCommandWorkerOptions
   std::string command;
 };
 
+struct RpcCompactionWorkerOptions
+{
+  RuntimeSession& session;
+  std::mutex& session_mutex;
+  rpc::RpcOutput& output;
+  rpc::RpcRunState& run_state;
+  ava::provider::Provider const& injected_provider;
+  std::string injected_provider_id;
+  ava::provider::Transport& transport;
+  ava::provider::Transport& auth_transport;
+  RuntimeRunOptions runtime_options;
+  std::string request_id;
+  std::optional<std::string> instructions;
+};
+
 std::jthread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions options)
 {
   return std::jthread([options = std::move(options)](std::stop_token stop_token) mutable {
-    auto cleanup_active_run = [&](std::string_view reason) -> bool {
-      auto cleared = rpc::deactivate_and_clear_queued_messages(options.run_state);
-      if (auto written = rpc::write_skipped_queue_events(options.output, options.session, options.session_mutex, cleared, reason); !written)
-      {
+    auto finish = [&](ava::core::Result<std::string> result) {
+      auto const reason = (stop_token.stop_requested() || rpc::cancel_requested(options.run_state)) ? std::string_view("canceled")
+                                                                                                    : std::string_view("run_completed_before_safe_point");
+      auto cleared = rpc::begin_terminal_publication(options.run_state);
+      ava::core::VoidResult written;
+      if (result)
+        written = rpc::write_success(options.output, options.request_id, *result);
+      else
+        written = rpc::write_error(options.output, options.request_id, result.error());
+      if (written)
+        written = rpc::write_skipped_queue_events(options.output, options.session, options.session_mutex, cleared, reason);
+      if (written)
+        written = rpc::write_follow_up_errors(options.output, options.run_state, cleared.follow_up_messages, reason);
+      rpc::complete_terminal_publication(options.run_state, options.request_id);
+      if (!written)
         rpc::record_async_error(options.run_state, std::move(written.error()));
-        return false;
-      }
-      if (auto written = rpc::write_follow_up_errors(options.output, cleared.follow_up_messages, reason); !written)
-      {
-        rpc::record_async_error(options.run_state, std::move(written.error()));
-        return false;
-      }
-      return true;
-    };
-
-    auto finish_reason = [&] {
-      return (stop_token.stop_requested() || rpc::cancel_requested(options.run_state)) ? std::string_view("canceled")
-                                                                                       : std::string_view("run_completed_before_safe_point");
-    };
-
-    auto finish_with_error = [&](ava::core::Error error) {
-      if (!cleanup_active_run(finish_reason()))
-        return;
-      if (auto written = rpc::write_error(options.output, options.request_id, error); !written)
-      {
-        rpc::record_async_error(options.run_state, std::move(written.error()));
-      }
     };
 
     auto policy_permission_resolver = options.runtime_options.permission_resolver;
@@ -169,23 +214,90 @@ std::jthread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions option
                                                     .session_mutex = &options.session_mutex});
     if (!result)
     {
-      finish_with_error(std::move(result.error()));
+      finish(std::unexpected(std::move(result.error())));
       return;
     }
     if (!result->handled)
     {
       auto error = rpc::invalid_rpc("command not found");
       error.with_context("type", "run_command");
-      finish_with_error(std::move(error));
+      finish(std::unexpected(std::move(error)));
+      return;
+    }
+    finish(rpc::command_result_json(*result));
+  });
+}
+
+std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
+{
+  return std::jthread([options = std::move(options)](std::stop_token stop_token) mutable {
+    auto finish = [&](ava::core::Result<std::string> result) {
+      static_cast<void>(rpc::begin_terminal_publication(options.run_state));
+      ava::core::VoidResult written;
+      if (result)
+        written = rpc::write_success(options.output, options.request_id, *result);
+      else
+        written = rpc::write_error(options.output, options.request_id, result.error());
+      rpc::complete_terminal_publication(options.run_state, options.request_id);
+      if (!written)
+        rpc::record_async_error(options.run_state, std::move(written.error()));
+    };
+
+    ava::config::XdgPaths paths;
+    std::string provider_id;
+    ava::core::Result<rpc::ProviderHandle> selected_provider = std::unexpected(rpc::invalid_rpc("compact provider was not selected"));
+    {
+      std::lock_guard lock(options.session_mutex);
+      paths = options.session.paths;
+      provider_id = options.session.model.provider_id;
+      selected_provider = rpc::provider_for_session_model(options.session, options.injected_provider_id, options.injected_provider);
+    }
+    if (!selected_provider)
+    {
+      finish(std::unexpected(std::move(selected_provider.error())));
       return;
     }
 
-    if (!cleanup_active_run(finish_reason()))
-      return;
-    if (auto written = rpc::write_success(options.output, options.request_id, rpc::command_result_json(*result)); !written)
+    auto compact_runtime_options =
+        rpc::ensure_prompt_runtime_options(paths, provider_id, std::move(options.runtime_options), options.auth_transport, "compact");
+    if (!compact_runtime_options)
     {
-      rpc::record_async_error(options.run_state, std::move(written.error()));
+      finish(std::unexpected(std::move(compact_runtime_options.error())));
+      return;
     }
+
+    auto base_cancel_requested = compact_runtime_options->cancel_requested;
+    auto compact_cancel_requested = [&run_state = options.run_state, stop_token, base_cancel_requested] {
+      return stop_token.stop_requested() || rpc::cancel_requested(run_state) || (base_cancel_requested && base_cancel_requested());
+    };
+    compact_runtime_options->cancel_requested = compact_cancel_requested;
+
+    EventBus event_bus;
+    rpc::subscribe_event_envelope_writer(event_bus, options.output);
+    auto summary_generator =
+        CompactionSummaryGenerator([&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
+                                       std::string_view instructions, std::size_t estimated_tokens) {
+          return generate_compaction_summary(options.session, entries, config, instructions, estimated_tokens, selected_provider->get(), options.transport,
+                                             *compact_runtime_options);
+        });
+    std::string slash_command = "/compact";
+    if (options.instructions)
+      slash_command += " " + *options.instructions;
+    auto command_result = run_command(options.session, CommandRequest{
+                                                           .command = std::move(slash_command),
+                                                           .event_sink = make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(options.request_id)),
+                                                           .permission_resolver = compact_runtime_options->permission_resolver,
+                                                           .compaction_summary_generator = std::move(summary_generator),
+                                                           .cancel_requested = std::move(compact_cancel_requested),
+                                                           .session_mutex = &options.session_mutex,
+                                                           .propagate_compaction_errors = true,
+                                                       });
+    if (!command_result)
+    {
+      finish(std::unexpected(std::move(command_result.error())));
+      return;
+    }
+    finish(rpc::command_result_json(*command_result));
   });
 }
 
@@ -193,7 +305,7 @@ std::jthread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions option
 
 ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options, ava::provider::Provider const& provider,
                                    ava::provider::Transport& transport, ava::provider::Transport& auth_transport, RuntimeRunOptions runtime_options,
-                                   std::istream& in, std::ostream& out)
+                                   rpc::RpcLineReader& input, std::ostream& out)
 {
   // This function is called first-thing after creating a thread.
   Debug(NAMESPACE_DEBUG::init_thread("run_rpc_loop"));
@@ -213,22 +325,21 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
   std::string const injected_provider_id = session.model.provider_id;
 
   auto reap_finished_prompt = [&] {
-    if (prompt_worker && !rpc::active_run(run_state))
-    {
+    if (prompt_worker && rpc::async_worker_reap_ready(run_state))
       prompt_worker.reset();
-    }
   };
 
   output.on_write_failure = [&] {
     static_cast<void>(rpc::close_input_and_cancel(run_state));
     static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
+    input.cancel();
   };
 
   std::string line;
   std::optional<ava::core::Error> input_read_error;
   while (true)
   {
-    auto read_line = rpc::read_rpc_line_bounded(in, line);
+    auto read_line = input.read_line(line);
     if (!read_line)
     {
       if (read_line.error().category() == ava::core::ErrorCategory::InvalidArgument)
@@ -257,6 +368,23 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     if (auto valid_version = rpc::validate_protocol_version(*command); !valid_version)
     {
       if (auto written = rpc::write_error(output, command->id, valid_version.error()); !written)
+        return written;
+      continue;
+    }
+    if (!rpc::is_rpc_command_type(command->type))
+    {
+      auto error = rpc::invalid_rpc("unknown RPC command type");
+      error.with_context("type", command->type);
+      if (auto written = rpc::write_error(output, command->id, error); !written)
+        return written;
+      continue;
+    }
+    auto const admission = rpc::await_command_admission(run_state, command->id, command->type != "cancel");
+    if (admission == rpc::RpcCommandAdmission::InputClosed)
+      break;
+    if (admission == rpc::RpcCommandAdmission::DuplicateRequestId)
+    {
+      if (auto written = rpc::write_error(output, command->id, rpc::duplicate_request_id_error(command->id)); !written)
         return written;
       continue;
     }
@@ -415,7 +543,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       }
 
       reap_finished_prompt();
-      rpc::set_active_run(run_state, true, command->id);
+      rpc::set_active_run(run_state, rpc::RpcRunKind::Prompt, command->id);
       prompt_worker.emplace(rpc::make_rpc_prompt_worker(rpc::RpcPromptWorkerOptions{
           .session = session,
           .session_mutex = session_mutex,
@@ -454,7 +582,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       }
 
       reap_finished_prompt();
-      rpc::set_active_run(run_state, true, command->id);
+      rpc::set_active_run(run_state, rpc::RpcRunKind::DirectCommand, command->id);
       prompt_worker.emplace(make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions{.session = session,
                                                                                          .session_mutex = session_mutex,
                                                                                          .output = output,
@@ -602,94 +730,95 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
 
     if (command->type == "cancel")
     {
-      bool was_active = false;
-      std::string active_request_id;
-      rpc::ClearedRpcQueues cleared;
-      {
-        std::lock_guard lock(run_state.mutex);
-        run_state.cancel_requested.store(true, std::memory_order_relaxed);
-        was_active = run_state.active_run;
-        active_request_id = run_state.active_request_id;
-        cleared.steering_messages.reserve(run_state.steering_messages.size());
-        while (!run_state.steering_messages.empty())
-        {
-          cleared.steering_messages.push_back(std::move(run_state.steering_messages.front()));
-          run_state.steering_messages.pop_front();
-        }
-        cleared.follow_up_messages.reserve(run_state.follow_up_messages.size());
-        while (!run_state.follow_up_messages.empty())
-        {
-          cleared.follow_up_messages.push_back(std::move(run_state.follow_up_messages.front()));
-          run_state.follow_up_messages.pop_front();
-        }
-      }
+      auto cancellation = rpc::begin_cancellation(run_state);
       static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
-      if (auto written = rpc::write_skipped_queue_events(output, session, session_mutex, cleared, "canceled"); !written)
+      if (session.run_controller)
+        static_cast<void>(session.run_controller->request_stop(StopReason::UserCanceled));
+      if (cancellation.deferred_to_terminal_publication)
       {
-        return written;
+        rpc::wait_for_terminal_publication(run_state);
       }
+      else
+      {
+        if (auto written = rpc::write_skipped_queue_events(output, session, session_mutex, cancellation.cleared, "canceled"); !written)
+          return written;
+      }
+
+      auto const cleared_steering_count = cancellation.cleared.steering_messages.size() + cancellation.deferred_steering_count;
+      auto const cleared_follow_up_count = cancellation.cleared.follow_up_messages.size() + cancellation.deferred_follow_up_count;
       auto cancel_event = rpc::resolver_event_envelope(
-          "cancel_requested", command->id, active_request_id.empty() ? command->id : active_request_id, rpc::session_id_snapshot(session, session_mutex),
-          rpc::cancel_requested_payload_json(was_active, cleared.steering_messages.size(), cleared.follow_up_messages.size(), active_request_id));
+          "cancel_requested", command->id, cancellation.active_request_id.empty() ? command->id : cancellation.active_request_id,
+          rpc::session_id_snapshot(session, session_mutex),
+          rpc::cancel_requested_payload_json(cancellation.active_run, cleared_steering_count, cleared_follow_up_count, cancellation.active_request_id));
       if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(cancel_event)); !written)
-      {
         return written;
-      }
       std::string json = "{";
       json += rpc::bool_field_json("cancel_requested", true);
       json += ',';
-      json += rpc::bool_field_json("active_run", was_active);
+      json += rpc::bool_field_json("active_run", cancellation.active_run);
       json += ',';
-      json += rpc::number_field_json("cleared_steer", cleared.steering_messages.size());
+      json += rpc::number_field_json("cleared_steer", cleared_steering_count);
       json += ',';
-      json += rpc::number_field_json("cleared_follow_up", cleared.follow_up_messages.size());
+      json += rpc::number_field_json("cleared_follow_up", cleared_follow_up_count);
       json += '}';
       if (auto written = rpc::write_success(output, command->id, json); !written)
         return written;
-      if (auto written = rpc::write_follow_up_errors(output, cleared.follow_up_messages, "canceled"); !written)
+      if (!cancellation.deferred_to_terminal_publication)
       {
-        return written;
+        if (auto written = rpc::write_follow_up_errors(output, run_state, cancellation.cleared.follow_up_messages, "canceled"); !written)
+          return written;
       }
       continue;
     }
 
-    if (command->type == "context" || command->type == "export" || command->type == "export_html" || command->type == "compact" ||
-        rpc::is_plugin_rpc_command(command->type) || rpc::is_mcp_rpc_command(command->type))
+    if (command->type == "compact")
     {
-      bool compact_active_run = false;
+      reap_finished_prompt();
+      bool admitted = false;
       {
-        std::lock_guard lock(run_state.mutex);
-        if (run_state.active_run)
+        std::unique_lock lock(run_state.mutex);
+        run_state.publication_cv.wait(lock, [&] { return !run_state.terminal_publication_in_progress || run_state.input_closed; });
+        if (run_state.active_run_kind == rpc::RpcRunKind::None)
         {
-          if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type)); !written)
-          {
-            return written;
-          }
-          continue;
-        }
-        if (command->type == "compact")
-        {
-          run_state.active_run = true;
+          run_state.active_run_kind = rpc::RpcRunKind::Compaction;
           run_state.active_request_id = command->id;
+          run_state.outstanding_request_ids.insert(command->id);
           run_state.cancel_requested.store(false, std::memory_order_relaxed);
-          compact_active_run = true;
+          admitted = true;
         }
       }
-      auto clear_compact_active_run = [&] {
-        if (compact_active_run)
-        {
-          rpc::set_active_run(run_state, false);
-          compact_active_run = false;
-        }
-      };
-      auto write_command_error = [&](ava::core::Error error) -> ava::core::VoidResult {
-        clear_compact_active_run();
-        return rpc::write_error(output, command->id, std::move(error));
-      };
-      auto write_command_success = [&](std::string json) -> ava::core::VoidResult {
-        clear_compact_active_run();
-        return rpc::write_success(output, command->id, std::move(json));
-      };
+      if (!admitted)
+      {
+        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type)); !written)
+          return written;
+        continue;
+      }
+      prompt_worker.emplace(make_rpc_compaction_worker(RpcCompactionWorkerOptions{
+          .session = session,
+          .session_mutex = session_mutex,
+          .output = output,
+          .run_state = run_state,
+          .injected_provider = provider,
+          .injected_provider_id = injected_provider_id,
+          .transport = transport,
+          .auth_transport = auth_transport,
+          .runtime_options = runtime_options,
+          .request_id = command->id,
+          .instructions = command->instructions,
+      }));
+      continue;
+    }
+
+    if (command->type == "context" || command->type == "export" || command->type == "export_html" || rpc::is_plugin_rpc_command(command->type) ||
+        rpc::is_mcp_rpc_command(command->type))
+    {
+      if (rpc::active_run(run_state))
+      {
+        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type)); !written)
+          return written;
+        continue;
+      }
+
       std::string slash_command;
       if (command->type == "context")
       {
@@ -705,18 +834,12 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
         if (command->output_path && !command->output_path->empty())
           slash_command += " " + *command->output_path;
       }
-      else if (command->type == "compact")
-      {
-        slash_command = "/compact";
-        if (command->instructions)
-          slash_command += " " + *command->instructions;
-      }
       else if (rpc::is_plugin_rpc_command(command->type))
       {
         auto plugin_command = rpc::plugin_rpc_slash_command(*command);
         if (!plugin_command)
         {
-          if (auto written = write_command_error(plugin_command.error()); !written)
+          if (auto written = rpc::write_error(output, command->id, plugin_command.error()); !written)
             return written;
           continue;
         }
@@ -727,77 +850,27 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
         auto mcp_command = rpc::mcp_rpc_slash_command(*command);
         if (!mcp_command)
         {
-          if (auto written = write_command_error(mcp_command.error()); !written)
+          if (auto written = rpc::write_error(output, command->id, mcp_command.error()); !written)
             return written;
           continue;
         }
         slash_command = std::move(*mcp_command);
       }
-      std::optional<RuntimeRunOptions> compact_runtime_options;
-      std::optional<rpc::ProviderHandle> compact_provider;
-      if (command->type == "compact")
-      {
-        ava::config::XdgPaths paths;
-        std::string provider_id;
-        {
-          std::lock_guard lock(session_mutex);
-          paths = session.paths;
-          provider_id = session.model.provider_id;
-          auto selected_provider = rpc::provider_for_session_model(session, injected_provider_id, provider);
-          if (!selected_provider)
-          {
-            if (auto written = write_command_error(selected_provider.error()); !written)
-              return written;
-            continue;
-          }
-          compact_provider = std::move(*selected_provider);
-        }
-        auto ensured = rpc::ensure_prompt_runtime_options(paths, provider_id, runtime_options, auth_transport, "compact");
-        if (!ensured)
-        {
-          if (auto written = write_command_error(ensured.error()); !written)
-            return written;
-          continue;
-        }
-        compact_runtime_options = std::move(*ensured);
-      }
+
       EventBus event_bus;
       rpc::subscribe_event_envelope_writer(event_bus, output);
-      std::function<bool()> compact_cancel_requested;
-      if (command->type == "compact")
-      {
-        auto base_cancel_requested = runtime_options.cancel_requested;
-        compact_cancel_requested = [&run_state, base_cancel_requested] {
-          return rpc::cancel_requested(run_state) || (base_cancel_requested && base_cancel_requested());
-        };
-        if (compact_runtime_options)
-          compact_runtime_options->cancel_requested = compact_cancel_requested;
-      }
-      std::unique_lock lock(session_mutex, std::defer_lock);
-      if (command->type != "compact")
-        lock.lock();
-      auto summary_generator =
-          command->type == "compact"
-              ? CompactionSummaryGenerator([&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
-                                               std::string_view instructions, std::size_t estimated_tokens) {
-                  return generate_compaction_summary(session, entries, config, instructions, estimated_tokens, compact_provider->get(), transport,
-                                                     *compact_runtime_options);
-                })
-              : CompactionSummaryGenerator{};
+      std::lock_guard lock(session_mutex);
       auto result = run_command(session, CommandRequest{.command = std::move(slash_command),
                                                         .event_sink = make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(command->id)),
                                                         .permission_resolver = runtime_options.permission_resolver,
-                                                        .compaction_summary_generator = std::move(summary_generator),
-                                                        .cancel_requested = compact_cancel_requested,
-                                                        .session_mutex = &session_mutex,
-                                                        .propagate_compaction_errors = command->type == "compact"});
+                                                        .session_mutex = &session_mutex});
       if (!result)
       {
-        if (auto written = write_command_error(result.error()); !written)
+        if (auto written = rpc::write_error(output, command->id, result.error()); !written)
           return written;
         continue;
       }
-      if (auto written = write_command_success(rpc::command_result_json(*result)); !written)
+      if (auto written = rpc::write_success(output, command->id, rpc::command_result_json(*result)); !written)
         return written;
       continue;
     }
@@ -883,7 +956,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       }
       auto prompt_runtime_options = runtime_options;
       prompt_runtime_options.image_attachments.clear();
-      rpc::set_active_run(run_state, true, command->id);
+      rpc::set_active_run(run_state, rpc::RpcRunKind::Prompt, command->id);
       prompt_worker.emplace(rpc::make_rpc_prompt_worker(rpc::RpcPromptWorkerOptions{
           .session = session,
           .session_mutex = session_mutex,
@@ -917,7 +990,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     {
       return written;
     }
-    if (auto written = rpc::write_follow_up_errors(output, cleared.follow_up_messages, "canceled"); !written)
+    if (auto written = rpc::write_follow_up_errors(output, run_state, cleared.follow_up_messages, "canceled"); !written)
     {
       return written;
     }
@@ -932,6 +1005,14 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
 }
 
 ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options, ava::provider::Provider const& provider,
+                                   ava::provider::Transport& transport, ava::provider::Transport& auth_transport, RuntimeRunOptions runtime_options,
+                                   std::istream& in, std::ostream& out)
+{
+  rpc::StreamRpcLineReader input(in);
+  return run_rpc_loop(session, open_options, provider, transport, auth_transport, std::move(runtime_options), input, out);
+}
+
+ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options, ava::provider::Provider const& provider,
                                    ava::provider::Transport& transport, RuntimeRunOptions runtime_options, std::istream& in, std::ostream& out)
 {
   return run_rpc_loop(session, open_options, provider, transport, transport, std::move(runtime_options), in, out);
@@ -939,6 +1020,15 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
 
 int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err)
 {
+  ScopedRpcSignalIgnore const ignore_sigpipe(SIGPIPE);
+  if (!ignore_sigpipe.installed())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to suppress SIGPIPE for RPC mode");
+    error.with_context("cause", std::strerror(ignore_sigpipe.error_number()));
+    err << error.format() << '\n';
+    return 1;
+  }
+
   auto session = open_runtime_session(options.open_options);
   if (!session)
   {
@@ -960,7 +1050,21 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
     return 1;
   }
   ava::provider::CurlCliTransport transport;
-  auto result = run_rpc_loop(*session, options.open_options, **provider, transport, transport, std::move(runtime_options), in, out);
+  ava::core::VoidResult result;
+  if (&in == &std::cin)
+  {
+    auto input = rpc::make_posix_rpc_line_reader(STDIN_FILENO);
+    if (!input)
+    {
+      err << input.error().format() << '\n';
+      return 1;
+    }
+    result = run_rpc_loop(*session, options.open_options, **provider, transport, transport, std::move(runtime_options), **input, out);
+  }
+  else
+  {
+    result = run_rpc_loop(*session, options.open_options, **provider, transport, transport, std::move(runtime_options), in, out);
+  }
   if (!result)
   {
     err << result.error().format() << '\n';

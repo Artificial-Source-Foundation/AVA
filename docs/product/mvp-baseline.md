@@ -214,7 +214,7 @@ Status guide: checked means `Present` for AVA's current MVP target; unchecked me
 
 ### P0: Baseline Truth
 
-- Keep `README.md`, `docs/USAGE.md`, `docs/CONFIG.md`, `docs/headless-protocol.md`, `docs/product/*.md`, and `docs/roadmap/*.md` aligned with current C++ code.
+- Keep `README.md`, `docs/USAGE.md`, `docs/CONFIG.md`, `docs/rpc-protocol.md` / `docs/headless-protocol.md`, `docs/product/*.md`, and `docs/roadmap/*.md` aligned with current C++ code.
 - Record whether a feature is implemented in backend/RPC, implemented in TUI/frontend, deferred, or intentionally out of scope.
 - Keep `docs/reference-code/` ignored and excluded from builds, tests, formatting, and normal source searches unless a task explicitly asks for reference analysis.
 

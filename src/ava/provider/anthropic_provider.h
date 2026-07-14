@@ -34,7 +34,7 @@ class AnthropicStreamParser final : public StreamParser
   std::map<long long, ToolBlock> tool_blocks_;
   std::map<long long, ReasoningBlock> reasoning_blocks_;
   std::optional<TokenUsage> usage_;
-  std::string stop_reason_;
+  std::optional<ProviderFinishReason> finish_reason_;
   bool saw_data_ = false;
   bool message_stop_seen_ = false;
   bool error_seen_ = false;

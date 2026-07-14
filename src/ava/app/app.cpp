@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/app/acp_mode.h"
 #include "ava/app/app.h"
 #include "ava/app/connect_openai.h"
 #include "ava/app/headless_policy.h"
@@ -53,8 +54,9 @@ void print_help()
   std::cout << "  ava --print [@file ...] [prompt] [--json|--output json] [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava -p [@file ...] [prompt] [--json|--output json] [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava --rpc [--allow read-only] [--allow-tool list]\n";
-  std::cout << "  ava --output rpc [--allow read-only] [--allow-tool list]\n\n";
-  std::cout << version::kDisplayVersion << " status: backend MVP runtime with terminal, print, and RPC workflows.\n";
+  std::cout << "  ava --output rpc [--allow read-only] [--allow-tool list]\n";
+  std::cout << "  ava --acp  # ACP v1 transport with the implemented AVA session/tool profile\n\n";
+  std::cout << version::kDisplayVersion << " status: backend MVP runtime with terminal, print, RPC, and ACP v1 workflows.\n";
 }
 
 bool stdin_is_tty()
@@ -72,9 +74,9 @@ bool is_cli_option(std::string_view arg)
   return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" || arg == "--session-id" || arg == "--continue" ||
          arg == "--resume" || arg == "-c" || arg == "-r" || arg == "--fork" || arg == "--name" || arg == "-n" || arg == "--session-dir" ||
          arg == "--no-session" || arg == "--offline" || arg == "--thinking" || arg == "--system-prompt" || arg == "--append-system-prompt" ||
-         arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--json" || arg == "--output" || arg == "--allow" || arg == "--allow-tool" ||
-         arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" || arg == "--no-builtin-tools" || arg == "-nbt" || arg == "--no-tools" ||
-         arg == "-nt";
+         arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--acp" || arg == "--json" || arg == "--output" || arg == "--allow" ||
+         arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" || arg == "--no-builtin-tools" || arg == "-nbt" ||
+         arg == "--no-tools" || arg == "-nt";
 }
 
 bool is_cli_file_argument(std::string_view arg)
@@ -203,6 +205,18 @@ namespace ava::app {
 
 int run(int argc, char** argv)
 {
+  bool acp_requested = false;
+  for (int index = 1; index < argc; ++index) acp_requested = acp_requested || std::string_view(argv[index]) == "--acp";
+  if (acp_requested)
+  {
+    if (argc != 2)
+    {
+      std::cerr << "--acp is a standalone mode and cannot be combined with other arguments\n";
+      return 2;
+    }
+    return run_acp_mode(std::cerr);
+  }
+
   auto mode = ava::agent::Mode::Build;
   std::optional<std::string> requested_session_id;
   std::optional<std::string> fork_session_id;

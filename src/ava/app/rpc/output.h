@@ -38,6 +38,7 @@ void subscribe_event_envelope_writer(EventBus& bus, RpcOutput& output);
                                                       QueuedRpcMessage const& queued, std::string_view reason = {});
 [[nodiscard]] ava::core::VoidResult write_skipped_queue_events(RpcOutput& output, RuntimeSession const& session, std::mutex& session_mutex,
                                                                ClearedRpcQueues const& cleared, std::string_view reason);
-[[nodiscard]] ava::core::VoidResult write_follow_up_errors(RpcOutput& output, std::vector<QueuedRpcMessage> const& follow_ups, std::string_view reason);
+[[nodiscard]] ava::core::VoidResult write_follow_up_errors(RpcOutput& output, RpcRunState& run_state, std::vector<QueuedRpcMessage> const& follow_ups,
+                                                           std::string_view reason);
 
 }  // namespace ava::app::rpc

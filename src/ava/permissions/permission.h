@@ -69,6 +69,7 @@ enum class PermissionResolution
   Allow,
   Deny,
   AllowSessionGrant,
+  Cancel,
 };
 
 struct PermissionResolutionDecision
@@ -87,6 +88,7 @@ struct PermissionResolutionDecision
 struct PermissionPrompt
 {
   std::string permission_request_id = {};
+  std::string tool_call_id = {};
   Operation operation;
   ava::agent::Mode mode;
   std::filesystem::path workspace_dir;

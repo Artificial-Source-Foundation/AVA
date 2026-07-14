@@ -34,17 +34,6 @@
 namespace ava::app {
 namespace {
 
-ava::core::VoidResult append_mode_change(ava::session::SessionStore& store, ava::agent::Mode mode)
-{
-  return store.append(ava::session::SessionEntry{
-      .id = ava::core::make_id("entry"),
-      .parent_id = "",
-      .type = ava::session::EntryType::ModeChange,
-      .timestamp = ava::session::now_timestamp(),
-      .data_json = "{\"mode\":\"" + ava::agent::to_string(mode) + "\"}",
-  });
-}
-
 std::string format_cost_usd(long double value)
 {
   std::ostringstream output;
@@ -660,7 +649,8 @@ ava::core::Result<CommandResult> run_branch_command(RuntimeSession& session, std
   if (!opened)
     return std::unexpected(std::move(opened.error()));
   opened->created = true;
-  session = std::move(*opened);
+  if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)
+    return std::unexpected(std::move(replaced.error()));
 
   auto const mode_text = mode == ava::session::SessionBranchMode::Clone ? std::string("cloned") : std::string("forked");
   std::string output = mode_text + " session " + created_session_id + " from " + source_session_id;
@@ -698,22 +688,34 @@ ava::core::Result<CommandResult> run_sessions_rename_command(RuntimeSession& ses
     return result;
   }
 
-  auto target = reopen_session(session, requested_session_id);
-  if (!target)
-    return std::unexpected(std::move(target.error()));
-
   auto const clear_name = trimmed_name == "--clear";
   ava::session::SessionMetadataUpdate update;
   update.name = clear_name ? std::optional<std::string>(std::string{}) : std::optional<std::string>(trimmed_name);
   update.actor = "tui";
-  auto metadata = ava::session::append_session_metadata(target->store, std::move(update));
+
+  std::string target_id;
+  ava::core::Result<ava::session::SessionMetadataView> metadata =
+      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session rename target was not resolved"));
+  if (requested_session_id == session.store.session_id())
+  {
+    target_id = session.store.session_id();
+    metadata = append_runtime_session_metadata(session, std::move(update));
+  }
+  else
+  {
+    auto target = reopen_session(session, requested_session_id);
+    if (!target)
+      return std::unexpected(std::move(target.error()));
+    target_id = target->store.session_id();
+    metadata = ava::session::append_session_metadata(target->store, std::move(update));
+  }
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
   if (clear_name)
-    add_output(result, "session " + target->store.session_id() + " name cleared");
+    add_output(result, "session " + target_id + " name cleared");
   else
-    add_output(result, "session " + target->store.session_id() + " name set: \"" + sanitize_inline_text(metadata->name) + "\"");
+    add_output(result, "session " + target_id + " name set: \"" + sanitize_inline_text(metadata->name) + "\"");
   return result;
 }
 
@@ -1012,7 +1014,8 @@ ava::core::Result<CommandResult> run_new_session_command(RuntimeSession& session
       return std::unexpected(std::move(metadata.error()));
   }
 
-  session = std::move(*opened);
+  if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)
+    return std::unexpected(std::move(replaced.error()));
 
   std::string output = "started session " + created_session_id;
   if (!trimmed_name.empty())
@@ -1039,7 +1042,8 @@ ava::core::Result<CommandResult> run_resume_command(RuntimeSession& session, std
   if (!opened)
     return std::unexpected(std::move(opened.error()));
 
-  session = std::move(*opened);
+  if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)
+    return std::unexpected(std::move(replaced.error()));
   add_output(result, "resumed session " + session.store.session_id());
   return result;
 }
@@ -1060,7 +1064,7 @@ ava::core::Result<CommandResult> run_name_command(RuntimeSession& session, std::
   ava::session::SessionMetadataUpdate update;
   update.name = clear_name ? std::optional<std::string>(std::string{}) : std::optional<std::string>(trimmed_name);
   update.actor = "tui";
-  auto metadata = ava::session::append_session_metadata(session.store, std::move(update));
+  auto metadata = append_runtime_session_metadata(session, std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
@@ -1098,7 +1102,7 @@ ava::core::Result<CommandResult> run_labels_command(RuntimeSession& session, std
   ava::session::SessionMetadataUpdate update;
   update.labels = next_labels;
   update.actor = "tui";
-  auto metadata = ava::session::append_session_metadata(session.store, std::move(update));
+  auto metadata = append_runtime_session_metadata(session, std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
@@ -1117,7 +1121,7 @@ ava::core::Result<CommandResult> run_mode_command(RuntimeSession& session)
   auto prompt_state = select_runtime_prompt_state(session, new_mode);
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
-  if (auto appended = append_mode_change(session.store, new_mode); !appended)
+  if (auto appended = append_runtime_mode_change(session, new_mode); !appended)
   {
     return std::unexpected(std::move(appended.error()));
   }
@@ -1540,9 +1544,28 @@ ava::core::Result<CommandResult> run_import_command(RuntimeSession& session, std
     add_output(result, opened.error().format());
     return result;
   }
-  session = std::move(*opened);
+  if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)
+    return std::unexpected(std::move(replaced.error()));
   add_output(result, "imported session " + session.store.session_id() + " from " + import_path.string() + "\n  entries: " + std::to_string(entries->size()) +
                          "\n  switched to " + session.store.session_id());
+  return result;
+}
+
+ava::core::Result<CommandResult> run_recover_persistence_command(RuntimeSession& session)
+{
+  CommandResult result;
+  result.handled = true;
+  if (!session.run_controller)
+  {
+    add_output(result, "session append controller is unavailable");
+    return result;
+  }
+  if (auto recovered = session.run_controller->reset_persistence_failure(); !recovered)
+  {
+    add_output(result, recovered.error().format());
+    return result;
+  }
+  add_output(result, "persistence failure latch cleared after terminal append drain");
   return result;
 }
 

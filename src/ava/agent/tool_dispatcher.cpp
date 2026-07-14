@@ -9,6 +9,7 @@
 #include "ava/tools/lsp_tools.h"
 #include "ava/tools/mutation_queue.h"
 #include "ava/tools/search_tools.h"
+#include "ava/tools/secure_workspace.h"
 #include "ava/tools/webfetch_tool.h"
 #include "ava/tools/websearch_tool.h"
 #include "ava/plugin/diagnostics.h"
@@ -284,10 +285,13 @@ ToolDispatchResult read_file_result(ava::tools::ToolContext const& context, Prov
     return tool_error_result(call, result.error());
   std::string text = "{\"tool\":\"read_file\",\"ok\":true,\"path\":\"" + ava::core::json::escape(*path) + "\",\"content\":\"" +
                      ava::core::json::escape(result->content) + "\",\"truncated\":" + json_bool(result->truncated) +
-                     ",\"byte_limited\":" + json_bool(result->byte_limited) + ",\"line_limited\":" + json_bool(result->line_limited) +
-                     ",\"total_bytes\":" + std::to_string(result->total_bytes) + ",\"output_bytes\":" + std::to_string(result->output_bytes) +
-                     ",\"output_lines\":" + std::to_string(result->output_lines) + ",\"start_line\":" + std::to_string(result->start_line) +
-                     ",\"end_line\":" + std::to_string(result->end_line) + ",\"total_lines\":" + std::to_string(result->total_lines);
+                     ",\"byte_limited\":" + json_bool(result->byte_limited) + ",\"line_limited\":" + json_bool(result->line_limited);
+  if (result->totals_known)
+    text += ",\"total_bytes\":" + std::to_string(result->total_bytes);
+  text += ",\"output_bytes\":" + std::to_string(result->output_bytes) + ",\"output_lines\":" + std::to_string(result->output_lines) +
+          ",\"start_line\":" + std::to_string(result->start_line) + ",\"end_line\":" + std::to_string(result->end_line);
+  if (result->totals_known)
+    text += ",\"total_lines\":" + std::to_string(result->total_lines);
   if (result->next_offset_line > 0)
   {
     text += ",\"next_offset\":" + std::to_string(result->next_offset_line);
@@ -476,11 +480,18 @@ ToolDispatchResult bash_result(ava::tools::ToolContext const& context, ProviderT
                                       "{\"tool\":\"bash\",\"ok\":" + json_bool(result->exit_code == 0 && !result->timed_out && !result->canceled) +
                                       ",\"exit_code\":" + std::to_string(result->exit_code) + ",\"timed_out\":" + json_bool(result->timed_out) +
                                       ",\"canceled\":" + json_bool(result->canceled) + ",\"truncated\":" + json_bool(result->truncated) +
-                                      ",\"byte_limited\":" + json_bool(result->byte_limited) + ",\"line_limited\":" + json_bool(result->line_limited) +
-                                      ",\"total_bytes\":" + std::to_string(result->total_bytes) + ",\"output_bytes\":" + std::to_string(result->output_bytes) +
-                                      ",\"total_lines\":" + std::to_string(result->total_lines) + ",\"output_lines\":" + std::to_string(result->output_lines) +
-                                      ",\"omitted_lines\":" + std::to_string(result->omitted_lines) + ",\"output\":\"" +
-                                      ava::core::json::escape(result->output) + "\"";
+                                      ",\"byte_limited\":" + json_bool(result->byte_limited) + ",\"line_limited\":" + json_bool(result->line_limited);
+                                  if (result->totals_known)
+                                    text += ",\"total_bytes\":" + std::to_string(result->total_bytes);
+                                  text += ",\"output_bytes\":" + std::to_string(result->output_bytes);
+                                  if (result->totals_known)
+                                  {
+                                    text += ",\"total_lines\":" + std::to_string(result->total_lines);
+                                  }
+                                  text += ",\"output_lines\":" + std::to_string(result->output_lines);
+                                  if (result->totals_known)
+                                    text += ",\"omitted_lines\":" + std::to_string(result->omitted_lines);
+                                  text += ",\"output\":\"" + ava::core::json::escape(result->output) + "\"";
                                   if (result->truncated && result->line_limited)
                                   {
                                     text += ",\"truncation_hint\":\"Increase max_lines to retain more command output.\"";
@@ -932,9 +943,31 @@ ToolExecutor builtin_tool_executor(std::string_view name)
   return nullptr;
 }
 
-ToolRegistry build_tool_registry(ava::tools::ToolContext const& context)
+ava::core::Result<ToolRegistry> build_tool_registry_result(ava::tools::ToolContext const& context)
 {
   ToolRegistry registry;
+  if (context.exact_builtin_tool_names)
+  {
+    if (!context.session_mcp_config)
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "exact tool composition requires an immutable session MCP configuration"));
+    for (auto const& name : *context.exact_builtin_tool_names)
+    {
+      auto const* entry = builtin_tool_registry().find(name);
+      if (entry == nullptr)
+      {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "requested built-in tool is unavailable");
+        error.with_context("tool", name);
+        return std::unexpected(std::move(error));
+      }
+      if (auto registered = registry.register_tool(*entry); !registered)
+        return std::unexpected(std::move(registered.error()));
+    }
+    if (auto registered = ava::mcp::register_enabled_mcp_tools(registry, context); !registered)
+      return std::unexpected(std::move(registered.error()));
+    return registry;
+  }
+
   for (auto const& entry : builtin_tool_registry().entries())
   {
     auto registered = registry.register_tool(entry);
@@ -945,9 +978,16 @@ ToolRegistry build_tool_registry(ava::tools::ToolContext const& context)
     }
   }
   ava::plugin::register_enabled_plugin_tools(registry, context);
-  ava::mcp::register_enabled_mcp_tools(registry, context);
+  if (auto registered = ava::mcp::register_enabled_mcp_tools(registry, context); !registered)
+    return std::unexpected(std::move(registered.error()));
   registry.apply_visibility_filter(context);
   return registry;
+}
+
+ToolRegistry build_tool_registry(ava::tools::ToolContext const& context)
+{
+  auto registry = build_tool_registry_result(context);
+  return registry ? std::move(*registry) : ToolRegistry{};
 }
 
 }  // namespace
@@ -980,6 +1020,27 @@ ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context)
     context.mutation_queue = std::make_shared<ava::tools::MutationQueue>();
   context_ = std::move(context);
   registry_ = build_tool_registry(context_);
+}
+
+ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context, ToolRegistry registry) : context_(std::move(context)), registry_(std::move(registry))
+{
+  if (!context_.mutation_queue)
+    context_.mutation_queue = std::make_shared<ava::tools::MutationQueue>();
+}
+
+ava::core::Result<ToolDispatcher> ToolDispatcher::create_strict(ava::tools::ToolContext context)
+{
+  if (context.require_descriptor_secure_workspace && !context.secure_workspace)
+  {
+    auto workspace = ava::tools::SecureWorkspace::open(context.workspace_dir);
+    if (!workspace)
+      return std::unexpected(std::move(workspace.error()));
+    context.secure_workspace = std::move(*workspace);
+  }
+  auto registry = build_tool_registry_result(context);
+  if (!registry)
+    return std::unexpected(std::move(registry.error()));
+  return ToolDispatcher(std::move(context), std::move(*registry));
 }
 
 ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall const& call) const
@@ -1057,6 +1118,8 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch_with_context(ava:
     return result;
   }
   context.permission_request_ids = std::make_shared<std::vector<std::string>>();
+  if (context.announce_execution_after_permission)
+    context.execution_started = std::make_shared<std::atomic_bool>(false);
   if (context.lsp_diagnostics_provider)
     context.lsp_diagnostics_provider->set_permission_request_ids(context.permission_request_ids);
   auto result = tool->executor(context, normalized);
@@ -1072,6 +1135,11 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch_with_context(ava:
 std::vector<ToolMetadata> ToolDispatcher::registered_tool_metadata() const
 {
   return registry_.metadata();
+}
+
+std::vector<std::string> ToolDispatcher::registered_tool_schemas_json() const
+{
+  return registry_.tool_schemas_json(context_);
 }
 
 std::span<ToolMetadata const> ToolDispatcher::tool_metadata()

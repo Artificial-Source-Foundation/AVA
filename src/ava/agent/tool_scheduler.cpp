@@ -110,6 +110,20 @@ struct ActiveEpochWorker
   std::jthread thread;
 };
 
+void request_epoch_cancellation(ParallelEpochState& state)
+{
+  {
+    std::lock_guard lock(state.mutex);
+    state.cancel_requested.store(true);
+  }
+  state.changed.notify_all();
+}
+
+bool has_completed_active_worker(ParallelEpochState const& state, std::vector<ActiveEpochWorker> const& active)
+{
+  return std::any_of(active.begin(), active.end(), [&state](ActiveEpochWorker const& worker) { return state.results[worker.epoch_offset].has_value(); });
+}
+
 void request_stop_for_active_workers(std::vector<ActiveEpochWorker>& active, std::size_t after_offset)
 {
   for (auto& worker : active)
@@ -154,15 +168,15 @@ std::optional<ava::core::Error> launch_epoch_worker(std::span<ToolScheduleSlot c
       {
         std::lock_guard lock(state.mutex);
         state.results[offset] = std::move(result);
-      }
-      if (failed)
-      {
-        auto current = state.stop_after.load();
-        while (offset < current && !state.stop_after.compare_exchange_weak(current, offset))
+        if (failed)
         {
+          auto current = state.stop_after.load();
+          while (offset < current && !state.stop_after.compare_exchange_weak(current, offset))
+          {
+          }
         }
+        state.completed.fetch_add(1);
       }
-      state.completed.fetch_add(1);
       state.changed.notify_all();
     });
     active.push_back(ActiveEpochWorker{.epoch_offset = offset, .thread = std::move(thread)});
@@ -216,10 +230,7 @@ ava::core::Result<std::vector<ToolScheduleOutcome>> run_parallel_epoch(std::span
   std::vector<ActiveEpochWorker> active;
   active.reserve(std::min(options.max_workers, epoch.size()));
 
-  std::stop_callback notify_external_stop(options.stop_token, [&state] {
-    state.cancel_requested.store(true);
-    state.changed.notify_all();
-  });
+  std::stop_callback notify_external_stop(options.stop_token, [&state] { request_epoch_cancellation(state); });
 
   std::size_t next_to_launch = 0;
   std::optional<ava::core::Error> launch_error;
@@ -227,7 +238,7 @@ ava::core::Result<std::vector<ToolScheduleOutcome>> run_parallel_epoch(std::span
   {
     retire_completed_workers(state, active);
     if (options.stop_token.stop_requested())
-      state.cancel_requested.store(true);
+      request_epoch_cancellation(state);
     if (state.cancel_requested.load())
       request_stop_for_all_active_workers(active);
     request_stop_for_active_workers(active, state.stop_after.load());
@@ -247,8 +258,16 @@ ava::core::Result<std::vector<ToolScheduleOutcome>> run_parallel_epoch(std::span
       break;
     }
     retire_completed_workers(state, active);
+    // A worker may publish a lower stop_after and finish between the earlier
+    // stop scan and retirement. Apply that transition before waiting even when
+    // the completed worker has already been removed from active.
+    request_stop_for_active_workers(active, state.stop_after.load());
     if (state.completed.load() >= epoch.size())
       break;
+    if (!state.cancel_requested.load() && active.size() < options.max_workers && next_to_launch < epoch.size() && next_to_launch <= state.stop_after.load())
+    {
+      continue;
+    }
     if (active.empty())
     {
       if (!state.cancel_requested.load() && next_to_launch < epoch.size() && next_to_launch <= state.stop_after.load())
@@ -261,7 +280,7 @@ ava::core::Result<std::vector<ToolScheduleOutcome>> run_parallel_epoch(std::span
     auto const observed_stop_after = state.stop_after.load();
     state.changed.wait(lock, [&] {
       return state.completed.load() != observed_completed || state.stop_after.load() != observed_stop_after || state.cancel_requested.load() ||
-             options.stop_token.stop_requested();
+             has_completed_active_worker(state, active);
     });
   }
 

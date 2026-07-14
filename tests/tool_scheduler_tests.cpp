@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -438,6 +439,137 @@ void test_run_parallel_tool_schedule_respects_worker_cap()
   expect(state.max_active <= 2, "parallel scheduler never exceeds max_workers");
 }
 
+void test_run_parallel_tool_schedule_replaces_immediately_completed_capped_workers()
+{
+  constexpr std::size_t slot_count = 256;
+  std::vector<ava::agent::ToolScheduleSlot> schedule;
+  schedule.reserve(slot_count);
+  for (std::size_t index = 0; index < slot_count; ++index)
+  {
+    auto const id = "call_" + std::to_string(index);
+    schedule.push_back(parallel_read_slot(index, id));
+  }
+
+  struct CompletionState
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool finished = false;
+  } completion;
+
+  std::atomic_size_t executed = 0;
+  std::stop_source cancellation;
+  std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
+  std::jthread runner([&] {
+    scheduled = ava::agent::run_parallel_tool_schedule(
+        schedule,
+        [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {
+          executed.fetch_add(1, std::memory_order_relaxed);
+          return successful_result(slot);
+        },
+        ava::agent::ToolParallelScheduleOptions{.max_workers = 4, .stop_token = cancellation.get_token()});
+    {
+      std::lock_guard lock(completion.mutex);
+      completion.finished = true;
+    }
+    completion.changed.notify_all();
+  });
+
+  bool finished = false;
+  {
+    std::unique_lock lock(completion.mutex);
+    finished = completion.changed.wait_for(lock, std::chrono::seconds(10), [&] { return completion.finished; });
+  }
+  if (!finished)
+    static_cast<void>(cancellation.request_stop());
+  runner.join();
+
+  expect(finished, "parallel scheduler replaces immediately completed capped workers without losing a wakeup");
+  if (!finished)
+    return;
+
+  expect(scheduled && scheduled->has_value(),
+         scheduled && !scheduled->has_value() ? scheduled->error().format() : "immediate-completion capped schedule returns a result");
+  expect(executed.load(std::memory_order_relaxed) == slot_count, "immediate-completion capped schedule executes every worker");
+
+  bool provider_order = scheduled && scheduled->has_value() && (*scheduled)->size() == slot_count;
+  if (provider_order)
+  {
+    for (std::size_t index = 0; index < slot_count; ++index) provider_order = provider_order && (*scheduled)->at(index).slot.provider_index == index;
+  }
+  expect(provider_order, "immediate-completion capped schedule returns every outcome in provider order");
+}
+
+void test_run_parallel_tool_schedule_refills_capacity_after_retiring_a_completed_worker()
+{
+  std::vector schedule{
+      parallel_read_slot(0, "call_0"),
+      parallel_read_slot(1, "call_1"),
+      parallel_read_slot(2, "call_2"),
+  };
+
+  struct State
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool second_started = false;
+    bool queued_started = false;
+    bool finished = false;
+  } state;
+
+  std::stop_source cancellation;
+  std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
+  std::jthread runner([&] {
+    scheduled = ava::agent::run_parallel_tool_schedule(
+        schedule,
+        [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {
+          std::unique_lock lock(state.mutex);
+          std::stop_callback notify_stop(stop_token, [&] { state.changed.notify_all(); });
+          if (slot.provider_index == 0)
+          {
+            state.changed.wait(lock, [&] { return state.second_started || stop_token.stop_requested(); });
+          }
+          else if (slot.provider_index == 1)
+          {
+            state.second_started = true;
+            state.changed.notify_all();
+            state.changed.wait(lock, [&] { return state.queued_started || stop_token.stop_requested(); });
+          }
+          else
+          {
+            state.queued_started = true;
+            state.changed.notify_all();
+          }
+          if (stop_token.stop_requested())
+            return canceled_executor_result(slot);
+          return successful_result(slot);
+        },
+        ava::agent::ToolParallelScheduleOptions{.max_workers = 2, .stop_token = cancellation.get_token()});
+    {
+      std::lock_guard lock(state.mutex);
+      state.finished = true;
+    }
+    state.changed.notify_all();
+  });
+
+  bool finished = false;
+  {
+    std::unique_lock lock(state.mutex);
+    finished = state.changed.wait_for(lock, std::chrono::seconds(5), [&] { return state.finished; });
+  }
+  if (!finished)
+    static_cast<void>(cancellation.request_stop());
+  runner.join();
+
+  expect(finished, "parallel scheduler refills capacity after retiring a completed worker");
+  if (!finished)
+    return;
+
+  expect(state.queued_started, "queued worker starts while the remaining capped worker is still active");
+  expect(scheduled && scheduled->has_value() && (*scheduled)->size() == schedule.size(),
+         scheduled && !scheduled->has_value() ? scheduled->error().format() : "capacity-refill schedule returns every outcome");
+}
+
 void test_run_parallel_tool_schedule_signals_stop_to_later_workers_on_error()
 {
   std::vector schedule{
@@ -455,6 +587,7 @@ void test_run_parallel_tool_schedule_signals_stop_to_later_workers_on_error()
     std::vector<std::size_t> stopped_workers;
   } state;
 
+  std::stop_source cancellation;
   std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
   std::jthread runner([&] {
     scheduled = ava::agent::run_parallel_tool_schedule(
@@ -476,17 +609,24 @@ void test_run_parallel_tool_schedule_signals_stop_to_later_workers_on_error()
           state.changed.notify_all();
           return canceled_executor_result(slot);
         },
-        ava::agent::ToolParallelScheduleOptions{.max_workers = 3});
+        ava::agent::ToolParallelScheduleOptions{.max_workers = 3, .stop_token = cancellation.get_token()});
   });
 
+  bool later_workers_stopped = false;
   {
     std::unique_lock lock(state.mutex);
     wait_for_test(state.changed, lock, [&] { return state.started == 3; }, "stop-signaling test starts all workers");
     state.fail_first = true;
     state.changed.notify_all();
-    wait_for_test(state.changed, lock, [&] { return state.stopped_workers.size() == 2; }, "scheduler stop signal reaches later active workers");
+    later_workers_stopped = state.changed.wait_for(lock, std::chrono::seconds(5), [&] { return state.stopped_workers.size() == 2; });
   }
+  if (!later_workers_stopped)
+    static_cast<void>(cancellation.request_stop());
   runner.join();
+
+  expect(later_workers_stopped, "scheduler stop signal reaches later active workers without losing the failure transition");
+  if (!later_workers_stopped)
+    return;
 
   expect(scheduled && !scheduled->has_value() && scheduled->error().message() == "slot zero failed",
          "parallel scheduler returns the first provider-order executor error after stopping later workers");
@@ -882,6 +1022,8 @@ void run_tool_scheduler_tests()
   test_run_parallel_tool_schedule_splits_epochs_at_barriers();
   test_run_parallel_tool_schedule_returns_provider_order_after_reverse_completion();
   test_run_parallel_tool_schedule_respects_worker_cap();
+  test_run_parallel_tool_schedule_replaces_immediately_completed_capped_workers();
+  test_run_parallel_tool_schedule_refills_capacity_after_retiring_a_completed_worker();
   test_run_parallel_tool_schedule_signals_stop_to_later_workers_on_error();
   test_run_parallel_tool_schedule_returns_first_error_in_provider_order();
   test_run_parallel_tool_schedule_cancels_active_epoch_from_external_stop_token();

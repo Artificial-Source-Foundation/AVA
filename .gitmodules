@@ -16,3 +16,6 @@
 [submodule "src/json"]
 	path = src/json
 	url = https://github.com/nlohmann/json.git
+[submodule "threadsafe"]
+	path = threadsafe
+	url = https://github.com/CarloWood/threadsafe.git

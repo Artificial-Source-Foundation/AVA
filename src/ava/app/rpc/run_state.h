@@ -11,16 +11,35 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "threadsafe/threadsafe.h"
 
 namespace ava::app::rpc {
 
-struct RpcOutput
-{
-  explicit RpcOutput(std::ostream& output) : out(output) { }
+// Forward declaration.
+class Output;
 
-  std::ostream& out;
-  std::mutex mutex;
-  std::function<void()> on_write_failure;
+// Output sink for RPC JSONL records.
+using output_ts = threadsafe::Unlocked<Output, threadsafe::policy::Primitive<std::mutex>>;
+
+class Output
+{
+ private:
+  std::ostream& out_;                           // The stream to write new-line delimited JSON records to.
+  std::function<void()> on_write_failure_;      // Called when the stream goes bad.
+
+ public:
+  // Construct an Output object for writing to `out`.
+  //
+  // Note: `on_write_failure` must not attempt to write to this same Output, even though
+  // the lock on this object was dropped (because it touches other mutexes).
+  explicit Output(std::ostream& out, std::function<void()> on_write_failure) : out_(out), on_write_failure_(std::move(on_write_failure)) { }
+
+  // Write one JSONL record to the stream and flush.
+  //
+  // `record` must be a a complete JSONL record not containing any new-lines, also not a trailing new-line.
+  //
+  // Calls on_write_failure_ (if set) and returns an IO error when the stream is left in a bad state.
+  [[nodiscard]] static ava::core::VoidResult write_record(output_ts& output, std::string_view record);
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

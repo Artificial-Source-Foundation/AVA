@@ -14,7 +14,7 @@ struct RpcSessionCommandContext
   RpcCommand const& command;
   RuntimeSession& session;
   RuntimeOpenOptions const& open_options;
-  RpcOutput& output;
+  output_ts& output;                            // Reference to threadsafe output stream.
   RpcRunState& run_state;
   std::mutex& session_mutex;
 

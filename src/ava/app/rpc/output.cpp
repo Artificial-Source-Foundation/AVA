@@ -53,37 +53,44 @@ ResolverEventPayload resolver_queue_payload(std::string payload_json)
   return ResolverEventPayload{.payload_type = RuntimePayloadType::Queue, .json = std::move(payload_json)};
 }
 
-ava::core::VoidResult write_rpc_record(RpcOutput& output, std::string_view record)
+//static
+ava::core::VoidResult Output::write_record(output_ts& output, std::string_view record)
 {
-  DoutEntering(dc::rpc, "write_rpc_record(" << output << ", JSON-record:[" << libcwd::buf2str(record.data(), record.length()) << "])");
+  DoutEntering(dc::rpc, "Output::write_record(output [" << (void*)&output << "], JSON-record:[" << libcwd::buf2str(record.data(), record.length()) << "])");
 
-  std::unique_lock lock(output.mutex);
-  output.out << record;
-  output.out.flush();
-  if (!output.out)
   {
-    auto on_write_failure = output.on_write_failure;
-    lock.unlock();
-    if (on_write_failure)
-      on_write_failure();
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write RPC JSONL record"));
+    output_ts::wat output_w(output);
+
+    if (output_w->out_ << record << std::flush)
+      return {};
+
+    if (output_w->on_write_failure_)
+    {
+      // The on_write_failure handler touches run_state/pending_state mutexes; running it under the
+      // output lock would invert lock order against paths that hold those mutexes and then write.
+      // Copy the handler out while still locked, drop the output lock, then invoke the handler lock-free.
+      auto on_write_failure_copy = output_w->on_write_failure_;
+      output_w.unlock();
+      on_write_failure_copy();
+    }
   }
-  return {};
+
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write RPC JSONL record"));
 }
 
-ava::core::VoidResult write_success(RpcOutput& output, std::string_view id, std::string_view result_json)
+ava::core::VoidResult write_success(output_ts& output, std::string_view id, std::string_view result_json)
 {
-  return write_rpc_record(output, ava::app::serialize_rpc_success_jsonl(id, result_json));
+  return Output::write_record(output, ava::app::serialize_rpc_success_jsonl(id, result_json));
 }
 
-ava::core::VoidResult write_error(RpcOutput& output, std::string_view id, ava::core::Error const& error)
+ava::core::VoidResult write_error(output_ts& output, std::string_view id, ava::core::Error const& error)
 {
-  return write_rpc_record(output, ava::app::serialize_rpc_error_jsonl(id, error));
+  return Output::write_record(output, ava::app::serialize_rpc_error_jsonl(id, error));
 }
 
-void subscribe_event_envelope_writer(EventBus& bus, RpcOutput& output)
+void subscribe_event_envelope_writer(EventBus& bus, output_ts& output)
 {
-  bus.subscribe([&output](EventEnvelope const& envelope) { return write_rpc_record(output, serialize_event_envelope_jsonl(envelope)); });
+  bus.subscribe([&output](EventEnvelope const& envelope) { return Output::write_record(output, serialize_event_envelope_jsonl(envelope)); });
 }
 
 EventEnvelopeContext rpc_event_context(std::string_view request_id)
@@ -132,15 +139,15 @@ EventEnvelope resolver_event_envelope(std::string name, std::string request_id, 
   return envelope;
 }
 
-ava::core::VoidResult write_queue_event(RpcOutput& output, RuntimeSession const& session, std::mutex& session_mutex, std::string_view name,
+ava::core::VoidResult write_queue_event(output_ts& output, RuntimeSession const& session, std::mutex& session_mutex, std::string_view name,
                                         QueuedRpcMessage const& queued, std::string_view reason)
 {
   auto envelope = resolver_event_envelope(std::string(name), queued.request_id, queued.correlation_id, session_id_snapshot(session, session_mutex),
                                           queued_message_payload_json(queued.message, reason));
-  return write_rpc_record(output, serialize_event_envelope_jsonl(envelope));
+  return Output::write_record(output, serialize_event_envelope_jsonl(envelope));
 }
 
-ava::core::VoidResult write_skipped_queue_events(RpcOutput& output, RuntimeSession const& session, std::mutex& session_mutex, ClearedRpcQueues const& cleared,
+ava::core::VoidResult write_skipped_queue_events(output_ts& output, RuntimeSession const& session, std::mutex& session_mutex, ClearedRpcQueues const& cleared,
                                                  std::string_view reason)
 {
   for (auto const& queued : cleared.steering_messages)
@@ -160,7 +167,7 @@ ava::core::VoidResult write_skipped_queue_events(RpcOutput& output, RuntimeSessi
   return {};
 }
 
-ava::core::VoidResult write_follow_up_errors(RpcOutput& output, std::vector<QueuedRpcMessage> const& follow_ups, std::string_view reason)
+ava::core::VoidResult write_follow_up_errors(output_ts& output, std::vector<QueuedRpcMessage> const& follow_ups, std::string_view reason)
 {
   for (auto const& queued : follow_ups)
   {

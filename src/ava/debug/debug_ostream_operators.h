@@ -1,5 +1,6 @@
 #pragma once
 
+#include <threadsafe/threadsafe.h>
 #include <boost/intrusive_ptr.hpp>
 #include <concepts>
 #include <condition_variable>
@@ -180,6 +181,12 @@ template<typename T>
 std::ostream& operator<<(std::ostream& os, std::reference_wrapper<T> const& ref)
 {
   return os << ::ava_utils::print_reference(ref);
+}
+
+template<typename T, typename POLICY_MUTEX>
+std::ostream& operator<<(std::ostream& os, threadsafe::Unlocked<T, POLICY_MUTEX>& unlocked)
+{
+  return os << "threadsafe::Unlocked<" << NAMESPACE_DEBUG::type_name_of<T>() << ">@" << (void*)&unlocked;
 }
 
 template<typename... Args>

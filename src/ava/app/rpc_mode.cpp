@@ -126,10 +126,6 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
   DoutEntering(dc::rpc, "run_rpc_loop(" << session << ", " << open_options << ", " << provider << ", " << auth_transport
       << ", " << runtime_options << ", " << print_reference(in) << ", " << print_reference(out) << ")");
 
-  // Wrap the output stream together with the mutex that serializes all writes to it (responses and
-  // events can originate from both the reader thread and the prompt worker). Every record goes out
-  // through `output`, never directly to `out`.
-  rpc::RpcOutput output(out);
   // Coordinator for the active prompt/compact run: active_run flag, the active request id, the
   // steering/follow-up queues, the cancel flag, and the side-channel used to surface write errors
   // that occurred on the worker thread back to this reader thread.
@@ -137,6 +133,19 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
   // Holds permission/question requests that are parked inside the worker waiting for a client reply.
   // permission_reply/question_reply (handled on this thread) resolve entries here and wake the worker.
   rpc::PendingResolverState pending_state;
+
+  // Protect the output stream with a mutex. Every record goes out through `output`, never directly to `out`.
+  //
+  // If a write to stdout fails irrecoverably we cannot communicate further with the client, so flip
+  // the run state to "input closed + cancel" and wake any parked resolver requests. This unblocks the
+  // worker (if any) and lets the loop reach its termination path; close_input_and_cancel returns the
+  // cleared queues but we discard them here because we are already aborting. The handler is installed
+  // under a write-access since set_on_write_failure is a member reachable only through a wat.
+  rpc::output_ts output(out, [&] {
+      static_cast<void>(rpc::close_input_and_cancel(run_state));
+      static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
+    });
+
   // Guards all access to `session` and its store, which are shared with the prompt worker.
   std::mutex session_mutex;
   // The optional worker thread for an in-flight prompt/follow-up chain. It is empty when no run is
@@ -167,15 +176,6 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     if (prompt_worker && !rpc::active_run(run_state)) {
       prompt_worker.reset();
     }
-  };
-
-  // If a write to stdout fails irreversibly we cannot communicate further with the client, so flip
-  // the run state to "input closed + cancel" and wake any parked resolver requests. This unblocks the
-  // worker (if any) and lets the loop reach its termination path; close_input_and_cancel returns the
-  // cleared queues but we discard them here because we are already aborting.
-  output.on_write_failure = [&] {
-    static_cast<void>(rpc::close_input_and_cancel(run_state));
-    static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
   };
 
   // Reused buffer for each incoming request line.
@@ -281,7 +281,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       // the request itself with the same payload. correlation_id = request id ties the event to this call.
       auto envelope = rpc::resolver_event_envelope("permission_grant_revoked", command->id, command->id,
                                                    rpc::session_id_snapshot(session, session_mutex), *revoked);
-      if (auto written = rpc::write_rpc_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
+      if (auto written = rpc::Output::write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
       if (auto written = rpc::write_success(output, command->id, *revoked); !written) return written;
       continue;
     }
@@ -292,7 +292,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       // Emit the grants-cleared event first, then the success response (same payload).
       auto envelope = rpc::resolver_event_envelope("permission_grants_cleared", command->id, command->id,
                                                    rpc::session_id_snapshot(session, session_mutex), cleared);
-      if (auto written = rpc::write_rpc_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
+      if (auto written = rpc::Output::write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
       if (auto written = rpc::write_success(output, command->id, cleared); !written) return written;
       continue;
     }
@@ -458,7 +458,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
           "permission_replied", *command->correlation_id, *command->correlation_id,
           rpc::session_id_snapshot(session, session_mutex),
           rpc::permission_reply_payload_json(*command->request_id, *command->decision, command->reason));
-      if (auto written = rpc::write_rpc_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
+      if (auto written = rpc::Output::write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
       if (auto written = rpc::write_success(output, command->id, "{}"); !written) return written;
       continue;
     }
@@ -495,7 +495,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
                                        rpc::session_id_snapshot(session, session_mutex),
                                        rpc::question_reply_payload_json(*command->request_id, command->answer,
                                                                         command->selected, command->selected_options));
-      if (auto written = rpc::write_rpc_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
+      if (auto written = rpc::Output::write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
       if (auto written = rpc::write_success(output, command->id, "{}"); !written) return written;
       continue;
     }
@@ -596,7 +596,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
           rpc::session_id_snapshot(session, session_mutex),
           rpc::cancel_requested_payload_json(was_active, cleared.steering_messages.size(),
                                              cleared.follow_up_messages.size(), active_request_id));
-      if (auto written = rpc::write_rpc_record(output, serialize_event_envelope_jsonl(cancel_event)); !written) {
+      if (auto written = rpc::Output::write_record(output, serialize_event_envelope_jsonl(cancel_event)); !written) {
         return written;
       }
       // The cancel command's own success response.

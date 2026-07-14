@@ -18,7 +18,7 @@ struct RpcPromptWorkerOptions
 {
   RuntimeSession& session;
   std::mutex& session_mutex;
-  RpcOutput& output;
+  output_ts& output;                                    // Reference to threadsafe output stream.
   RpcRunState& run_state;
   PendingResolverState& pending_state;
   ava::provider::Provider const& injected_provider;

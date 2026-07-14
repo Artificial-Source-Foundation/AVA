@@ -137,10 +137,6 @@ function(ava_apply_sanitizers target)
     target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(${target} PRIVATE -fsanitize=address,undefined)
   endif()
-  if(AVA_ENABLE_TSAN AND NOT MSVC)
-    target_compile_options(${target} PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
-    target_link_options(${target} PRIVATE -fsanitize=thread)
-  endif()
 endfunction()
 
 #==============================================================================
@@ -160,6 +156,15 @@ include_directories(${top_objdir})
 # End of CONFIG FILES section.
 
 #==============================================================================
+
+# ThreadSanitizer must instrument every project-built object that can be linked
+# into an instrumented executable. Applying it only to AVA's final targets can
+# select uninstrumented weak libstdc++ template definitions from AICxx object
+# libraries and hide real synchronization from TSan.
+if(AVA_ENABLE_TSAN AND NOT MSVC)
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=thread)
+endif()
 
 # Declare aicxx submodules.
 include(AICxxSubmodules)

@@ -16,6 +16,9 @@ def main():
 
     root = Path(args.root)
     root.mkdir(parents=True, exist_ok=True)
+    libcwd_rcfile = (root / "libcwdrc").resolve()
+    libcwd_rcfile.write_text(
+        "silent = on\nchannels_default = off\n", encoding="utf-8")
     env = os.environ.copy()
     env.update({
         "HOME": str(root / "home"),
@@ -24,6 +27,9 @@ def main():
         "XDG_STATE_HOME": str(root / "state"),
         "XDG_CACHE_HOME": str(root / "cache"),
         "NO_COLOR": "1",
+        # Debug builds must remain protocol-quiet even when an isolated HOME
+        # has no developer libcwd configuration.
+        "LIBCWD_RCFILE_NAME": str(libcwd_rcfile),
     })
     process = subprocess.Popen(
         [args.ava, "--rpc", "--no-session", "--offline"],

@@ -18,6 +18,9 @@ def environment(root):
     root.mkdir(parents=True, exist_ok=True)
     temporary = root / "tmp"
     temporary.mkdir(parents=True, exist_ok=True)
+    libcwd_rcfile = (root / "libcwdrc").resolve()
+    libcwd_rcfile.write_text(
+        "silent = on\nchannels_default = off\n", encoding="utf-8")
     return {
         "HOME": str(root / "home"),
         "XDG_CONFIG_HOME": str(root / "config"),
@@ -29,6 +32,9 @@ def environment(root):
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "NO_COLOR": "1",
+        # Debug builds must remain protocol-quiet even when an isolated HOME
+        # has no developer libcwd configuration.
+        "LIBCWD_RCFILE_NAME": str(libcwd_rcfile),
     }
 
 

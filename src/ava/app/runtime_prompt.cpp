@@ -8,6 +8,7 @@
 #include "ava/app/runtime_retry.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/subagent_config.h"
+#include "ava/config/prompt_config.h"
 #include "ava/tools/file_tools.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/permissions/permission_rules.h"

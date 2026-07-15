@@ -1,75 +1,25 @@
 #pragma once
 
+#include "ava/app/RuntimeOpenOptions.h"
+#include "ava/app/RuntimePromptState.h"
+#include "ava/app/RuntimeRunOptions.h"
 #include "ava/app/RuntimeSession.h"
-#include "ava/app/events.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/config/model_config.h"
-#include "ava/config/prompt_config.h"
 #include "ava/config/xdg_paths.h"
-#include "ava/session/attachments.h"
 #include "ava/session/compaction.h"
 #include "ava/session/session_store.h"
-#include "ava/permissions/permission.h"
 #include "ava/provider/provider.h"
+#include "ava/core/result.h"
 
-#include <cstdint>
-#include <filesystem>
+#include <cstddef>
 #include <functional>
-#include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace ava::app {
-
-struct RuntimeOpenOptions
-{
-  std::filesystem::path workspace_dir;
-  std::filesystem::path current_dir;
-  std::optional<std::string> requested_session_id;
-  std::optional<std::string> fork_session_id;
-  std::optional<std::string> initial_session_name;
-  bool continue_last_session = false;
-  bool sessionless = false;
-  ava::agent::Mode mode = ava::agent::Mode::Build;
-  ava::agent::ToolVisibilityOptions tool_visibility;
-  ava::config::XdgPaths paths = ava::config::xdg_paths();
-  RuntimePromptOverrides prompt_overrides;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct RuntimePromptState
-{
-  ava::agent::Mode mode = ava::agent::Mode::Build;
-  RuntimeBasePromptMetadata base_prompt;
-  std::vector<ContextSourceMetadata> context_sources;
-  std::vector<RuntimeFreshnessSourceMetadata> freshness_sources;
-  std::string system_prompt;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct RuntimeRunOptions
-{
-  std::string access_token;
-  std::string credential_type = "bearer";
-  bool openai_oauth = false;
-  std::string openai_account_id;
-  bool stream = true;
-  bool enable_transport_retries = false;
-  RuntimeEventSink event_sink = nullptr;
-  ava::permissions::PermissionResolver permission_resolver = nullptr;
-  ava::agent::QuestionResolver question_resolver = nullptr;
-  std::function<bool()> cancel_requested = nullptr;
-  std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
-  std::mutex* session_mutex = nullptr;
-  std::vector<ava::session::ImageAttachmentRef> image_attachments;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
 
 using CompactionSummaryGenerator =
     std::function<ava::core::Result<std::string>(std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,

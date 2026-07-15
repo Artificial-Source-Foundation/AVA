@@ -4,7 +4,7 @@
 
 #include <cstdint>
 #include <limits>
-#include "debug.h"
+#include "debug.h"      // ASSERT
 
 namespace ava::tui::terminal {
 

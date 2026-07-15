@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/core/result.h"
 
@@ -7,7 +8,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include "debug.h"
 
 namespace ava::app {
 

@@ -9,7 +9,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-#include "debug.h"
 
 namespace ava::app {
 

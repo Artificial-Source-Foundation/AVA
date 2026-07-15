@@ -12,6 +12,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include "debug.h"      // AI_NEVER_REACHED
 
 namespace ava::app {
 namespace {

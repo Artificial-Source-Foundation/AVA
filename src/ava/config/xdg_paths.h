@@ -1,7 +1,8 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <filesystem>
-#include "debug.h"
 
 namespace ava::config {
 

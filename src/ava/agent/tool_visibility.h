@@ -1,8 +1,9 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <string>
 #include <vector>
-#include "debug.h"
 
 namespace ava::agent {
 

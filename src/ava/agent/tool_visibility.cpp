@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tool_visibility.h"
+#include "debug.h"
 
 namespace ava::agent {
 

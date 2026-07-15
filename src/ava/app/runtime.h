@@ -1,7 +1,7 @@
 #pragma once
 
+#include "ava/app/RuntimeSession.h"
 #include "ava/app/events.h"
-#include "ava/app/project_trust.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/config/model_config.h"
 #include "ava/config/prompt_config.h"
@@ -11,7 +11,6 @@
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/provider.h"
-#include "ava/context/context_loader.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -22,51 +21,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include "debug.h"
 
 namespace ava::app {
-
-enum class RuntimeFreshnessSourceKind
-{
-  SystemPrompt,
-  AppendSystemPrompt,
-  PromptCommand,
-  Skill,
-  PluginManifest,
-  PluginPrompt,
-  PluginSkill,
-};
-
-struct ContextSourceMetadata
-{
-  std::filesystem::path path;
-  ava::context::ContextSourceType source_type = ava::context::ContextSourceType::Workspace;
-  std::size_t byte_count = 0;
-  std::uint64_t content_fingerprint = 0;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct RuntimeFreshnessSourceMetadata
-{
-  RuntimeFreshnessSourceKind kind = RuntimeFreshnessSourceKind::Skill;
-  std::string scope;
-  std::string source_id;
-  std::string name;
-  std::filesystem::path path;
-  std::size_t byte_count = 0;
-  std::uint64_t content_fingerprint = 0;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct RuntimePromptOverrides
-{
-  std::optional<std::string> system_prompt = std::nullopt;
-  std::vector<std::string> append_system_prompts;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
 
 struct RuntimeOpenOptions
 {
@@ -81,49 +37,6 @@ struct RuntimeOpenOptions
   ava::agent::ToolVisibilityOptions tool_visibility;
   ava::config::XdgPaths paths = ava::config::xdg_paths();
   RuntimePromptOverrides prompt_overrides;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct RuntimeReasoningSelection
-{
-  std::string level;
-  std::optional<long long> budget_tokens = std::nullopt;
-  std::string display;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct RuntimeBasePromptMetadata
-{
-  bool from_override = false;
-  std::optional<std::filesystem::path> source_path = std::nullopt;
-  std::size_t byte_count = 0;
-  std::uint64_t content_fingerprint = 0;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct RuntimeSession
-{
-  ava::session::SessionStore store;
-  ava::agent::Mode mode = ava::agent::Mode::Build;
-  ava::config::ModelInfo model;
-  RuntimeBasePromptMetadata base_prompt;
-  ava::config::XdgPaths paths;
-  std::filesystem::path workspace_dir;
-  std::filesystem::path current_dir;
-  ProjectTrustState project_trust;
-  RuntimePromptOverrides prompt_overrides;
-  ava::agent::ToolVisibilityOptions tool_visibility;
-  std::vector<ContextSourceMetadata> context_sources;
-  std::vector<RuntimeFreshnessSourceMetadata> freshness_sources;
-  std::string system_prompt;
-  std::optional<RuntimeReasoningSelection> reasoning = std::nullopt;
-  std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
-  bool created = false;
-  bool sessionless = false;
-  std::shared_ptr<ava::agent::BackgroundJobRegistry> background_jobs = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

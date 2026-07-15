@@ -17,18 +17,11 @@ set(GITACHE_PACKAGES libcwd)  # List of requested packages.
 
 include(FetchContent)
 
-# If a local gitache submodule is present then use that rather than downloading one.
-if (EXISTS ${CMAKE_CURRENT_LIST_DIR}/gitache/.git)
-  # This will disable the use of the GIT_REPOSITORY/GIT_TAG below, and disable the
-  # FetchContent- download and update step. Instead, use the gitache submodule as-is.
-  set(FETCHCONTENT_SOURCE_DIR_GITACHE "${CMAKE_CURRENT_LIST_DIR}/gitache" CACHE INTERNAL "" FORCE)
-endif ()
-
 FetchContent_Declare(
   gitache
   GIT_REPOSITORY "https://github.com/CarloWood/gitache.git"
-  GIT_TAG        "stable"       # Normally use either "stable" or a fixed SHA1 to freeze the version here!
-                                # Using "master" might be *unstable*.
+  GIT_TAG        "c765a7199d8c789fe8d59af69a18a8eb08c5b945"
+  UPDATE_DISCONNECTED TRUE
 )
 FetchContent_MakeAvailable(gitache)
 # End of gitache configuration.

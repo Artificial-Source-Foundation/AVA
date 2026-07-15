@@ -1,15 +1,16 @@
 [submodule "cwds"]
 	path = cwds
 	url = https://github.com/CarloWood/cwds.git
-	branch = master
+	update = checkout
 [submodule "cmake/aicxx"]
 	path = cmake/aicxx
 	url = https://github.com/CarloWood/cmake-aicxx.git
-	branch = master
+	update = checkout
 [submodule "utils"]
 	path = utils
 	url = https://github.com/CarloWood/ai-utils.git
-	branch = master
+	update = checkout
 [submodule "enchantum"]
 	path = enchantum
 	url = https://github.com/ZXShady/enchantum.git
+	update = checkout

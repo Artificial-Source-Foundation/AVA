@@ -752,6 +752,11 @@ template <typename Callback>
 LineResult with_provider_runtime(ShellState& state, std::string_view offline_suffix, Callback callback)
 {
   LineResult line_result;
+  if (state.session.offline)
+  {
+    add_output(line_result, ava::app::offline_provider_error("prompt").format() + std::string(offline_suffix));
+    return line_result;
+  }
   ava::provider::CurlCliTransport transport;
   auto credential = ava::config::provider_credential_for_request(state.session.paths, state.session.model.provider_id, transport);
   if (!credential)
@@ -837,32 +842,31 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
     line_result.tool_timeline = std::move(command_result->tool_timeline);
     if (command_result->prompt_message)
     {
-      return with_provider_runtime(
-          state, "\nthis command expands to a prompt and needs provider auth.",
-          [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
-            run_options.permission_resolver = permission_resolver;
-            run_options.question_resolver = question_resolver;
-            run_options.event_sink = std::move(event_sink);
-            run_options.cancel_requested = std::move(cancel_requested);
-            run_options.take_steering_messages = std::move(take_steering_messages);
-            auto result = ava::app::run_prompt(state.session, *command_result->prompt_message, provider, transport, run_options);
-            LineResult prompt_result;
-            if (!result)
-            {
-              add_output(prompt_result, result.error().format());
-              return prompt_result;
-            }
-            prompt_result.tool_timeline = std::move(result->tool_timeline);
-            if (!result->final_text.empty())
-            {
-              add_output(prompt_result, result->final_text);
-            }
-            else
-            {
-              add_output(prompt_result, "done");
-            }
-            return prompt_result;
-          });
+      return with_provider_runtime(state, "\nthis command expands to a prompt and needs provider auth.",
+                                   [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
+                                     run_options.permission_resolver = permission_resolver;
+                                     run_options.question_resolver = question_resolver;
+                                     run_options.event_sink = std::move(event_sink);
+                                     run_options.cancel_requested = std::move(cancel_requested);
+                                     run_options.take_steering_messages = std::move(take_steering_messages);
+                                     auto result = ava::app::run_prompt(state.session, *command_result->prompt_message, provider, transport, run_options);
+                                     LineResult prompt_result;
+                                     if (!result)
+                                     {
+                                       add_output(prompt_result, result.error().format());
+                                       return prompt_result;
+                                     }
+                                     prompt_result.tool_timeline = std::move(result->tool_timeline);
+                                     if (!result->final_text.empty())
+                                     {
+                                       add_output(prompt_result, result->final_text);
+                                     }
+                                     else
+                                     {
+                                       add_output(prompt_result, "done");
+                                     }
+                                     return prompt_result;
+                                   });
     }
     return line_result;
   }
@@ -987,6 +991,7 @@ int run_tui(ShellState state)
     options.tool_visibility = state.session.tool_visibility;
     options.paths = state.session.paths;
     options.sessionless = state.session.sessionless;
+    options.offline = state.session.offline;
     return options;
   };
   auto state_snapshot = [&state, &hotkeys, &model_display, &custom_theme_options](std::string status) {
@@ -1021,7 +1026,8 @@ int run_tui(ShellState state)
     auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_options(), target_session_id);
     if (!opened)
       return std::unexpected(std::move(opened.error()));
-    state.session = std::move(*opened);
+    if (auto replaced = ava::app::replace_runtime_session(state.session, std::move(*opened)); !replaced)
+      return std::unexpected(std::move(replaced.error()));
     return state_snapshot(status_prefix + target_session_id);
   };
   auto open_selector_branch = [&state, &open_session_selector_target, session_selector_sort, session_selector_show_archived](
@@ -1385,7 +1391,8 @@ int run_tui(ShellState state)
         auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_options(), value);
         if (!opened)
           return std::unexpected(std::move(opened.error()));
-        state.session = std::move(*opened);
+        if (auto replaced = ava::app::replace_runtime_session(state.session, std::move(*opened)); !replaced)
+          return std::unexpected(std::move(replaced.error()));
         return state_snapshot("session opened");
       }});
   std::cout << std::flush;

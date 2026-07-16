@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace ava::mcp {
@@ -21,6 +22,7 @@ struct McpServerConfig
   std::string name;
   std::string command;
   std::vector<std::string> args;
+  std::vector<std::pair<std::string, std::string>> env;
   bool enabled = true;
   McpServerScope scope = McpServerScope::Global;
   std::filesystem::path source_path;

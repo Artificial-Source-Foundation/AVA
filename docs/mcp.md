@@ -15,7 +15,7 @@ Use `/mcp list` and `/mcp inspect <server_id>` to inspect loaded servers. Use `/
 
 ## Supported MVP Surface
 
-- stdio MCP transport with bounded Content-Length parsing and stderr diagnostics;
+- standards-compliant newline-delimited JSON-RPC stdio MCP transport with bounded strict records, exact `2024-11-05` version negotiation, bounded list pagination, and stderr diagnostics;
 - `initialize`, `tools/list`, and `tools/call` adapted into AVA model-visible tools named with a bounded `mcp_<server>_<tool>` prefix;
 - `resources/list` and `resources/read` adapted into opaque no-argument read-style tools that require `mcp.resource.read` approval before content enters model context;
 - `prompts/list` and `prompts/get` exposed through the command registry as `/mcp:<server_id>:<prompt_name>` commands and RPC `list_commands`/`invoke_command`, not as automatic model-visible tools;

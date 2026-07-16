@@ -49,11 +49,16 @@ configure_file(
   @ONLY
 )
 
+# Keep the long-standing AVA_* command-line variables as compatibility inputs.
+# An explicitly set cw_option value wins; otherwise it follows the legacy cache
+# variable so existing presets, CI jobs, and documented invocations still work.
+option(AVA_BUILD_TESTS "Build AVA tests (compatibility alias for EnableAvaBuildTests)" ON)
+option(AVA_ENABLE_SANITIZERS "Build AVA with sanitizers (compatibility alias for EnableAvaSanitizers)" OFF)
 cw_option(EnableAvaBuildTests
-    "Build AVA tests" ON
+    "Build AVA tests" "${AVA_BUILD_TESTS}"
     "" OFF)
 cw_option(EnableAvaSanitizers
-    "Build AVA with AddressSanitizer and UndefinedBehaviorSanitizer" OFF
+    "Build AVA with AddressSanitizer and UndefinedBehaviorSanitizer" "${AVA_ENABLE_SANITIZERS}"
     "" OFF)
 
 # AVA_BUILD_DESKTOP_QML gates the experimental Qt Quick/QML desktop prototype
@@ -61,6 +66,10 @@ cw_option(EnableAvaSanitizers
 # because src/CMakeLists.txt references the AVA_BUILD_DESKTOP_QML variable name
 # directly, unlike the cw_option-based toggles above.
 option(AVA_BUILD_DESKTOP_QML "Build the experimental Qt Quick/QML desktop prototype" OFF)
+option(AVA_ENABLE_TSAN "Build AVA with ThreadSanitizer (focused coordinator tests only)" OFF)
+if(OptionEnableAvaSanitizers AND AVA_ENABLE_TSAN)
+  message(FATAL_ERROR "EnableAvaSanitizers/AVA_ENABLE_SANITIZERS and AVA_ENABLE_TSAN are mutually exclusive")
+endif()
 
 # Default maximum string length for debug output truncation. When no maxlen()
 # IO manipulator is active on the debug stream, strings longer than this are
@@ -81,6 +90,22 @@ endif()
 message(STATUS "${Option} ${OptionColor}AVA_DEBUG_MAXLEN${ColourReset} (Default maximum string length for debug output truncation) =\n\t${_ava_debug_maxlen_color}${AVA_DEBUG_MAXLEN}${ColourReset}${_ava_debug_maxlen_info}")
 unset(_ava_debug_maxlen_color)
 unset(_ava_debug_maxlen_info)
+
+# ACP keeps JSON implementation details behind its codec. Prefer an installed
+# package so configured offline environments do not need the network; the
+# fallback is an immutable official release artifact.
+find_package(nlohmann_json 3.11 CONFIG QUIET)
+if(NOT TARGET nlohmann_json::nlohmann_json)
+  set(JSON_BuildTests OFF CACHE INTERNAL "" FORCE)
+  set(JSON_Install OFF CACHE INTERNAL "" FORCE)
+  FetchContent_Declare(
+    ava_nlohmann_json
+    URL "https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz"
+    URL_HASH "SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d"
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  FetchContent_MakeAvailable(ava_nlohmann_json)
+endif()
 
 function(ava_apply_debugging target)
   target_link_libraries(${target} PRIVATE ${AICXX_OBJECTS_LIST})
@@ -131,6 +156,15 @@ include_directories(${top_objdir})
 # End of CONFIG FILES section.
 
 #==============================================================================
+
+# ThreadSanitizer must instrument every project-built object that can be linked
+# into an instrumented executable. Applying it only to AVA's final targets can
+# select uninstrumented weak libstdc++ template definitions from AICxx object
+# libraries and hide real synchronization from TSan.
+if(AVA_ENABLE_TSAN AND NOT MSVC)
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=thread)
+endif()
 
 # Declare aicxx submodules.
 include(AICxxSubmodules)

@@ -139,6 +139,49 @@ void test_headless_permission_policy()
                                                       .command = "demo:echo",
                                                       .tool_name = "mcp_demo_echo",
                                                       .reason = "MCP tool calls require explicit approval"};
+  auto const plugin_tool_name = std::string("plugin_com_example_todo_todo_add");
+  ava::permissions::PermissionPrompt const plugin_execute_prompt{.operation = ava::permissions::Operation::PluginExecute,
+                                                                 .mode = ava::agent::Mode::Build,
+                                                                 .workspace_dir = workspace,
+                                                                 .target_path = workspace / ".ava" / "plugins" / "com.example.todo" / "plugin.json",
+                                                                 .command = "com.example.todo",
+                                                                 .tool_name = plugin_tool_name,
+                                                                 .reason = "plugin subprocess execution requires explicit approval"};
+  ava::permissions::PermissionPrompt const plugin_tool_prompt{.operation = ava::permissions::Operation::PluginToolCall,
+                                                              .mode = ava::agent::Mode::Build,
+                                                              .workspace_dir = workspace,
+                                                              .target_path = workspace / ".ava" / "plugins" / "com.example.todo" / "plugin.json",
+                                                              .command = "com.example.todo:todo_add",
+                                                              .tool_name = plugin_tool_name,
+                                                              .reason = "plugin tool calls require explicit approval"};
+  ava::permissions::PermissionPrompt const plugin_command_execute_prompt{.operation = ava::permissions::Operation::PluginExecute,
+                                                                         .mode = ava::agent::Mode::Build,
+                                                                         .workspace_dir = workspace,
+                                                                         .target_path = workspace / ".ava" / "plugins" / "com.example.cmd" / "plugin.json",
+                                                                         .command = "com.example.cmd",
+                                                                         .tool_name = "plugin_command",
+                                                                         .reason = "plugin subprocess execution requires explicit approval"};
+  ava::permissions::PermissionPrompt const plugin_command_prompt{.operation = ava::permissions::Operation::PluginCommandRun,
+                                                                 .mode = ava::agent::Mode::Build,
+                                                                 .workspace_dir = workspace,
+                                                                 .target_path = workspace / ".ava" / "plugins" / "com.example.cmd" / "plugin.json",
+                                                                 .command = "com.example.cmd:todo",
+                                                                 .tool_name = "plugin_command",
+                                                                 .reason = "plugin commands require explicit approval"};
+  ava::permissions::PermissionPrompt const plugin_event_execute_prompt{.operation = ava::permissions::Operation::PluginExecute,
+                                                                       .mode = ava::agent::Mode::Build,
+                                                                       .workspace_dir = workspace,
+                                                                       .target_path = workspace / ".ava" / "plugins" / "com.example.events" / "plugin.json",
+                                                                       .command = "com.example.events",
+                                                                       .tool_name = "plugin_event_observe",
+                                                                       .reason = "plugin subprocess execution requires explicit approval"};
+  ava::permissions::PermissionPrompt const plugin_event_prompt{.operation = ava::permissions::Operation::PluginEventObserve,
+                                                               .mode = ava::agent::Mode::Build,
+                                                               .workspace_dir = workspace,
+                                                               .target_path = workspace / ".ava" / "plugins" / "com.example.events" / "plugin.json",
+                                                               .command = "com.example.events:tool.result",
+                                                               .tool_name = "plugin_event_observe",
+                                                               .reason = "plugin event observation requires explicit approval"};
 
   auto default_resolver = ava::app::build_headless_permission_resolver(ava::app::HeadlessPermissionPolicyOptions{});
   auto default_read = default_resolver(read_prompt);
@@ -163,8 +206,8 @@ void test_headless_permission_policy()
          "headless read-only policy denies network search prompts");
 
   ava::app::HeadlessPermissionPolicyOptions tool_options;
-  auto tools_added = ava::app::add_headless_allowed_tools(tool_options, "glob,grep,mcp,read_file,skill,task,webfetch,websearch");
-  expect(tools_added.has_value() && tool_options.allowed_tools.size() == 8, "headless allow-tool parses supported comma-separated tool names");
+  auto tools_added = ava::app::add_headless_allowed_tools(tool_options, "glob,grep,mcp,plugin,read_file,skill,task,webfetch,websearch");
+  expect(tools_added.has_value() && tool_options.allowed_tools.size() == 9, "headless allow-tool parses supported comma-separated tool names");
   auto tool_resolver = ava::app::build_headless_permission_resolver(tool_options);
   auto const tool_read = tool_resolver(read_prompt);
   auto const tool_search = tool_resolver(search_prompt);
@@ -173,6 +216,12 @@ void test_headless_permission_policy()
   auto const tool_skill = tool_resolver(skill_prompt);
   auto const tool_task = tool_resolver(task_prompt);
   auto const tool_mcp = tool_resolver(mcp_prompt);
+  auto const tool_plugin_execute = tool_resolver(plugin_execute_prompt);
+  auto const tool_plugin_tool = tool_resolver(plugin_tool_prompt);
+  auto const tool_plugin_command_execute = tool_resolver(plugin_command_execute_prompt);
+  auto const tool_plugin_command = tool_resolver(plugin_command_prompt);
+  auto const tool_plugin_event_execute = tool_resolver(plugin_event_execute_prompt);
+  auto const tool_plugin_event = tool_resolver(plugin_event_prompt);
   ava::permissions::PermissionPrompt const lower_layer_read_prompt{.operation = ava::permissions::Operation::ReadFile,
                                                                    .mode = ava::agent::Mode::Build,
                                                                    .workspace_dir = workspace,
@@ -187,8 +236,56 @@ void test_headless_permission_policy()
                                                                   .command = "",
                                                                   .tool_name = "read_file",
                                                                   .reason = "target is outside the workspace"};
+  ava::permissions::PermissionPrompt const plugin_proxy_read_prompt{.operation = ava::permissions::Operation::ReadFile,
+                                                                    .mode = ava::agent::Mode::Build,
+                                                                    .workspace_dir = workspace,
+                                                                    .target_path = outside,
+                                                                    .command = "",
+                                                                    .tool_name = plugin_tool_name + ":proxy:file.read",
+                                                                    .reason = "target is outside the workspace"};
+  ava::permissions::PermissionPrompt const plugin_proxy_search_prompt{.operation = ava::permissions::Operation::SearchFiles,
+                                                                      .mode = ava::agent::Mode::Build,
+                                                                      .workspace_dir = workspace,
+                                                                      .target_path = workspace,
+                                                                      .command = "",
+                                                                      .tool_name = plugin_tool_name + ":proxy:file.search",
+                                                                      .reason = "search requires approval"};
+  ava::permissions::PermissionPrompt const plugin_proxy_bash_prompt{.operation = ava::permissions::Operation::RunCommand,
+                                                                    .mode = ava::agent::Mode::Build,
+                                                                    .workspace_dir = workspace,
+                                                                    .target_path = workspace,
+                                                                    .command = "true",
+                                                                    .tool_name = plugin_tool_name + ":proxy:shell.run",
+                                                                    .reason = "command risk is unknown"};
+  ava::permissions::PermissionPrompt const plugin_proxy_network_prompt{.operation = ava::permissions::Operation::NetworkFetch,
+                                                                       .mode = ava::agent::Mode::Build,
+                                                                       .workspace_dir = workspace,
+                                                                       .target_path = {},
+                                                                       .command = "https://example.com",
+                                                                       .tool_name = plugin_tool_name + ":proxy:network.fetch",
+                                                                       .reason = "network fetch requires explicit approval"};
+  ava::permissions::PermissionPrompt const plugin_tool_name_wrong_operation_prompt{.operation = ava::permissions::Operation::EditFile,
+                                                                                   .mode = ava::agent::Mode::Build,
+                                                                                   .workspace_dir = workspace,
+                                                                                   .target_path = outside,
+                                                                                   .command = "",
+                                                                                   .tool_name = plugin_tool_name,
+                                                                                   .reason = "target is outside the workspace"};
+  ava::permissions::PermissionPrompt const plugin_operation_wrong_tool_name_prompt{.operation = ava::permissions::Operation::PluginToolCall,
+                                                                                   .mode = ava::agent::Mode::Build,
+                                                                                   .workspace_dir = workspace,
+                                                                                   .target_path = workspace,
+                                                                                   .command = "com.example.todo:todo_add",
+                                                                                   .tool_name = "read_file",
+                                                                                   .reason = "plugin tool calls require explicit approval"};
   auto const lower_layer_read = tool_resolver(lower_layer_read_prompt);
   auto const mismatched_tool = tool_resolver(mismatched_tool_prompt);
+  auto const plugin_proxy_read = tool_resolver(plugin_proxy_read_prompt);
+  auto const plugin_proxy_search = tool_resolver(plugin_proxy_search_prompt);
+  auto const plugin_proxy_bash = tool_resolver(plugin_proxy_bash_prompt);
+  auto const plugin_proxy_network = tool_resolver(plugin_proxy_network_prompt);
+  auto const plugin_tool_name_wrong_operation = tool_resolver(plugin_tool_name_wrong_operation_prompt);
+  auto const plugin_operation_wrong_tool_name = tool_resolver(plugin_operation_wrong_tool_name_prompt);
   expect(tool_read && *tool_read == ava::permissions::PermissionResolution::Allow, "headless allow-tool allows exact read_file prompts");
   expect(tool_search && *tool_search == ava::permissions::PermissionResolution::Allow, "headless allow-tool allows exact glob search prompts");
   expect(tool_webfetch && *tool_webfetch == ava::permissions::PermissionResolution::Allow, "headless allow-tool allows exact webfetch network prompts");
@@ -196,9 +293,33 @@ void test_headless_permission_policy()
   expect(tool_skill && *tool_skill == ava::permissions::PermissionResolution::Allow, "headless allow-tool allows exact skill prompts");
   expect(tool_task && *tool_task == ava::permissions::PermissionResolution::Allow, "headless allow-tool allows exact task prompts");
   expect(tool_mcp && *tool_mcp == ava::permissions::PermissionResolution::Allow, "headless allow-tool allows dynamic MCP tool prompts through the mcp group");
+  expect(tool_plugin_execute && *tool_plugin_execute == ava::permissions::PermissionResolution::Allow,
+         "headless allow-tool allows exact plugin tool launch prompts through the plugin group");
+  expect(tool_plugin_tool && *tool_plugin_tool == ava::permissions::PermissionResolution::Allow,
+         "headless allow-tool allows exact plugin tool call prompts through the plugin group");
+  expect(tool_plugin_command_execute && *tool_plugin_command_execute == ava::permissions::PermissionResolution::Allow,
+         "headless allow-tool allows exact plugin command launch prompts through the plugin group");
+  expect(tool_plugin_command && *tool_plugin_command == ava::permissions::PermissionResolution::Allow,
+         "headless allow-tool allows exact plugin command run prompts through the plugin group");
+  expect(tool_plugin_event_execute && *tool_plugin_event_execute == ava::permissions::PermissionResolution::Deny,
+         "headless allow-tool plugin does not allow plugin event hook launch prompts");
+  expect(tool_plugin_event && *tool_plugin_event == ava::permissions::PermissionResolution::Deny,
+         "headless allow-tool plugin does not allow plugin event observe prompts");
   expect(lower_layer_read && *lower_layer_read == ava::permissions::PermissionResolution::Deny, "headless allow-tool requires exact tool names");
   expect(mismatched_tool && *mismatched_tool == ava::permissions::PermissionResolution::Deny,
          "headless allow-tool does not allow unsafe operations with a safe tool name");
+  expect(plugin_proxy_read && *plugin_proxy_read == ava::permissions::PermissionResolution::Deny,
+         "headless allow-tool plugin does not allow plugin file read proxy prompts");
+  expect(plugin_proxy_search && *plugin_proxy_search == ava::permissions::PermissionResolution::Deny,
+         "headless allow-tool plugin does not allow plugin file search proxy prompts");
+  expect(plugin_proxy_bash && *plugin_proxy_bash == ava::permissions::PermissionResolution::Deny,
+         "headless allow-tool plugin does not allow plugin shell proxy prompts");
+  expect(plugin_proxy_network && *plugin_proxy_network == ava::permissions::PermissionResolution::Deny,
+         "headless allow-tool plugin does not allow plugin network proxy prompts");
+  expect(plugin_tool_name_wrong_operation && *plugin_tool_name_wrong_operation == ava::permissions::PermissionResolution::Deny,
+         "headless allow-tool plugin requires plugin operation families");
+  expect(plugin_operation_wrong_tool_name && *plugin_operation_wrong_tool_name == ava::permissions::PermissionResolution::Deny,
+         "headless allow-tool plugin requires exact plugin prompt tool names");
 
   auto invalid_allow = ava::app::add_headless_allow_policy(tool_options, "nope");
   auto invalid_tool = ava::app::add_headless_allowed_tools(tool_options, "glob,nope");
@@ -615,6 +736,44 @@ void test_app_print_mode_refreshes_expired_oauth_before_provider_request()
       "print mode OAuth preflight persists refreshed credential before provider startup");
 }
 
+void test_app_print_offline_fails_before_auth_refresh_or_provider_request()
+{
+  auto const root = temp_root() / "app-print-offline";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  auto stored = ava::config::store_openai_credential(paths, ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
+                                                                                          .access_token = "expired-offline-access",
+                                                                                          .refresh_token = "offline-refresh",
+                                                                                          .expires_at = 100,
+                                                                                          .account_id = "acct_offline",
+                                                                                          .source_path = {}});
+  expect(stored.has_value(), "print offline test stores expired credential");
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{}"}});
+
+  ava::app::PrintModeOptions options;
+  options.open_options.workspace_dir = workspace;
+  options.open_options.current_dir = workspace;
+  options.open_options.mode = ava::agent::Mode::Build;
+  options.open_options.paths = paths;
+  options.open_options.offline = true;
+  options.explicit_prompt = "hello offline print";
+  options.provider_override = std::cref(provider);
+  options.transport_override = std::ref(transport);
+
+  std::istringstream in;
+  std::ostringstream out;
+  std::ostringstream err;
+  auto const exit_code = ava::app::run_print_mode(options, in, out, err);
+  expect(exit_code == 1 && out.str().empty() && err.str().find("offline mode is enabled") != std::string::npos,
+         "print offline mode fails with a clear offline error");
+  expect(transport.requests().empty(), "print offline mode skips OAuth refresh and provider requests");
+}
+
 void test_app_connect_provider_credentials_headlessly()
 {
   ScopedStdinTerminalState terminal_state;
@@ -895,6 +1054,7 @@ void run_app_print_tests()
   test_app_print_mode_default_permission_denial_is_actionable();
   test_app_print_mode_uses_persistent_permission_rules();
   test_app_print_mode_refreshes_expired_oauth_before_provider_request();
+  test_app_print_offline_fails_before_auth_refresh_or_provider_request();
   test_app_connect_provider_credentials_headlessly();
   test_app_print_json_mode_outputs_runtime_events();
   test_app_print_json_mode_streams_provider_deltas_before_final_message();

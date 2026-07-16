@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/rpc/run_state.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/config/auth.h"
@@ -17,6 +18,55 @@
 namespace {
 
 using namespace ava::tests;
+
+void test_app_rpc_follow_up_transition_state_machine_is_atomic()
+{
+  using ava::app::rpc::RpcFollowUpTransitionKind;
+  using ava::app::rpc::RpcRunKind;
+
+  ava::app::rpc::RpcRunState canceled_state;
+  ava::app::rpc::set_active_run(canceled_state, RpcRunKind::Prompt, "parent");
+  auto queued = ava::app::rpc::queue_rpc_message(canceled_state.follow_up_messages, canceled_state, "follow_up", "child", "next");
+  ava::app::rpc::begin_prompt_terminal_publication(canceled_state);
+  auto cancellation = ava::app::rpc::begin_cancellation(canceled_state);
+  bool retained_during_publication = false;
+  {
+    std::lock_guard lock(canceled_state.mutex);
+    retained_during_publication = canceled_state.active_request_id == "parent" && canceled_state.follow_up_messages.size() == 1 &&
+                                  canceled_state.outstanding_request_ids.contains("parent") && canceled_state.outstanding_request_ids.contains("child");
+  }
+  auto canceled = ava::app::rpc::transition_after_prompt_terminal_response(canceled_state);
+  ava::app::rpc::complete_terminal_publication(canceled_state, "parent");
+  expect(queued && cancellation.deferred_to_terminal_publication && cancellation.deferred_follow_up_count == 1 && retained_during_publication &&
+             canceled.kind == RpcFollowUpTransitionKind::Skipped && !canceled.follow_up && canceled.cleared.follow_up_messages.size() == 1 &&
+             canceled.cleared.follow_up_messages.front().request_id == "child" && !ava::app::rpc::active_run(canceled_state),
+         "RPC cancellation during parent publication retains the child and parent identity until the post-flush transition skips it");
+
+  ava::app::rpc::RpcRunState admitted_state;
+  ava::app::rpc::set_active_run(admitted_state, RpcRunKind::Prompt, "parent");
+  auto admitted = ava::app::rpc::queue_rpc_message(admitted_state.follow_up_messages, admitted_state, "follow_up", "child", "next");
+  ava::app::rpc::begin_prompt_terminal_publication(admitted_state);
+  bool child_shared_until_flush = false;
+  {
+    std::lock_guard lock(admitted_state.mutex);
+    child_shared_until_flush = admitted_state.active_request_id == "parent" && admitted_state.follow_up_messages.size() == 1;
+  }
+  auto activated = ava::app::rpc::transition_after_prompt_terminal_response(admitted_state);
+  ava::app::rpc::complete_terminal_publication(admitted_state, "parent");
+  expect(admitted && child_shared_until_flush && activated.kind == RpcFollowUpTransitionKind::Activated && activated.follow_up &&
+             activated.follow_up->request_id == "child" && ava::app::rpc::active_prompt_run(admitted_state),
+         "RPC follow-up remains shared until a successful parent flush then is atomically popped and activated");
+
+  ava::app::rpc::RpcRunState deactivated_state;
+  ava::app::rpc::set_active_run(deactivated_state, RpcRunKind::Prompt, "parent");
+  ava::app::rpc::begin_prompt_terminal_publication(deactivated_state);
+  auto deactivated = ava::app::rpc::transition_after_prompt_terminal_response(deactivated_state);
+  ava::app::rpc::complete_terminal_publication(deactivated_state, "parent");
+  auto late = ava::app::rpc::queue_rpc_message(deactivated_state.follow_up_messages, deactivated_state, "follow_up", "late", "too late");
+  expect(deactivated.kind == RpcFollowUpTransitionKind::Deactivated && !ava::app::rpc::active_run(deactivated_state) && !late &&
+             late.error().message() == "RPC command requires an active prompt",
+         "RPC empty-run deactivation and a late follow-up admission have one deterministic lock order with no orphaned queue item");
+}
 
 void test_app_rpc_cancel_affects_subsequent_prompt()
 {
@@ -113,9 +163,10 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission()
   expect(result.has_value(), "RPC active cancel loop exits successfully");
   expect(jsonl.find("\"id\":\"cancel\"") != std::string::npos && jsonl.find("\"active_run\":true") != std::string::npos &&
              jsonl.find("\"name\":\"cancel_requested\"") != std::string::npos && jsonl.find("\"name\":\"canceled\"") != std::string::npos &&
-             jsonl.find("\"id\":\"p1\"") != std::string::npos && jsonl.find("agent loop canceled") != std::string::npos &&
-             jsonl.find("\"success\":false") != std::string::npos,
-         "RPC cancel is processed while prompt waits and prompt receives one canceled response");
+             jsonl.find("\"id\":\"p1\",\"type\":\"response\",\"success\":false") != std::string::npos &&
+             jsonl.find("\"category\":\"unknown\",\"code\":\"canceled\",\"message\":\"agent loop canceled\"") != std::string::npos &&
+             jsonl.find("\"details\":\"unknown: agent loop canceled\\n  boundary: after_tool_dispatch\"") != std::string::npos,
+         "RPC active prompt cancel emits a terminal canceled event and stable canceled response while preserving boundary details");
 }
 
 void test_app_rpc_steer_applies_before_next_provider_request()
@@ -310,8 +361,9 @@ void test_app_rpc_steer_after_follow_up_started_targets_follow_up()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("first done")),
-                                       sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("follow steered done"))});
+  ava::tests::FakeTransport transport(
+      {sse_response(read_file_call_sse(outside_path.generic_string(), "call_read_parent")), sse_response(final_text_sse("first done")),
+       sse_response(read_file_call_sse(outside_path.generic_string(), "call_read_follow_up")), sse_response(final_text_sse("follow steered done"))});
   ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
@@ -522,6 +574,101 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up()
          "RPC active cancel clears queued follow-up errors without starting queued turns or applying steer");
 }
 
+void test_app_rpc_direct_command_rejects_prompt_only_queue_commands()
+{
+  auto const root = temp_root() / "app-rpc-direct-queue-reject";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC direct queue rejection test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  ava::app::runtime::RunOptions runtime_options;
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+
+  input_buffer.push("{\"id\":\"bash\",\"type\":\"run_bash\",\"command\":\"printf direct\"}\n");
+  bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
+  auto const resolver_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
+  expect(requested && !resolver_id.empty(), "RPC direct queue rejection test observes command permission wait");
+  input_buffer.push("{\"id\":\"steer-direct\",\"type\":\"steer\",\"message\":\"no\"}\n");
+  input_buffer.push("{\"id\":\"follow-direct\",\"type\":\"follow_up\",\"message\":\"no\"}\n");
+  bool const rejected = output_buffer.wait_contains("\"code\":\"active_run\"", std::chrono::seconds(2));
+  input_buffer.push("{\"id\":\"deny\",\"type\":\"permission_reply\",\"request_id\":\"" + resolver_id +
+                    "\",\"correlation_id\":\"bash\",\"decision\":\"deny\"}\n");
+  bool const completed = output_buffer.wait_contains("\"id\":\"bash\"", std::chrono::seconds(2));
+  input_buffer.close();
+  rpc_thread.join();
+
+  auto const jsonl = output_buffer.str();
+  expect(result && rejected && completed && count_substrings(jsonl, "\"code\":\"active_run\"") == 2 &&
+             jsonl.find("\"name\":\"steer_queued\"") == std::string::npos && jsonl.find("\"name\":\"follow_up_queued\"") == std::string::npos,
+         "RPC direct command rejects steer and follow_up immediately without queue events");
+}
+
+void test_app_rpc_duplicate_outstanding_id_does_not_replace_original()
+{
+  auto const root = temp_root() / "app-rpc-duplicate-outstanding";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  auto const outside_path = root / "outside.txt";
+  write_app_test_file(outside_path, "duplicate id note");
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC duplicate id test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("original done"))});
+  ava::app::runtime::RunOptions runtime_options;
+  runtime_options.access_token = "token";
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+
+  input_buffer.push("{\"id\":\"same\",\"type\":\"prompt\",\"message\":\"original\"}\n");
+  bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
+  auto const resolver_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
+  input_buffer.push("{\"id\":\"same\",\"type\":\"get_state\"}\n");
+  bool const duplicate = output_buffer.wait_contains("RPC request id is already outstanding", std::chrono::seconds(2));
+  input_buffer.push("{\"id\":\"allow\",\"type\":\"permission_reply\",\"request_id\":\"" + resolver_id +
+                    "\",\"correlation_id\":\"same\",\"decision\":\"allow\"}\n");
+  bool const completed = output_buffer.wait_contains("original done", std::chrono::seconds(2));
+  input_buffer.close();
+  rpc_thread.join();
+
+  auto const jsonl = output_buffer.str();
+  expect(result && requested && duplicate && completed && jsonl.find("\"code\":\"invalid_request\"") != std::string::npos &&
+             jsonl.find("\"final_text\":\"original done\"") != std::string::npos && transport.requests().size() == 2,
+         "RPC duplicate outstanding id is rejected without canceling or replacing the original prompt");
+}
+
 void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
 {
   auto const root = temp_root() / "app-rpc-active-rejects";
@@ -584,6 +731,7 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
 
 void run_app_rpc_queue_tests()
 {
+  test_app_rpc_follow_up_transition_state_machine_is_atomic();
   test_app_rpc_cancel_affects_subsequent_prompt();
   test_app_rpc_active_prompt_cancel_unblocks_pending_permission();
   test_app_rpc_steer_applies_before_next_provider_request();
@@ -593,5 +741,7 @@ void run_app_rpc_queue_tests()
   test_app_rpc_queue_limit_rejects_new_items();
   test_app_rpc_eof_clears_queued_follow_up_without_running();
   test_app_rpc_cancel_clears_queued_steer_and_follow_up();
+  test_app_rpc_direct_command_rejects_prompt_only_queue_commands();
+  test_app_rpc_duplicate_outstanding_id_does_not_replace_original();
   test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch();
 }

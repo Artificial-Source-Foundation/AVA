@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
+#include "ava/observability/run_observer.h"
+#include "ava/provider/finish_reason.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -11,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "debug.h"
 
 namespace ava::provider {
 
@@ -176,7 +179,9 @@ struct StreamEvent
   std::string tool_name;
   std::string error_message;
   std::optional<TokenUsage> usage;
-  std::string stop_reason = {};
+  // Present only on a provider terminal event. The value is closed at the
+  // provider boundary; unknown native values normalize to Error.
+  std::optional<ProviderFinishReason> finish_reason = std::nullopt;
   std::string reasoning_format = {};
   std::string reasoning_signature = {};
   std::string reasoning_redacted_data = {};
@@ -209,6 +214,13 @@ class Provider
   AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS
 };
 
+struct TransportObservation
+{
+  std::shared_ptr<ava::observability::RunObservation> observation;
+  ava::observability::TraceContext context;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 class Transport
 {
  public:
@@ -227,6 +239,9 @@ class Transport
 
 struct RetryOptions
 {
+  // Deliberately separate from HttpRequest: this configuration observes retry
+  // composition, not provider protocol bytes.
+  TransportObservation observation = {};
   int max_attempts = 3;
   int base_delay_ms = 250;
   int max_retry_after_ms = 60'000;
@@ -247,7 +262,7 @@ struct RetryOptions
   std::function<ava::core::VoidResult(Event const&)> on_retry = nullptr;
   Transport::CancelCallback cancel_requested = nullptr;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class RetryTransport final : public Transport
@@ -259,12 +274,36 @@ class RetryTransport final : public Transport
   [[nodiscard]] bool supports_streaming() const noexcept override;
   [[nodiscard]] ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
                                                                CancelCallback cancel_requested = nullptr) override;
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // RetryOptions contains runtime callbacks and observation state.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
   Transport& inner_;
   RetryOptions options_;
 };
+
+// The non-overridable observation boundary. New concrete transports only
+// implement Transport; callers compose this decorator when tracing is enabled.
+class ObservedTransport final : public Transport
+{
+ public:
+  ObservedTransport(Transport& inner, TransportObservation observation);
+  [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request) override;
+  [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request, CancelCallback cancel_requested) override;
+  [[nodiscard]] bool supports_streaming() const noexcept override;
+  [[nodiscard]] ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
+                                                               CancelCallback cancel_requested = nullptr) override;
+
+ private:
+  Transport& inner_;
+  TransportObservation observation_;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+void observe_transport_result(TransportObservation const& observation, HttpRequest const& request, ava::core::Result<HttpResponse> const& result,
+                              bool canceled = false, bool attempt = false) noexcept;
+void observe_transport_retry(TransportObservation const& observation, std::size_t next_attempt, std::size_t max_attempts, std::size_t delay_ms,
+                             std::string_view reason, int status_code, bool streaming) noexcept;
 
 [[nodiscard]] std::string to_string(StreamEventType type);
 [[nodiscard]] std::string to_string(ProviderErrorKind kind);
@@ -273,7 +312,6 @@ class RetryTransport final : public Transport
 [[nodiscard]] bool is_context_overflow_error(ava::core::Error const& error);
 [[nodiscard]] bool is_supported_image_mime_type(std::string_view mime_type);
 [[nodiscard]] bool request_has_image_parts(ProviderRequest const& request);
-[[nodiscard]] ava::core::VoidResult validate_image_content_parts(ProviderRequest const& request,
-                                                                 bool model_supports_images);
+[[nodiscard]] ava::core::VoidResult validate_image_content_parts(ProviderRequest const& request, bool model_supports_images);
 
 }  // namespace ava::provider

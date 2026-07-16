@@ -1,0 +1,11 @@
+{
+  "encoding": "UTF-8",
+  "delimiter_hex": "0a",
+  "cases": [
+    {"name": "lf", "input_hex": "7b7d0a", "records": ["{}"]},
+    {"name": "crlf", "input_hex": "7b7d0d0a", "records": ["{}"], "strip_single_trailing_cr": true},
+    {"name": "unterminated_final_record", "input_hex": "7b7d", "records": ["{}"], "accepted": true},
+    {"name": "malformed_recovery", "input_hex": "6e6f742d6a736f6e0a7b7d0a", "records": ["not-json", "{}"], "recoverable_errors": 2},
+    {"name": "invalid_utf8", "input_hex": "7b226964223a22ff227d0a", "recoverable_error_id": "", "error_code": "invalid_request"}
+  ]
+}

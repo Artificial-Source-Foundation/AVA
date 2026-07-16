@@ -7,7 +7,9 @@
 #include "debug.h"
 
 void run_core_mode_tests();
+void run_acp_tests();
 void run_session_tests();
+void run_session_run_controller_tests();
 void run_core_json_permission_tests();
 void run_app_command_classification_tests();
 void run_app_command_registry_tests();
@@ -23,15 +25,18 @@ void run_app_runtime_tests();
 void run_app_event_bus_tests();
 void run_provider_openai_tests();
 void run_provider_anthropic_tests();
+void run_provider_gemini_tests();
 void run_provider_live_smoke_tests();
 void run_agent_loop_resilience_tests();
 void run_agent_loop_tests();
 void run_agent_tool_dispatcher_tests();
+void run_tool_scheduler_tests();
 void run_lsp_tests();
 void run_plugin_tests();
 void run_mcp_tests();
 void run_permission_rules_tests();
 void run_tui_composer_tests();
+void run_run_observer_tests();
 #ifdef CWDEBUG
 void run_debug_tests();
 #endif
@@ -46,7 +51,9 @@ struct TestSuite
 
 constexpr std::array kTestSuites{
     TestSuite{"core_mode", run_core_mode_tests},
+    TestSuite{"acp", run_acp_tests},
     TestSuite{"session", run_session_tests},
+    TestSuite{"session_run_controller", run_session_run_controller_tests},
     TestSuite{"core_json_permission", run_core_json_permission_tests},
     TestSuite{"app_command_classification", run_app_command_classification_tests},
     TestSuite{"app_command_registry", run_app_command_registry_tests},
@@ -62,15 +69,18 @@ constexpr std::array kTestSuites{
     TestSuite{"app_runtime", run_app_runtime_tests},
     TestSuite{"provider_openai", run_provider_openai_tests},
     TestSuite{"provider_anthropic", run_provider_anthropic_tests},
+    TestSuite{"provider_gemini", run_provider_gemini_tests},
     TestSuite{"provider_live_smoke", run_provider_live_smoke_tests},
     TestSuite{"agent_loop_resilience", run_agent_loop_resilience_tests},
     TestSuite{"agent_loop", run_agent_loop_tests},
     TestSuite{"agent_tool_dispatcher", run_agent_tool_dispatcher_tests},
+    TestSuite{"tool_scheduler", run_tool_scheduler_tests},
     TestSuite{"lsp", run_lsp_tests},
     TestSuite{"plugin", run_plugin_tests},
     TestSuite{"mcp", run_mcp_tests},
     TestSuite{"permission_rules", run_permission_rules_tests},
     TestSuite{"tui_composer", run_tui_composer_tests},
+    TestSuite{"run_observer", run_run_observer_tests},
 #ifdef CWDEBUG
     TestSuite{"debug", run_debug_tests},
 #endif

@@ -4,10 +4,12 @@
 #include "runtime/PromptState.h"
 #include "runtime/RunOptions.h"
 #include "runtime/Session.h"
+#include "ava/app/session_run_controller.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/session/compaction.h"
+#include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
 #include "ava/provider/provider.h"
 #include "ava/core/result.h"
@@ -31,6 +33,13 @@ using CompactionSummaryGenerator =
 
 void apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state);
 
+// Append session metadata through the runtime owner's serialized route.
+[[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(runtime::Session& session,
+                                                                                                   ava::session::SessionMetadataUpdate update);
+
+// Append a mode change through the runtime owner's serialized route.
+[[nodiscard]] ava::core::VoidResult append_runtime_mode_change(runtime::Session& session, ava::agent::Mode mode);
+
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths, std::string_view provider_id,
                                                                               std::string_view model_id);
 
@@ -38,9 +47,19 @@ void apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState 
 
 [[nodiscard]] ava::core::Result<bool> set_runtime_reasoning(runtime::Session& session, std::optional<runtime::ReasoningSelection> selection);
 
+// Stop background work and replace an attached session without memberwise move assignment.
+[[nodiscard]] ava::core::VoidResult replace_runtime_session(runtime::Session& destination, runtime::Session replacement);
+
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message,
                                                                         ava::provider::Provider const& provider, ava::provider::Transport& transport,
                                                                         runtime::RunOptions const& options);
+
+// Run a prompt using an admission guard already acquired from this session's controller.
+[[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Session& session, std::string const& user_message,
+                                                                                 ava::provider::Provider const& provider, ava::provider::Transport& transport,
+                                                                                 runtime::RunOptions const& options, ActiveRunGuard guard);
+
+[[nodiscard]] ava::core::Error offline_provider_error(std::string_view action);
 
 [[nodiscard]] bool same_session_snapshot(std::vector<ava::session::SessionEntry> const& expected, std::vector<ava::session::SessionEntry> const& actual);
 

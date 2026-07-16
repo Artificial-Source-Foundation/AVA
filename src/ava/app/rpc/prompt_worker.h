@@ -31,7 +31,8 @@ struct RpcPromptWorkerOptions
   std::string message;
   std::vector<ava::session::ImageAttachmentRef> image_attachments = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // Owns runtime credential-bearing options and non-owning process state.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options);

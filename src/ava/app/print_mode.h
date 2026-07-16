@@ -33,7 +33,8 @@ struct PrintModeRunOptions
   bool sanitize_terminal_output = false;
   bool sanitize_terminal_diagnostics = false;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // runtime_options may hold provider credentials.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct PrintModeOptions

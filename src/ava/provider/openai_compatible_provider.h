@@ -38,10 +38,11 @@ class OpenAICompatibleStreamParser final : public StreamParser
   std::string data_;
   std::size_t scan_offset_ = 0;
   std::string reasoning_format_;
+  std::string fallback_tool_call_prefix_;
   bool reasoning_open_ = false;
   std::map<int, std::string> open_tool_call_ids_;
   std::optional<TokenUsage> usage_ = std::nullopt;
-  std::string stop_reason_ = {};
+  std::optional<ProviderFinishReason> finish_reason_ = std::nullopt;
   bool saw_data_ = false;
   bool done_seen_ = false;
   bool error_seen_ = false;

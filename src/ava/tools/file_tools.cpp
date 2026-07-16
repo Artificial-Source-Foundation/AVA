@@ -1,14 +1,13 @@
 #include "sys.h"
-#include "ava/tools/file_tools.h"
-
 #include "ava/tools/diff_utils.h"
 #include "ava/tools/edit_match.h"
 #include "ava/tools/file_io.h"
+#include "ava/tools/file_tools.h"
 #include "ava/tools/mutation_queue.h"
-
+#include "ava/tools/secure_workspace.h"
+#include "ava/permissions/permission_rules.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
-#include "ava/permissions/permission_rules.h"
 
 #include <algorithm>
 #include <memory>
@@ -66,12 +65,12 @@ PermissionAuditEvent audit_event(ToolContext const& context, std::string permiss
                               .reason = decision.reason,
                               .risk = decision.risk,
                               .target_path = target_path,
-                               .command = std::string(command),
-                               .resolution = "",
-                               .resolution_source = "policy",
-                               .resolution_reason = "",
-                               .actor = context.permission_actor.empty() ? std::string("agent") : context.permission_actor,
-                               .rule_id = ""};
+                              .command = context.redact_permission_audit_arguments && !command.empty() ? std::string("[redacted]") : std::string(command),
+                              .resolution = "",
+                              .resolution_source = "policy",
+                              .resolution_reason = "",
+                              .actor = context.permission_actor.empty() ? std::string("agent") : context.permission_actor,
+                              .rule_id = ""};
 }
 
 ava::core::Error permission_denied_error(std::string_view error_message, ava::permissions::PermissionDecision const& decision,
@@ -131,8 +130,7 @@ std::filesystem::path normalized_absolute_path(std::filesystem::path const& path
   return absolute.lexically_normal();
 }
 
-void append_permission_rule_store_for_config_dir(std::vector<ava::permissions::PermissionRuleStore>& stores,
-                                                 ToolContext const& context,
+void append_permission_rule_store_for_config_dir(std::vector<ava::permissions::PermissionRuleStore>& stores, ToolContext const& context,
                                                  std::filesystem::path const& config_dir)
 {
   if (context.workspace_dir.empty() || config_dir.empty())
@@ -194,10 +192,25 @@ ava::core::Result<std::optional<PermissionDiffPreview>> write_permission_diff_pr
   {
     return std::unexpected(std::move(canceled.error()));
   }
-  std::error_code exists_error;
-  bool const exists = std::filesystem::exists(path, exists_error);
-  if (exists_error)
+  // Permission must precede every installed frontend call. A local preview
+  // would also be misleading when the frontend owns the exact written bytes.
+  if (context.exact_file_access && context.exact_file_access->supports_write_text_file())
     return std::optional<PermissionDiffPreview>{};
+  bool exists = false;
+  if (context.secure_workspace)
+  {
+    auto resolved = context.secure_workspace->resolve(path, SecureWorkspaceResolveMode::AllowMissing);
+    if (!resolved)
+      return std::unexpected(std::move(resolved.error()));
+    exists = resolved->exists;
+  }
+  else
+  {
+    std::error_code exists_error;
+    exists = std::filesystem::exists(path, exists_error);
+    if (exists_error)
+      return std::optional<PermissionDiffPreview>{};
+  }
 
   std::string original;
   if (exists)
@@ -213,7 +226,9 @@ ava::core::Result<std::optional<PermissionDiffPreview>> write_permission_diff_pr
     {
       return std::optional<PermissionDiffPreview>{};
     }
-    auto current = read_all_text(context, path, "write_file_permission_preview");
+    auto current = context.exact_file_access && !context.exact_file_access->supports_write_text_file()
+                       ? detail::read_all_text_local_only(context, path, "write_file_permission_preview")
+                       : read_all_text(context, path, "write_file_permission_preview");
     if (!current)
     {
       if (is_canceled_error(current.error()))
@@ -227,15 +242,44 @@ ava::core::Result<std::optional<PermissionDiffPreview>> write_permission_diff_pr
   return std::optional<PermissionDiffPreview>{PermissionDiffPreview{.text = std::move(diff.text), .truncated = diff.truncated}};
 }
 
+ava::core::VoidResult announce_execution_start_impl(ToolContext const& context)
+{
+  if (!context.announce_execution_after_permission || !context.progress_sink || !context.execution_started)
+    return {};
+  if (context.execution_started->exchange(true, std::memory_order_acq_rel))
+    return {};
+  return context.progress_sink(ToolProgressEvent{
+      .text = "authorized; execution starting", .call_id = context.current_call_id, .tool_name = context.current_tool_name, .status = "in_progress"});
+}
+
 }  // namespace
+
+ava::core::VoidResult announce_tool_execution_start(ToolContext const& context)
+{
+  return announce_execution_start_impl(context);
+}
 
 ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permissions::Operation operation, std::filesystem::path const& target_path,
                                         std::string_view command, std::string_view tool_name, std::string_view error_message, std::string_view diff_preview,
                                         bool diff_truncated)
 {
+  auto permission_target = target_path;
+  if (context.secure_workspace && (operation == ava::permissions::Operation::ReadFile || operation == ava::permissions::Operation::EditFile ||
+                                   operation == ava::permissions::Operation::SearchFiles))
+  {
+    auto const remote_read = context.exact_file_access && context.exact_file_access->supports_read_text_file();
+    auto const mode = operation == ava::permissions::Operation::EditFile || (operation == ava::permissions::Operation::ReadFile && remote_read)
+                          ? SecureWorkspaceResolveMode::AllowMissing
+                          : SecureWorkspaceResolveMode::Existing;
+    auto resolved = context.secure_workspace->resolve(target_path, mode);
+    if (!resolved)
+      return std::unexpected(std::move(resolved.error()));
+    permission_target = std::move(resolved->absolute);
+  }
+
   if (operation == ava::permissions::Operation::EditFile)
   {
-    if (auto protected_file = reject_permission_rules_file_mutation(context, target_path); !protected_file)
+    if (auto protected_file = reject_permission_rules_file_mutation(context, permission_target); !protected_file)
     {
       return protected_file;
     }
@@ -243,15 +287,22 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
 
   auto const request_tool_name = effective_tool_name(context, operation, tool_name);
   auto const permission_request_id = ava::core::make_id("permreq");
-  auto const decision = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = operation,
       .mode = context.mode,
       .workspace_dir = context.workspace_dir,
-      .target_path = target_path,
+      .target_path = permission_target,
       .command = std::string(command),
   });
+  if (context.require_explicit_file_permissions && decision.action == ava::permissions::PermissionAction::Allow &&
+      (operation == ava::permissions::Operation::ReadFile || operation == ava::permissions::Operation::EditFile))
+  {
+    decision.action = ava::permissions::PermissionAction::Ask;
+    decision.reason = "The frontend requires explicit approval for model-initiated file access after backend safety checks";
+    decision.risk = operation == ava::permissions::Operation::EditFile ? ava::permissions::PermissionRisk::Medium : ava::permissions::PermissionRisk::Low;
+  }
 
-  auto policy_event = audit_event(context, permission_request_id, operation, request_tool_name, decision, target_path, command);
+  auto policy_event = audit_event(context, permission_request_id, operation, request_tool_name, decision, permission_target, command);
   if (decision.action == ava::permissions::PermissionAction::Allow || decision.action == ava::permissions::PermissionAction::Deny)
   {
     policy_event.resolution = ava::permissions::to_string(decision.action);
@@ -266,7 +317,7 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   }
   if (decision.action == ava::permissions::PermissionAction::Deny)
   {
-    return std::unexpected(permission_denied_error(error_message, decision, target_path, command, "policy", "", permission_request_id));
+    return std::unexpected(permission_denied_error(error_message, decision, permission_target, command, "policy", "", permission_request_id));
   }
 
   if (!context.permission_resolver)
@@ -278,15 +329,16 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
     {
       return std::unexpected(std::move(audited.error()));
     }
-    return std::unexpected(permission_denied_error(error_message, decision, target_path, command, "no_resolver", "", permission_request_id));
+    return std::unexpected(permission_denied_error(error_message, decision, permission_target, command, "no_resolver", "", permission_request_id));
   }
 
   auto resolution = context.permission_resolver(ava::permissions::PermissionPrompt{
       .permission_request_id = permission_request_id,
+      .tool_call_id = context.current_call_id,
       .operation = operation,
       .mode = context.mode,
       .workspace_dir = context.workspace_dir,
-      .target_path = target_path,
+      .target_path = permission_target,
       .command = std::string(command),
       .tool_name = request_tool_name,
       .reason = decision.reason,
@@ -305,6 +357,8 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   outcome_event.resolution = resolution ? ava::permissions::to_string(*resolution) : "deny";
   if (resolution)
     outcome_event.resolution_reason = resolution->reason;
+  else
+    outcome_event.resolution_reason = resolution.error().format();
   if (resolution)
     outcome_event.rule_id = resolution->rule_id;
   if (auto audited = record_permission_audit(context, outcome_event); !audited)
@@ -315,11 +369,18 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   {
     return {};
   }
+  if (resolution && *resolution == ava::permissions::PermissionResolution::Cancel)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled");
+    error.with_context("permission_request_id", permission_request_id);
+    error.with_context("resolution_reason", resolution->reason);
+    return std::unexpected(std::move(error));
+  }
 
   auto const resolution_context = resolution ? ava::permissions::to_string(*resolution) : std::string("resolver_failed");
-  auto const resolution_reason = resolution ? std::string_view(resolution->reason) : std::string_view{};
-  return std::unexpected(permission_denied_error(error_message, decision, target_path, command, resolution_context, resolution_reason,
-                                                permission_request_id));
+  auto const resolution_reason = resolution ? resolution->reason : resolution.error().format();
+  return std::unexpected(
+      permission_denied_error(error_message, decision, permission_target, command, resolution_context, resolution_reason, permission_request_id));
 }
 
 std::string permission_audit_data_json(PermissionAuditEvent const& event)
@@ -382,6 +443,11 @@ ava::core::Result<TextOutput> read_file(ToolContext const& context, std::filesys
   {
     return std::unexpected(std::move(canceled.error()));
   }
+  if (!options.permission_already_checked)
+  {
+    if (auto started = announce_tool_execution_start(context); !started)
+      return std::unexpected(std::move(started.error()));
+  }
 
   return read_head_text(context, path, options);
 }
@@ -415,9 +481,15 @@ ava::core::Result<FileMutationResult> write_file(ToolContext const& context, std
   {
     return std::unexpected(std::move(canceled.error()));
   }
+  if (!options.permission_already_checked)
+  {
+    if (auto started = announce_tool_execution_start(context); !started)
+      return std::unexpected(std::move(started.error()));
+  }
 
   auto attach_preview = [&preview](ava::core::Result<FileMutationResult> written) -> ava::core::Result<FileMutationResult> {
-    if (written && preview) {
+    if (written && preview)
+    {
       written->diff = std::move(preview->text);
       written->diff_truncated = preview->truncated;
     }
@@ -436,6 +508,13 @@ ava::core::Result<FileMutationResult> edit_file(ToolContext const& context, std:
   if (old_text.empty())
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "old_text must not be empty");
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
+  if (context.exact_file_access && context.exact_file_access->supports_read_text_file() != context.exact_file_access->supports_write_text_file())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
+                                  "edit_file requires coherent read and write ownership; the exact-file capabilities are partial");
     error.with_context("path", path.string());
     return std::unexpected(std::move(error));
   }
@@ -511,6 +590,8 @@ ava::core::Result<FileMutationResult> edit_file(ToolContext const& context, std:
   {
     return std::unexpected(std::move(canceled.error()));
   }
+  if (auto started = announce_tool_execution_start(context); !started)
+    return std::unexpected(std::move(started.error()));
   auto written = write_file(context, path, *content, WriteOptions{.permission_already_checked = true, .mutation_already_locked = true});
   if (!written)
     return std::unexpected(written.error());

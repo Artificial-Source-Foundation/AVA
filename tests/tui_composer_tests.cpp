@@ -23,6 +23,7 @@
 #include "ava/tui/runtime.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
+#include "ava/tui/text_wrap.h"
 #include "ava/tui/theme.h"
 #include "ava/tui/tool_cards.h"
 #include "ava/config/auth.h"
@@ -78,7 +79,8 @@ struct ScopedTerminalCapabilityProfile
         warp_session_id("WARP_SESSION_ID", ""),
         warp_terminal_session_uuid("WARP_TERMINAL_SESSION_UUID", ""),
         iterm_session_id("ITERM_SESSION_ID", ""),
-        wt_session("WT_SESSION", "")
+        wt_session("WT_SESSION", ""),
+        tmux_hyperlinks("AVA_TUI_TMUX_HYPERLINKS", "")
   {
   }
 
@@ -93,6 +95,7 @@ struct ScopedTerminalCapabilityProfile
   ScopedEnvVar warp_terminal_session_uuid;
   ScopedEnvVar iterm_session_id;
   ScopedEnvVar wt_session;
+  ScopedEnvVar tmux_hyperlinks;
 };
 
 void test_tui_terminal_image_support()
@@ -107,6 +110,26 @@ void test_tui_terminal_image_support()
   expect(tmux_ghostty.images == ava::tui::TerminalImageProtocol::None && tmux_ghostty.true_color && tmux_ghostty.hyperlinks && tmux_ghostty.badge == "tmux" &&
              tmux_ghostty.detail.find("tmux") != std::string::npos,
          "terminal image detection disables image protocols under tmux while preserving explicit truecolor and forwarded hyperlinks");
+
+  auto const tmux_default = ava::tui::detect_terminal_image_capabilities(
+      ava::tui::TerminalEnvironment{.term_program = "ghostty", .term = "tmux-256color", .color_term = "truecolor", .tmux = true});
+  expect(tmux_default.images == ava::tui::TerminalImageProtocol::None && tmux_default.true_color && !tmux_default.hyperlinks &&
+             tmux_default.detail.find("AVA_TUI_TMUX_HYPERLINKS") != std::string::npos,
+         "terminal image detection keeps tmux OSC 8 disabled unless forwarding is explicitly advertised");
+
+  {
+    ScopedEnvVar term("TERM", "tmux-256color");
+    ScopedEnvVar term_program("TERM_PROGRAM", "ghostty");
+    ScopedEnvVar terminal_emulator("TERMINAL_EMULATOR", "");
+    ScopedEnvVar color_term("COLORTERM", "truecolor");
+    ScopedEnvVar tmux("TMUX", "/tmp/tmux-1000/default,123,0");
+    ScopedEnvVar tmux_hyperlinks("AVA_TUI_TMUX_HYPERLINKS", "1");
+    auto const tmux_env = ava::tui::current_terminal_environment();
+    auto const tmux_env_caps = ava::tui::detect_terminal_image_capabilities(tmux_env);
+    expect(tmux_env.tmux && tmux_env.tmux_forwards_hyperlinks && tmux_env_caps.images == ava::tui::TerminalImageProtocol::None && tmux_env_caps.hyperlinks &&
+               tmux_env_caps.detail.find("explicit tmux forwarding") != std::string::npos,
+           "terminal image detection honors the explicit tmux hyperlink forwarding environment hint at runtime");
+  }
 
   auto const kitty = ava::tui::detect_terminal_image_capabilities(ava::tui::TerminalEnvironment{.term_program = "kitty", .term = "xterm-kitty"});
   auto const ghostty = ava::tui::detect_terminal_image_capabilities(ava::tui::TerminalEnvironment{.term_program = "ghostty"});
@@ -145,6 +168,12 @@ void test_tui_terminal_image_support()
                                                          ava::tui::TerminalCellDimensions{.width_px = 10, .height_px = 10});
   expect(cells.columns == 1 && cells.rows == 5, "terminal image sizing preserves aspect ratio within cell bounds");
 
+  auto const fallback_cell_size = ava::tui::calculate_image_cell_size(ava::tui::ImageDimensions{.width_px = 90, .height_px = 90}, 10);
+  auto const square_cell_size = ava::tui::calculate_image_cell_size(ava::tui::ImageDimensions{.width_px = 90, .height_px = 90}, 10, std::nullopt,
+                                                                    ava::tui::TerminalCellDimensions{.width_px = 9, .height_px = 9});
+  expect(fallback_cell_size.columns == 10 && fallback_cell_size.rows == 5 && square_cell_size.columns == 10 && square_cell_size.rows == 10,
+         "terminal image sizing documents the 9x18 fallback cell constraint and honors explicit cell dimensions when supplied");
+
   std::string png(24, '\0');
   png[0] = static_cast<char>(0x89);
   png[1] = 'P';
@@ -181,6 +210,39 @@ void test_tui_composer_rendering_and_input()
              ava::tui::detail::fit_line_preserving_sgr(std::string("\x1b]8;;https://example.test\x1b\\abcdef\x1b]8;;\x1b\\"), 4).find("\x1b]8;;\x1b\\...") !=
                  std::string::npos,
          "tui width helpers treat OSC 8 hyperlinks as zero-width and close truncated links before ellipses");
+  auto const underlined_wrap = ava::tui::detail::wrap_ansi_text(std::string(ava::tui::detail::kSgrUnderline) + "abcdef", 3);
+  expect(underlined_wrap.size() == 2 && underlined_wrap[0] == std::string(ava::tui::detail::kSgrUnderline) + "abc" + std::string(ava::tui::detail::kSgrReset) &&
+             underlined_wrap[1] == std::string(ava::tui::detail::kSgrUnderline) + "def" + std::string(ava::tui::detail::kSgrReset),
+         "tui ANSI wrapping closes active underline at synthetic line breaks and reopens it on continuations");
+  auto const reset_before_wrap =
+      ava::tui::detail::wrap_ansi_text(std::string(ava::tui::detail::kSgrUnderline) + "abc" + std::string(ava::tui::detail::kSgrReset) + "def", 3);
+  expect(reset_before_wrap.size() == 2 && reset_before_wrap[1] == "def", "tui ANSI wrapping honors explicit SGR resets before continuing with plain text");
+  auto const background_sgr = std::string("\x1b[48;2;1;2;3m");
+  auto const background_wrap = ava::tui::detail::wrap_ansi_text(background_sgr + "abcd" + std::string(ava::tui::detail::kSgrReset), 2);
+  expect(background_wrap.size() == 2 && background_wrap[0] == background_sgr + "ab" + std::string(ava::tui::detail::kSgrReset) &&
+             background_wrap[1] == background_sgr + "cd" + std::string(ava::tui::detail::kSgrReset),
+         "tui ANSI wrapping preserves truecolor backgrounds across wrapped rows when the background remains active");
+  auto const long_word_wrap = ava::tui::detail::wrap_ansi_text("abcdef", 2);
+  expect(long_word_wrap == std::vector<std::string>({"ab", "cd", "ef"}), "tui ANSI wrapping hard-wraps long unbroken words deterministically");
+  auto const cjk_ansi_wrap = ava::tui::detail::wrap_ansi_text(std::string("a") + "\xE7\x95\x8C" + "\xE7\x95\x8C" + "b", 3);
+  expect(cjk_ansi_wrap.size() == 2 && cjk_ansi_wrap[0] == std::string("a") + "\xE7\x95\x8C" && cjk_ansi_wrap[1] == std::string("\xE7\x95\x8C") + "b" &&
+             ava::tui::detail::terminal_text_columns(cjk_ansi_wrap[0]) == 3 && ava::tui::detail::terminal_text_columns(cjk_ansi_wrap[1]) == 3,
+         "tui ANSI wrapping uses AVA display-width accounting for CJK cells");
+  auto const newline_wrap = ava::tui::detail::wrap_ansi_text("ab\r\ncd\nef", 2);
+  expect(newline_wrap == std::vector<std::string>({"ab", "cd", "ef"}), "tui ANSI wrapping treats CRLF and LF as explicit line breaks");
+  expect(ava::tui::detail::wrap_ansi_text("", 4) == std::vector<std::string>({""}), "tui ANSI wrapping returns one empty row for empty input");
+  expect(ava::tui::detail::wrap_ansi_text("ab", 0) == std::vector<std::string>({"a", "b"}), "tui ANSI wrapping clamps zero width to one column");
+  auto const osc_open = std::string("\x1b]8;;https://example.test\x1b\\");
+  auto const osc_close = std::string("\x1b]8;;\x1b\\");
+  auto const osc_wrap = ava::tui::detail::wrap_ansi_text(osc_open + "abcd" + osc_close, 2);
+  expect(osc_wrap.size() == 2 && osc_wrap[0] == osc_open + "ab" + osc_close && osc_wrap[1] == osc_open + "cd" + osc_close,
+         "tui ANSI wrapping closes and reopens OSC 8 hyperlinks at synthetic line breaks");
+  auto const malformed_color_wrap = ava::tui::detail::wrap_ansi_text(std::string("\x1b[38;2m") + "ab", 1);
+  expect(malformed_color_wrap == std::vector<std::string>({std::string("\x1b[38;2m") + "a", "b"}),
+         "tui ANSI wrapping preserves malformed extended color bytes without leaking dim state");
+  auto const sanitized_wrap = ava::tui::detail::wrap_transcript_text(std::string(ava::tui::detail::kSgrUnderline) + "ab", 3);
+  expect(!sanitized_wrap.empty() && sanitized_wrap[0].find('\x1b') == std::string::npos,
+         "production transcript wrapping still sanitizes raw escape sequences before wrapping");
   expect(ava::tui::terminal_kitty_keyboard_push_sequence() == std::string_view("\x1b[>5u") &&
              ava::tui::terminal_kitty_keyboard_query_sequence() == std::string_view("\x1b[>5u\x1b[?u\x1b[c") &&
              ava::tui::terminal_kitty_keyboard_pop_sequence() == std::string_view("\x1b[<u"),
@@ -7970,6 +8032,7 @@ void run_tui_composer_tests()
   ScopedEnvVar no_color_guard("NO_COLOR", "");
   ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
   ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
+  ScopedEnvVar tmux_hyperlinks_guard("AVA_TUI_TMUX_HYPERLINKS", "");
   test_tui_terminal_image_support();
   test_tui_composer_rendering_and_input();
   test_tui_text_model_conversions();

@@ -8,11 +8,13 @@ add_library(ava_session
   "session_store.cpp"
   "session_tree.cpp"
   "stats.cpp"
+  "transcript.cpp"
   "validation.cpp"
   "validation_fields.cpp"
 )
 
 target_include_directories(ava_session PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(ava_session PUBLIC ava_observability)
 ava_apply_debugging(ava_session)
 ava_apply_warnings(ava_session)
 ava_apply_sanitizers(ava_session)

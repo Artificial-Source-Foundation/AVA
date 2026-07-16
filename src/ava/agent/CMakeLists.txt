@@ -14,6 +14,7 @@ add_library(ava_agent
   "tool_dispatcher.cpp"
   "tool_registry.cpp"
   "tool_result.cpp"
+  "tool_scheduler.cpp"
   "tool_summaries.cpp"
   "tool_timeline.cpp"
   "tool_visibility.cpp"
@@ -21,6 +22,7 @@ add_library(ava_agent
 )
 
 target_include_directories(ava_agent PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(ava_agent PUBLIC ava_observability)
 ava_apply_debugging(ava_agent)
 ava_apply_warnings(ava_agent)
 ava_apply_sanitizers(ava_agent)

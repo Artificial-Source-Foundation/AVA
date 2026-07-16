@@ -1,0 +1,1003 @@
+{
+  "formatVersion": 1,
+  "scope": "AVA stable ACP v1 M6 documented interoperability and evidence state",
+  "statusValues": [
+    "implemented",
+    "deferred",
+    "rejected"
+  ],
+  "schema": {
+    "protocolVersion": 1,
+    "artifactRelease": "schema-v1.19.0",
+    "sourceRepository": "https://github.com/agentclientprotocol/agent-client-protocol",
+    "sourceCommit": "a213df5240048f96d2b23f644984bb20c188a234",
+    "artifactUrl": "https://github.com/agentclientprotocol/agent-client-protocol/releases/download/schema-v1.19.0/schema.json",
+    "sha256": "92c1dfcda10dd47e99127500a3763da2b471f9ac61e12b9bf0430c32cf953796",
+    "checkedFixture": "tests/fixtures/acp-v1/schema.json",
+    "unstableSchemaUsed": false,
+    "draftV2Used": false
+  },
+  "interoperability": {
+    "milestone": "M6 production interoperability and captured evidence",
+    "evidenceLabels": [
+      "automated",
+      "manual verified",
+      "configuration documented but not executed",
+      "deferred",
+      "unsupported"
+    ],
+    "productionNodeRequired": false,
+    "ciNodeVersion": "24.13.1",
+    "dependencies": [
+      {
+        "name": "@agentclientprotocol/sdk",
+        "version": "1.2.1",
+        "license": "Apache-2.0",
+        "gitHead": "26da1ae7ab66fae0f5e77272dee3e5d562d24aee",
+        "shasum": "c98952123d2b202a143ab5ec68782eec2775003a",
+        "integrity": "sha512-jwYUdOQR7tc+Zfch53VL4JJyUNK/46q03uUTYb+PjECsmnNl94XFXOfYLJ8RBpMNidXd1rpOAVgb0vqD98xImA==",
+        "packagePath": "tests/acp-sdk/package.json",
+        "lockPath": "tests/acp-sdk/package-lock.json",
+        "harnessPath": "tests/acp-sdk/interop.mjs",
+        "testName": "ava_cli.acp_sdk_interop",
+        "cmakeOption": "AVA_REQUIRE_ACP_SDK_INTEROP",
+        "testOnly": true,
+        "gate": "mandatory dedicated CI; ordinary offline CTest skips only when Node or installed packages are absent",
+        "evidenceLabel": "automated",
+        "lastVerified": "2026-07-13",
+        "status": "automated"
+      },
+      {
+        "name": "zod",
+        "version": "4.4.3",
+        "license": "MIT",
+        "integrity": "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==",
+        "packagePath": "tests/acp-sdk/package.json",
+        "lockPath": "tests/acp-sdk/package-lock.json",
+        "testOnly": true,
+        "gate": "exact direct peer dependency of the official SDK test package"
+      },
+      {
+        "name": "acpx",
+        "version": "0.12.0",
+        "license": "MIT",
+        "gitHead": "6a24a546d2349cbe71ed032d52d07cab611e320c",
+        "shasum": "584e2c99cae2312607e0691bba6f4fa6dd8a89fb",
+        "integrity": "sha512-APYpN04XFWrCGuSBvM4HTKWWFH8uSIuzc+qI7aCGeVdP9o4euZeBosFEkmNUHvBOop0XBemg6d8RsNvzXN3Mgw==",
+        "packagePath": "tests/acp-acpx/package.json",
+        "lockPath": "tests/acp-acpx/package-lock.json",
+        "harnessPath": "tests/acp-acpx/interop.py",
+        "testName": "ava_cli.acpx_interop",
+        "cmakeOption": "AVA_ENABLE_ACPX_INTEROP",
+        "testOnly": true,
+        "gate": "opt-in alpha compatibility smoke; absent from default CTest",
+        "evidenceLabel": "automated",
+        "lastVerified": "2026-07-13",
+        "status": "automated, opt-in alpha compatibility smoke, not official conformance"
+      }
+    ],
+    "clients": [
+      {
+        "name": "Zed",
+        "detectedVersion": "1.9.0",
+        "detectedCommit": "ced90fc636c4ede05402befc38a63bae7fd741bd",
+        "evidenceLabel": "manual verified",
+        "status": "manual verified for the captured Zed 1.9.0 lifecycle/tool/permission/client-filesystem/client-terminal and in-flight cancellation flows only",
+        "configurationDocumentationPath": "docs/acp.md#zed-custom-agent",
+        "configurationPath": "$XDG_CONFIG_HOME/zed/settings.json",
+        "dogfoodScriptPath": "scripts/live-acp-dogfood.sh",
+        "evidencePolicyPath": "docs/interop/evidence/README.md",
+        "completedEvidenceReports": [
+          "docs/interop/evidence/zed-1.9.0-2026-07-14.md"
+        ],
+        "headlessMode": "no documented headless ACP mode; the captured evidence used the real interactive GUI in reviewed confinement",
+        "confinementRequired": true,
+        "lastVerified": "2026-07-14",
+        "configurationLastChecked": "2026-07-14"
+      },
+      {
+        "name": "JetBrains",
+        "detectedVersion": null,
+        "documentedVersion": "2026.1+",
+        "evidenceLabel": "configuration documented but not executed",
+        "status": "configuration documented but not executed; JetBrains 2026.1+ was not installed or run here",
+        "configurationDocumentationPath": "docs/acp.md#jetbrains-20261-custom-agent",
+        "configurationPath": "~/.jetbrains/acp.json",
+        "completedEvidenceReports": [],
+        "configurationLastChecked": "2026-07-13"
+      },
+      {
+        "name": "CodeCompanion.nvim",
+        "detectedVersion": null,
+        "documentedVersion": null,
+        "evidenceLabel": "configuration documented but not executed",
+        "status": "configuration documented but not executed; CodeCompanion.nvim was not installed or run here",
+        "configurationDocumentationPath": "docs/acp.md#codecompanionnvim-custom-acp-adapter",
+        "configurationPath": "Neovim CodeCompanion setup adapters.acp",
+        "terminalLimitation": "client advertises terminal=false; AVA bash is therefore unavailable and never falls back to a local ACP shell",
+        "completedEvidenceReports": [],
+        "configurationLastChecked": "2026-07-13"
+      }
+    ],
+    "dogfood": {
+      "scriptPath": "scripts/live-acp-dogfood.sh",
+      "modes": [
+        "sdk",
+        "acpx",
+        "zed"
+      ],
+      "packageDownloadAtRuntime": false,
+      "evidencePolicyPath": "docs/interop/evidence/README.md",
+      "completedRealClientEvidence": [
+        "docs/interop/evidence/zed-1.9.0-2026-07-14.md"
+      ],
+      "zedConfinementRequirements": {
+        "profileIsolationIsSandbox": false,
+        "ordinaryAccountProfileOnlyAllowed": false,
+        "dedicatedDisplayRequired": true,
+        "allowedModes": [
+          "reviewed OS sandbox/container/VM with recorded description and preflight evidence",
+          "already-provisioned disposable credential-free graphical account/VM with explicit acknowledgement"
+        ],
+        "forbiddenEnvironment": "SSH-agent, keyring, D-Bus, provider/cloud, npm, and Git credential variables",
+        "rawArtifactLocation": "unique private temporary dogfood root only",
+        "repositoryArtifactPolicy": "manually reviewed bounded textual derivatives only"
+      }
+    }
+  },
+  "jsonDependency": {
+    "name": "nlohmann/json",
+    "findPackageMinimum": "3.11",
+    "fallbackRelease": "v3.11.3",
+    "fallbackCommit": "9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03",
+    "artifactUrl": "https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz",
+    "sha256": "d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d",
+    "visibility": "private ACP codec implementation detail"
+  },
+  "deserializeDefaultOnError": {
+    "status": "implemented",
+    "scope": "initialize capability/clientInfo optionals plus client response _meta and terminal exit optionals",
+    "requiredFields": "strict",
+    "globalJsonBounds": "strict and unchanged",
+    "terminalContradiction": "both a valid exitCode and valid signal is rejected; neither is unavailable"
+  },
+  "filesystemRouting": {
+    "capabilitiesIndependent": true,
+    "unsupportedOperation": "descriptor-secure local",
+    "supportedOperationFailureFallback": false,
+    "partialEditPatch": "omitted from exact ACP registry and rejected before permission or I/O",
+    "boundedReadWindow": "one-based line and max_lines+1 sentinel limit; max_bytes remains local",
+    "boundedReadTotals": "full-file total_bytes and total_lines are unavailable and omitted; retained counts and sentinel continuation remain exact",
+    "fullEditPatchRead": "line and limit omitted"
+  },
+  "terminalExitCode": {
+    "wireRange": "0..4294967295",
+    "protocolNeutralType": "int64",
+    "unknownOrSignal": -1,
+    "successValue": 0,
+    "truncatedOutputTotals": "terminal/output truncated tails omit unavailable total_bytes, total_lines, and omitted_lines"
+  },
+  "methods": [
+    {
+      "side": "agent",
+      "kind": "request",
+      "name": "initialize",
+      "status": "implemented",
+      "handler": "AgentService/AcpSessionRegistry/AcpSessionHost",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "agent",
+      "kind": "request",
+      "name": "authenticate",
+      "status": "deferred",
+      "handler": "AgentService pre-initialization gate",
+      "test": "ava_tests.acp"
+    },
+    {
+      "side": "agent",
+      "kind": "request",
+      "name": "logout",
+      "status": "deferred",
+      "handler": "AgentService pre-initialization gate",
+      "test": "ava_tests.acp"
+    },
+    {
+      "side": "agent",
+      "kind": "request",
+      "name": "session/new",
+      "status": "implemented",
+      "handler": "AgentService/AcpSessionRegistry/AcpSessionHost",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "agent",
+      "kind": "request",
+      "name": "session/load",
+      "status": "deferred",
+      "handler": "unadvertised; AgentService rejects until exact bounded rich-history replay preserves images, tool lifecycle, and reasoning",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "agent",
+      "kind": "request",
+      "name": "session/list",
+      "status": "implemented",
+      "handler": "AgentService/AcpSessionRegistry exact bounded persistence paths",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "agent",
+      "kind": "request",
+      "name": "session/delete",
+      "status": "rejected",
+      "handler": "not advertised; destructive session deletion is intentionally unavailable",
+      "test": "ava_tests.acp_support_manifest"
+    },
+    {
+      "side": "agent",
+      "kind": "request",
+      "name": "session/resume",
+      "status": "implemented",
+      "handler": "AgentService/AcpSessionRegistry exact bounded persistence paths",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "agent",
+      "kind": "request",
+      "name": "session/close",
+      "status": "implemented",
+      "handler": "AgentService/AcpSessionRegistry/AcpSessionHost",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "agent",
+      "kind": "request",
+      "name": "session/set_mode",
+      "status": "deferred",
+      "handler": "AgentService pre-initialization gate",
+      "test": "ava_tests.acp"
+    },
+    {
+      "side": "agent",
+      "kind": "request",
+      "name": "session/set_config_option",
+      "status": "deferred",
+      "handler": "AgentService pre-initialization gate",
+      "test": "ava_tests.acp"
+    },
+    {
+      "side": "agent",
+      "kind": "request",
+      "name": "session/prompt",
+      "status": "implemented",
+      "handler": "AgentService/AcpSessionRegistry/AcpSessionHost",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "agent",
+      "kind": "notification",
+      "name": "session/cancel",
+      "status": "implemented",
+      "handler": "AgentService/AcpSessionRegistry/AcpSessionHost",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "client",
+      "kind": "request",
+      "name": "fs/write_text_file",
+      "status": "implemented",
+      "handler": "AcpSessionHost/client_tools/ClientRequestGateway/JsonRpcPeer independently negotiated fail-stop write route",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "client",
+      "kind": "request",
+      "name": "fs/read_text_file",
+      "status": "implemented",
+      "handler": "AcpSessionHost/client_tools/ClientRequestGateway/JsonRpcPeer independently negotiated bounded line/limit route",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "client",
+      "kind": "request",
+      "name": "session/request_permission",
+      "status": "implemented",
+      "handler": "AcpSessionHost/ClientRequestGateway/JsonRpcPeer bounded bidirectional request path",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "client",
+      "kind": "request",
+      "name": "terminal/create",
+      "status": "implemented",
+      "handler": "AcpSessionHost/client_tools/ClientRequestGateway/JsonRpcPeer bounded negotiated client route",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "client",
+      "kind": "request",
+      "name": "terminal/output",
+      "status": "implemented",
+      "handler": "AcpSessionHost/client_tools/ClientRequestGateway/JsonRpcPeer bounded negotiated client route",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "client",
+      "kind": "request",
+      "name": "terminal/release",
+      "status": "implemented",
+      "handler": "AcpSessionHost/client_tools/ClientRequestGateway/JsonRpcPeer bounded negotiated client route",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "client",
+      "kind": "request",
+      "name": "terminal/wait_for_exit",
+      "status": "implemented",
+      "handler": "AcpSessionHost/client_tools/ClientRequestGateway/JsonRpcPeer bounded negotiated client route",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "client",
+      "kind": "request",
+      "name": "terminal/kill",
+      "status": "implemented",
+      "handler": "AcpSessionHost/client_tools/ClientRequestGateway/JsonRpcPeer bounded negotiated client route",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "client",
+      "kind": "notification",
+      "name": "session/update",
+      "status": "implemented",
+      "handler": "AcpSessionHost live ordered update gateway",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "protocol",
+      "kind": "notification",
+      "name": "$/cancel_request",
+      "status": "implemented",
+      "handler": "JsonRpcPeer inbound arbitration and ordered outbound cancellation before local pending retirement",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    }
+  ],
+  "capabilities": [
+    {
+      "side": "agent",
+      "name": "loadSession",
+      "status": "deferred",
+      "advertised": false,
+      "handler": "initialize_result_json false; exact rich-history replay deferred",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "agent",
+      "name": "promptCapabilities.image",
+      "status": "implemented",
+      "advertised": "model-dependent",
+      "handler": "AgentService exact startup model pin shared by immutable RuntimeOpenOptions and initialize capability/decode_prompt_content",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "agent",
+      "name": "promptCapabilities.audio",
+      "status": "rejected",
+      "advertised": false,
+      "handler": "not advertised in M5",
+      "test": "ava_tests.acp"
+    },
+    {
+      "side": "agent",
+      "name": "promptCapabilities.embeddedContext",
+      "status": "deferred",
+      "advertised": false,
+      "handler": "not advertised in M5",
+      "test": "ava_tests.acp"
+    },
+    {
+      "side": "agent",
+      "name": "mcpCapabilities.http",
+      "status": "deferred",
+      "advertised": false,
+      "handler": "not advertised in M5",
+      "test": "ava_tests.acp"
+    },
+    {
+      "side": "agent",
+      "name": "mcpCapabilities.sse",
+      "status": "deferred",
+      "advertised": false,
+      "handler": "not advertised in M5",
+      "test": "ava_tests.acp"
+    },
+    {
+      "side": "agent",
+      "name": "sessionCapabilities.list",
+      "status": "implemented",
+      "advertised": true,
+      "handler": "initialize_result_json/AgentService",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "agent",
+      "name": "sessionCapabilities.delete",
+      "status": "rejected",
+      "advertised": false,
+      "handler": "destructive operation intentionally unavailable",
+      "test": "ava_tests.acp"
+    },
+    {
+      "side": "agent",
+      "name": "sessionCapabilities.additionalDirectories",
+      "status": "deferred",
+      "advertised": false,
+      "handler": "not advertised in the stable v1 profile; malformed/defaultable input normalizes empty and normalized valid non-empty roots are rejected",
+      "test": "ava_tests.acp"
+    },
+    {
+      "side": "agent",
+      "name": "sessionCapabilities.resume",
+      "status": "implemented",
+      "advertised": true,
+      "handler": "initialize_result_json/AgentService",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "agent",
+      "name": "sessionCapabilities.close",
+      "status": "implemented",
+      "advertised": true,
+      "handler": "initialize_result_json/AgentService",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "agent",
+      "name": "auth.logout",
+      "status": "deferred",
+      "advertised": false,
+      "handler": "not advertised in M5",
+      "test": "ava_tests.acp"
+    },
+    {
+      "side": "client",
+      "name": "fs.readTextFile",
+      "status": "implemented",
+      "advertised": null,
+      "handler": "decode_client_capabilities immutable independent read snapshot; bounded read_file uses client windows when true",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "client",
+      "name": "fs.writeTextFile",
+      "status": "implemented",
+      "advertised": null,
+      "handler": "decode_client_capabilities immutable independent write snapshot; write_file uses fail-stop client writes when true",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "client",
+      "name": "terminal",
+      "status": "implemented",
+      "advertised": null,
+      "handler": "decode_client_capabilities immutable connection snapshot; conditional bash/client terminal route",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "side": "client",
+      "name": "session.configOptions.boolean",
+      "status": "implemented",
+      "advertised": null,
+      "handler": "decode_client_capabilities",
+      "test": "ava_tests.acp"
+    }
+  ],
+  "contentDiscriminators": [
+    {
+      "name": "text",
+      "status": "implemented",
+      "handler": "AgentService::prompt_text/AcpSessionHost text execution",
+      "test": "ava_cli.acp_subprocess"
+    },
+    {
+      "name": "image",
+      "status": "implemented",
+      "handler": "immutable startup model capability/decode_prompt_content/pre-import pinned session modality gate/import_image_attachment_bytes",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "audio",
+      "status": "rejected",
+      "handler": "decode_prompt_content returns -32602; audio is not advertised",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "resource_link",
+      "status": "implemented",
+      "handler": "AgentService::prompt_text reference-only projection (no fetch)",
+      "test": "ava_cli.acp_subprocess"
+    },
+    {
+      "name": "resource",
+      "status": "rejected",
+      "handler": "decode_prompt_content returns -32602; embeddedContext is not advertised",
+      "test": "ava_tests.acp"
+    }
+  ],
+  "toolCallContentDiscriminators": [
+    {
+      "name": "content",
+      "status": "implemented",
+      "handler": "RuntimeSessionUpdateMapper text tool content",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "diff",
+      "status": "deferred",
+      "handler": "session/update deferred",
+      "test": "acp_support_manifest"
+    },
+    {
+      "name": "terminal",
+      "status": "deferred",
+      "handler": "session/update deferred",
+      "test": "acp_support_manifest"
+    }
+  ],
+  "toolKinds": [
+    {
+      "name": "read",
+      "status": "implemented",
+      "handler": "RuntimeSessionUpdateMapper/acp_tool_kind",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "edit",
+      "status": "implemented",
+      "handler": "RuntimeSessionUpdateMapper/acp_tool_kind",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "delete",
+      "status": "deferred",
+      "handler": "session/update deferred",
+      "test": "acp_support_manifest"
+    },
+    {
+      "name": "move",
+      "status": "deferred",
+      "handler": "session/update deferred",
+      "test": "acp_support_manifest"
+    },
+    {
+      "name": "search",
+      "status": "implemented",
+      "handler": "RuntimeSessionUpdateMapper/acp_tool_kind",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "execute",
+      "status": "implemented",
+      "handler": "RuntimeSessionUpdateMapper/acp_tool_kind",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "think",
+      "status": "deferred",
+      "handler": "session/update deferred",
+      "test": "acp_support_manifest"
+    },
+    {
+      "name": "fetch",
+      "status": "deferred",
+      "handler": "session/update deferred",
+      "test": "acp_support_manifest"
+    },
+    {
+      "name": "switch_mode",
+      "status": "deferred",
+      "handler": "session/update deferred",
+      "test": "acp_support_manifest"
+    },
+    {
+      "name": "other",
+      "status": "implemented",
+      "handler": "RuntimeSessionUpdateMapper/acp_tool_kind",
+      "test": "ava_tests.acp"
+    }
+  ],
+  "toolCallStatuses": [
+    {
+      "name": "pending",
+      "status": "implemented",
+      "handler": "initial RuntimeSessionUpdateMapper tool_call/permission request DTO before authorization",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "in_progress",
+      "status": "implemented",
+      "handler": "one post-authorization execution-start progress boundary",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "completed",
+      "status": "implemented",
+      "handler": "RuntimeSessionUpdateMapper/permission request DTO",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "failed",
+      "status": "implemented",
+      "handler": "RuntimeSessionUpdateMapper/permission request DTO",
+      "test": "ava_tests.acp"
+    }
+  ],
+  "permissionOutcomes": [
+    {
+      "name": "cancelled",
+      "status": "implemented",
+      "handler": "decode_permission_response/AcpSessionHost",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "name": "selected",
+      "status": "implemented",
+      "handler": "decode_permission_response/AcpSessionHost",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    }
+  ],
+  "permissionOptions": [
+    {
+      "name": "allow_once",
+      "status": "implemented",
+      "availability": "every prompted operation, including file mutations",
+      "handler": "encode_permission_request_params/exact host-session grant resolver",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "name": "allow_always",
+      "status": "implemented",
+      "availability": "non-mutation operations whose action identity fits the complete bounded display only",
+      "handler": "encode_permission_request_params/exact host-session grant resolver",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "name": "reject_once",
+      "status": "implemented",
+      "availability": "every prompted operation, including file mutations",
+      "handler": "encode_permission_request_params/exact host-session grant resolver",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "name": "reject_always",
+      "status": "implemented",
+      "availability": "non-mutation operations whose action identity fits the complete bounded display only",
+      "handler": "encode_permission_request_params/exact host-session grant resolver",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    }
+  ],
+  "terminalFilesystemMethods": [
+    {
+      "name": "fs/read_text_file",
+      "status": "implemented",
+      "handler": "client_tools exact-file adapter over ClientRequestGateway with optional uint32 line/limit windows",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "name": "fs/write_text_file",
+      "status": "implemented",
+      "handler": "client_tools independently negotiated exact-file adapter over ClientRequestGateway with fail-stop delivery",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "name": "terminal/create",
+      "status": "implemented",
+      "handler": "client_tools fail-stop command resource acquisition over ClientRequestGateway; delivered ambiguity or unusable terminalId aborts the connection",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "name": "terminal/output",
+      "status": "implemented",
+      "handler": "client_tools protocol-neutral exact-file or command adapter over ClientRequestGateway",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "name": "terminal/release",
+      "status": "implemented",
+      "handler": "client_tools protocol-neutral exact-file or command adapter over ClientRequestGateway",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "name": "terminal/wait_for_exit",
+      "status": "implemented",
+      "handler": "client_tools command adapter over ClientRequestGateway with field-local optional status defaults and full uint32 exit codes",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "name": "terminal/kill",
+      "status": "implemented",
+      "handler": "client_tools protocol-neutral exact-file or command adapter over ClientRequestGateway",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    }
+  ],
+  "mcpTransports": [
+    {
+      "name": "stdio",
+      "wireDiscriminator": "implicit/default",
+      "status": "implemented",
+      "advertised": true,
+      "handler": "decode_mcp_servers accepts session-local composition; AcpSessionHost requires exact protected persistent launch/connect and tool/resource Allows before McpStdioClient clean-environment newline-delimited JSON-RPC execution",
+      "authorization": "client responses and session grants cannot authorize session-supplied MCP operations; launch identity canonically binds argv, sorted explicit env pairs, persisted cwd, and clean_environment=true",
+      "test": "ava_tests.acp/ava_tests.mcp"
+    },
+    {
+      "name": "http",
+      "wireDiscriminator": "http",
+      "status": "deferred",
+      "advertised": false,
+      "handler": "decode_mcp_servers rejects unsupported transport discriminator",
+      "test": "acp_support_manifest"
+    },
+    {
+      "name": "sse",
+      "wireDiscriminator": "sse",
+      "status": "deferred",
+      "advertised": false,
+      "handler": "decode_mcp_servers rejects unsupported transport discriminator",
+      "test": "acp_support_manifest"
+    }
+  ],
+  "jsonRpcErrors": [
+    {
+      "code": -32700,
+      "name": "Parse error",
+      "status": "implemented",
+      "handler": "decode_message/JsonRpcPeer",
+      "test": "ava_tests.acp"
+    },
+    {
+      "code": -32600,
+      "name": "Invalid Request",
+      "status": "implemented",
+      "handler": "decode_message/AgentService",
+      "test": "ava_tests.acp"
+    },
+    {
+      "code": -32601,
+      "name": "Method not found",
+      "status": "implemented",
+      "handler": "AgentService unadvertised/deferred method dispatch, including session/load",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "code": -32602,
+      "name": "Invalid params",
+      "status": "implemented",
+      "handler": "decode_initialize_params/decode_prompt_content/pre-import session model modality gate",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "code": -32603,
+      "name": "Internal error",
+      "status": "implemented",
+      "handler": "AgentService conformance gate, non-authentication provider/policy setup failures, JsonRpcPeer saturation/callback boundary",
+      "test": "ava_tests.acp"
+    },
+    {
+      "code": -32800,
+      "name": "Request cancelled",
+      "status": "implemented",
+      "handler": "JsonRpcPeer request-terminal commit arbitration/cancellation/deadline/shutdown",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "code": -32000,
+      "name": "Authentication required",
+      "status": "implemented",
+      "handler": "AgentService lifecycle/auth/session dispatch",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "code": -32002,
+      "name": "Resource not found",
+      "status": "implemented",
+      "handler": "AgentService lifecycle/auth/session dispatch",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "code": "other-int32",
+      "name": "Implementation-defined",
+      "status": "implemented",
+      "handler": "generic inbound error parser",
+      "test": "ava_tests.acp"
+    }
+  ],
+  "exposure": {
+    "publicMode": "--acp",
+    "successfulProtocolV1Negotiation": true,
+    "conformanceGate": "complete: initialize succeeds because all required ACP v1 baseline operations are implemented",
+    "requiredBaseline": [
+      "session/new",
+      "session/prompt",
+      "session/cancel",
+      "session/update"
+    ]
+  },
+  "stopReasons": [
+    {
+      "name": "end_turn",
+      "status": "implemented",
+      "handler": "acp_stop_reason/AcpSessionHost",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "max_tokens",
+      "status": "implemented",
+      "handler": "acp_stop_reason/AcpSessionHost",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "max_turn_requests",
+      "status": "implemented",
+      "handler": "acp_stop_reason/AcpSessionHost",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "refusal",
+      "status": "implemented",
+      "handler": "acp_stop_reason/AcpSessionHost",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "cancelled",
+      "status": "implemented",
+      "handler": "AcpSessionHost generation-aware cancellation",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    }
+  ],
+  "runtimeStopReasons": [
+    {
+      "name": "completed",
+      "disposition": "end_turn"
+    },
+    {
+      "name": "max_tokens",
+      "disposition": "max_tokens"
+    },
+    {
+      "name": "max_turn_requests",
+      "disposition": "max_turn_requests"
+    },
+    {
+      "name": "refusal",
+      "disposition": "refusal"
+    },
+    {
+      "name": "cancelled",
+      "disposition": "cancelled"
+    },
+    {
+      "name": "error",
+      "disposition": "protocol_error"
+    }
+  ],
+  "sessionUpdates": [
+    {
+      "name": "user_message_chunk",
+      "status": "deferred",
+      "handler": "not emitted live; exact session/load replay is deferred",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "name": "agent_message_chunk",
+      "status": "implemented",
+      "handler": "RuntimeSessionUpdateMapper streamed/final de-duplication",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    },
+    {
+      "name": "agent_thought_chunk",
+      "status": "implemented",
+      "handler": "RuntimeSessionUpdateMapper non-redacted reasoning projection",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "tool_call",
+      "status": "implemented",
+      "handler": "RuntimeSessionUpdateMapper",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "tool_call_update",
+      "status": "implemented",
+      "handler": "RuntimeSessionUpdateMapper",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "plan",
+      "status": "deferred",
+      "handler": "no protocol-neutral plan event is available",
+      "test": "ava_tests.acp_support_manifest"
+    },
+    {
+      "name": "available_commands_update",
+      "status": "deferred",
+      "handler": "not advertised in M5",
+      "test": "ava_tests.acp_support_manifest"
+    },
+    {
+      "name": "current_mode_update",
+      "status": "deferred",
+      "handler": "session modes are not advertised in M5",
+      "test": "ava_tests.acp_support_manifest"
+    },
+    {
+      "name": "config_option_update",
+      "status": "deferred",
+      "handler": "config options are not advertised in M5",
+      "test": "ava_tests.acp_support_manifest"
+    },
+    {
+      "name": "session_info_update",
+      "status": "deferred",
+      "handler": "not emitted in M5",
+      "test": "ava_tests.acp_support_manifest"
+    },
+    {
+      "name": "usage_update",
+      "status": "deferred",
+      "handler": "context usage semantics are not projected without exact cumulative values",
+      "test": "ava_tests.acp_support_manifest"
+    }
+  ],
+  "acpBuiltinTools": [
+    {
+      "name": "read_file",
+      "status": "implemented",
+      "handler": "strict ACP ToolRegistry composition with descriptor-anchored secure workspace paths",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "list_directory",
+      "status": "implemented",
+      "handler": "strict ACP ToolRegistry composition with descriptor-anchored secure workspace paths",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "glob",
+      "status": "implemented",
+      "handler": "strict ACP ToolRegistry composition with descriptor-anchored secure workspace paths",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "grep",
+      "status": "implemented",
+      "handler": "strict ACP ToolRegistry composition with descriptor-anchored secure workspace paths",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "write_file",
+      "status": "implemented",
+      "handler": "strict ACP ToolRegistry composition with descriptor-anchored secure workspace paths",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "edit_file",
+      "status": "implemented",
+      "handler": "strict ACP ToolRegistry composition with descriptor-anchored secure workspace paths",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "apply_patch",
+      "status": "implemented",
+      "handler": "strict ACP ToolRegistry composition with descriptor-anchored secure workspace paths",
+      "test": "ava_tests.acp"
+    },
+    {
+      "name": "bash",
+      "status": "implemented",
+      "handler": "strict ACP ToolRegistry conditionally exposes protocol-neutral command executor only for terminal:true",
+      "test": "ava_tests.acp/ava_cli.acp_subprocess"
+    }
+  ]
+}

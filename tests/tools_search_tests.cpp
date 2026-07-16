@@ -3,14 +3,17 @@
 #include "ava/agent/mode.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/search_tools.h"
+#include "ava/tools/secure_workspace.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/error.h"
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -22,6 +25,28 @@ std::string read_text_file_for_test(std::filesystem::path const& path)
   out << file.rdbuf();
   return out.str();
 }
+
+class CountingDifferentContentExactFileAccess final : public ava::tools::ExactFileAccess
+{
+ public:
+  explicit CountingDifferentContentExactFileAccess(std::string content) : content_(std::move(content)) { }
+
+  [[nodiscard]] ava::core::Result<std::string> read_text_file(std::filesystem::path const&, ava::tools::ToolIoCancelCallback) const override
+  {
+    ++read_calls;
+    return content_;
+  }
+
+  [[nodiscard]] ava::core::VoidResult write_text_file(std::filesystem::path const&, std::string_view, ava::tools::ToolIoCancelCallback) const override
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "unexpected exact-file write"));
+  }
+
+  mutable int read_calls = 0;
+
+ private:
+  std::string content_;
+};
 
 void test_search_tools()
 {
@@ -56,8 +81,8 @@ void test_search_tools()
 
   auto bracket_glob = ava::tools::glob_files(context, "*.[ch]");
   expect(!bracket_glob && bracket_glob.error().category() == ava::core::ErrorCategory::InvalidArgument &&
-              bracket_glob.error().message().find("bracket") != std::string::npos,
-          "glob_files rejects unsupported bracket character classes instead of silently mis-matching them");
+             bracket_glob.error().message().find("bracket") != std::string::npos,
+         "glob_files rejects unsupported bracket character classes instead of silently mis-matching them");
 
   auto oversized_glob = ava::tools::glob_files(context, std::string(513, '*'));
   expect(!oversized_glob && oversized_glob.error().category() == ava::core::ErrorCategory::InvalidArgument &&
@@ -102,6 +127,24 @@ void test_search_tools()
   {
     expect(grep->matches.size() == 2, "grep_files returns matching markdown lines");
     expect(grep->matches[0].line_number == 1, "grep_files records line numbers");
+  }
+  auto const readable_link = workspace / "docs" / "plan-link.md";
+  std::error_code readable_link_error;
+  std::filesystem::create_symlink(workspace / "docs" / "plan.md", readable_link, readable_link_error);
+  if (!readable_link_error)
+  {
+    auto linked_read = ava::tools::read_file(context, readable_link);
+    expect(!linked_read && linked_read.error().message().find("symlink") != std::string::npos,
+           "read_file rejects readable symlinks before opening file contents");
+    auto linked_glob = ava::tools::glob_files(context, "**/*.md");
+    expect(linked_glob && std::ranges::none_of(linked_glob->paths, [&readable_link](auto const& path) { return path == readable_link; }),
+           "glob_files skips symlinked file matches by default to mirror read_file safety");
+    auto linked_grep = ava::tools::grep_files(context, "hello", "**/*.md");
+    expect(linked_grep && std::ranges::none_of(linked_grep->matches, [&readable_link](auto const& match) { return match.path == readable_link; }),
+           "grep_files does not read symlinked files by default");
+    auto explicit_link_glob = ava::tools::glob_files(context, "**/*.md", ava::tools::GlobOptions{.skip_symlinks = false});
+    expect(explicit_link_glob && std::ranges::any_of(explicit_link_glob->paths, [&readable_link](auto const& path) { return path == readable_link; }),
+           "glob_files only exposes symlinked matches when local code explicitly opts in");
   }
   auto ci_options = ava::tools::GrepOptions{};
   ci_options.case_insensitive = true;
@@ -178,6 +221,24 @@ void test_search_tools()
   std::filesystem::create_symlink(outside_search_path, outside_search_link, symlink_error);
   if (!symlink_error)
   {
+    int default_search_prompts = 0;
+    ava::tools::ToolContext const default_search_context{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .permission_resolver =
+            [&default_search_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+          ++default_search_prompts;
+          return ava::permissions::PermissionResolution::Allow;
+        }};
+    auto default_symlink_glob = ava::tools::glob_files(default_search_context, "**/*");
+    expect(default_symlink_glob &&
+               std::ranges::none_of(default_symlink_glob->paths, [&outside_search_link](auto const& path) { return path == outside_search_link; }) &&
+               default_search_prompts == 0,
+           "glob_files skips outside symlink matches by default before read permission prompts");
+    auto default_symlink_grep = ava::tools::grep_files(default_search_context, "outside", "**/*");
+    expect(default_symlink_grep && default_symlink_grep->matches.empty() && default_search_prompts == 0,
+           "grep_files skips outside symlink contents by default before read permission prompts");
+
     int search_prompts = 0;
     std::vector<ava::tools::PermissionAuditEvent> search_audits;
     ava::tools::ToolContext const resolving_search_context{
@@ -194,10 +255,10 @@ void test_search_tools()
           search_audits.push_back(event);
           return {};
         }};
-    auto resolved_glob = ava::tools::glob_files(resolving_search_context, "**/*");
+    auto resolved_glob = ava::tools::glob_files(resolving_search_context, "**/*", ava::tools::GlobOptions{.skip_symlinks = false});
     bool const resolved_includes_link =
         resolved_glob && std::ranges::any_of(resolved_glob->paths, [&outside_search_link](auto const& path) { return path == outside_search_link; });
-    expect(resolved_includes_link && search_prompts == 1, "glob_files resolves ask decisions for symlinked matches instead of silently skipping them");
+    expect(resolved_includes_link && search_prompts == 1, "glob_files resolves ask decisions only for explicitly opted-in symlink matches");
     expect(search_audits.size() == 3 && search_audits[0].operation == ava::permissions::Operation::SearchFiles &&
                search_audits[0].action == ava::permissions::PermissionAction::Allow && search_audits[1].operation == ava::permissions::Operation::ReadFile &&
                search_audits[1].action == ava::permissions::PermissionAction::Ask && search_audits[2].resolution == "allow" &&
@@ -213,7 +274,7 @@ void test_search_tools()
           ++denied_search_prompts;
           return ava::permissions::PermissionResolution::Deny;
         }};
-    auto denied_glob = ava::tools::glob_files(denying_search_context, "**/*");
+    auto denied_glob = ava::tools::glob_files(denying_search_context, "**/*", ava::tools::GlobOptions{.skip_symlinks = false});
     bool const denied_excludes_link =
         denied_glob && std::ranges::none_of(denied_glob->paths, [&outside_search_link](auto const& path) { return path == outside_search_link; });
     expect(denied_excludes_link && denied_search_prompts == 1, "glob_files keeps resolver-denied ask matches excluded");
@@ -227,7 +288,7 @@ void test_search_tools()
           ++failing_search_prompts;
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "search resolver failed"));
         }};
-    auto failing_glob = ava::tools::glob_files(failing_search_context, "**/*");
+    auto failing_glob = ava::tools::glob_files(failing_search_context, "**/*", ava::tools::GlobOptions{.skip_symlinks = false});
     bool const failing_skips_link =
         failing_glob && std::ranges::none_of(failing_glob->paths, [&outside_search_link](auto const& path) { return path == outside_search_link; });
     bool const failing_keeps_readable_match =
@@ -387,10 +448,52 @@ void test_search_gitignore_rules()
          "grep_files no_ignore opt-out searches files ignored by .gitignore");
 }
 
+void test_secure_workspace_search_tools()
+{
+  auto const root = temp_root() / "secure-workspace-search";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  auto const workspace = root / "workspace";
+  auto const outside = root / "outside";
+  std::filesystem::create_directories(workspace / "ordinary" / "nested");
+  std::filesystem::create_directories(outside);
+  {
+    std::ofstream file(workspace / "ordinary" / "nested" / "inside.txt", std::ios::binary | std::ios::trunc);
+    file << "inside searchable text\n";
+    std::ofstream secret(outside / "secret.txt", std::ios::binary | std::ios::trunc);
+    secret << "outside searchable secret\n";
+  }
+  std::error_code symlink_error;
+  std::filesystem::create_directory_symlink(outside, workspace / "linked-parent", symlink_error);
+
+  auto secure = ava::tools::SecureWorkspace::open(std::filesystem::canonical(workspace));
+  expect(secure.has_value(), "secure search workspace anchors a canonical root descriptor");
+  if (!secure)
+    return;
+  ava::tools::ToolContext context{.workspace_dir = std::filesystem::canonical(workspace), .mode = ava::agent::Mode::Build, .secure_workspace = *secure};
+  auto list_link = ava::tools::list_directory(context, workspace / "linked-parent");
+  auto glob = ava::tools::glob_files(context, "**/*.txt");
+  auto grep = ava::tools::grep_files(context, "searchable", "**/*.txt");
+  auto list_nested = ava::tools::list_directory(context, workspace / "ordinary" / "nested");
+  expect((symlink_error || !list_link) && glob && grep && list_nested && list_nested->entries.size() == 1 &&
+             std::ranges::find(glob->paths, workspace / "ordinary" / "nested" / "inside.txt") != glob->paths.end() &&
+             std::ranges::none_of(glob->paths, [&workspace](auto const& path) { return path.string().find((workspace / "linked-parent").string()) == 0; }) &&
+             grep->matches.size() == 1 && grep->matches.front().path == workspace / "ordinary" / "nested" / "inside.txt",
+         "secure list/glob/grep reject symlinked parents while ordinary nested search remains functional");
+
+  auto exact_access = std::make_shared<CountingDifferentContentExactFileAccess>("client-only-marker\n");
+  context.exact_file_access = exact_access;
+  auto local_grep = ava::tools::grep_files(context, "inside searchable text", "**/inside.txt");
+  auto client_grep = ava::tools::grep_files(context, "client-only-marker", "**/inside.txt");
+  expect(local_grep && local_grep->matches.size() == 1 && client_grep && client_grep->matches.empty() && exact_access->read_calls == 0,
+         "secure grep reads descriptor-anchored local bytes without consulting exact-file access");
+}
+
 }  // namespace
 
 void run_tools_search_tests()
 {
   test_search_tools();
   test_search_gitignore_rules();
+  test_secure_workspace_search_tools();
 }

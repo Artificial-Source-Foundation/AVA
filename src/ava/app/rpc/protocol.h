@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/app/rpc/catalog.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -77,6 +78,7 @@ struct RpcCommand
 namespace ava::app::rpc {
 
 inline constexpr std::size_t kMaxRpcLineBytes = 32 * 1024 * 1024;
+inline constexpr std::size_t kMaxRpcNestingDepth = 64;
 inline constexpr std::size_t kMaxRpcMessagesResponseBytes = 1024 * 1024;
 inline constexpr std::size_t kMaxRpcMessagesEntries = 1000;
 inline constexpr std::size_t kMaxRpcQueuedMessages = 64;
@@ -98,7 +100,7 @@ inline constexpr std::size_t kMaxRpcPromptAttachments = 16;
 inline constexpr std::size_t kMaxRpcPromptAttachmentPathBytes = 8192;
 inline constexpr std::size_t kMaxRpcPromptImageDataBase64Bytes = ((20 * 1024 * 1024 + 2) / 3) * 4;
 inline constexpr std::size_t kMaxRpcPromptImageMimeTypeBytes = 128;
-inline constexpr long long kRpcProtocolVersion = 1;
+inline constexpr long long kRpcProtocolVersion = kRpcProtocolVersions.protocol;
 
 [[nodiscard]] ava::core::Error invalid_rpc(std::string message);
 

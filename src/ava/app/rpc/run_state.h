@@ -1,13 +1,16 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <deque>
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <ostream>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -61,13 +64,50 @@ struct ClearedRpcQueues
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+enum class RpcFollowUpTransitionKind
+{
+  Skipped,
+  Activated,
+  Deactivated,
+};
+
+struct RpcFollowUpTransition
+{
+  RpcFollowUpTransitionKind kind = RpcFollowUpTransitionKind::Deactivated;
+  std::optional<QueuedRpcMessage> follow_up;
+  ClearedRpcQueues cleared;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+struct RpcCancellation
+{
+  bool active_run = false;
+  std::string active_request_id;
+  ClearedRpcQueues cleared;
+  std::size_t deferred_steering_count = 0;
+  std::size_t deferred_follow_up_count = 0;
+  bool deferred_to_terminal_publication = false;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+enum class RpcRunKind
+{
+  None,
+  Prompt,
+  DirectCommand,
+  Compaction,
+};
+
 struct RpcRunState
 {
   std::mutex mutex;
+  std::condition_variable publication_cv;
   std::atomic_bool cancel_requested = false;
-  bool active_run = false;
+  bool terminal_publication_in_progress = false;
+  RpcRunKind active_run_kind = RpcRunKind::None;
   bool input_closed = false;
   std::string active_request_id;
+  std::set<std::string> outstanding_request_ids;
   std::deque<QueuedRpcMessage> steering_messages;
   std::deque<QueuedRpcMessage> follow_up_messages;
   std::optional<ava::core::Error> async_error;
@@ -78,17 +118,35 @@ struct RpcRunState
 [[nodiscard]] ava::core::Error canceled_error();
 [[nodiscard]] ava::core::Error skipped_follow_up_error(std::string_view reason);
 [[nodiscard]] ava::core::Error active_run_reject_error(std::string_view command_type);
+[[nodiscard]] ava::core::Error duplicate_request_id_error(std::string_view request_id);
 
 [[nodiscard]] bool cancel_requested(RpcRunState& state);
 [[nodiscard]] bool active_run(RpcRunState& state);
+[[nodiscard]] bool active_prompt_run(RpcRunState& state);
+[[nodiscard]] bool async_worker_reap_ready(RpcRunState& state);
 [[nodiscard]] bool input_closed(RpcRunState& state);
-void set_active_run(RpcRunState& state, bool active, std::string request_id = {});
+enum class RpcCommandAdmission
+{
+  Admitted,
+  DuplicateRequestId,
+  InputClosed,
+};
+
+[[nodiscard]] RpcCommandAdmission await_command_admission(RpcRunState& state, std::string_view request_id, bool wait_for_terminal_publication = true);
+[[nodiscard]] bool outstanding_request_id(RpcRunState& state, std::string_view request_id);
+void set_active_run(RpcRunState& state, RpcRunKind kind, std::string request_id = {});
 void set_active_request_id(RpcRunState& state, std::string request_id);
+void complete_outstanding_request(RpcRunState& state, std::string_view request_id);
 
 [[nodiscard]] ava::core::Result<QueuedRpcMessage> queue_rpc_message(std::deque<QueuedRpcMessage>& queue, RpcRunState& state, std::string command_type,
                                                                     std::string request_id, std::string message);
 [[nodiscard]] std::vector<QueuedRpcMessage> take_queued_steering_messages(RpcRunState& state, std::string_view correlation_id);
-[[nodiscard]] std::optional<QueuedRpcMessage> take_next_follow_up_message(RpcRunState& state);
+void begin_prompt_terminal_publication(RpcRunState& state);
+[[nodiscard]] RpcFollowUpTransition transition_after_prompt_terminal_response(RpcRunState& state);
+[[nodiscard]] ClearedRpcQueues begin_terminal_publication(RpcRunState& state);
+void complete_terminal_publication(RpcRunState& state, std::string_view request_id);
+[[nodiscard]] RpcCancellation begin_cancellation(RpcRunState& state);
+void wait_for_terminal_publication(RpcRunState& state);
 [[nodiscard]] std::vector<QueuedRpcMessage> clear_queued_steering_messages(RpcRunState& state);
 [[nodiscard]] ClearedRpcQueues deactivate_and_clear_queued_messages(RpcRunState& state);
 [[nodiscard]] ClearedRpcQueues close_input_and_cancel(RpcRunState& state);

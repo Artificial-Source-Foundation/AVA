@@ -37,7 +37,7 @@ Suggested Codex command:
 
 ## Current Gap Summary
 
-AVA already has strong session tree/fork/clone/name/label/archive/export/copy behavior. This area closes local session import, raw JSONL export, and Pi-compatible session CLI aliases. Public share/cloud upload, provider logout mutation, dedicated RPC import/share, `--models`, `--thinking`, `--export` exit flow, and cross-session content search are explicitly deferred or left to later scoped areas because they need product/security design beyond minimal MVP parity.
+AVA already has strong session tree/fork/clone/name/label/archive/export/copy behavior. This area closes local session import, raw JSONL export, and Pi-compatible session CLI aliases. Public share/cloud upload, provider logout mutation, dedicated RPC import/share, `--models`, `--export` exit flow, and cross-session content search are explicitly deferred or left to later scoped areas because they need product/security design beyond minimal MVP parity.
 
 ## 100 Percent Criteria
 
@@ -61,7 +61,7 @@ AVA already has strong session tree/fork/clone/name/label/archive/export/copy be
 | C2. `/import` | Implement safe import of AVA JSONL sessions first. Decide whether Pi JSONL import requires a converter or is unsupported. Add confirmation in TUI and RPC/headless behavior. |
 | C3. `/share` | Product decision first: local-only export link, `gh gist` private upload, or defer. If accepted, make dependency and privacy explicit. |
 | C4. `/copy` and `/logout` | Close low-risk UX gaps with focused command handlers and tests. |
-| C5. CLI flag parity | Add `--session-id`, `--models`, `--thinking`, `--export`, and `--resume` semantics only where they fit AVA. Do not add ambiguous aliases that conflict with existing `--mode build|plan`. |
+| C5. CLI flag parity | Add or verify `--session-id`, `--models`, `--thinking`, `--export`, and `--resume` semantics only where they fit AVA. Do not add ambiguous aliases that conflict with existing `--mode build|plan`. |
 | C6. Docs and smokes | Update `README.md`, `docs/USAGE.md`, `docs/headless-protocol.md`, and terminal smoke scripts for user-visible flows. |
 
 ## Design Constraints
@@ -128,8 +128,9 @@ git --no-pager diff --check
 | `/logout` | Deferred | Removing one provider credential safely needs provider-specific confirmation UX; disabled command directs users to edit only the provider entry or rerun `/connect`. |
 | `--resume`, `-r` | Implemented alias | Maps to `--continue`; covered by CLI fake-provider startup-options smoke. |
 | `--session-id` | Implemented alias | Maps to `--session`; uses existing safe session-id/prefix resolution and conflict checks; covered by CLI fake-provider startup-options smoke. |
+| `--thinking <level>` | Implemented alias | Maps to existing runtime reasoning selection: `off` clears explicit reasoning, and other levels use active-model `reasoning_levels`/provider validation. Covered by CLI/RPC startup alias tests. |
 | `--fork`, `--name`, `--session-dir`, `@file` | Implemented | Existing behavior retained; `--fork` conflict wording now mentions aliases. |
-| `--models`, `--thinking`, `--extension`, `--skill`, `--prompt-template`, `--theme`, `--no-context-files`, `--export`, `--offline`, trust flags | Deferred / excluded for this area | These affect provider/model selection, context/resource loading, settings, process exit export, or trust policy. They are intentionally left for settings/packages/resources or future product design to avoid ambiguous aliases and weakened safety boundaries. |
+| `--models`, `--extension`, `--skill`, `--prompt-template`, `--theme`, `--no-context-files`, `--export`, `--offline`, trust flags | Deferred / excluded for this area | These affect provider/model selection, context/resource loading, settings, process exit export, or trust policy. They are intentionally left for settings/packages/resources or future product design to avoid ambiguous aliases and weakened safety boundaries. |
 | Dedicated RPC import/share | Deferred | RPC already covers Markdown/HTML export; local JSONL import is slash/line-shell only until the RPC contract for archive replacement/switching is designed. |
 | Session content search | Deferred | Current `/sessions [query]` searches session metadata/tree rows; full transcript search across sessions needs indexing/UX design and is not required for safe local import/export closure. |
 

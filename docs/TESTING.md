@@ -28,6 +28,7 @@ Recommended coverage:
 
 - `ava --print ... --json --allow read-only` for `read_file`, `list_directory`, `glob`, and `grep`. This verifies provider tool-call streaming, read/search permission auto-allow, `.gitignore` behavior, and tool progress events.
 - `ava --print ... --json --allow-tool skill` for `skill` when a test skill is available. This verifies the explicit `skill` headless allow path and bounded skill loading behavior.
+- `ava --print ... --json --allow-tool task` for `task` when a small subagent prompt is available. This verifies the explicit `task`/`TaskRun` headless allow path, child-session creation, recursive-task hiding, and background job metadata when `background:true` is used.
 - `ava --print ... --json --allow-tool webfetch` for `webfetch`. This verifies the explicit `network.fetch` headless allow path and real bounded HTTP fetch behavior.
 - `ava --print ... --json --allow-tool websearch` for `websearch`. This verifies the explicit `network.search` headless allow path and bounded search result shaping.
 - `ava --print ... --json` without `--allow-tool webfetch` for a prompt that asks for `webfetch`. This verifies `network.fetch` ask prompts fail closed by the default headless resolver; workspace-policy allow decisions may still proceed without prompting.
@@ -49,7 +50,7 @@ The deterministic full-tool smoke is part of default CTest:
 ctest --test-dir build -R '^ava_cli\.headless_e2e_model_smoke$' --output-on-failure
 ```
 
-The smoke starts the built `ava --rpc` binary against `ava_fake_provider_server`, seeds a temporary workspace under the build tree, and drives `read_file`, `grep`, `list_directory`, `apply_patch`, and `bash` in one provider-backed turn. It uses `--allow read-only` only for read/search prompts; the outside-temp edit target and verification command must be resolved through RPC `permission_reply`. Assertions cover tool lifecycle events, successful tool results, permission events and persisted `permission_decision` session entries, `get_session_stats`, `validate_session`, `get_messages`, provider request-log continuation with prior tool results, and replay through `ava --rpc --continue`.
+The smoke starts the built `ava --rpc` binary against `ava_fake_provider_server`, seeds a temporary workspace under the build tree, and drives `read_file`, `grep`, `list_directory`, `apply_patch`, and `bash` in one provider-backed turn. It uses `--allow read-only` only for read/search prompts; the outside-temp edit target and verification command must be resolved through RPC `permission_reply`. Assertions cover tool lifecycle events, successful tool results, permission events and persisted `permission_decision` session entries, `get_session_stats`, `validate_session`, `get_messages`, provider request-log continuation with prior tool results, and replay through `ava --rpc --continue`. Subagent/task and background job coverage lives in `ava_tests.agent_loop`; run that suite after changing `task`, subagent config, or `BackgroundJobRegistry` behavior.
 
 Latest local result: 2026-07-05 `cmake --build --preset dev --target ava ava_fake_provider_server ava_tests`, `ctest --test-dir build -R '^ava_cli\.headless_e2e_model_smoke$' --output-on-failure`, `ctest --preset dev --output-on-failure`, and `git --no-pager diff --check` passed. The full default CTest run passed 59/59 with expected skips for credential-gated provider live smoke and opt-in TUI PTY smokes.
 
@@ -63,7 +64,17 @@ Set `AVA_EXE=/path/to/ava` when the binary is not `./build/ava`. Set `AVA_LIVE_D
 
 The live dogfood script uses the first configured provider credential from the provider live-smoke matrix, writes an isolated `models.json`, starts `ava --rpc --allow read-only`, asks the live model to read `src/live-smoke.txt` with `read_file`, then validates session stats/messages. It prints one classification: `passed`, `skipped/not opted in`, `skipped/no credential`, `credential/auth-blocked`, `provider/rate-limited`, `network-blocked`, `provider-behavior/inconclusive`, or `AVA regression`. Treat provider-behavior/inconclusive as live dogfood evidence that the deterministic fake-provider E2E remains the release gate, not as a release blocker by itself.
 
-Latest local result: 2026-07-05 `AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-model-dogfood.sh` returned `classification=skipped/no credential`.
+Latest local result: 2026-07-05 `AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-model-dogfood.sh` returned `classification=passed` against DeepSeek after the smoke was fixed to run from its isolated workspace.
+
+Live coding dogfood exercises a broader coding-agent loop with a real provider:
+
+```sh
+AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-coding-dogfood.sh
+```
+
+Set `AVA_EXE=/path/to/ava` when the binary is not `./build/ava`. Set `AVA_LIVE_CODING_DOGFOOD_ROOT=/tmp/ava-live-coding-dogfood` to choose the evidence root, and `AVA_LIVE_CODING_DOGFOOD_KEEP=1` when the RPC output, stderr, workspace, and session files should remain available for review.
+
+The live coding dogfood script creates an isolated workspace, trusts a project-local `coding-smoke` skill, asks the live model to load that skill, read a target file, apply an exact edit through `apply_patch` or `edit_file`, and reply with the marker. It validates permission prompts/replies, successful tool results, the mutated file, session JSONL `tool_call`/`tool_result`/`permission_decision` entries, and `validate_session` output. It uses the same classification vocabulary as `live-model-dogfood.sh`; classify model non-compliance separately from AVA-owned regressions.
 
 ## Sanitizers
 
@@ -113,8 +124,9 @@ Pi's reference tree has broad Jest/Vitest coverage across provider protocols, co
 
 | Evidence area | AVA evidence | Release rule |
 | --- | --- | --- |
-| Provider protocol regressions | `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `ava_tests.config_context_auth_oauth`, and `ava_tests.provider_live_smoke` | Local protocol tests must pass. Live provider cases are credential-gated and classified in the matrix below. |
+| Provider protocol regressions | `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `ava_tests.provider_gemini`, `ava_tests.config_context_auth_oauth`, and `ava_tests.provider_live_smoke` | Local protocol tests must pass. Live provider cases are credential-gated and classified in the matrix below. |
 | Headless/RPC automation | `ava_cli.headless_print_*`, `ava_cli.headless_rpc_*`, `ava_cli.headless_tool_visibility`, `ava_cli.headless_performance_smoke`, `ava_cli.headless_e2e_model_smoke` | Fake-provider smokes must pass in default CTest; live credentials are not required. |
+| Subagent/background jobs | `ava_tests.agent_loop` task-subagent and `BackgroundJobRegistry` tests; opt-in live task/coding dogfood when credentials are present | Foreground/background task delegation, custom subagent config, cancellation, retained job snapshots, and explicit `--allow-tool task` behavior must remain covered by deterministic tests. |
 | TUI/editor/renderer | `ava_tests.tui_composer` plus gated `ava_tui.tmux_smoke`, `ava_tui.kitty_image_smoke`, and `ava_tui.osc8_smoke` | Deterministic renderer/editor tests are required; PTY smokes are run when prerequisites exist and otherwise skip with code 77. |
 | Virtual-terminal decision | AVA does not add a Pi-style TypeScript virtual terminal for MVP. Renderer tests assert visible rows/widths and tmux/PTY captures assert real terminal behavior. | Revisit a screen-model parser only if tmux/PTY smoke flakes or cannot cover a terminal protocol that renderer tests cannot prove. |
 | Performance thresholds | `ava_tests.tui_composer` large-render budgets and `ava_cli.headless_performance_smoke` | Treat budget failures as release regressions unless the threshold is intentionally raised with profiling evidence. |
@@ -128,9 +140,10 @@ Run live smokes only when credentials are intentionally present in the environme
 ```sh
 AVA_LIVE_PROVIDER_SMOKE=1 ctest --test-dir build -R provider_live_smoke --output-on-failure
 AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-model-dogfood.sh
+AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-coding-dogfood.sh
 ```
 
-`ava_tests.provider_live_smoke` verifies provider transport/connectivity. `scripts/live-model-dogfood.sh` is the opt-in full-binary dogfood path for CLI/RPC startup, agent loop, read-only tool use, permission policy, and session persistence with a live model.
+`ava_tests.provider_live_smoke` verifies provider transport/connectivity. `scripts/live-model-dogfood.sh` is the opt-in full-binary dogfood path for CLI/RPC startup, agent loop, read-only tool use, permission policy, and session persistence with a live model. `scripts/live-coding-dogfood.sh` extends that coverage to skill loading, file mutation, edit permission prompts, and persisted coding-session evidence. Both dogfood scripts use the shared provider selector in `scripts/live-provider-selection.sh` so the first available OpenAI, Anthropic, DeepSeek, Gemini, Kimi, Moonshot, or OpenRouter credential is handled consistently.
 
 | Provider | Credential env | Default model / override | Expected CTest behavior without credentials | Latest local result field |
 | --- | --- | --- | --- | --- |
@@ -138,6 +151,7 @@ AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-model-dogfood.sh
 | Anthropic API key | `ANTHROPIC_API_KEY` | `claude-sonnet-4-5` / `AVA_LIVE_ANTHROPIC_MODEL` | Skipped unless gate and key are set | Same classification. |
 | Anthropic OAuth bearer | `ANTHROPIC_OAUTH_TOKEN` or `ANTHROPIC_AUTH_TOKEN` | `claude-sonnet-4-5` / `AVA_LIVE_ANTHROPIC_MODEL` | Skipped unless gate and token are set | Same classification; interactive Anthropic OAuth remains deferred. |
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` / `AVA_LIVE_DEEPSEEK_MODEL` | Skipped unless gate and key are set | Same classification; local tests cover `reasoning_effort=high|max`; live runs classify endpoint/auth/network results. |
+| Gemini | `GEMINI_API_KEY` | `gemini-2.5-pro` / `AVA_LIVE_GEMINI_MODEL` | Skipped unless gate and key are set | Same classification; local tests cover native GenerateContent request/response and SSE parsing. |
 | Kimi | `KIMI_API_KEY` | `kimi-k2-thinking` / `AVA_LIVE_KIMI_MODEL` | Skipped unless gate and key are set | Same classification. |
 | Moonshot | `MOONSHOT_API_KEY` | `kimi-k2.6` / `AVA_LIVE_MOONSHOT_MODEL` | Skipped unless gate and key are set | Same classification. |
 | OpenRouter | `OPENROUTER_API_KEY` | `moonshotai/kimi-k2.6` / `AVA_LIVE_OPENROUTER_MODEL` | Skipped unless gate and key are set | Same classification. |
@@ -161,7 +175,7 @@ The `ava_tests` binary covers:
 - XDG path handling
 - OpenAI auth loading/storage and OAuth refresh preflight
 - model and prompt configuration
-- provider request/SSE parsing, including OpenAI Responses function-call starts from `response.output_item.added`, Anthropic native tools/thinking/cache usage, DeepSeek/Kimi/Moonshot-compatible reasoning-content vectors, and OpenRouter-compatible request/error vectors
+- provider request/SSE parsing, including OpenAI Responses function-call starts from `response.output_item.added`, Anthropic native tools/thinking/cache usage, Gemini GenerateContent request/response and SSE vectors, DeepSeek/Kimi/Moonshot-compatible reasoning-content vectors, and OpenRouter-compatible request/error vectors
 - permission audit persistence, file/search/bash/webfetch/LSP tools, bash process-group cleanup, spill files, and atomic file writes
 - tool dispatcher and agent loop
 - command registry discovery/invocation for built-ins, prompt commands, skills, plugin commands, and MCP prompts
@@ -201,7 +215,7 @@ Before treating a 0.90 release-candidate audit as complete, run and record:
 ```sh
 cmake --build build --target ava ava_tests
 ctest --test-dir build --output-on-failure
-ctest --test-dir build --output-on-failure -R "ava_tests\.(session|agent_loop|agent_loop_resilience|app_print|app_runtime|app_command_classification|config_context_auth_oauth|provider_openai|provider_anthropic|app_command_registry|app_compaction|core_json_permission|plugin|mcp)|ava_cli\.headless_rpc_"
+ctest --test-dir build --output-on-failure -R "ava_tests\.(session|agent_loop|agent_loop_resilience|app_print|app_runtime|app_command_classification|config_context_auth_oauth|provider_openai|provider_anthropic|provider_gemini|app_command_registry|app_compaction|core_json_permission|plugin|mcp)|ava_cli\.headless_rpc_"
 git --no-pager diff --check
 ```
 
@@ -216,6 +230,6 @@ Run `clang-format` on changed C++ files and `clang-tidy <changed-cpp-files> -p b
 
 Use `docs/versions/0.90.md` as the release-candidate test evidence map. It maps 1.0 capability areas to `ava_tests` suite names, `ava_cli.headless_rpc_*` scripts, golden fixtures, and live/manual smoke expectations.
 
-For provider live smokes, use environment credentials only; the smoke suite intentionally does not read or print auth files. The CTest suite `ava_tests.provider_live_smoke` is skipped by default; opt in with `AVA_LIVE_PROVIDER_SMOKE=1` plus one or more provider credentials such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `ANTHROPIC_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`, `MOONSHOT_API_KEY`, or `OPENROUTER_API_KEY`. Optional model overrides are `AVA_LIVE_OPENAI_MODEL`, `AVA_LIVE_ANTHROPIC_MODEL`, `AVA_LIVE_DEEPSEEK_MODEL`, `AVA_LIVE_KIMI_MODEL`, `AVA_LIVE_MOONSHOT_MODEL`, and `AVA_LIVE_OPENROUTER_MODEL`.
+For provider live smokes, use environment credentials only; the smoke suite intentionally does not read or print auth files. The CTest suite `ava_tests.provider_live_smoke` is skipped by default; opt in with `AVA_LIVE_PROVIDER_SMOKE=1` plus one or more provider credentials such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `ANTHROPIC_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `KIMI_API_KEY`, `MOONSHOT_API_KEY`, or `OPENROUTER_API_KEY`. Optional model overrides are `AVA_LIVE_OPENAI_MODEL`, `AVA_LIVE_ANTHROPIC_MODEL`, `AVA_LIVE_DEEPSEEK_MODEL`, `AVA_LIVE_GEMINI_MODEL`, `AVA_LIVE_KIMI_MODEL`, `AVA_LIVE_MOONSHOT_MODEL`, and `AVA_LIVE_OPENROUTER_MODEL`.
 
-Record each provider case as one of: passed, skipped/no credential, credential/auth-blocked, provider/rate-limited, network-blocked, or AVA regression. The full-binary live dogfood script may also report provider-behavior/inconclusive when the model returns a valid response but does not perform the requested read-only tool call. A provider-breadth release claim needs the focused provider suites (`ava_tests.config_context_auth_oauth`, `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `ava_tests.provider_live_smoke`) plus a dated matrix of the enabled live cases, model ids, result classifications, and whether any failure is credentials/provider/network/AVA-owned. Anthropic interactive OAuth is not a live-smoke requirement because Anthropic does not document a third-party authorization or device flow; use `ANTHROPIC_API_KEY`, `ANTHROPIC_OAUTH_TOKEN`, or `ANTHROPIC_AUTH_TOKEN` only when the credential is already available. The current 0.90 evidence has OpenAI and Kimi-for-coding live-smoked, with Kimi-for-coding accepted as the additional production-quality provider path. Anthropic endpoint auth remains blocked by the configured key, and Moonshot/OpenRouter-compatible prompts are blocked by missing auth for follow-up provider-breadth validation.
+Record each provider case as one of: passed, skipped/no credential, credential/auth-blocked, provider/rate-limited, network-blocked, or AVA regression. The full-binary live dogfood script may also report provider-behavior/inconclusive when the model returns a valid response but does not perform the requested read-only tool call. A provider-breadth release claim needs the focused provider suites (`ava_tests.config_context_auth_oauth`, `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `ava_tests.provider_gemini`, `ava_tests.provider_live_smoke`) plus a dated matrix of the enabled live cases, model ids, result classifications, and whether any failure is credentials/provider/network/AVA-owned. Anthropic interactive OAuth is not a live-smoke requirement because Anthropic does not document a third-party authorization or device flow; use `ANTHROPIC_API_KEY`, `ANTHROPIC_OAUTH_TOKEN`, or `ANTHROPIC_AUTH_TOKEN` only when the credential is already available. Historical 0.90 evidence had OpenAI and Kimi-for-coding live-smoked, with Kimi-for-coding accepted as the additional production-quality provider path at that release-candidate cut; current provider-breadth claims should use the matrix runner and classify every enabled live case separately.

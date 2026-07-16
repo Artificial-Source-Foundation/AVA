@@ -22,14 +22,14 @@ ava::core::Error unsupported_allow_tool_error(std::string_view value)
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "unsupported --allow-tool value");
   error.with_context("value", std::string(value));
-  error.with_context("supported", "glob, grep, list_directory, mcp, read_file, skill, task, webfetch, websearch");
+  error.with_context("supported", "glob, grep, list_directory, mcp, plugin, read_file, skill, task, webfetch, websearch");
   return error;
 }
 
 bool is_supported_tool(std::string_view value)
 {
-  return value == "glob" || value == "grep" || value == "list_directory" || value == "mcp" || value == "read_file" || value == "skill" || value == "task" ||
-         value == "webfetch" || value == "websearch";
+  return value == "glob" || value == "grep" || value == "list_directory" || value == "mcp" || value == "plugin" || value == "read_file" || value == "skill" ||
+         value == "task" || value == "webfetch" || value == "websearch";
 }
 
 bool contains_tool(std::vector<std::string> const& tools, std::string_view value)
@@ -40,6 +40,30 @@ bool contains_tool(std::vector<std::string> const& tools, std::string_view value
 bool prompt_matches_read_only(ava::permissions::PermissionPrompt const& prompt)
 {
   return prompt.operation == ava::permissions::Operation::ReadFile || prompt.operation == ava::permissions::Operation::SearchFiles;
+}
+
+bool is_plugin_model_tool_prompt(std::string_view tool_name)
+{
+  return tool_name.starts_with("plugin_") && tool_name != "plugin_command" && tool_name != "plugin_event_observe" &&
+         tool_name.find(':') == std::string_view::npos;
+}
+
+bool prompt_matches_allowed_plugin(ava::permissions::PermissionPrompt const& prompt)
+{
+  if (prompt.operation == ava::permissions::Operation::PluginExecute)
+  {
+    return (is_plugin_model_tool_prompt(prompt.tool_name) || prompt.tool_name == "plugin_command") && !prompt.command.empty() &&
+           prompt.command.find(':') == std::string::npos;
+  }
+  if (prompt.operation == ava::permissions::Operation::PluginToolCall)
+  {
+    return is_plugin_model_tool_prompt(prompt.tool_name) && prompt.command.find(':') != std::string::npos;
+  }
+  if (prompt.operation == ava::permissions::Operation::PluginCommandRun)
+  {
+    return prompt.tool_name == "plugin_command" && prompt.command.find(':') != std::string::npos;
+  }
+  return false;
 }
 
 bool prompt_matches_allowed_tool(ava::permissions::PermissionPrompt const& prompt, std::set<std::string> const& tools)
@@ -73,6 +97,10 @@ bool prompt_matches_allowed_tool(ava::permissions::PermissionPrompt const& promp
     return (prompt.operation == ava::permissions::Operation::McpServerLaunch || prompt.operation == ava::permissions::Operation::McpServerConnect ||
             prompt.operation == ava::permissions::Operation::McpToolCall || prompt.operation == ava::permissions::Operation::McpResourceRead) &&
            tools.contains("mcp");
+  }
+  if (tools.contains("plugin") && prompt_matches_allowed_plugin(prompt))
+  {
+    return true;
   }
   return false;
 }

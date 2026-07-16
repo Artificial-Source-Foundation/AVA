@@ -235,19 +235,6 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
       options.transport_override ? options.transport_override->get() : static_cast<ava::provider::Transport&>(default_transport);
   ava::provider::Transport& auth_transport =
       options.transport_override ? options.transport_override->get() : static_cast<ava::provider::Transport&>(default_transport);
-  auto request_credential = ava::config::provider_credential_for_request(session->paths, session->model.provider_id, auth_transport);
-  if (!request_credential)
-  {
-    err << terminal_output_text(request_credential.error().format(), sanitize_stderr) << '\n';
-    return 1;
-  }
-  if (!*request_credential)
-  {
-    err << "print mode requires auth for provider `" << terminal_output_text(session->model.provider_id, sanitize_stderr) << "`. Configure a credential in "
-        << terminal_output_text(session->paths.auth_file.string(), sanitize_stderr) << " or the provider API key environment variable\n";
-    return 1;
-  }
-
   auto registry = ava::provider::builtin_provider_registry();
   auto default_provider = registry.create(session->model.provider_id);
   if (!default_provider)
@@ -258,10 +245,26 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   ava::provider::Provider const& provider =
       options.provider_override ? options.provider_override->get() : static_cast<ava::provider::Provider const&>(**default_provider);
   runtime::RunOptions runtime_options;
-  runtime_options.access_token = (*request_credential)->access_token;
-  runtime_options.credential_type = (*request_credential)->credential_type;
-  runtime_options.openai_oauth = (*request_credential)->provider_id == "openai" && (*request_credential)->credential_type == "oauth";
-  runtime_options.openai_account_id = (*request_credential)->account_id;
+  runtime_options.offline = session->offline || options.open_options.offline;
+  if (!runtime_options.offline)
+  {
+    auto request_credential = ava::config::provider_credential_for_request(session->paths, session->model.provider_id, auth_transport);
+    if (!request_credential)
+    {
+      err << terminal_output_text(request_credential.error().format(), sanitize_stderr) << '\n';
+      return 1;
+    }
+    if (!*request_credential)
+    {
+      err << "print mode requires auth for provider `" << terminal_output_text(session->model.provider_id, sanitize_stderr) << "`. Configure a credential in "
+          << terminal_output_text(session->paths.auth_file.string(), sanitize_stderr) << " or the provider API key environment variable\n";
+      return 1;
+    }
+    runtime_options.access_token = (*request_credential)->access_token;
+    runtime_options.credential_type = (*request_credential)->credential_type;
+    runtime_options.openai_oauth = (*request_credential)->provider_id == "openai" && (*request_credential)->credential_type == "oauth";
+    runtime_options.openai_account_id = (*request_credential)->account_id;
+  }
   runtime_options.enable_transport_retries = !options.transport_override.has_value();
   runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
 

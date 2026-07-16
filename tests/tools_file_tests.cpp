@@ -4,21 +4,33 @@
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/mutation_queue.h"
+#include "ava/tools/secure_workspace.h"
 #include "ava/session/export.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <array>
+#include <cerrno>
+#include <charconv>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <map>
 #include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
+#include <dirent.h>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
 
@@ -28,6 +40,132 @@ std::string read_text_file_for_test(std::filesystem::path const& path)
   std::ostringstream out;
   out << file.rdbuf();
   return out.str();
+}
+
+bool has_secure_write_temp_for(std::filesystem::path const& directory, std::string_view target_filename = {})
+{
+  auto const prefix = target_filename.empty() ? std::string{} : "." + std::string(target_filename) + ".ava-write-";
+  std::error_code iter_error;
+  for (std::filesystem::directory_iterator it(directory, iter_error), end; !iter_error && it != end; it.increment(iter_error))
+  {
+    auto const name = it->path().filename().string();
+    if ((prefix.empty() && name.find(".ava-write-") != std::string::npos) || (!prefix.empty() && name.starts_with(prefix)))
+      return true;
+  }
+  return false;
+}
+
+bool has_error_context(ava::core::Error const& error, std::string_view key, std::string_view value)
+{
+  return std::ranges::any_of(error.context(), [key, value](ava::core::ErrorContext const& item) { return item.key == key && item.value == value; });
+}
+
+#ifdef __linux__
+std::optional<std::vector<int>> proc_open_file_descriptors()
+{
+  DIR* directory = ::opendir("/proc/self/fd");
+  if (directory == nullptr)
+    return std::nullopt;
+  int const listing_fd = ::dirfd(directory);
+  if (listing_fd < 0)
+  {
+    ::closedir(directory);
+    return std::nullopt;
+  }
+
+  std::vector<int> descriptors;
+  errno = 0;
+  while (auto* entry = ::readdir(directory))
+  {
+    auto const* begin = entry->d_name;
+    auto const* end = begin + std::strlen(begin);
+    int descriptor = -1;
+    auto const parsed = std::from_chars(begin, end, descriptor);
+    if (parsed.ec == std::errc{} && parsed.ptr == end && descriptor != listing_fd)
+      descriptors.push_back(descriptor);
+  }
+  int const read_error = errno;
+  ::closedir(directory);
+  if (read_error != 0)
+    return std::nullopt;
+
+  std::ranges::sort(descriptors);
+  return descriptors;
+}
+
+std::optional<std::vector<int>> added_file_descriptors(std::vector<int> const& before)
+{
+  auto after = proc_open_file_descriptors();
+  if (!after)
+    return std::nullopt;
+  std::vector<int> added;
+  std::ranges::set_difference(*after, before, std::back_inserter(added));
+  return added;
+}
+#endif
+
+class MemoryExactFileAccess final : public ava::tools::ExactFileAccess
+{
+ public:
+  [[nodiscard]] bool supports_read_text_file() const noexcept override { return supports_reads; }
+  [[nodiscard]] bool supports_write_text_file() const noexcept override { return supports_writes; }
+
+  [[nodiscard]] ava::core::Result<std::string> read_text_file(std::filesystem::path const& path, ava::tools::ToolIoCancelCallback) const override
+  {
+    ++read_calls;
+    paths.push_back(path);
+    if (fail_reads)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "injected exact read failed"));
+    auto found = files.find(path);
+    if (found == files.end())
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "injected exact file is missing"));
+    return found->second;
+  }
+
+  [[nodiscard]] ava::core::VoidResult write_text_file(std::filesystem::path const& path, std::string_view content,
+                                                      ava::tools::ToolIoCancelCallback) const override
+  {
+    ++write_calls;
+    paths.push_back(path);
+    if (fail_writes)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "injected exact write failed"));
+    files[path] = std::string(content);
+    return {};
+  }
+
+  mutable std::map<std::filesystem::path, std::string> files;
+  mutable std::vector<std::filesystem::path> paths;
+  mutable int read_calls = 0;
+  mutable int write_calls = 0;
+  bool supports_reads = true;
+  bool supports_writes = true;
+  bool fail_reads = false;
+  bool fail_writes = false;
+};
+
+void test_mutation_queue_cleans_drained_path_entries()
+{
+  std::error_code remove_error;
+  std::filesystem::remove_all(temp_root(), remove_error);
+  auto const workspace = temp_root() / "mutation-queue";
+  std::filesystem::create_directories(workspace);
+
+  ava::tools::MutationQueue queue;
+  expect(queue.tracked_path_count() == 0, "mutation queue starts without tracked path entries");
+
+  auto const single_path = workspace / "single.txt";
+  {
+    [[maybe_unused]] auto lock = queue.lock_path(single_path);
+    expect(queue.tracked_path_count() == 1, "mutation queue tracks a locked path entry");
+  }
+  expect(queue.tracked_path_count() == 0, "mutation queue removes a path entry after queued work drains");
+
+  std::array const paths{workspace / "multi-a.txt", workspace / "." / "multi-a.txt", workspace / "multi-b.txt"};
+  {
+    [[maybe_unused]] auto lock = queue.lock_paths(paths);
+    expect(queue.tracked_path_count() == 2, "mutation queue deduplicates normalized aliases while locked");
+  }
+  expect(queue.tracked_path_count() == 0, "mutation queue removes deduped multi-path entries after queued work drains");
 }
 
 void test_file_tools()
@@ -66,8 +204,9 @@ void test_file_tools()
   if (read)
   {
     expect(read->content == "hello", "read_file truncates head");
-    expect(read->truncated && read->byte_limited && !read->line_limited && read->output_lines == 1,
-           "read_file reports byte-cap truncation as line-aware metadata");
+    expect(read->truncated && read->byte_limited && !read->line_limited && read->totals_known && read->total_bytes == 11 && read->total_lines == 1 &&
+               read->output_lines == 1,
+           "local read_file reports byte-cap truncation with exact full-file totals");
   }
   auto const ranged_path = workspace / "range.txt";
   {
@@ -78,9 +217,9 @@ void test_file_tools()
                    "four\n";
   }
   auto ranged = ava::tools::read_file(build_context, ranged_path, ava::tools::ReadOptions{.max_bytes = 1024, .offset_line = 2, .max_lines = 2});
-  expect(ranged && ranged->content == "two\nthree\n" && ranged->start_line == 2 && ranged->end_line == 3 && ranged->output_lines == 2 &&
-             ranged->total_lines == 4 && ranged->line_limited && !ranged->byte_limited && ranged->next_offset_line == 4,
-         "read_file supports line offset and limit continuation metadata");
+  expect(ranged && ranged->content == "two\nthree\n" && ranged->start_line == 2 && ranged->end_line == 3 && ranged->output_lines == 2 && ranged->totals_known &&
+             ranged->total_bytes == 19 && ranged->total_lines == 4 && ranged->line_limited && !ranged->byte_limited && ranged->next_offset_line == 4,
+         "local read_file supports line offset and continuation metadata with exact full-file totals");
 
   auto edit = ava::tools::edit_file(build_context, source_path, "world", "ava");
   expect(edit.has_value(), "edit_file edits unique text");
@@ -680,10 +819,324 @@ void test_permission_audit_persistence()
          "session export includes permission decision audit data");
 }
 
+void test_secure_workspace_staged_write_contracts()
+{
+  auto const root = temp_root() / "secure-workspace-staged-write";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto secure = ava::tools::SecureWorkspace::open(std::filesystem::canonical(workspace));
+  expect(secure.has_value(), "staged write contract test anchors a canonical workspace");
+  if (!secure)
+    return;
+
+#ifdef __linux__
+  auto const fd_baseline = proc_open_file_descriptors();
+  expect(fd_baseline.has_value(), "staged write contract test can enumerate /proc/self/fd without counting its own directory descriptor");
+  if (!fd_baseline)
+    return;
+  auto const fds_restored = [&fd_baseline] {
+    auto current = proc_open_file_descriptors();
+    return current && *current == *fd_baseline;
+  };
+#else
+  auto const fds_restored = [] { return true; };
+  expect(true, "staged write descriptor accounting explicitly requires Linux /proc/self/fd");
+#endif
+
+  auto const abandoned_path = workspace / "abandoned.txt";
+  bool abandoned_held_parent_fd = true;
+  {
+    auto abandoned = (*secure)->stage_write(abandoned_path, "abandoned bytes");
+    expect(abandoned.has_value(), "staged write can be abandoned after staging");
+#ifdef __linux__
+    if (abandoned)
+    {
+      auto added = added_file_descriptors(*fd_baseline);
+      abandoned_held_parent_fd = added && added->size() == 1;
+    }
+#endif
+  }
+  expect(abandoned_held_parent_fd && !std::filesystem::exists(abandoned_path) && !has_secure_write_temp_for(workspace, "abandoned.txt") && fds_restored(),
+         "abandoned staged write removes its temp and restores the file descriptor baseline");
+
+  auto const committed_path = workspace / "committed.txt";
+  bool successful_commit_contract = false;
+  {
+    auto staged = (*secure)->stage_write(committed_path, "committed bytes");
+    if (staged)
+    {
+      auto committed = staged->commit();
+      successful_commit_contract = committed.has_value() && staged->target_changed() && staged->path() == committed_path && staged->bytes_written() == 15;
+    }
+  }
+  expect(successful_commit_contract && read_text_file_for_test(committed_path) == "committed bytes" && !has_secure_write_temp_for(workspace, "committed.txt") &&
+             fds_restored(),
+         "successful staged commit publishes bytes, cleans its temp, and restores the file descriptor baseline");
+
+  auto const mode_path = workspace / "mode-preserved.txt";
+  {
+    std::ofstream original(mode_path, std::ios::binary | std::ios::trunc);
+    original << "mode original";
+  }
+  bool const mode_setup = ::chmod(mode_path.c_str(), 0640) == 0;
+  auto mode_stage = (*secure)->stage_write(mode_path, "mode replacement");
+  bool mode_committed = false;
+  if (mode_stage)
+  {
+    auto committed = mode_stage->commit();
+    mode_committed = committed.has_value() && mode_stage->target_changed();
+  }
+  struct stat mode_status{};
+  bool const mode_stat = ::stat(mode_path.c_str(), &mode_status) == 0;
+  expect(mode_setup && mode_committed && read_text_file_for_test(mode_path) == "mode replacement" && mode_stat && (mode_status.st_mode & 07777) == 0640 &&
+             !has_secure_write_temp_for(workspace, "mode-preserved.txt") && fds_restored(),
+         "descriptor-secure stage and commit preserve an existing file's mode");
+
+  auto const move_source_path = workspace / "move-source.txt";
+  auto const move_destination_path = workspace / "move-destination.txt";
+  bool move_assignment_contract = false;
+  {
+    auto move_source = (*secure)->stage_write(move_source_path, "moved bytes");
+    auto move_destination = (*secure)->stage_write(move_destination_path, "discarded bytes");
+    if (move_source && move_destination)
+    {
+      bool two_staged_parent_fds = true;
+#ifdef __linux__
+      auto two_added = added_file_descriptors(*fd_baseline);
+      two_staged_parent_fds = two_added && two_added->size() == 2;
+#endif
+      bool const both_temps = has_secure_write_temp_for(workspace, "move-source.txt") && has_secure_write_temp_for(workspace, "move-destination.txt");
+      *move_destination = std::move(*move_source);
+      bool sole_staged_parent_fd = true;
+#ifdef __linux__
+      auto sole_added = added_file_descriptors(*fd_baseline);
+      sole_staged_parent_fd = sole_added && sole_added->size() == 1;
+#endif
+      bool const old_temp_cleaned = has_secure_write_temp_for(workspace, "move-source.txt") && !has_secure_write_temp_for(workspace, "move-destination.txt");
+      auto moved_from_commit = move_source->commit();
+      auto moved_commit = move_destination->commit();
+      move_assignment_contract = two_staged_parent_fds && both_temps && sole_staged_parent_fd && old_temp_cleaned && !moved_from_commit && moved_commit &&
+                                 move_destination->path() == move_source_path && move_destination->target_changed();
+    }
+  }
+  expect(move_assignment_contract && read_text_file_for_test(move_source_path) == "moved bytes" && !std::filesystem::exists(move_destination_path) &&
+             !has_secure_write_temp_for(workspace) && fds_restored(),
+         "staged write move assignment cleans its old temp and transfers sole ownership without leaking descriptors");
+
+  auto const rename_failure_target = workspace / "rename-failure.txt";
+  auto const preserved_original = workspace / "rename-failure-original.txt";
+  auto const non_target = workspace / "rename-failure-non-target.txt";
+  {
+    std::ofstream original(rename_failure_target, std::ios::binary | std::ios::trunc);
+    original << "rename original";
+    std::ofstream unrelated(non_target, std::ios::binary | std::ios::trunc);
+    unrelated << "unrelated safe bytes";
+  }
+  bool rename_failure_contract = false;
+  {
+    auto staged = (*secure)->stage_write(rename_failure_target, "rename replacement");
+    if (staged)
+    {
+      std::error_code rename_error;
+      std::filesystem::rename(rename_failure_target, preserved_original, rename_error);
+      std::error_code directory_error;
+      bool const directory_created = std::filesystem::create_directory(rename_failure_target, directory_error);
+      if (directory_created)
+      {
+        std::ofstream sentinel(rename_failure_target / "sentinel.txt", std::ios::binary | std::ios::trunc);
+        sentinel << "directory sentinel";
+      }
+      auto committed = staged->commit();
+      rename_failure_contract = !rename_error && directory_created && !directory_error && !committed &&
+                                committed.error().message().find("staged write commit") != std::string::npos &&
+                                has_error_context(committed.error(), "path", rename_failure_target.string()) && !staged->target_changed() &&
+                                has_secure_write_temp_for(workspace, "rename-failure.txt") &&
+                                read_text_file_for_test(preserved_original) == "rename original" &&
+                                read_text_file_for_test(rename_failure_target / "sentinel.txt") == "directory sentinel" &&
+                                read_text_file_for_test(non_target) == "unrelated safe bytes";
+    }
+  }
+  expect(rename_failure_contract && !has_secure_write_temp_for(workspace, "rename-failure.txt") && fds_restored(),
+         "failed staged rename reports operation/path context, preserves original and non-target data, cleans up, and restores descriptors");
+
+#ifdef __linux__
+  auto const sync_parent = workspace / "sync-parent";
+  std::filesystem::create_directories(sync_parent);
+  auto const sync_target = sync_parent / "sync-target.txt";
+  {
+    std::ofstream original(sync_target, std::ios::binary | std::ios::trunc);
+    original << "sync original";
+  }
+  bool parent_sync_failure_contract = false;
+  {
+    auto before_stage = proc_open_file_descriptors();
+    auto staged = (*secure)->stage_write(sync_target, "sync replacement");
+    if (before_stage && staged)
+    {
+      auto added = added_file_descriptors(*before_stage);
+      if (added && added->size() == 1)
+      {
+        int const path_parent = ::open(sync_parent.c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC);
+        bool const parent_replaced = path_parent >= 0 && ::dup2(path_parent, added->front()) == added->front();
+        if (path_parent >= 0)
+          ::close(path_parent);
+        if (parent_replaced)
+        {
+          auto committed = staged->commit();
+          parent_sync_failure_contract = !committed && committed.error().message().find("write parent sync") != std::string::npos &&
+                                         has_error_context(committed.error(), "path", sync_target.string()) &&
+                                         has_error_context(committed.error(), "cause", std::generic_category().message(EBADF)) &&
+                                         has_error_context(committed.error(), "target_changed", "true") && staged->target_changed();
+        }
+      }
+    }
+  }
+  expect(parent_sync_failure_contract && read_text_file_for_test(sync_target) == "sync replacement" &&
+             !has_secure_write_temp_for(sync_parent, "sync-target.txt") && fds_restored(),
+         "post-rename parent fsync failure reports target_changed while leaving replacement bytes visible and restoring descriptors");
+#else
+  expect(true, "post-rename parent fsync fault injection is explicitly Linux-only because it requires O_PATH and /proc/self/fd");
+#endif
+}
+
+void test_injected_exact_file_access()
+{
+  auto const root = temp_root() / "injected-exact-file-access";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  auto const workspace = root / "workspace";
+  auto const outside = root / "outside";
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(outside);
+  auto secure = ava::tools::SecureWorkspace::open(std::filesystem::canonical(workspace));
+  expect(secure.has_value(), "injected exact file test anchors its workspace");
+  if (!secure)
+    return;
+
+  auto adapter = std::make_shared<MemoryExactFileAccess>();
+  auto const remote_path = std::filesystem::canonical(workspace) / "remote.txt";
+  adapter->files[remote_path] = "one\ntwo\nthree\n";
+  ava::tools::ToolContext context{
+      .workspace_dir = std::filesystem::canonical(workspace), .mode = ava::agent::Mode::Build, .secure_workspace = *secure, .exact_file_access = adapter};
+
+  auto read = ava::tools::read_file(context, remote_path, ava::tools::ReadOptions{.max_bytes = 1024, .offset_line = 2, .max_lines = 1});
+  auto write = ava::tools::write_file(context, workspace / "created.txt", "created remotely");
+  auto edit = ava::tools::edit_file(context, remote_path, "two", "changed");
+  expect(read && read->content == "two\n" && read->line_limited && !read->totals_known && read->total_bytes == 0 && read->total_lines == 0 && write && edit &&
+             adapter->files[remote_path] == "one\nchanged\nthree\n" &&
+             adapter->files[std::filesystem::canonical(workspace) / "created.txt"] == "created remotely" && !std::filesystem::exists(workspace / "created.txt"),
+         "injected exact access keeps bounded window totals unknown while coherently handling writes and edits without local I/O");
+
+  auto const local_only = workspace / "local-only.txt";
+  {
+    std::ofstream file(local_only, std::ios::binary | std::ios::trunc);
+    file << "must not fall back";
+  }
+  adapter->fail_reads = true;
+  auto failed = ava::tools::read_file(context, local_only);
+  expect(!failed && failed.error().message() == "injected exact read failed", "an installed exact adapter failure never falls back to readable local bytes");
+  adapter->fail_reads = false;
+
+  adapter->supports_writes = false;
+  int partial_permission_requests = 0;
+  ava::tools::ToolContext partial_context = context;
+  partial_context.require_explicit_file_permissions = true;
+  partial_context.permission_resolver = [&](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    ++partial_permission_requests;
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto const partial_calls_before = adapter->read_calls + adapter->write_calls;
+  auto partial_edit = ava::tools::edit_file(partial_context, remote_path, "two", "partial");
+  expect(!partial_edit && partial_edit.error().message().find("capabilities are partial") != std::string::npos && partial_permission_requests == 0 &&
+             adapter->read_calls + adapter->write_calls == partial_calls_before && adapter->files[remote_path] == "one\nchanged\nthree\n",
+         "partial exact-file capabilities reject edit_file before permissions or I/O");
+  adapter->supports_writes = true;
+
+  auto const calls_before_denial = adapter->read_calls + adapter->write_calls;
+  auto outside_read = ava::tools::read_file(context, outside / "secret.txt");
+  ava::tools::ToolContext plan_context = context;
+  plan_context.mode = ava::agent::Mode::Plan;
+  auto denied_write = ava::tools::write_file(plan_context, workspace / "source.cpp", "int changed;\n");
+  expect(!outside_read && !denied_write && adapter->read_calls + adapter->write_calls == calls_before_denial,
+         "workspace-root and permission denials happen before injected exact-file callbacks");
+}
+
+void test_secure_workspace_file_tools()
+{
+  auto const root = temp_root() / "secure-workspace-files";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  auto const workspace = root / "workspace";
+  auto const outside = root / "outside";
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(outside);
+  {
+    std::ofstream file(outside / "secret.txt", std::ios::binary | std::ios::trunc);
+    file << "outside secret";
+  }
+  auto secure = ava::tools::SecureWorkspace::open(std::filesystem::canonical(workspace));
+  expect(secure.has_value(), "secure workspace anchors a canonical root descriptor");
+  if (!secure)
+    return;
+  ava::tools::ToolContext secure_context{.workspace_dir = std::filesystem::canonical(workspace), .mode = ava::agent::Mode::Build, .secure_workspace = *secure};
+
+  auto nested_write = ava::tools::write_file(secure_context, workspace / "nested" / "deeper" / "note.txt", "alpha beta");
+  auto nested_edit = ava::tools::edit_file(secure_context, workspace / "nested" / "deeper" / "note.txt", "beta", "gamma");
+  auto nested_read = ava::tools::read_file(secure_context, workspace / "nested" / "deeper" / "note.txt");
+  expect(nested_write && nested_edit && nested_read && nested_read->content == "alpha gamma",
+         "secure workspace creates nested parents and preserves ordinary read/edit regressions");
+
+  std::error_code symlink_error;
+  std::filesystem::create_directory_symlink(outside, workspace / "linked-parent", symlink_error);
+  if (!symlink_error)
+  {
+    auto linked_read = ava::tools::read_file(secure_context, workspace / "linked-parent" / "secret.txt");
+    auto linked_write = ava::tools::write_file(secure_context, workspace / "linked-parent" / "created.txt", "escape");
+    auto linked_edit = ava::tools::edit_file(secure_context, workspace / "linked-parent" / "secret.txt", "outside", "changed");
+    expect(!linked_read && !linked_write && !linked_edit && !std::filesystem::exists(outside / "created.txt") &&
+               read_text_file_for_test(outside / "secret.txt") == "outside secret",
+           "secure file reads, writes, and edits reject symlinked parents without touching outside files");
+  }
+
+  std::filesystem::create_directories(workspace / "race-parent");
+  std::filesystem::create_directories(outside / "race-parent");
+  {
+    std::ofstream inside_file(workspace / "race-parent" / "target.txt", std::ios::binary | std::ios::trunc);
+    inside_file << "inside original";
+    std::ofstream outside_file(outside / "race-parent" / "target.txt", std::ios::binary | std::ios::trunc);
+    outside_file << "outside original";
+  }
+  int permission_requests = 0;
+  ava::tools::ToolContext race_context{
+      .workspace_dir = std::filesystem::canonical(workspace),
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++permission_requests;
+        expect(prompt.target_path == workspace / "race-parent" / "target.txt", "secure permission identity is canonical and root-relative before the grant");
+        std::filesystem::rename(workspace / "race-parent", workspace / "race-parent-original");
+        std::error_code link_error;
+        std::filesystem::create_directory_symlink(outside / "race-parent", workspace / "race-parent", link_error);
+        expect(!link_error, "retarget race installs a parent symlink after permission validation");
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .require_explicit_file_permissions = true,
+      .secure_workspace = *secure};
+  auto raced_write = ava::tools::write_file(race_context, workspace / "race-parent" / "target.txt", "attacker content");
+  expect(!raced_write && permission_requests == 1 && read_text_file_for_test(outside / "race-parent" / "target.txt") == "outside original" &&
+             read_text_file_for_test(workspace / "race-parent-original" / "target.txt") == "inside original",
+         "retargeting a parent symlink after a grant fails closed at descriptor-anchored I/O");
+}
+
 }  // namespace
 
 void run_tools_file_tests()
 {
+  test_mutation_queue_cleans_drained_path_entries();
   test_file_tools();
   test_permission_audit_persistence();
+  test_secure_workspace_staged_write_contracts();
+  test_injected_exact_file_access();
+  test_secure_workspace_file_tools();
 }

@@ -8,6 +8,8 @@
 
 namespace ava::core::json {
 
+[[nodiscard]] bool is_valid_utf8(std::string_view value) noexcept;
+[[nodiscard]] std::string replace_invalid_utf8(std::string_view value);
 [[nodiscard]] std::string escape(std::string_view value);
 [[nodiscard]] std::optional<std::size_t> field_value_start(std::string_view object, std::string_view key);
 [[nodiscard]] std::optional<std::string> string_field(std::string_view object, std::string_view key);

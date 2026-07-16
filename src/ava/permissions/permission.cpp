@@ -330,40 +330,6 @@ bool is_dangerous_cmake_arg(std::string_view value)
   return value == "-e" || value == "-p" || value == "--install" || value == "--open";
 }
 
-bool is_safe_cmake_build(std::vector<std::string> const& argv, std::vector<std::string> const& lower)
-{
-  if (argv.size() < 3 || lower[1] != "--build")
-    return false;
-  if (!is_safe_relative_path_arg(argv[2]))
-    return false;
-  for (std::size_t index = 3; index < argv.size(); ++index)
-  {
-    auto const& arg = lower[index];
-    if (is_dangerous_cmake_arg(arg) || arg == "--install" || arg == "--build-and-test")
-      return false;
-    if (arg.starts_with("--") || arg.starts_with("-j") || arg == "-v")
-      continue;
-    if (!is_safe_relative_path_arg(argv[index]))
-      return false;
-  }
-  return true;
-}
-
-bool is_safe_ctest(std::vector<std::string> const& argv, std::vector<std::string> const& lower)
-{
-  for (std::size_t index = 1; index < argv.size(); ++index)
-  {
-    auto const& arg = lower[index];
-    if (arg == "--build-and-test" || arg == "--test-command" || arg == "--build-generator" || arg == "--build-makeprogram")
-    {
-      return false;
-    }
-    if (!is_safe_relative_path_arg(argv[index]))
-      return false;
-  }
-  return true;
-}
-
 bool is_simple_number(std::string_view value)
 {
   if (value.empty())
@@ -516,6 +482,21 @@ PermissionDecision decide(PermissionRequest const& request)
   return decision(PermissionAction::Allow, "allowed by default workspace policy", default_allow_risk(request.operation));
 }
 
+bool is_repository_controlled_build_or_test_command(std::string_view command)
+{
+  auto const parsed = parse_command_argv(command);
+  if (!parsed.ok)
+    return false;
+
+  auto const argv = lowercase_argv(parsed.argv);
+  auto const executable = lowercase(std::filesystem::path(argv.front()).filename().string());
+  if (executable == "ctest")
+    return true;
+  return executable == "cmake" && std::ranges::any_of(argv, [](std::string const& arg) {
+           return arg == "--build" || arg.starts_with("--build=") || arg == "--build-and-test" || arg == "--workflow";
+         });
+}
+
 PermissionDecision classify_command(std::string_view command)
 {
   auto const parsed = parse_command_argv(command);
@@ -561,14 +542,10 @@ PermissionDecision classify_command(std::string_view command)
         return decision(PermissionAction::Deny, "cmake script/file helpers are not allowed", PermissionRisk::High);
       }
     }
-    if (is_safe_cmake_build(parsed.argv, argv))
-    {
-      return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
-    }
   }
-  if (executable == "ctest" && is_safe_ctest(parsed.argv, argv))
+  if (is_repository_controlled_build_or_test_command(command))
   {
-    return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
+    return decision(PermissionAction::Ask, "repository build or test execution requires explicit approval", PermissionRisk::High);
   }
   if (executable == "rg")
   {
@@ -623,6 +600,8 @@ std::string to_string(PermissionResolution resolution)
       return "allow";
     case PermissionResolution::Deny:
       return "deny";
+    case PermissionResolution::Cancel:
+      return "cancel";
   }
   return "deny";
 }

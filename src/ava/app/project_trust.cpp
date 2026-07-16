@@ -22,6 +22,12 @@ struct TrustRecord
   bool trusted = false;
 };
 
+struct ParsedTrustRecords
+{
+  std::vector<TrustRecord> records;
+  std::string diagnostic;
+};
+
 std::filesystem::path normalized_absolute(std::filesystem::path const& path)
 {
   std::error_code error;
@@ -118,20 +124,58 @@ ava::core::Result<std::string> read_trust_file(std::filesystem::path const& path
   return buffer.str();
 }
 
-std::vector<TrustRecord> parse_trust_records(std::string_view content)
+std::string malformed_trust_file_diagnostic(std::filesystem::path const& path, std::string reason)
 {
-  std::vector<TrustRecord> records;
-  if (content.empty() || !ava::core::json::is_valid_object(content))
-    return records;
+  return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "malformed project trust file")
+      .with_context("path", path.string())
+      .with_context("cause", std::move(reason))
+      .format();
+}
+
+ParsedTrustRecords parse_trust_records(std::string_view content, bool content_expected)
+{
+  ParsedTrustRecords parsed;
+  if (content.empty())
+  {
+    if (content_expected)
+      parsed.diagnostic = "file is empty";
+    return parsed;
+  }
+  if (!ava::core::json::is_valid_object(content))
+  {
+    parsed.diagnostic = "invalid JSON object";
+    return parsed;
+  }
+
+  auto const decisions_start = ava::core::json::field_value_start(content, "decisions");
+  if (!decisions_start)
+  {
+    parsed.diagnostic = "missing decisions array";
+    return parsed;
+  }
+  if (*decisions_start >= content.size() || content[*decisions_start] != '[')
+  {
+    parsed.diagnostic = "decisions must be an array";
+    return parsed;
+  }
+
+  std::size_t skipped_records = 0;
   for (auto const& object : ava::core::json::objects_in_array_field(content, "decisions"))
   {
     auto path = ava::core::json::string_field(object, "path");
     auto trusted = bool_field(object, "trusted");
     if (!path || !trusted)
+    {
+      ++skipped_records;
       continue;
-    records.push_back(TrustRecord{.path = normalized_absolute(*path), .trusted = *trusted});
+    }
+    parsed.records.push_back(TrustRecord{.path = normalized_absolute(*path), .trusted = *trusted});
   }
-  return records;
+  if (skipped_records > 0)
+  {
+    parsed.diagnostic = "ignored " + std::to_string(skipped_records) + " malformed project trust decision" + (skipped_records == 1 ? "" : "s");
+  }
+  return parsed;
 }
 
 std::string trust_records_json(std::vector<TrustRecord> const& records)
@@ -188,7 +232,8 @@ ava::core::Result<std::vector<TrustRecord>> load_records_for_write(std::filesyst
   auto content = read_trust_file(path);
   if (!content)
     return std::unexpected(std::move(content.error()));
-  return parse_trust_records(*content);
+  auto parsed = parse_trust_records(*content, path_exists(path));
+  return std::move(parsed.records);
 }
 
 }  // namespace
@@ -224,14 +269,17 @@ ProjectTrustState load_project_trust_state(ava::config::XdgPaths const& paths, s
   state.trust_file = project_trust_file(paths);
   state.protected_resources = discover_protected_resources(state.workspace_dir);
 
+  auto const trust_file_exists = path_exists(state.trust_file);
   auto content = read_trust_file(state.trust_file);
   if (!content)
   {
     state.diagnostic = content.error().format();
     return state;
   }
-  auto records = parse_trust_records(*content);
-  if (auto matched = closest_matching_record(records, state.workspace_dir))
+  auto parsed = parse_trust_records(*content, trust_file_exists);
+  if (!parsed.diagnostic.empty())
+    state.diagnostic = malformed_trust_file_diagnostic(state.trust_file, std::move(parsed.diagnostic));
+  if (auto matched = closest_matching_record(parsed.records, state.workspace_dir))
   {
     state.decision = matched->trusted ? ProjectTrustDecision::Trusted : ProjectTrustDecision::Denied;
     state.matched_path = matched->path;

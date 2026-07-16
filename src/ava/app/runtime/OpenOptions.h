@@ -4,7 +4,9 @@
 #include "ava/debug/print_members_on.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_visibility.h"
+#include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/session/session_metadata.h"
 
 #include <filesystem>
 #include <optional>
@@ -29,6 +31,17 @@ struct OpenOptions
   ava::agent::ToolVisibilityOptions tool_visibility;
   ava::config::XdgPaths paths = ava::config::xdg_paths();
   PromptOverrides prompt_overrides;
+  std::optional<std::string> initial_reasoning_level = std::nullopt;
+  // Strict long-lived adapters may pin the startup default so later config edits cannot drift immutable connection capabilities from new sessions.
+  std::optional<ava::config::ModelInfo> default_model_override = std::nullopt;
+  // When true, the override is the complete immutable model snapshot for both new and resumed sessions.
+  bool pin_model_override = false;
+  bool offline = false;
+  // Strict adapters opt out of CLI prefix resolution and may bound persistence reads without changing legacy CLI/RPC behavior.
+  bool exact_session_id = false;
+  std::optional<ava::session::SessionReadLimits> session_read_limits = std::nullopt;
+  // Strict adapters may pin the persisted cwd while retaining lease acquisition inside the protocol-neutral runtime ownership boundary.
+  std::optional<std::filesystem::path> expected_original_cwd = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

@@ -14,21 +14,9 @@
 namespace ava::provider {
 namespace {
 
-std::string normalized_openai_stop_reason(std::string_view reason)
+ProviderFinishReason normalized_openai_finish_reason(std::string_view reason)
 {
-  if (reason == "completed")
-    return "completed";
-  if (reason == "incomplete")
-    return "incomplete";
-  if (reason == "max_output_tokens" || reason == "max_tokens")
-    return "max_tokens";
-  if (reason == "content_filter")
-    return "content_filter";
-  if (reason == "refusal")
-    return "refusal";
-  if (reason == "failed" || reason == "cancelled" || reason == "canceled")
-    return std::string(reason);
-  return std::string(reason);
+  return normalize_provider_finish_reason(ProviderProtocol::OpenAIResponses, reason);
 }
 
 std::optional<long long> non_negative_integer_field(std::string_view object, std::string_view key)
@@ -128,7 +116,7 @@ std::optional<std::string> first_string_field(std::string_view object, std::init
   return std::nullopt;
 }
 
-std::string openai_response_stop_reason(std::string_view object)
+ProviderFinishReason openai_response_finish_reason(std::string_view object)
 {
   std::string status = ava::core::json::string_field(object, "status").value_or("");
   if (auto const response = ava::core::json::object_field(object, "response"))
@@ -138,15 +126,15 @@ std::string openai_response_stop_reason(std::string_view object)
     if (auto const details = ava::core::json::object_field(*response, "incomplete_details"))
     {
       if (auto reason = ava::core::json::string_field(*details, "reason"))
-        return normalized_openai_stop_reason(*reason);
+        return normalized_openai_finish_reason(*reason);
     }
   }
   if (auto const details = ava::core::json::object_field(object, "incomplete_details"))
   {
     if (auto reason = ava::core::json::string_field(*details, "reason"))
-      return normalized_openai_stop_reason(*reason);
+      return normalized_openai_finish_reason(*reason);
   }
-  return normalized_openai_stop_reason(status);
+  return normalized_openai_finish_reason(status);
 }
 
 std::string reasoning_summary_text_from_object(std::string_view object)
@@ -241,7 +229,7 @@ namespace detail {
 ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std::string_view body)
 {
   std::vector<StreamEvent> events;
-  auto const stop_reason = openai_response_stop_reason(body);
+  auto const finish_reason = openai_response_finish_reason(body);
   for (auto const& item : ava::core::json::objects_in_array_field(body, "output"))
   {
     if (ava::core::json::string_field(item, "type").value_or("") != "reasoning")
@@ -290,7 +278,8 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
     events.push_back(
         StreamEvent{.type = StreamEventType::ToolCallEnd, .text = "", .tool_call_id = id, .tool_name = "", .error_message = "", .usage = std::nullopt});
   }
-  bool const allows_empty_terminal = stop_reason == "incomplete" || stop_reason == "max_tokens" || stop_reason == "content_filter" || stop_reason == "refusal";
+  bool const allows_empty_terminal = finish_reason == ProviderFinishReason::MaxTokens || finish_reason == ProviderFinishReason::Refusal ||
+                                     finish_reason == ProviderFinishReason::Cancelled || finish_reason == ProviderFinishReason::Error;
   if (events.empty() && !allows_empty_terminal)
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI response text is missing"));
@@ -301,7 +290,7 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
                                .tool_name = "",
                                .error_message = "",
                                .usage = parse_openai_usage(body),
-                               .stop_reason = stop_reason});
+                               .finish_reason = finish_reason});
   return events;
 }
 

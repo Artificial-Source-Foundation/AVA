@@ -5,6 +5,7 @@
 #include "ava/app/EventEnvelope.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/rpc/output.h"
+#include "ava/app/rpc/resolvers.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/session/session_store.h"
@@ -56,6 +57,49 @@ void test_app_rpc_resolver_payload_builders_preserve_wire_shapes()
   expect(queue_json.find("\"payload_type\":\"queue\"") != std::string::npos && queue_json.find("\"message\":\"follow next\"") != std::string::npos &&
              queue_json.find("\"reason\":\"canceled\"") != std::string::npos,
          "typed queue resolver envelope keeps payload family and top-level aliases");
+}
+
+void test_app_rpc_resolver_write_failure_releases_waiters()
+{
+  auto const root = temp_root() / "app-rpc-resolver-write-failure";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = app_test_paths(root);
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC resolver write failure test opens runtime session");
+  if (!session)
+    return;
+
+  ava::app::rpc::PendingResolverState pending_state;
+  ava::app::rpc::RpcRunState run_state;
+  std::mutex session_mutex;
+  std::ostringstream stream;
+  stream.setstate(std::ios::badbit);
+  ava::app::rpc::output_ts output(stream, [&] { static_cast<void>(ava::app::rpc::cancel_pending_resolvers(pending_state)); });
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session, session_mutex, nullptr, "prompt-write-fail");
+  auto result = resolver(ava::permissions::PermissionPrompt{.permission_request_id = "permreq_write_fail",
+                                                            .operation = ava::permissions::Operation::ReadFile,
+                                                            .mode = ava::agent::Mode::Build,
+                                                            .workspace_dir = workspace,
+                                                            .target_path = workspace / "note.txt",
+                                                            .command = "",
+                                                            .tool_name = "read_file",
+                                                            .reason = "test write failure",
+                                                            .risk = ava::permissions::PermissionRisk::Low,
+                                                            .diff_preview = "",
+                                                            .diff_truncated = false});
+  bool no_pending = false;
+  {
+    std::lock_guard lock(pending_state.mutex);
+    no_pending = pending_state.permission_requests.empty() && pending_state.question_requests.empty();
+  }
+  expect(!result && result.error().category() == ava::core::ErrorCategory::Io && no_pending,
+         "RPC resolver output failure cancels and removes pending waits without a user timeout");
 }
 
 void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
@@ -203,8 +247,9 @@ void test_app_rpc_permission_reply_session_grant_flow()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("first grant done")),
-                                       sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("second grant done"))});
+  ava::tests::FakeTransport transport(
+      {sse_response(read_file_call_sse(outside_path.generic_string(), "call_read_first")), sse_response(final_text_sse("first grant done")),
+       sse_response(read_file_call_sse(outside_path.generic_string(), "call_read_second")), sse_response(final_text_sse("second grant done"))});
   ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
@@ -232,14 +277,142 @@ void test_app_rpc_permission_reply_session_grant_flow()
   expect(result.has_value() && first_completed && grant_listed && second_completed, "RPC permission session grant loop exits successfully");
   expect(count_substrings(jsonl, "\"name\":\"permission_requested\"") == 1 && jsonl.find("\"payload_type\":\"permission\"") != std::string::npos &&
              jsonl.find("\"decision\":\"allow_session\"") != std::string::npos && jsonl.find("\"id\":\"grants\"") != std::string::npos &&
+             jsonl.find("\"session_id\":\"" + session->store.session_id() + "\"") != std::string::npos &&
              jsonl.find("\"operation\":\"read\"") != std::string::npos && jsonl.find("\"target_path\":\"" + outside_path.string() + "\"") != std::string::npos,
-         "RPC session grant is inspectable and suppresses a repeated matching permission prompt");
+         "RPC session grants are serialized with their exact session and suppress only repeated matching prompts");
 
   auto entries = session->store.load();
   auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
   expect(audits.size() == 4 && ava::core::json::string_field(audits[3].data_json, "resolution_source") == "session_grant" &&
              ava::core::json::string_field(audits[3].data_json, "resolution") == "allow",
          "session grant approvals are still audited as backend permission outcomes");
+}
+
+void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_deny()
+{
+  auto const root = temp_root() / "app-rpc-session-grant-bounds";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = app_test_paths(root);
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC session grant bounds test opens runtime session");
+  if (!session)
+    return;
+
+  ava::app::rpc::PendingResolverState pending_state;
+  ava::app::rpc::RpcRunState run_state;
+  std::mutex session_mutex;
+  std::ostringstream output_stream;
+  ava::app::rpc::output_ts output(output_stream, [] { });
+  ava::permissions::PermissionPrompt const prompt{.permission_request_id = "permreq_build_test",
+                                                  .operation = ava::permissions::Operation::RunCommand,
+                                                  .mode = ava::agent::Mode::Build,
+                                                  .workspace_dir = workspace,
+                                                  .target_path = {},
+                                                  .command = "ctest --test-dir build",
+                                                  .tool_name = "bash",
+                                                  .reason = "repository test execution requires explicit approval",
+                                                  .risk = ava::permissions::PermissionRisk::High};
+  {
+    std::lock_guard lock(pending_state.mutex);
+    pending_state.permission_session_grants.push_back(ava::app::rpc::PermissionSessionGrant{
+        .grant_id = "permgrant_matching",
+        .permission_request_id = prompt.permission_request_id,
+        .session_id = session->store.session_id(),
+        .operation = prompt.operation,
+        .mode = prompt.mode,
+        .tool_name = prompt.tool_name,
+        .target_path = prompt.target_path,
+        .command = prompt.command,
+        .reason = "explicit current-session test grant",
+        .risk = prompt.risk,
+    });
+  }
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session, session_mutex, nullptr, "prompt_1");
+  auto matched = resolver(prompt);
+  expect(matched && *matched == ava::permissions::PermissionResolution::AllowSessionGrant,
+         "a session grant authorizes only its exact repository test invocation");
+
+  {
+    std::lock_guard lock(pending_state.mutex);
+    pending_state.permission_session_grants.front().session_id = "session_other";
+  }
+  std::optional<ava::core::Result<ava::permissions::PermissionResolutionDecision>> mismatched;
+  std::jthread resolver_thread([&] { mismatched = resolver(prompt); });
+  std::string resolver_request_id;
+  for (int attempt = 0; attempt < 100 && resolver_request_id.empty(); ++attempt)
+  {
+    {
+      std::lock_guard lock(pending_state.mutex);
+      if (!pending_state.permission_requests.empty())
+        resolver_request_id = pending_state.permission_requests.begin()->first;
+    }
+    if (resolver_request_id.empty())
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  auto denied = resolver_request_id.empty()
+                    ? ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing permission request")))
+                    : ava::app::rpc::resolve_permission_reply(pending_state, resolver_request_id, "prompt_1", "deny");
+  resolver_thread.join();
+  expect(!resolver_request_id.empty() && denied && mismatched && *mismatched && **mismatched == ava::permissions::PermissionResolution::Deny,
+         "a grant from another session cannot authorize an otherwise matching repository test invocation");
+
+  {
+    std::lock_guard lock(pending_state.mutex);
+    pending_state.permission_session_grants.clear();
+  }
+  std::optional<ava::core::Result<ava::permissions::PermissionResolutionDecision>> one_shot;
+  std::jthread one_shot_thread([&] { one_shot = resolver(prompt); });
+  std::string one_shot_request_id;
+  for (int attempt = 0; attempt < 100 && one_shot_request_id.empty(); ++attempt)
+  {
+    {
+      std::lock_guard lock(pending_state.mutex);
+      if (!pending_state.permission_requests.empty())
+        one_shot_request_id = pending_state.permission_requests.begin()->first;
+    }
+    if (one_shot_request_id.empty())
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  auto one_shot_allowed = one_shot_request_id.empty()
+                              ? ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing permission request")))
+                              : ava::app::rpc::resolve_permission_reply(pending_state, one_shot_request_id, "prompt_1", "allow");
+  one_shot_thread.join();
+  expect(!one_shot_request_id.empty() && one_shot_allowed && one_shot && *one_shot && **one_shot == ava::permissions::PermissionResolution::Allow,
+         "a one-shot approval authorizes the requested repository test invocation");
+
+  {
+    std::lock_guard lock(pending_state.mutex);
+    pending_state.permission_session_grants.push_back(ava::app::rpc::PermissionSessionGrant{
+        .grant_id = "permgrant_matching_again",
+        .permission_request_id = prompt.permission_request_id,
+        .session_id = session->store.session_id(),
+        .operation = prompt.operation,
+        .mode = prompt.mode,
+        .tool_name = prompt.tool_name,
+        .target_path = prompt.target_path,
+        .command = prompt.command,
+        .reason = "explicit current-session test grant",
+        .risk = prompt.risk,
+    });
+  }
+  auto hard_deny = ava::app::rpc::make_rpc_permission_resolver(
+      pending_state, output, run_state, *session, session_mutex,
+      [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::Deny, "hard policy deny"};
+        decision.authoritative = true;
+        return decision;
+      },
+      "prompt_2");
+  auto denied_by_policy = hard_deny(prompt);
+  expect(denied_by_policy && *denied_by_policy == ava::permissions::PermissionResolution::Deny,
+         "an authoritative deny takes precedence over a matching session grant");
 }
 
 void test_app_rpc_permission_request_includes_mutation_diff_preview()
@@ -539,9 +712,11 @@ void test_app_rpc_question_reply_selected_options_flow()
 void run_app_rpc_resolver_tests()
 {
   test_app_rpc_resolver_payload_builders_preserve_wire_shapes();
+  test_app_rpc_resolver_write_failure_releases_waiters();
   test_app_rpc_permission_policy_auto_allows_before_resolver_event();
   test_app_rpc_permission_reply_allow_and_deny_flows();
   test_app_rpc_permission_reply_session_grant_flow();
+  test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_deny();
   test_app_rpc_permission_request_includes_mutation_diff_preview();
   test_app_rpc_persistent_permission_rule_lifecycle();
   test_app_rpc_question_reply_flow();

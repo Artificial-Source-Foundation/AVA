@@ -128,6 +128,7 @@ Rules:
 
 - Use project root or explicit safe directory.
 - Respect gitignore by default.
+- Skip symlinked file matches by default so search results do not advertise paths that `read_file` will reject; local/internal callers may explicitly opt in only when they own the follow-through behavior.
 - Provider-visible glob calls cannot disable ignore filtering. Local/internal callers may use `no_ignore` only under explicit local control; permission checks, secret-path denial, workspace boundaries, `.git` exclusion, and output caps still apply.
 - Limit result count.
 
@@ -145,6 +146,7 @@ Rules:
 
 - Use ripgrep-compatible semantics if `rg` is available, or native fallback later.
 - Respect gitignore by default.
+- Skip symlinked files by default so grep does not read through paths that `read_file` would reject; local/internal callers may explicitly opt in only when they own the follow-through behavior.
 - Provider-visible grep calls cannot disable ignore filtering. Local/internal callers may use `no_ignore` only under explicit local control; permission checks, secret-path denial, workspace boundaries, `.git` exclusion, binary-file safeguards, and output caps still apply.
 - Return file, line, and matched preview.
 - Limit matches and output bytes.
@@ -244,6 +246,28 @@ Rules:
 - Bound loaded skill content and sampled file lists.
 - Treat skill text as untrusted instructions that augment context; it must not bypass tool permissions.
 
+### task
+
+Runs a foreground or background subagent in a child session.
+
+Inputs:
+
+- `description`: short label for the delegated work.
+- `prompt`: full instruction for the child agent.
+- `subagent_type`: `general`, `explore`, or a configured custom subagent from the available subagents list.
+- `task_id` optional: resume an existing foreground child session.
+- `command` optional: local command label from the caller.
+- `background` optional: when true, start a tracked background child session and return immediately with `task_id` and `job_id`.
+
+Rules:
+
+- Request `task`/`TaskRun` permission before starting the child session. Headless `--allow read-only` does not imply task delegation; use `--allow-tool task` for exact task prompts.
+- Create or reopen a child session under the same session root and link it to the parent through session metadata.
+- Hide recursive `task` from child tool schemas. The built-in `explore` and any `tools: read-only` custom subagent expose only read/search/list tools.
+- Background children require a runtime-owned background job registry plus fresh provider and transport instances. They do not inherit parent UI callbacks, LSP providers, or nested background factories.
+- Child sessions are capped to a small bounded tool-iteration budget so runaway delegated work cannot monopolize a turn.
+- Return bounded structured metadata including `task_id`, `session_path`, `state`, `stop_reason`, and `job_id` for background tasks. The child session remains the source of truth for full transcript details.
+
 ### LSP code intelligence
 
 Queries diagnostics, document symbols, workspace symbols, definitions, and references from a locally configured language server.
@@ -287,6 +311,7 @@ Examples:
 - `webfetch` requests `network.fetch`.
 - `websearch` requests `network.search`.
 - `skill` requests `skill`.
+- `task` requests `task` with the selected `subagent_type` as command context.
 - LSP diagnostics/symbols/definitions/references request `lsp.query` for the target file path; workspace symbol search uses the workspace root as the permission target and the query as command context. Configured server startup separately requests `lsp.server.launch` with the exact JSON-array encoded argv vector in `command`.
 
 ## Output Truncation

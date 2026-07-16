@@ -1,8 +1,6 @@
 #include "sys.h"
-#include "ava/session/session_metadata.h"
-
 #include "ava/session/record.h"
-
+#include "ava/session/session_metadata.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
@@ -105,10 +103,15 @@ bool valid_branch_origin(std::string_view origin)
   return origin.empty() || origin == "root" || origin == "fork" || origin == "clone" || origin == "manual" || origin == "import";
 }
 
+bool is_canonical_absolute_path(std::filesystem::path const& path)
+{
+  return path.is_absolute() && path.lexically_normal() == path;
+}
+
 ava::core::VoidResult validate_update(SessionMetadataUpdate const& update)
 {
-  if (!update.name && !update.labels && !update.archived && update.parent_session_id.empty() &&
-      update.source_session_id.empty() && update.branch_from_entry_id.empty() && update.branch_origin.empty())
+  if (!update.name && !update.labels && !update.archived && update.parent_session_id.empty() && update.source_session_id.empty() &&
+      update.branch_from_entry_id.empty() && update.branch_origin.empty() && !update.original_cwd)
   {
     return std::unexpected(metadata_error("session metadata update is empty"));
   }
@@ -132,6 +135,8 @@ ava::core::VoidResult validate_update(SessionMetadataUpdate const& update)
   {
     return std::unexpected(metadata_error("session metadata actor is invalid", "actor"));
   }
+  if (update.original_cwd && (!is_canonical_absolute_path(*update.original_cwd) || has_control_byte(update.original_cwd->string())))
+    return std::unexpected(metadata_error("session metadata original_cwd must be a canonical absolute path", "original_cwd"));
   return {};
 }
 
@@ -237,6 +242,15 @@ ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::vector
     {
       metadata.actor = std::move(*actor);
     }
+    if (auto cwd = ava::core::json::string_field(entry.data_json, "original_cwd"); cwd && !cwd->empty())
+    {
+      std::filesystem::path candidate(*cwd);
+      if (!is_canonical_absolute_path(candidate))
+        return std::unexpected(metadata_error("session metadata original_cwd is invalid", "original_cwd"));
+      if (!metadata.original_cwd.empty() && metadata.original_cwd != candidate)
+        return std::unexpected(metadata_error("session metadata original_cwd is immutable", "original_cwd"));
+      metadata.original_cwd = std::move(candidate);
+    }
   }
   return metadata;
 }
@@ -282,6 +296,8 @@ ava::core::Result<SessionEntry> make_session_metadata_entry(SessionMetadataUpdat
     append_string_field(data, first, "branch_origin", update.branch_origin);
   if (!update.actor.empty())
     append_string_field(data, first, "actor", update.actor);
+  if (update.original_cwd)
+    append_string_field(data, first, "original_cwd", update.original_cwd->string());
   data += '}';
 
   return SessionEntry{
@@ -316,6 +332,7 @@ std::string session_metadata_json(std::string_view session_id, SessionMetadataVi
   json += ",\"branch_from_entry_id\":\"" + ava::core::json::escape(metadata.branch_from_entry_id) + "\"";
   json += ",\"branch_origin\":\"" + ava::core::json::escape(metadata.branch_origin) + "\"";
   json += ",\"actor\":\"" + ava::core::json::escape(metadata.actor) + "\"";
+  json += ",\"original_cwd\":\"" + ava::core::json::escape(metadata.original_cwd.string()) + "\"";
   json += '}';
   return json;
 }

@@ -2,6 +2,7 @@
 #include "ava/app/EventEnvelope.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/runtime.h"
+#include "ava/agent/agent_loop_session.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/discovery.h"
 #include "ava/plugin/enablement.h"
@@ -214,19 +215,10 @@ class PluginEventObserverState final
   std::vector<std::string> observe_denied_;
 };
 
-ava::core::VoidResult append_permission_decision(ava::session::SessionStore& store, ava::tools::PermissionAuditEvent const& event)
-{
-  return store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                 .parent_id = "",
-                                                 .type = ava::session::EntryType::PermissionDecision,
-                                                 .timestamp = ava::session::now_timestamp(),
-                                                 .data_json = ava::tools::permission_audit_data_json(event)});
-}
-
 }  // namespace
 
 PluginEventObserverOptions plugin_event_observer_options(runtime::Session& session, ava::permissions::PermissionResolver permission_resolver,
-                                                         std::mutex* session_mutex)
+                                                         std::mutex* /*session_mutex*/)
 {
   return PluginEventObserverOptions{
       .workspace_dir = session.workspace_dir,
@@ -236,13 +228,10 @@ PluginEventObserverOptions plugin_event_observer_options(runtime::Session& sessi
       .include_project_plugins = project_resources_trusted(session.project_trust),
       .mode = session.mode,
       .permission_resolver = std::move(permission_resolver),
-      .permission_audit_sink = [&store = session.store, session_mutex](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
-        if (session_mutex)
-        {
-          std::lock_guard lock(*session_mutex);
-          return append_permission_decision(store, event);
-        }
-        return append_permission_decision(store, event);
+      // Permission audits are owner-routed outside active runs and replaced by
+      // run_prompt's immutable generation route during one.
+      .permission_audit_sink = [sink = session.owner_append_route()](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+        return ava::agent::append_permission_decision(sink, event);
       },
       .cancel_requested = nullptr,
       .session_id = session.store.session_id(),

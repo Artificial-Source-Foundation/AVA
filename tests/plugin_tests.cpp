@@ -1,6 +1,8 @@
 #include "sys.h"
+#include "tests/support/app_runtime_support.h"
 #include "tests/support/golden.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/command_plugins.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/file_tools.h"
@@ -74,6 +76,22 @@ std::string read_text(std::filesystem::path const& path)
   buffer << file.rdbuf();
   return buffer.str();
 }
+
+class PluginWindowExactFileAccess final : public ava::tools::ExactFileAccess
+{
+ public:
+  [[nodiscard]] bool supports_write_text_file() const noexcept override { return false; }
+
+  [[nodiscard]] ava::core::Result<std::string> read_text_file(std::filesystem::path const&, ava::tools::ToolIoCancelCallback) const override
+  {
+    return "remote-one\nremote-two\nremote-three\n";
+  }
+
+  [[nodiscard]] ava::core::VoidResult write_text_file(std::filesystem::path const&, std::string_view, ava::tools::ToolIoCancelCallback) const override
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "exact writes are disabled in this fixture"));
+  }
+};
 
 std::optional<pid_t> read_pid_file_for_test(std::filesystem::path const& path)
 {
@@ -195,6 +213,71 @@ std::string event_hook_manifest_json(std::string id, std::string script_name, st
          ava::core::json::escape(event_name) +
          "\"}]}\n"
          "}";
+}
+
+std::string dynamic_resource_manifest_json(std::string id, std::string script_name, std::string contributes_json = "{}",
+                                           std::string capabilities_json = "[\"dynamic.prompts\", \"dynamic.skills\"]")
+{
+  return std::string("{\n") +
+         "  \"schema_version\": 1,\n"
+         "  \"id\": \"" +
+         ava::core::json::escape(id) +
+         "\",\n"
+         "  \"name\": \"Dynamic Resource Plugin\",\n"
+         "  \"version\": \"0.1.0\",\n"
+         "  \"api_version\": \"ava.plugin.v1\",\n"
+         "  \"entrypoint\": {\"command\": \"/bin/sh\", \"args\": [\"" +
+         ava::core::json::escape(script_name) +
+         "\"]},\n"
+         "  \"capabilities\": " +
+         capabilities_json +
+         ",\n"
+         "  \"contributes\": " +
+         contributes_json +
+         "\n"
+         "}";
+}
+
+ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace)
+{
+  auto store = ava::session::SessionStore::create_ephemeral(workspace);
+  expect(store.has_value(), store ? "plugin command test session store opens" : "plugin command test session store opens: " + store.error().format());
+  ava::config::ModelInfo model;
+  model.provider_id = "openai";
+  model.model_id = "gpt-test";
+  ava::app::ProjectTrustState trust;
+  trust.workspace_dir = workspace;
+  trust.trust_file = paths.ava_state_dir / "trusted-projects.json";
+  trust.decision = ava::app::ProjectTrustDecision::Trusted;
+  return ava::app::runtime::Session{.store = std::move(*store),
+                                  .lease = {},
+                                  .mode = ava::agent::Mode::Build,
+                                  .model = std::move(model),
+                                  .base_prompt = {},
+                                  .paths = paths,
+                                  .workspace_dir = workspace,
+                                  .current_dir = workspace,
+                                  .project_trust = std::move(trust),
+                                  .prompt_overrides = {},
+                                  .tool_visibility = {},
+                                  .context_sources = {},
+                                  .freshness_sources = {},
+                                  .system_prompt = {},
+                                  .reasoning = std::nullopt,
+                                  .scoped_model_cycle = std::nullopt,
+                                  .created = false,
+                                  .sessionless = false,
+                                  .background_jobs = nullptr,
+                                  .offline = false};
+}
+
+std::string command_output_text(ava::core::Result<ava::app::CommandResult> const& command)
+{
+  if (!command)
+    return command.error().format();
+  if (command->output.empty())
+    return {};
+  return command->output.front();
 }
 
 ava::plugin::PluginManifest runner_manifest(std::filesystem::path const& plugin_dir, std::string id, std::string script_name)
@@ -470,6 +553,63 @@ void test_plugin_runner_protocol_parsing()
   auto too_deep = ava::plugin::parse_tool_result_response(
       "{\"id\":\"ava_tool_deep\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"x\",\"metadata\":" + nested_arrays_json(130) + "}", "ava_tool_deep");
   expect(!too_deep, "plugin runner protocol rejects excessively deep JSON records");
+
+  auto resource_list = ava::plugin::parse_resource_list_result_response(
+      "{\"id\":\"ava_resource_1\",\"type\":\"resource.list.result\",\"ok\":true,\"kind\":\"prompt\","
+      "\"resources\":[{\"name\":\"dyn-one\",\"description\":\"demo\"}]}",
+      "ava_resource_1", ava::plugin::PluginDynamicResourceKind::Prompt);
+  expect(resource_list && resource_list->ok && resource_list->resources.size() == 1 && resource_list->resources[0].name == "dyn-one",
+         "plugin runner protocol parses dynamic resource list responses");
+
+  auto resource_list_invalid_name = ava::plugin::parse_resource_list_result_response(
+      "{\"id\":\"ava_resource_1\",\"type\":\"resource.list.result\",\"ok\":true,\"kind\":\"prompt\","
+      "\"resources\":[{\"name\":\"../bad\",\"description\":\"demo\"}]}",
+      "ava_resource_1", ava::plugin::PluginDynamicResourceKind::Prompt);
+  expect(!resource_list_invalid_name, "plugin runner protocol rejects invalid dynamic resource names from plugins");
+
+  auto resource_list_missing_resources =
+      ava::plugin::parse_resource_list_result_response("{\"id\":\"ava_resource_1\",\"type\":\"resource.list.result\",\"ok\":true,\"kind\":\"prompt\"}",
+                                                       "ava_resource_1", ava::plugin::PluginDynamicResourceKind::Prompt);
+  expect(!resource_list_missing_resources, "plugin runner protocol rejects ok dynamic resource lists without resources arrays");
+
+  auto long_description = std::string(4097, 'd');
+  auto resource_list_long_description = ava::plugin::parse_resource_list_result_response(
+      "{\"id\":\"ava_resource_1\",\"type\":\"resource.list.result\",\"ok\":true,\"kind\":\"prompt\","
+      "\"resources\":[{\"name\":\"dyn-one\",\"description\":\"" +
+          long_description + "\"}]}",
+      "ava_resource_1", ava::plugin::PluginDynamicResourceKind::Prompt);
+  expect(!resource_list_long_description, "plugin runner protocol rejects oversized dynamic resource descriptions");
+
+  auto resource_list_false_missing_content =
+      ava::plugin::parse_resource_list_result_response("{\"id\":\"ava_resource_1\",\"type\":\"resource.list.result\",\"ok\":false,\"kind\":\"prompt\"}",
+                                                       "ava_resource_1", ava::plugin::PluginDynamicResourceKind::Prompt);
+  expect(!resource_list_false_missing_content, "plugin runner protocol rejects dynamic list failures without content");
+
+  auto resource_read = ava::plugin::parse_resource_read_result_response(
+      "{\"id\":\"ava_resource_2\",\"type\":\"resource.read.result\",\"ok\":true,\"kind\":\"prompt\",\"name\":\"dyn-one\","
+      "\"content\":\"body\"}",
+      "ava_resource_2", ava::plugin::PluginDynamicResourceKind::Prompt, "dyn-one");
+  expect(resource_read && resource_read->ok && resource_read->content == "body", "plugin runner protocol parses dynamic resource read responses");
+
+  auto resource_read_name_mismatch = ava::plugin::parse_resource_read_result_response(
+      "{\"id\":\"ava_resource_2\",\"type\":\"resource.read.result\",\"ok\":true,\"kind\":\"prompt\",\"name\":\"other\","
+      "\"content\":\"body\"}",
+      "ava_resource_2", ava::plugin::PluginDynamicResourceKind::Prompt, "dyn-one");
+  expect(!resource_read_name_mismatch, "plugin runner protocol rejects dynamic resource read name mismatches");
+
+  auto resource_read_kind_mismatch = ava::plugin::parse_resource_read_result_response(
+      "{\"id\":\"ava_resource_2\",\"type\":\"resource.read.result\",\"ok\":true,\"kind\":\"skill\",\"name\":\"dyn-one\","
+      "\"content\":\"body\"}",
+      "ava_resource_2", ava::plugin::PluginDynamicResourceKind::Prompt, "dyn-one");
+  expect(!resource_read_kind_mismatch, "plugin runner protocol rejects dynamic resource read kind mismatches");
+
+  auto oversized_content = std::string(ava::plugin::kPluginResourceContentMaxBytes + 1, 'x');
+  auto resource_read_oversized_content = ava::plugin::parse_resource_read_result_response(
+      "{\"id\":\"ava_resource_2\",\"type\":\"resource.read.result\",\"ok\":true,\"kind\":\"prompt\",\"name\":\"dyn-one\","
+      "\"content\":\"" +
+          oversized_content + "\"}",
+      "ava_resource_2", ava::plugin::PluginDynamicResourceKind::Prompt, "dyn-one");
+  expect(!resource_read_oversized_content, "plugin runner protocol rejects oversized dynamic resource read content");
 }
 
 void test_plugin_discovery()
@@ -933,6 +1073,383 @@ void test_plugin_runner_event_observation()
   }
 }
 
+void test_enabled_plugin_dynamic_resources_list_and_read()
+{
+  auto const root = temp_root() / "plugin-dynamic-resources";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const paths = ava::tests::app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const project_plugins = workspace / ".ava" / "plugins";
+  auto const plugin_dir = project_plugins / "com.example.dynamic";
+  auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
+  std::filesystem::create_directories(workspace);
+
+  write_text(plugin_dir / "plugin.json", dynamic_resource_manifest_json("com.example.dynamic", "plugin.sh"));
+  write_text(plugin_dir / "plugin.sh",
+             "IFS= read -r line\n"
+             "printf '%s\\n' \"$line\" >> requests.txt\n"
+             "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
+             "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
+             "IFS= read -r request\n"
+             "printf '%s\\n' \"$request\" >> requests.txt\n"
+             "case \"$request\" in\n"
+             "  *resource.list*prompt*) printf '%s\\n' "
+             "'{\"id\":\"ava_resource_2\",\"type\":\"resource.list.result\",\"ok\":true,\"kind\":\"prompt\",\"resources\":[{\"name\":\"dyn-review\","
+             "\"description\":\"Generated review prompt\"}]}' ;;\n"
+             "  *resource.list*skill*) printf '%s\\n' "
+             "'{\"id\":\"ava_resource_2\",\"type\":\"resource.list.result\",\"ok\":true,\"kind\":\"skill\",\"resources\":[{\"name\":\"dyn-triage\","
+             "\"description\":\"Generated triage skill\"}]}' ;;\n"
+             "  *resource.read*prompt*) printf '%s\\n' "
+             "'{\"id\":\"ava_resource_2\",\"type\":\"resource.read.result\",\"ok\":true,\"kind\":\"prompt\",\"name\":\"dyn-review\",\"content\":\"Dynamic "
+             "prompt body\"}' ;;\n"
+             "  *resource.read*skill*) printf '%s\\n' "
+             "'{\"id\":\"ava_resource_2\",\"type\":\"resource.read.result\",\"ok\":true,\"kind\":\"skill\",\"name\":\"dyn-triage\",\"content\":\"Dynamic skill "
+             "body\"}' ;;\n"
+             "esac\n"
+             "while IFS= read -r line; do :; done\n");
+  auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.dynamic", true, ava::plugin::PluginScope::Project);
+  expect(enabled.has_value(), "dynamic resource test enables project plugin");
+
+  auto session = plugin_command_test_session(paths, workspace);
+  std::vector<ava::permissions::PermissionPrompt> prompts;
+  auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    prompts.push_back(prompt);
+    return ava::permissions::PermissionResolution::Allow;
+  };
+
+  auto prompt_list = ava::app::run_plugins_command(session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
+  auto skill_list = ava::app::run_plugins_command(session, ava::app::CommandRequest{.command = "/plugins dynamic-skills", .permission_resolver = allow});
+  auto prompt_read = ava::app::run_plugins_command(
+      session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamic dyn-review", .permission_resolver = allow});
+  auto skill_read = ava::app::run_plugins_command(
+      session, ava::app::CommandRequest{.command = "/plugins dynamic-skill com.example.dynamic dyn-triage", .permission_resolver = allow});
+
+  expect(prompt_list && prompt_list->handled && command_output_text(prompt_list).find("com.example.dynamic/dyn-review") != std::string::npos &&
+             command_output_text(prompt_list).find("Generated review prompt") != std::string::npos,
+         "enabled plugin lists dynamic prompts through the explicit command surface: " + command_output_text(prompt_list));
+  expect(skill_list && skill_list->handled && command_output_text(skill_list).find("com.example.dynamic/dyn-triage") != std::string::npos &&
+             command_output_text(skill_list).find("Generated triage skill") != std::string::npos,
+         "enabled plugin lists dynamic skills through the explicit command surface: " + command_output_text(skill_list));
+  expect(prompt_read && prompt_read->handled &&
+             command_output_text(prompt_read).find("Plugin dynamic prompt com.example.dynamic/dyn-review") != std::string::npos &&
+             command_output_text(prompt_read).find("Dynamic prompt body") != std::string::npos,
+         "enabled plugin reads a dynamic prompt through the runner protocol: " + command_output_text(prompt_read));
+  expect(skill_read && skill_read->handled &&
+             command_output_text(skill_read).find("Plugin dynamic skill com.example.dynamic/dyn-triage") != std::string::npos &&
+             command_output_text(skill_read).find("Dynamic skill body") != std::string::npos,
+         "enabled plugin reads a dynamic skill through the runner protocol: " + command_output_text(skill_read));
+  expect(prompts.size() == 4 && std::all_of(prompts.begin(), prompts.end(),
+                                            [](auto const& prompt) {
+                                              return prompt.operation == ava::permissions::Operation::PluginExecute && prompt.tool_name == "plugin_resource";
+                                            }),
+         "dynamic resource commands require only plugin.execute permission, not plugin tool or command permission");
+  auto const requests = read_text(plugin_dir / "requests.txt");
+  expect(requests.find("\"type\":\"resource.list\"") != std::string::npos && requests.find("\"type\":\"resource.read\"") != std::string::npos &&
+             requests.find("\"kind\":\"prompt\"") != std::string::npos && requests.find("\"kind\":\"skill\"") != std::string::npos,
+         "dynamic resource commands send resource.list/resource.read records with prompt and skill kinds");
+}
+
+void test_disabled_plugin_dynamic_resources_do_not_execute()
+{
+  auto const root = temp_root() / "plugin-dynamic-disabled";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const paths = ava::tests::app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.disabled";
+  std::filesystem::create_directories(workspace);
+
+  write_text(plugin_dir / "plugin.json", dynamic_resource_manifest_json("com.example.disabled", "plugin.sh"));
+  write_text(plugin_dir / "plugin.sh",
+             "printf '%s\\n' executed > executed.txt\n"
+             "IFS= read -r line\n"
+             "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
+             "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n");
+
+  auto session = plugin_command_test_session(paths, workspace);
+  std::vector<ava::permissions::PermissionPrompt> prompts;
+  auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    prompts.push_back(prompt);
+    return ava::permissions::PermissionResolution::Allow;
+  };
+
+  auto list = ava::app::run_plugins_command(session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
+  auto read = ava::app::run_plugins_command(
+      session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.disabled any", .permission_resolver = allow});
+
+  expect(list && list->handled && command_output_text(list).find("none") != std::string::npos &&
+             command_output_text(list).find("com.example.disabled") == std::string::npos,
+         "disabled plugin does not appear in dynamic prompt listings: " + command_output_text(list));
+  expect(read && read->handled && command_output_text(read).find("plugin is disabled: com.example.disabled") != std::string::npos,
+         "direct dynamic prompt read refuses disabled plugins before execution: " + command_output_text(read));
+  expect(!std::filesystem::exists(plugin_dir / "executed.txt"), "disabled plugin entrypoint is not executed for dynamic resources");
+  expect(prompts.empty(), "disabled dynamic resource commands do not request plugin.execute permission");
+}
+
+void test_dynamic_resources_require_explicit_manifest_capability()
+{
+  auto const root = temp_root() / "plugin-dynamic-capability";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const paths = ava::tests::app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.nodynamic";
+  auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
+  std::filesystem::create_directories(workspace);
+
+  write_text(plugin_dir / "plugin.json", dynamic_resource_manifest_json("com.example.nodynamic", "plugin.sh", "{}", "[\"tools\"]"));
+  write_text(plugin_dir / "plugin.sh",
+             "printf '%s\\n' executed > executed.txt\n"
+             "IFS= read -r line\n"
+             "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
+             "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n");
+  auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.nodynamic", true, ava::plugin::PluginScope::Project);
+  expect(enabled.has_value(), "dynamic capability test enables project plugin");
+
+  auto session = plugin_command_test_session(paths, workspace);
+  std::vector<ava::permissions::PermissionPrompt> prompts;
+  auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    prompts.push_back(prompt);
+    return ava::permissions::PermissionResolution::Allow;
+  };
+
+  auto list = ava::app::run_plugins_command(session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
+  auto read = ava::app::run_plugins_command(
+      session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.nodynamic dyn-review", .permission_resolver = allow});
+
+  expect(list && list->handled && command_output_text(list).find("none") != std::string::npos &&
+             command_output_text(list).find("com.example.nodynamic") == std::string::npos,
+         "dynamic list skips enabled plugins that do not opt into dynamic prompts: " + command_output_text(list));
+  expect(read && read->handled && command_output_text(read).find("plugin does not declare dynamic.prompts: com.example.nodynamic") != std::string::npos,
+         "direct dynamic read rejects non-opt-in plugins before launch: " + command_output_text(read));
+  expect(!std::filesystem::exists(plugin_dir / "executed.txt"), "non-opt-in dynamic resource commands do not execute the plugin entrypoint");
+  expect(prompts.empty(), "non-opt-in dynamic resource commands do not request plugin.execute permission");
+}
+
+void test_dynamic_resource_read_rejects_invalid_names_before_launch()
+{
+  auto const root = temp_root() / "plugin-dynamic-invalid-name";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const paths = ava::tests::app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.dynamicname";
+  auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
+  std::filesystem::create_directories(workspace);
+
+  write_text(plugin_dir / "plugin.json", dynamic_resource_manifest_json("com.example.dynamicname", "plugin.sh"));
+  write_text(plugin_dir / "plugin.sh", "printf '%s\\n' executed > executed.txt\n");
+  auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.dynamicname", true, ava::plugin::PluginScope::Project);
+  expect(enabled.has_value(), "dynamic invalid-name test enables project plugin");
+
+  auto session = plugin_command_test_session(paths, workspace);
+  std::vector<ava::permissions::PermissionPrompt> prompts;
+  auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    prompts.push_back(prompt);
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto read = ava::app::run_plugins_command(
+      session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamicname ../bad", .permission_resolver = allow});
+
+  expect(read && read->handled && command_output_text(read).find("invalid dynamic prompt name") != std::string::npos,
+         "direct dynamic read validates resource names before sending resource.read: " + command_output_text(read));
+  expect(!std::filesystem::exists(plugin_dir / "executed.txt"), "invalid dynamic resource name does not execute the plugin entrypoint");
+  expect(prompts.empty(), "invalid dynamic resource names do not request plugin.execute permission");
+}
+
+void test_dynamic_resource_proxy_requests_use_core_service_handler()
+{
+  auto const root = temp_root() / "plugin-dynamic-proxy";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const paths = ava::tests::app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.dynamicproxy";
+  auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
+  auto const response_file = plugin_dir / "proxy-response.txt";
+  std::filesystem::create_directories(workspace / "src");
+
+  write_text(plugin_dir / "plugin.json",
+             dynamic_resource_manifest_json("com.example.dynamicproxy", "plugin.sh", "{}", "[\"dynamic.prompts\",\"proxy.session\"]"));
+  write_text(plugin_dir / "plugin.sh", std::string("IFS= read -r line\n"
+                                                   "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
+                                                   "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
+                                                   "IFS= read -r request\n"
+                                                   "printf '%s\\n' ") +
+                                           shell_single_quote(proxy_request_json("px_dynamic_session", "session.status", "{}")) +
+                                           "\n"
+                                           "IFS= read -r proxy_response\n"
+                                           "printf '%s\\n' \"$proxy_response\" > " +
+                                           shell_single_quote(response_file.generic_string()) +
+                                           "\n"
+                                           "printf '%s\\n' "
+                                           "'{\"id\":\"ava_resource_2\",\"type\":\"resource.read.result\",\"ok\":true,\"kind\":\"prompt\",\"name\":\"dyn-"
+                                           "proxy\",\"content\":\"Dynamic proxy prompt\"}'\n"
+                                           "while IFS= read -r line; do :; done\n");
+  auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.dynamicproxy", true, ava::plugin::PluginScope::Project);
+  expect(enabled.has_value(), "dynamic proxy test enables project plugin");
+
+  auto session = plugin_command_test_session(paths, workspace);
+  std::vector<ava::permissions::PermissionPrompt> prompts;
+  auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    prompts.push_back(prompt);
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto read = ava::app::run_plugins_command(
+      session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamicproxy dyn-proxy", .permission_resolver = allow});
+  auto const output = command_output_text(read);
+  auto const response = read_text(response_file);
+  auto content = proxy_response_content(response);
+  expect(read && read->handled && output.find("Dynamic proxy prompt") != std::string::npos, "dynamic resource read succeeds after proxy request: " + output);
+  expect(response.find("handler unavailable") == std::string::npos && response.find("\"ok\":true") != std::string::npos && content &&
+             content->find("\"operation\":\"session.status\"") != std::string::npos,
+         "dynamic resource requests can use declared core-service proxy operations");
+}
+
+void test_plugin_reported_dynamic_resource_errors_surface_text()
+{
+  auto const root = temp_root() / "plugin-dynamic-reported-errors";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const paths = ava::tests::app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.dynamicerrors";
+  auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
+  std::filesystem::create_directories(workspace);
+
+  write_text(plugin_dir / "plugin.json", dynamic_resource_manifest_json("com.example.dynamicerrors", "plugin.sh"));
+  write_text(
+      plugin_dir / "plugin.sh",
+      "IFS= read -r line\n"
+      "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
+      "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
+      "IFS= read -r request\n"
+      "case \"$request\" in\n"
+      "  *resource.list*) printf '%s\\n' '{\"id\":\"ava_resource_2\",\"type\":\"resource.list.result\",\"ok\":false,\"kind\":\"prompt\",\"content\":\"list "
+      "boom\"}' ;;\n"
+      "  *resource.read*) printf '%s\\n' "
+      "'{\"id\":\"ava_resource_2\",\"type\":\"resource.read.result\",\"ok\":false,\"kind\":\"prompt\",\"name\":\"dyn-error\",\"content\":\"read boom\"}' ;;\n"
+      "esac\n"
+      "while IFS= read -r line; do :; done\n");
+  auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.dynamicerrors", true, ava::plugin::PluginScope::Project);
+  expect(enabled.has_value(), "dynamic error test enables project plugin");
+
+  auto session = plugin_command_test_session(paths, workspace);
+  auto allow = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto list = ava::app::run_plugins_command(session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
+  auto read = ava::app::run_plugins_command(
+      session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamicerrors dyn-error", .permission_resolver = allow});
+  auto const list_output = command_output_text(list);
+  auto const read_output = command_output_text(read);
+  expect(list && list->handled && list_output.find("list boom") != std::string::npos && list_output.find("malformed") == std::string::npos,
+         "plugin-reported dynamic resource list errors surface plugin text: " + list_output);
+  expect(read && read->handled && read_output.find("read boom") != std::string::npos && read_output.find("malformed") == std::string::npos,
+         "plugin-reported dynamic resource read errors surface plugin text: " + read_output);
+}
+
+void test_dynamic_resource_commands_respect_prelaunch_cancellation()
+{
+  auto const root = temp_root() / "plugin-dynamic-cancel";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const paths = ava::tests::app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.dynamiccancel";
+  auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
+  std::filesystem::create_directories(workspace);
+
+  write_text(plugin_dir / "plugin.json", dynamic_resource_manifest_json("com.example.dynamiccancel", "plugin.sh"));
+  write_text(plugin_dir / "plugin.sh",
+             "printf '%s\\n' executed > executed.txt\n"
+             "IFS= read -r line\n"
+             "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
+             "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n");
+  auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.dynamiccancel", true, ava::plugin::PluginScope::Project);
+  expect(enabled.has_value(), "dynamic cancellation test enables project plugin");
+
+  auto session = plugin_command_test_session(paths, workspace);
+  std::vector<ava::permissions::PermissionPrompt> prompts;
+  auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    prompts.push_back(prompt);
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto canceled = [] { return true; };
+  auto list = ava::app::run_plugins_command(
+      session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow, .cancel_requested = canceled});
+  auto read = ava::app::run_plugins_command(
+      session, ava::app::CommandRequest{
+                   .command = "/plugins dynamic-prompt com.example.dynamiccancel dyn-cancel", .permission_resolver = allow, .cancel_requested = canceled});
+  auto const list_output = command_output_text(list);
+  auto const read_output = command_output_text(read);
+  expect(list && list->handled && list_output.find("canceled") != std::string::npos,
+         "dynamic resource list commands report prelaunch cancellation: " + list_output);
+  expect(read && read->handled && read_output.find("canceled") != std::string::npos,
+         "dynamic resource read commands report prelaunch cancellation: " + read_output);
+  expect(!std::filesystem::exists(plugin_dir / "executed.txt"), "prelaunch cancellation prevents dynamic resource plugin execution");
+  expect(prompts.empty(), "prelaunch cancellation does not request plugin.execute permission");
+}
+
+void test_malformed_dynamic_resource_result_fails_safely()
+{
+  auto const root = temp_root() / "plugin-dynamic-malformed";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const paths = ava::tests::app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.malformedresource";
+  auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
+  std::filesystem::create_directories(workspace);
+
+  write_text(plugin_dir / "plugin.json", dynamic_resource_manifest_json("com.example.malformedresource", "plugin.sh"));
+  write_text(plugin_dir / "plugin.sh",
+             "IFS= read -r line\n"
+             "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
+             "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
+             "IFS= read -r request\n"
+             "printf '%s\\n' '{\"id\":\"ava_resource_2\",\"type\":\"resource.read.result\",\"ok\":true,\"kind\":\"prompt\",\"name\":\"broken\"}'\n");
+  auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.malformedresource", true, ava::plugin::PluginScope::Project);
+  expect(enabled.has_value(), "malformed dynamic resource test enables project plugin");
+
+  auto session = plugin_command_test_session(paths, workspace);
+  auto allow = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto read = ava::app::run_plugins_command(
+      session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.malformedresource broken", .permission_resolver = allow});
+  auto const output = command_output_text(read);
+  expect(read && read->handled && output.find("plugin dynamic resource read result is malformed") != std::string::npos &&
+             output.find("com.example.malformedresource") != std::string::npos && output.find("broken") != std::string::npos,
+         "malformed dynamic resource read results fail safely with plugin/kind/name context: " + output);
+}
+
+void test_static_plugin_resources_remain_manifest_only()
+{
+  auto const root = temp_root() / "plugin-static-resource-manifest-only";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const paths = ava::tests::app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.staticresource";
+  std::filesystem::create_directories(workspace);
+
+  write_text(plugin_dir / "plugin.json",
+             dynamic_resource_manifest_json(
+                 "com.example.staticresource", "plugin.sh",
+                 "{\"prompts\":[{\"name\":\"static-review\",\"description\":\"Static review\",\"path\":\"prompts/review.md\"}],\"skills\":[]}"));
+  write_text(plugin_dir / "prompts" / "review.md", "Static prompt body\n");
+  write_text(plugin_dir / "plugin.sh", "printf '%s\\n' executed > executed.txt\n");
+
+  auto session = plugin_command_test_session(paths, workspace);
+  auto prompt = ava::app::run_plugins_command(session, ava::app::CommandRequest{.command = "/plugins prompt com.example.staticresource static-review"});
+  auto const output = command_output_text(prompt);
+  expect(prompt && prompt->handled && output.find("Static prompt body") != std::string::npos && output.find("path:") != std::string::npos,
+         "static /plugins prompt still reads manifest-declared files: " + output);
+  expect(!std::filesystem::exists(plugin_dir / "executed.txt"), "static /plugins prompt remains manifest-only and does not execute plugin entrypoints");
+}
+
 void test_enabled_plugin_event_hooks_observe_runtime_events()
 {
   auto const root = temp_root() / "plugin-event-hooks";
@@ -1285,6 +1802,41 @@ void test_plugin_core_service_proxy_read_search_slice()
   }
 
   {
+    auto const plugin_id = std::string("com.example.proxywindow");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json("px_window", "file.read", R"({"path":"visible.txt","offset":2,"limit":1})");
+    install_plugin(plugin_id, "[\"tools\",\"proxy.read\"]", proxy_tool_script(request, response_file, "call_proxy_window"));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    context.exact_file_access = std::make_shared<PluginWindowExactFileAccess>();
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(
+        ava::agent::ProviderToolCall{.id = "call_proxy_window", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    auto const response = read_text(response_file);
+    auto const content = proxy_response_content(response);
+    long long output_lines = -1;
+    long long next_offset = -1;
+    bool has_total_bytes = false;
+    bool has_total_lines = false;
+    if (content)
+    {
+      output_lines = ava::core::json::integer_field(*content, "output_lines").value_or(-1);
+      next_offset = ava::core::json::integer_field(*content, "next_offset_line").value_or(-1);
+      has_total_bytes = ava::core::json::integer_field(*content, "total_bytes").has_value();
+      has_total_lines = ava::core::json::integer_field(*content, "total_lines").has_value();
+    }
+    expect(
+        dispatched && dispatched->success && content && content->find("remote-two") != std::string::npos && output_lines == 1 && next_offset == 3 &&
+            !has_total_bytes && !has_total_lines,
+        std::string("plugin file.read serialization omits unavailable exact-window totals while retaining output and sentinel continuation counts: success=") +
+            (dispatched && dispatched->success ? "true" : "false") + " output_lines=" + std::to_string(output_lines) +
+            " next_offset=" + std::to_string(next_offset) + " has_total_bytes=" + (has_total_bytes ? "true" : "false") +
+            " has_total_lines=" + (has_total_lines ? "true" : "false") + " response=" + response + " content=" + content.value_or("<missing>"));
+  }
+
+  {
     auto const plugin_id = std::string("com.example.proxysearch");
     auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
     auto const request = proxy_request_json("px_search", "file.search", "{\"query\":\"needle\",\"include\":\"**/*.txt\",\"max_matches\":10}");
@@ -1598,6 +2150,15 @@ void run_plugin_tests()
   test_plugin_runner_tool_calls();
   test_plugin_runner_command_calls();
   test_plugin_runner_event_observation();
+  test_enabled_plugin_dynamic_resources_list_and_read();
+  test_disabled_plugin_dynamic_resources_do_not_execute();
+  test_dynamic_resources_require_explicit_manifest_capability();
+  test_dynamic_resource_read_rejects_invalid_names_before_launch();
+  test_dynamic_resource_proxy_requests_use_core_service_handler();
+  test_plugin_reported_dynamic_resource_errors_surface_text();
+  test_dynamic_resource_commands_respect_prelaunch_cancellation();
+  test_malformed_dynamic_resource_result_fails_safely();
+  test_static_plugin_resources_remain_manifest_only();
   test_enabled_plugin_event_hooks_observe_runtime_events();
   test_plugin_event_hook_failures_report_to_opt_in_sink();
   test_plugin_tool_dispatcher();

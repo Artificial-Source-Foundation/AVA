@@ -6,6 +6,7 @@
 #include "ava/app/project_trust.h"
 #include "ava/tools/file_tools.h"
 #include "ava/plugin/diagnostics.h"
+#include "ava/plugin/static_resources.h"
 #include "ava/mcp/config.h"
 #include "ava/context/skill_loader.h"
 #include "ava/core/fingerprint.h"
@@ -440,10 +441,35 @@ void add_prompt_command_source_files(std::vector<PromptCommandSourceFile>& sourc
   }
 }
 
+ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::Session const& session)
+{
+  return ava::plugin::PluginDiscoveryOptions{
+      .global_plugins_dir = session.paths.ava_config_dir / "plugins",
+      .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{}};
+}
+
+std::filesystem::path plugin_enablement_file(runtime::Session const& session)
+{
+  return session.paths.ava_state_dir / "plugin-enablement.json";
+}
+
+std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(ava::plugin::PluginDiagnostics const& diagnostics)
+{
+  std::vector<ava::context::DeclaredSkillFileOptions> files;
+  for (auto const& skill : ava::plugin::enabled_plugin_static_skill_files(diagnostics))
+  {
+    files.push_back(ava::context::DeclaredSkillFileOptions{
+        .path = skill.path, .name = skill.name, .description = skill.description, .source_type = ava::context::SkillSourceType::Plugin});
+  }
+  return files;
+}
+
 void load_skill_commands(RegistryBuilder& builder, runtime::Session const& session)
 {
+  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir);
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = session.workspace_dir,
+      .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
       .include_project_skills = project_resources_trusted(session.project_trust),
   });
   for (auto const& diagnostic : loaded.diagnostics)
@@ -467,18 +493,6 @@ void load_skill_commands(RegistryBuilder& builder, runtime::Session const& sessi
     entry.command = "/" + skill.name;
     add_entry(builder, std::move(entry));
   }
-}
-
-ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::Session const& session)
-{
-  return ava::plugin::PluginDiscoveryOptions{
-      .global_plugins_dir = session.paths.ava_config_dir / "plugins",
-      .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{}};
-}
-
-std::filesystem::path plugin_enablement_file(runtime::Session const& session)
-{
-  return session.paths.ava_state_dir / "plugin-enablement.json";
 }
 
 void load_plugin_commands(RegistryBuilder& builder, runtime::Session const& session)

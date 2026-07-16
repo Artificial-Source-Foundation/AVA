@@ -3,7 +3,9 @@
 #include "ava/agent/tool_dispatch_patch.h"
 #include "ava/tools/diff_utils.h"
 #include "ava/tools/edit_match.h"
+#include "ava/tools/file_io.h"
 #include "ava/tools/mutation_queue.h"
+#include "ava/tools/secure_workspace.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
@@ -135,10 +137,81 @@ ava::core::VoidResult commit_staged_patch_writes(std::vector<StagedPatchWrite> c
   return {};
 }
 
+ava::core::Result<std::vector<ava::tools::SecureWorkspace::StagedWrite>> stage_secure_patch_writes(
+    ava::tools::ToolContext const& context, std::vector<std::filesystem::path> const& paths, std::map<std::filesystem::path, std::string> const& final_contents)
+{
+  std::vector<ava::tools::SecureWorkspace::StagedWrite> staged;
+  staged.reserve(paths.size());
+  for (auto const& path : paths)
+  {
+    auto const content = final_contents.find(path);
+    if (content == final_contents.end())
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "missing staged patch content");
+      error.with_context("path", path.string());
+      return std::unexpected(std::move(error));
+    }
+    auto write = context.secure_workspace->stage_write(path, content->second, context.cancel_requested);
+    if (!write)
+    {
+      auto error = std::move(write.error());
+      error.with_context("stage", "temporary_patch_write");
+      error.with_context("target_path", path.string());
+      return std::unexpected(std::move(error));
+    }
+    staged.push_back(std::move(*write));
+  }
+  return staged;
+}
+
+std::string describe_patch_paths(std::vector<std::filesystem::path> const& paths)
+{
+  if (paths.empty())
+    return "(none)";
+  std::string result;
+  for (auto const& path : paths)
+  {
+    if (!result.empty())
+      result += ", ";
+    result += path.generic_string();
+  }
+  return result;
+}
+
+ava::core::VoidResult commit_secure_patch_writes(std::vector<ava::tools::SecureWorkspace::StagedWrite>& staged)
+{
+  std::vector<std::filesystem::path> committed_paths;
+  committed_paths.reserve(staged.size());
+  for (auto& write : staged)
+  {
+    if (auto committed = write.commit(); !committed)
+    {
+      auto changed_paths = committed_paths;
+      if (write.target_changed())
+        changed_paths.push_back(write.path());
+      auto error = std::move(committed.error());
+      error.with_context("stage", "commit_staged_patch_write");
+      error.with_context("atomicity", "all targets were staged before commit, but cross-file commit is not atomic and changed targets were not rolled back");
+      error.with_context("already_committed_paths", describe_patch_paths(committed_paths));
+      error.with_context("changed_paths", describe_patch_paths(changed_paths));
+      error.with_context("commit_failed_path", write.path().generic_string());
+      return std::unexpected(std::move(error));
+    }
+    committed_paths.push_back(write.path());
+  }
+  return {};
+}
+
 }  // namespace
 
 ToolDispatchResult apply_patch_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
 {
+  if (context.exact_file_access && context.exact_file_access->supports_read_text_file() != context.exact_file_access->supports_write_text_file())
+  {
+    return tool_dispatch::simple_error_result(call, ava::core::ErrorCategory::PermissionDenied,
+                                              "apply_patch requires coherent read and write ownership; the exact-file capabilities are partial");
+  }
+
   auto const edits = ava::core::json::objects_in_array_field(call.arguments_json, "edits");
   if (edits.empty())
   {
@@ -188,9 +261,20 @@ ToolDispatchResult apply_patch_result(ava::tools::ToolContext const& context, Pr
     if (!new_text)
       return tool_dispatch::tool_error_result(call, new_text.error());
 
-    auto const target = tool_dispatch::permission_dedupe_path(tool_dispatch::workspace_path(context, *path));
+    auto const unresolved_target = tool_dispatch::workspace_path(context, *path);
+    auto const target = context.secure_workspace ? unresolved_target.lexically_normal() : tool_dispatch::permission_dedupe_path(unresolved_target);
     permission_targets.emplace(target, target);
     parsed_edits.push_back(PatchEdit{.target = target, .old_text = std::move(*old_text), .new_text = std::move(*new_text)});
+  }
+
+  if (context.exact_file_access && context.exact_file_access->supports_read_text_file() && context.exact_file_access->supports_write_text_file() &&
+      permission_targets.size() > 1)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                  "transactional multi-file client apply_patch calls are unsupported; use one distinct target per call");
+    error.with_context("distinct_target_count", std::to_string(permission_targets.size()));
+    error.with_context("reason", "the ACP client filesystem has no transaction primitive");
+    return tool_dispatch::tool_error_result(call, error);
   }
 
   if (auto canceled = tool_dispatch::check_canceled(context, call); !canceled)
@@ -234,17 +318,10 @@ ToolDispatchResult apply_patch_result(ava::tools::ToolContext const& context, Pr
     auto const& target = edit.target;
     if (!original_contents.contains(target))
     {
-      auto content = ava::tools::read_file(context, target, ava::tools::ReadOptions{.max_bytes = 10 * 1024 * 1024, .permission_already_checked = true});
+      auto content = ava::tools::detail::read_all_text(context, target, "apply_patch");
       if (!content)
         return tool_dispatch::tool_error_result(call, content.error());
-      if (content->truncated)
-      {
-        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "file is too large for apply_patch");
-        error.with_context("path", target.string());
-        error.with_context("max_bytes", std::to_string(10 * 1024 * 1024));
-        return tool_dispatch::tool_error_result(call, error);
-      }
-      original_contents.emplace(target, std::move(content->content));
+      original_contents.emplace(target, std::move(*content));
       applied_paths.push_back(target);
     }
 
@@ -318,23 +395,51 @@ ToolDispatchResult apply_patch_result(ava::tools::ToolContext const& context, Pr
   {
     return tool_dispatch::tool_error_result(call, canceled.error());
   }
-  auto staged = stage_patch_writes(context, applied_paths, final_contents);
-  if (!staged)
-    return tool_dispatch::tool_error_result(call, staged.error());
-  if (auto canceled = tool_dispatch::check_canceled(context, call); !canceled)
+  if (auto started = ava::tools::announce_tool_execution_start(context); !started)
+    return tool_dispatch::tool_error_result(call, started.error());
+  std::vector<StagedPatchWrite> completed_writes;
+  completed_writes.reserve(applied_paths.size());
+  if (context.exact_file_access && context.exact_file_access->supports_read_text_file() && context.exact_file_access->supports_write_text_file())
   {
-    cleanup_staged_patch_writes(*staged);
-    return tool_dispatch::tool_error_result(call, canceled.error());
+    for (auto const& target : applied_paths)
+    {
+      auto written = ava::tools::write_file(context, target, final_contents[target],
+                                            ava::tools::WriteOptions{.permission_already_checked = true, .mutation_already_locked = true});
+      if (!written)
+        return tool_dispatch::tool_error_result(call, written.error());
+      completed_writes.push_back(StagedPatchWrite{.target = target, .temp = {}, .bytes_written = written->bytes_written});
+    }
   }
-  if (auto committed = commit_staged_patch_writes(*staged); !committed)
+  else if (context.secure_workspace)
   {
-    return tool_dispatch::tool_error_result(call, committed.error());
+    auto staged = stage_secure_patch_writes(context, applied_paths, final_contents);
+    if (!staged)
+      return tool_dispatch::tool_error_result(call, staged.error());
+    if (auto canceled = tool_dispatch::check_canceled(context, call); !canceled)
+      return tool_dispatch::tool_error_result(call, canceled.error());
+    if (auto committed = commit_secure_patch_writes(*staged); !committed)
+      return tool_dispatch::tool_error_result(call, committed.error());
+    for (auto const& write : *staged) completed_writes.push_back(StagedPatchWrite{.target = write.path(), .temp = {}, .bytes_written = write.bytes_written()});
+  }
+  else
+  {
+    auto staged = stage_patch_writes(context, applied_paths, final_contents);
+    if (!staged)
+      return tool_dispatch::tool_error_result(call, staged.error());
+    if (auto canceled = tool_dispatch::check_canceled(context, call); !canceled)
+    {
+      cleanup_staged_patch_writes(*staged);
+      return tool_dispatch::tool_error_result(call, canceled.error());
+    }
+    if (auto committed = commit_staged_patch_writes(*staged); !committed)
+      return tool_dispatch::tool_error_result(call, committed.error());
+    completed_writes = std::move(*staged);
   }
 
   std::string text = "{\"tool\":\"apply_patch\",\"ok\":true,\"edits\":[";
-  for (std::size_t index = 0; index < staged->size(); ++index)
+  for (std::size_t index = 0; index < completed_writes.size(); ++index)
   {
-    auto const& write = (*staged)[index];
+    auto const& write = completed_writes[index];
 
     if (index > 0)
       text += ',';

@@ -38,7 +38,7 @@ Suggested Codex command:
 
 ## Current Gap Summary
 
-AVA has domain-specific XDG JSON configs, a TUI `/settings` select-list, theme/keybinding reload, and project-resource trust gating. Pi has a unified global/project settings model, safe external-edit preservation, package/resource install flows, first-run theme/analytics setup, and resource filtering. AVA now closes MVP parity by documenting the domain-config product decision, tightening keybinding writes through the atomic config helper, recognizing package-manager entry points as deferred, and explicitly deferring remote package/self-update/telemetry/offline-switch surfaces unless approved.
+AVA has domain-specific XDG JSON configs, a TUI `/settings` select-list, theme/keybinding reload, project-resource trust gating, local/offline plugin directory install/remove, and an implemented provider-call `--offline` guard. Pi has a unified global/project settings model, safe external-edit preservation, broad package/resource install flows, first-run theme/analytics setup, and resource filtering. AVA now closes MVP parity by documenting the domain-config product decision, tightening keybinding writes through the atomic config helper, recognizing broad package-manager entry points as deferred, and explicitly deferring remote package/self-update/telemetry surfaces unless approved.
 
 ## 100 Percent Criteria
 
@@ -63,7 +63,7 @@ AVA has domain-specific XDG JSON configs, a TUI `/settings` select-list, theme/k
 | S2. Safe config write utility | Reuse or create a narrow config write helper for owner-only, atomic writes, validation-before-commit, and external-edit preservation where needed. |
 | S3. Reload diagnostics | Add structured reload result objects and TUI/headless display for each reloadable domain. Keep last good config on failure. |
 | S4. Project settings trust | Define allowed project-local settings, deny model-writable policy escalation, and test trust decisions. |
-| S5. Package/resource policy | Write a package manager product decision. If implemented, start with local path packages only before remote npm/git. |
+| S5. Package/resource policy | Write a package manager product decision. Keep the approved local plugin directory install/remove slice separate from future remote npm/git/marketplace package flows. |
 | S6. Startup UI | Decide whether first-run theme selection is MVP. Keep analytics excluded unless explicitly approved. |
 | S7. Theme polish | Finish docs/tests for custom themes, terminal background inference, and NO_COLOR/plain behavior. |
 
@@ -100,8 +100,8 @@ git --no-pager diff --check
 
 ## Progress Log
 
-- 2026-07-03: Initial goal file created. Current status: domain configs strong; unified settings/package/startup decisions remain open.
-- 2026-07-04: Area checkpoint plan: S1 inspect Pi settings/package/resource/startup/theme/trust references and AVA config/reload/theme/trust code; S2 preserve AVA domain config architecture and document why a unified merged `settings.json` is deferred; S3 improve safe config writes where the active settings UI mutates files; S4 document project-resource trust and reload diagnostics; S5 recognize package-manager entry points but defer install/update/remove until safety policy exists; S6 document startup/theme/offline/telemetry decisions; S7 update product ledgers and run targeted/full validation plus material review.
+- 2026-07-03: Initial goal file created. Initial status: domain configs strong; unified settings/package/startup decisions remained open.
+- 2026-07-04: Area checkpoint plan: S1 inspect Pi settings/package/resource/startup/theme/trust references and AVA config/reload/theme/trust code; S2 preserve AVA domain config architecture and document why a unified merged `settings.json` is deferred; S3 improve safe config writes where the active settings UI mutates files; S4 document project-resource trust and reload diagnostics; S5 recognize package-manager entry points while deferring remote/update/list flows until safety policy exists; S6 document startup/theme/offline/telemetry decisions; S7 update product ledgers and run targeted/full validation plus material review.
 - 2026-07-04: Inspected Pi references listed above. Summary: Pi deep-merges global/project settings with project settings gated by trust, lock-protects settings writes while preserving external edits, supports npm/git/local package install/list/remove/update/config plus resource filters, auto-discovers package/project/user resources, runs optional first-time theme/analytics setup, supports large JSON theme schemas and auto theme detection, and gates trust-requiring project resources.
 - 2026-07-04: Inspected AVA references listed above. Summary: AVA already has XDG domain configs, owner-only auth storage, atomic model scoped-cycle writes, atomic display theme writes, project trust stored outside the workspace, `/reload` rows for hot/restart-required domains, manual plugin/MCP/LSP/resource directories, `/settings` theme/model/trust/keybinding rows, auth-only onboarding, NO_COLOR/AVA_TUI_THEME/COLORFGBG theme precedence, and broad deterministic/TUI smoke coverage.
 - 2026-07-04: Implemented minimal settings/package/resource closure.
@@ -120,11 +120,11 @@ git --no-pager diff --check
 | Safe writes | Implemented for active user-mutated settings surfaces | Auth has owner-only locked atomic storage; model scoped-cycle and display theme writes already use atomic replacement; this area moved keybinding init/import/set/reset onto `write_text_file_atomic` and added symlink-target coverage. |
 | Project settings trust | Implemented | Trust decisions live in `$XDG_STATE_HOME/ava/project-trust.json`; project commands, skills, plugins, MCP/LSP config, and project system prompt resources are skipped until `/trust project`; context files remain visible. |
 | Reload diagnostics | Implemented for MVP | `/reload` reports display/models/trust/prompts/compaction/keybindings and restart-required auth/permissions/LSP/MCP/plugins, with targeted app-runtime coverage and opt-in TUI smoke coverage. |
-| Package/resource workflow | Deferred with recognized entry points | `/packages` and `ava packages ...` return deferral text; no npm/git/marketplace/self-update side effects are added. |
+| Package/resource workflow | Local plugin directory install/remove implemented; broad package manager deferred | `/plugins install <path>` and `/plugins remove <id>` manage local global disabled plugin directories without entrypoint launch. `/packages` and `ava packages ...` return deferral text; no npm/git/marketplace/self-update side effects are added. |
 | Resource filters | Deferred with manual install docs | Because packages are deferred, package resource filters are also deferred. Manual global/project resource locations are documented in `docs/CONFIG.md`; plugin enable/disable remains available for local plugins. |
 | Startup setup | AVA-native auth onboarding accepted; analytics/theme wizard deferred | First-run/pre-auth guidance remains focused on `/connect` and provider env/auth setup. Theme selection is available through `/settings` and `/theme`; analytics/telemetry remain excluded. |
 | Theme story | Implemented for MVP | Built-in/custom themes, display.json, auto reload, `NO_COLOR`, `AVA_TUI_THEME`, `COLORFGBG`, docs, unit tests, and opt-in TUI smoke coverage exist. Package-delivered themes are deferred. |
-| Offline mode | Dedicated flag deferred | AVA does not perform telemetry/self-update/package update/catalog fetches. Users can keep sessions local-only by avoiding provider turns and disabling/denying network-capable tools; a single `--offline` switch is deferred until its provider/tool/MCP semantics are designed. |
+| Offline mode | Implemented as a provider-call guard | `--offline` fails closed before provider prompt turns or provider-backed compaction resolve credentials or send requests. Local slash/RPC inspection commands and local plugin directory install/remove remain available; the flag is not an operating-system network sandbox for tools or future remote MCP/package surfaces. |
 | Tests | Implemented for changed surfaces | Targeted tests listed below cover config/reload/theme/trust, packages deferral, and keybinding safe writes. |
 
 ## Validation Evidence
@@ -148,10 +148,10 @@ Manual/headless package placeholder smoke is covered by `ava_cli.package_manager
 - Decision: AVA will not introduce a single global/project `settings.json` for MVP. Domain configs remain the product shape because auth, provider/model metadata, model context, executable project resources, permissions, and display preferences need different validators and trust boundaries.
 - Decision: Project-local executable/stronger model-context resources stay gated by `/trust project`; model-writable project files cannot silently grant package/plugin/MCP/LSP/prompt authority.
 - Decision: Active settings writes that AVA performs for display and keybindings use atomic replacement with symlink-target rejection. Auth/model/trust paths already have their own atomic or locked write flows.
-- Deferral: Pi-style npm/git/local package install/list/remove/update/config is not implemented. Remote install, self-update, and package update checks require local-source allowlists, provenance/signing, compatibility policy, rollback, and explicit trust UX.
+- Deferral: Pi-style npm/git/marketplace package install/list/update/config is not implemented. Local plugin directory install/remove is implemented only for global plugin directories and leaves installed plugins disabled; remote install, self-update, and package update checks require local-source allowlists, provenance/signing, compatibility policy, rollback, and explicit trust UX.
 - Deferral: Package resource filters for extensions/skills/prompts/themes are not implemented because package install is deferred. Manual resource installation remains the supported MVP path.
 - Deferral: Theme wizard/analytics first-run setup is not adopted. AVA keeps auth-first onboarding and local-first no-telemetry behavior.
-- Deferral: Dedicated `--offline` is not implemented in this area. The current local-only controls are tool visibility/permission denial plus no provider turn.
+- Decision: `--offline` is implemented as a provider-call guard, not an OS network sandbox. Future remote package catalogs, remote MCP transports, version checks, and network sandboxing need separate policy before they can rely on it.
 - Residual risk: Domain-specific config means users do not have one Pi-style settings file to inspect; `docs/CONFIG.md`, `/settings`, `/reload`, and command-specific validation are the mitigation.
 - Pending questions: none blocking safe progress for this area.
 
@@ -164,3 +164,9 @@ Manual/headless package placeholder smoke is covered by `ava_cli.package_manager
 
 - Re-audited this final backend area against the aggregate goal. Unified settings, safe writes, project trust, reload diagnostics, package/resource disposition, startup setup, theme story, offline mode, and test criteria are all implemented/accepted for MVP or explicitly deferred/excluded with rationale; no frontend/TUI/editor implementation was added for this backend closure.
 - Current aggregate verification rerun: `cmake --preset dev`, `cmake --build --preset dev`, the settings/package targeted CTest command, `ctest --preset dev --output-on-failure`, and `git --no-pager diff --check` all passed locally. Default-gated live-provider and opt-in TUI smokes remained skipped, which is acceptable for this backend-only area.
+
+## 2026-07-08 M6/M7 And Carlo Follow-Up
+
+- Local/offline plugin directory install/remove is now implemented through `/plugins install <path>` and `/plugins remove <id>` plus RPC `install_plugin`/`remove_plugin`, scoped to global plugin directories with installed plugins left disabled. This does not change the broad package-manager deferral for `/packages`, remote marketplaces, git/npm installs, self-update, source signing, or provenance.
+- Enabled/trust-gated static plugin prompt resources now autoload into runtime context, static plugin skill resources appear in `<available_skills>` and load via `/skill:<name>` or provider `skill`, and failed enabled plugin static resources show in `/context` freshness.
+- Post-merge validation passed `cmake --build --preset dev --target ava_tests`, `ctest --preset dev --output-on-failure` (62/62 with expected skips for `ava_tests.provider_live_smoke`, `ava_tui.tmux_smoke`, `ava_tui.kitty_image_smoke`, and `ava_tui.osc8_smoke`), and `git --no-pager diff --check`. Carlo's libcwd/ctags debug print-members codegen remains unvalidated locally because `ctags` and `ccache` are missing; the default libcwd-OFF `ava_debug` fallback is covered by the passing default build/tests.

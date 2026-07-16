@@ -188,12 +188,12 @@ std::string tool_body(std::string_view call_id, std::string_view name, std::stri
          json_escape(name) + "\",\"arguments\":\"" + json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
-std::string read_tool_body(std::string_view path)
+std::string read_tool_body(std::string_view path, std::string_view call_id = "call_read")
 {
   auto const arguments = std::string("{\"path\":\"") + json_escape(path) + "\"}";
-  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_read\",\"type\":\"function\","
-         "\"function\":{\"name\":\"read_file\",\"arguments\":\"" +
-         json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"" + json_escape(call_id) +
+         "\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"" + json_escape(arguments) +
+         "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
 std::string grep_tool_body(std::string_view include)
@@ -219,6 +219,11 @@ std::string bash_tool_body(std::string_view marker_path)
   return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_bash\",\"type\":\"function\","
          "\"function\":{\"name\":\"bash\",\"arguments\":\"" +
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
+std::string terminal_tool_body()
+{
+  return tool_body("call_terminal", "bash", R"({"command":"touch terminal-e2e-marker","timeout_ms":5000,"max_lines":20})");
 }
 
 std::string question_tool_body()
@@ -317,6 +322,14 @@ struct ProviderResponse
 
 ProviderResponse response_for(std::string_view scenario, int request_index, std::string_view target_path)
 {
+  if (scenario == "rpc-stream")
+  {
+    return ProviderResponse{.body =
+                                "data: {\"choices\":[{\"delta\":{\"content\":\"rpc \"}}]}\n\n"
+                                "data: {\"choices\":[{\"delta\":{\"content\":\"stream\"},\"finish_reason\":\"stop\"}],"
+                                "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n"
+                                "data: [DONE]\n\n"};
+  }
   if (scenario == "http-error")
   {
     return ProviderResponse{.status_code = 500,
@@ -333,14 +346,14 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   if (scenario == "read-tool-twice")
   {
     if (request_index == 0 || request_index == 2)
-      return ProviderResponse{.body = read_tool_body(target_path)};
+      return ProviderResponse{.body = read_tool_body(target_path, "call_read_" + std::to_string(request_index / 2 + 1))};
     return ProviderResponse{.body = text_body(request_index == 1 ? "first session grant" : "second session grant")};
   }
   if (scenario == "read-tool-thrice")
   {
     if (request_index == 0 || request_index == 2 || request_index == 4)
     {
-      return ProviderResponse{.body = read_tool_body(target_path)};
+      return ProviderResponse{.body = read_tool_body(target_path, "call_read_" + std::to_string(request_index / 2 + 1))};
     }
     if (request_index == 1)
       return ProviderResponse{.body = text_body("first controlled grant")};
@@ -361,6 +374,10 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   if (scenario == "bash-timeout-tree")
   {
     return ProviderResponse{.body = request_index == 0 ? bash_tool_body(target_path) : text_body("after bash process cleanup")};
+  }
+  if (scenario == "terminal-tool")
+  {
+    return ProviderResponse{.body = request_index == 0 ? terminal_tool_body() : text_body("after ACP terminal")};
   }
   if (scenario == "question-tool")
   {
@@ -390,7 +407,7 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   {
     return ProviderResponse{.body = e2e_tool_body(request_index, target_path)};
   }
-  if (scenario == "compact")
+  if (scenario == "compact" || scenario == "compact-delayed")
   {
     return ProviderResponse{.body = request_index == 0 ? text_body("before compact") : text_body("# Goal\nHeadless compact summary\n# Next Steps\nContinue.")};
   }
@@ -424,7 +441,7 @@ int main(int argc, char** argv)
       : scenario == "read-tool-thrice"    ? 6
       : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "grep-tool" || scenario == "write-tool" || scenario == "bash-timeout-tree" ||
          scenario == "question-tool" || scenario == "question-tool-multi" || scenario == "skill-tool" || scenario == "websearch-tool" ||
-         scenario == "webfetch-tool" || scenario == "mcp-tool" || scenario == "compact")
+         scenario == "webfetch-tool" || scenario == "mcp-tool" || scenario == "terminal-tool" || scenario == "compact" || scenario == "compact-delayed")
           ? 2
           : 1;
 
@@ -486,7 +503,7 @@ int main(int argc, char** argv)
       std::ofstream file(request_log, std::ios::binary | std::ios::app);
       file << "--- request " << (request_index + 1) << " ---\n" << request << '\n';
     }
-    if (request_index == 0)
+    if ((scenario == "compact-delayed" && request_index == 1) || (scenario != "compact-delayed" && request_index == 0))
       std::this_thread::sleep_for(delay);
 
     auto const provider_response = response_for(scenario, request_index, target_path);

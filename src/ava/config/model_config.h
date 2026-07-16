@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/provider/provider.h"
@@ -22,6 +23,26 @@ struct ModelPricing
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct ModelReasoningLevelMapping
+{
+  // User-facing AVA/Pi-style reasoning level. `supported == false` records an
+  // explicit per-model block. For supported levels, `provider_level` rewrites
+  // to the provider request value; nullopt means send the user-facing level.
+  std::string level;
+  std::optional<std::string> provider_level = std::nullopt;
+  bool supported = true;
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+struct ModelReasoningLevelResolution
+{
+  std::string level;
+  bool supported = false;
+  std::optional<std::string> provider_level = std::nullopt;
+  bool explicit_mapping = false;
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct ModelInfo
 {
   std::string provider_id;
@@ -41,6 +62,7 @@ struct ModelInfo
   std::vector<std::string> compatibility_quirks = {};
   std::vector<std::string> output_modalities = {};
   std::string reasoning_format = {};
+  std::vector<ModelReasoningLevelMapping> reasoning_level_mappings = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -58,10 +80,12 @@ struct ModelRegistry
 [[nodiscard]] ModelRegistry builtin_model_registry();
 [[nodiscard]] ModelRegistry parse_model_registry(std::string_view content);
 [[nodiscard]] ava::core::Result<ModelRegistry> load_model_registry(XdgPaths const& paths);
-[[nodiscard]] ava::core::VoidResult store_scoped_model_cycle(XdgPaths const& paths,
-                                                             std::optional<std::vector<std::string>> scoped_model_cycle);
+[[nodiscard]] ava::core::VoidResult store_scoped_model_cycle(XdgPaths const& paths, std::optional<std::vector<std::string>> scoped_model_cycle);
 [[nodiscard]] std::optional<ModelInfo> find_model(ModelRegistry const& registry, std::string_view provider_id, std::string_view model_id);
 [[nodiscard]] ModelInfo select_default_model(ModelRegistry const& registry);
+[[nodiscard]] std::optional<ModelReasoningLevelMapping> find_reasoning_level_mapping(ModelInfo const& model, std::string_view level);
+[[nodiscard]] ModelReasoningLevelResolution resolve_reasoning_level(ModelInfo const& model, std::string_view level);
+[[nodiscard]] std::vector<std::string> supported_reasoning_levels(ModelInfo const& model);
 [[nodiscard]] std::optional<long double> usage_cost_usd(ModelPricing const& pricing, ava::provider::TokenUsage const& usage);
 
 }  // namespace ava::config

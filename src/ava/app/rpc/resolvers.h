@@ -25,6 +25,7 @@ struct PendingPermissionRequest
   bool resolved = false;
   std::string correlation_id;
   std::string permission_request_id;
+  std::string session_id;
   ava::permissions::Operation operation = ava::permissions::Operation::ReadFile;
   ava::agent::Mode mode = ava::agent::Mode::Build;
   std::string tool_name;
@@ -42,6 +43,7 @@ struct PermissionSessionGrant
 {
   std::string grant_id;
   std::string permission_request_id;
+  std::string session_id;
   ava::permissions::Operation operation = ava::permissions::Operation::ReadFile;
   ava::agent::Mode mode = ava::agent::Mode::Build;
   std::string tool_name;

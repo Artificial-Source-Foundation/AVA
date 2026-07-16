@@ -19,4 +19,3 @@ std::string to_string(ToolVisibilityMode mode)
 }
 
 } // ava::agent
-

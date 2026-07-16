@@ -27,12 +27,22 @@
       }
     },
     {
+      "name": "tsan",
+      "displayName": "Focused ThreadSanitizer build",
+      "description": "Configure ThreadSanitizer for deterministic coordinator and ACP peer race tests.",
+      "inherits": "dev",
+      "binaryDir": "${sourceDir}/build-tsan",
+      "cacheVariables": {
+        "AVA_ENABLE_TSAN": "ON"
+      }
+    },
+    {
       "name": "release",
       "displayName": "Release build",
-      "description": "Configure an optimized build without tests.",
+      "description": "Configure an optimized build with the release/RPC contract tests available.",
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
-        "EnableAvaBuildTests": "OFF",
+        "EnableAvaBuildTests": "ON",
         "CMAKE_BUILD_TYPE": "Release"
       }
     },
@@ -43,7 +53,7 @@
       "binaryDir": "${sourceDir}/build-desktop-qml",
       "cacheVariables": {
         "AVA_BUILD_DESKTOP_QML": "ON",
-        "AVA_BUILD_TESTS": "OFF",
+        "EnableAvaBuildTests": "OFF",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     }
@@ -56,6 +66,10 @@
     {
       "name": "sanitize",
       "configurePreset": "sanitize"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan"
     },
     {
       "name": "release",
@@ -77,6 +91,66 @@
     {
       "name": "sanitize",
       "configurePreset": "sanitize",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release-rpc",
+      "configurePreset": "release",
+      "filter": {
+        "include": {
+          "name": "rpc"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "sanitize-rpc",
+      "configurePreset": "sanitize",
+      "filter": {
+        "include": {
+          "name": "rpc"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release-acp",
+      "configurePreset": "release",
+      "filter": {
+        "include": {
+          "name": "acp"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "sanitize-acp",
+      "configurePreset": "sanitize",
+      "filter": {
+        "include": {
+          "name": "acp"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "filter": {
+        "include": {
+          "name": "^ava_tests\\.(session_run_controller|acp)$"
+        }
+      },
       "output": {
         "outputOnFailure": true
       }

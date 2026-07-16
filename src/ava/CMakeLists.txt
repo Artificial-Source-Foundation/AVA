@@ -5,6 +5,7 @@ set(AVA_BACKEND_LIBRARIES
   ava_core
   ava_lsp
   ava_mcp
+  ava_observability
   ava_permissions
   ava_plugin
   ava_provider
@@ -20,6 +21,7 @@ add_subdirectory(context)
 add_subdirectory(core)
 add_subdirectory(lsp)
 add_subdirectory(mcp)
+add_subdirectory(observability)
 add_subdirectory(permissions)
 add_subdirectory(plugin)
 add_subdirectory(provider)

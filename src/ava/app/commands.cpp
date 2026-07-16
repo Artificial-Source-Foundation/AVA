@@ -17,6 +17,8 @@
 #include "ava/tools/file_tools.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/theme.h"
+#include "ava/plugin/diagnostics.h"
+#include "ava/plugin/static_resources.h"
 #include "ava/mcp/config.h"
 #include "ava/mcp/stdio_client.h"
 #include "ava/session/compaction.h"
@@ -1117,10 +1119,31 @@ std::string dynamic_command_argument(std::string_view line)
   return std::string(rest);
 }
 
+ava::plugin::PluginDiscoveryOptions skill_plugin_discovery_options(runtime::Session const& session)
+{
+  return ava::plugin::PluginDiscoveryOptions{
+      .global_plugins_dir = session.paths.ava_config_dir / "plugins",
+      .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{}};
+}
+
+std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(ava::plugin::PluginDiagnostics const& diagnostics)
+{
+  std::vector<ava::context::DeclaredSkillFileOptions> files;
+  for (auto const& skill : ava::plugin::enabled_plugin_static_skill_files(diagnostics))
+  {
+    files.push_back(ava::context::DeclaredSkillFileOptions{
+        .path = skill.path, .name = skill.name, .description = skill.description, .source_type = ava::context::SkillSourceType::Plugin});
+  }
+  return files;
+}
+
 ava::core::Result<std::string> skill_prompt_message(runtime::Session& session, CommandRequest const& request, CommandRegistryEntry const& entry)
 {
+  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(skill_plugin_discovery_options(session),
+                                                                    session.paths.ava_state_dir / "plugin-enablement.json", session.workspace_dir);
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = session.workspace_dir,
+      .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
       .include_project_skills = project_resources_trusted(session.project_trust),
   });
   auto const match = std::ranges::find_if(loaded.skills, [&](ava::context::LoadedSkill const& skill) { return skill.name == entry.skill_name; });
@@ -1446,6 +1469,10 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   if (starts_with_command(request.command, "/sessions"))
   {
     return run_sessions_command(session, command_argument(request.command, "/sessions"));
+  }
+  if (request.command == "/recover-persistence")
+  {
+    return run_recover_persistence_command(session);
   }
   if (starts_with_command(request.command, "/fork"))
   {

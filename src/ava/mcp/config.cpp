@@ -374,6 +374,7 @@ ava::core::Result<McpConfig> parse_mcp_config(std::string_view json, std::filesy
                                              .name = std::move(name),
                                              .command = std::move(*command),
                                              .args = std::move(*args),
+                                             .env = {},
                                              .enabled = enabled,
                                              .scope = scope,
                                              .source_path = config_path});

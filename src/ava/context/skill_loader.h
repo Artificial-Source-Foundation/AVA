@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -13,6 +14,7 @@ enum class SkillSourceType
 {
   Global,
   Project,
+  Plugin,
 };
 
 struct LoadedSkill
@@ -36,11 +38,22 @@ struct SkillDiagnostic
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct DeclaredSkillFileOptions
+{
+  std::filesystem::path path;
+  std::string name;
+  std::string description;
+  SkillSourceType source_type = SkillSourceType::Project;
+  std::size_t max_file_bytes = 64 * 1024;
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct SkillLoadOptions
 {
   std::filesystem::path workspace_root;
   std::vector<std::filesystem::path> global_skill_dirs = {};
   std::vector<std::filesystem::path> project_skill_dirs = {};
+  std::vector<DeclaredSkillFileOptions> declared_skill_files = {};
   std::size_t max_file_bytes = 64 * 1024;
   bool include_project_skills = true;
 
@@ -58,6 +71,7 @@ struct SkillLoadResult
 [[nodiscard]] std::string to_string(SkillSourceType source_type);
 [[nodiscard]] std::vector<std::filesystem::path> default_global_skill_dirs();
 [[nodiscard]] std::vector<std::filesystem::path> default_project_skill_dirs(std::filesystem::path const& workspace_root);
+[[nodiscard]] ava::core::Result<LoadedSkill> load_declared_skill_file(DeclaredSkillFileOptions options);
 [[nodiscard]] SkillLoadResult load_skills(SkillLoadOptions options);
 [[nodiscard]] std::string format_available_skills_for_prompt(std::vector<LoadedSkill> const& skills);
 [[nodiscard]] std::string format_loaded_skill_for_tool(LoadedSkill const& skill, std::vector<std::filesystem::path> const& sampled_files);

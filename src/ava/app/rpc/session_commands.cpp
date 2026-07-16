@@ -10,6 +10,7 @@
 #include "ava/session/session_metadata.h"
 
 #include <optional>
+#include <string_view>
 #include <utility>
 
 namespace ava::app::rpc {
@@ -20,6 +21,15 @@ ava::core::Result<bool> handled(ava::core::VoidResult result)
   if (!result)
     return std::unexpected(std::move(result.error()));
   return true;
+}
+
+std::string_view trim_rpc_text(std::string_view text)
+{
+  auto const first = text.find_first_not_of(" \t\r\n");
+  if (first == std::string_view::npos)
+    return {};
+  auto const last = text.find_last_not_of(" \t\r\n");
+  return text.substr(first, last - first + 1);
 }
 
 ava::core::Result<bool> reject_active_run_if_needed(RpcSessionCommandContext const& context)
@@ -259,7 +269,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     ava::session::SessionMetadataUpdate update;
     update.name = *command.session_name;
     update.actor = "rpc";
-    auto metadata = ava::session::append_session_metadata(context.session.store, std::move(update));
+    auto metadata = append_runtime_session_metadata(context.session, std::move(update));
     if (!metadata)
       return handled(write_error(context.output, command.id, metadata.error()));
     return handled(write_success(context.output, command.id, ava::session::session_metadata_json(context.session.store.session_id(), *metadata)));
@@ -279,7 +289,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     ava::session::SessionMetadataUpdate update;
     update.labels = *command.labels;
     update.actor = "rpc";
-    auto metadata = ava::session::append_session_metadata(context.session.store, std::move(update));
+    auto metadata = append_runtime_session_metadata(context.session, std::move(update));
     if (!metadata)
       return handled(write_error(context.output, command.id, metadata.error()));
     return handled(write_success(context.output, command.id, ava::session::session_metadata_json(context.session.store.session_id(), *metadata)));
@@ -390,8 +400,16 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       {
         return handled(write_error(context.output, command.id, invalid_rpc("set_reasoning requires reasoning_level")));
       }
-      selection = runtime::ReasoningSelection{
-          .level = *command.reasoning_level, .budget_tokens = command.reasoning_budget_tokens, .display = command.reasoning_display.value_or("")};
+      auto const level = trim_rpc_text(*command.reasoning_level);
+      if (level.empty())
+      {
+        return handled(write_error(context.output, command.id, invalid_rpc("set_reasoning requires reasoning_level")));
+      }
+      if (level != "off")
+      {
+        selection = runtime::ReasoningSelection{
+            .level = std::string(level), .budget_tokens = command.reasoning_budget_tokens, .display = command.reasoning_display.value_or("")};
+      }
     }
 
     std::lock_guard lock(context.session_mutex);
@@ -432,7 +450,8 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!opened)
       return handled(write_error(context.output, command.id, opened.error()));
     opened->created = true;
-    context.session = std::move(*opened);
+    if (auto replaced = replace_runtime_session(context.session, std::move(*opened)); !replaced)
+      return handled(write_error(context.output, command.id, replaced.error()));
     reset_cancel_after_session_switch(context.run_state);
     return handled(write_success(context.output, command.id, state_result_json(context.session, false)));
   }
@@ -496,7 +515,8 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     auto created = create_new_session(context.session, context.open_options);
     if (!created)
       return handled(write_error(context.output, command.id, created.error()));
-    context.session = std::move(*created);
+    if (auto replaced = replace_runtime_session(context.session, std::move(*created)); !replaced)
+      return handled(write_error(context.output, command.id, replaced.error()));
     reset_cancel_after_session_switch(context.run_state);
     return handled(write_success(context.output, command.id, state_result_json(context.session, false)));
   }
@@ -515,7 +535,8 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     auto opened = open_requested_session(context.session, context.open_options, *command.session_id);
     if (!opened)
       return handled(write_error(context.output, command.id, opened.error()));
-    context.session = std::move(*opened);
+    if (auto replaced = replace_runtime_session(context.session, std::move(*opened)); !replaced)
+      return handled(write_error(context.output, command.id, replaced.error()));
     reset_cancel_after_session_switch(context.run_state);
     return handled(write_success(context.output, command.id, state_result_json(context.session, false)));
   }

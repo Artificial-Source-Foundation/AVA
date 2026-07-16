@@ -72,9 +72,9 @@ void test_agent_loop_cancellation_boundaries()
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
-                                                             .system_prompt = "system prompt",
-                                                             .access_token = "token",
-                                                             .cancel_requested = [] { return true; }});
+                                                            .system_prompt = "system prompt",
+                                                            .access_token = "token",
+                                                            .cancel_requested = [] { return true; }});
     auto result = loop.run_turn("cancel now", store, provider, transport);
     auto entries = store.load();
     bool saw_user_message = false;
@@ -108,11 +108,11 @@ void test_agent_loop_cancellation_boundaries()
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
                                                             .system_prompt = "system prompt",
-                                                             .access_token = "token",
-                                                             .cancel_requested = [&cancel_checks] {
-                                                               ++cancel_checks;
-                                                               return cancel_checks >= 2;
-                                                             }});
+                                                            .access_token = "token",
+                                                            .cancel_requested = [&cancel_checks] {
+                                                              ++cancel_checks;
+                                                              return cancel_checks >= 2;
+                                                            }});
     auto result = loop.run_turn("cancel before provider", store, provider, transport);
     auto entries = store.load();
     bool const saw_cancel = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
@@ -147,9 +147,9 @@ void test_agent_loop_cancellation_boundaries()
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
-                                                             .system_prompt = "system prompt",
-                                                             .access_token = "token",
-                                                             .cancel_requested = [&cancel] { return cancel; }});
+                                                            .system_prompt = "system prompt",
+                                                            .access_token = "token",
+                                                            .cancel_requested = [&cancel] { return cancel; }});
     auto result = loop.run_turn("read then cancel", store, provider, transport);
     auto entries = store.load();
     bool saw_tool_entry = false;
@@ -237,9 +237,9 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
-                                                             .model_id = "gpt-5.5",
-                                                             .system_prompt = "system prompt",
-                                                             .access_token = "token"});
+                                                            .model_id = "gpt-5.5",
+                                                            .system_prompt = "system prompt",
+                                                            .access_token = "token"});
     auto result = loop.run_turn("hi", store, provider, transport);
     expect(!result && result.error().message().find("provider stream error") != std::string::npos, "agent loop returns provider error events");
   }
@@ -256,9 +256,9 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
-                                                             .model_id = "gpt-5.5",
-                                                             .system_prompt = "system prompt",
-                                                             .access_token = "token"});
+                                                            .model_id = "gpt-5.5",
+                                                            .system_prompt = "system prompt",
+                                                            .access_token = "token"});
     auto result = loop.run_turn("hi", store, provider, transport);
     expect(!result && result.error().message().find("fake transport has no response") != std::string::npos, "agent loop returns transport failures");
   }
@@ -275,9 +275,9 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
-                                                             .model_id = "gpt-5.5",
-                                                             .system_prompt = "system prompt",
-                                                             .access_token = "token"});
+                                                            .model_id = "gpt-5.5",
+                                                            .system_prompt = "system prompt",
+                                                            .access_token = "token"});
     auto result = loop.run_turn("hi", store, provider, transport);
     expect(!result && result.error().message().find("empty") != std::string::npos, "agent loop returns empty provider responses");
   }
@@ -296,9 +296,9 @@ void test_agent_loop_error_paths_and_bounds()
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
-                                                             .system_prompt = "system prompt",
-                                                             .access_token = "token",
-                                                             .max_provider_events = 1});
+                                                            .system_prompt = "system prompt",
+                                                            .access_token = "token",
+                                                            .max_provider_events = 1});
     auto result = loop.run_turn("hi", store, provider, transport);
     expect(!result && result.error().message().find("event limit") != std::string::npos, "agent loop enforces provider event bounds");
   }
@@ -317,9 +317,9 @@ void test_agent_loop_error_paths_and_bounds()
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
-                                                             .system_prompt = "system prompt",
-                                                             .access_token = "token",
-                                                             .max_assistant_text_bytes = 3});
+                                                            .system_prompt = "system prompt",
+                                                            .access_token = "token",
+                                                            .max_assistant_text_bytes = 3});
     auto result = loop.run_turn("hi", store, provider, transport);
     expect(!result && result.error().message().find("text byte limit") != std::string::npos, "agent loop enforces assistant text byte bounds");
   }
@@ -341,9 +341,9 @@ void test_agent_loop_error_paths_and_bounds()
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
-                                                             .system_prompt = "system prompt",
-                                                             .access_token = "token",
-                                                             .max_tool_argument_bytes = 5});
+                                                            .system_prompt = "system prompt",
+                                                            .access_token = "token",
+                                                            .max_tool_argument_bytes = 5});
     auto result = loop.run_turn("hi", store, provider, transport);
     expect(!result && result.error().message().find("argument byte limit") != std::string::npos, "agent loop enforces tool argument byte bounds");
   }
@@ -362,9 +362,9 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
-                                                             .model_id = "gpt-5.5",
-                                                             .system_prompt = "system prompt",
-                                                             .access_token = "token"});
+                                                            .model_id = "gpt-5.5",
+                                                            .system_prompt = "system prompt",
+                                                            .access_token = "token"});
     auto result = loop.run_turn("bad id", store, provider, transport);
     auto entries = store.load();
     bool saw_tool_entry = false;
@@ -393,9 +393,9 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
-                                                             .model_id = "gpt-5.5",
-                                                             .system_prompt = "system prompt",
-                                                             .access_token = "token"});
+                                                            .model_id = "gpt-5.5",
+                                                            .system_prompt = "system prompt",
+                                                            .access_token = "token"});
     auto result = loop.run_turn("long id", store, provider, transport);
     expect(!result && result.error().message().find("too long") != std::string::npos, "agent loop rejects overlong provider tool call ids");
   }
@@ -409,31 +409,33 @@ void test_agent_loop_max_iteration_guard()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "max"});
-  std::string const tool_sse =
-      "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_glob\",\"name\":\"glob\"}\n\n"
-      "data: "
-      "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_glob\",\"delta\":\"{\\\"pattern\\\":"
-      "\\\"**/*\\\"}\"}\n\n"
-      "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_glob\"}\n\n"
-      "data: [DONE]\n\n";
+  auto tool_sse = [](std::string_view call_id) {
+    return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"" + std::string(call_id) +
+           "\",\"name\":\"glob\"}\n\n"
+           "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"" +
+           std::string(call_id) +
+           "\",\"delta\":\"{\\\"pattern\\\":\\\"**/*\\\"}\"}\n\n"
+           "data: {\"type\":\"response.function_call.done\",\"item_id\":\"" +
+           std::string(call_id) +
+           "\"}\n\n"
+           "data: [DONE]\n\n";
+  };
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response(tool_sse), sse_response(tool_sse)});
+  ava::tests::FakeTransport transport({sse_response(tool_sse("call_glob_1")), sse_response(tool_sse("call_glob_2"))});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
                                                           .provider_id = "openai",
-                                                           .model_id = "gpt-5.5",
-                                                           .system_prompt = "system prompt",
-                                                           .access_token = "token",
-                                                           .max_tool_iterations = 2});
+                                                          .model_id = "gpt-5.5",
+                                                          .system_prompt = "system prompt",
+                                                          .access_token = "token",
+                                                          .max_tool_iterations = 2});
   auto result = loop.run_turn("loop", store, provider, transport);
-  expect(!result && result.error().message().find("maximum tool iterations") != std::string::npos, "agent loop stops repeated tool use at max iteration guard");
+  expect(result && result->outcome == ava::core::RuntimeTerminalOutcome::MaxTurnRequests && result->provider_iterations == 2 && result->tool_iterations == 2 &&
+             result->tool_calls == 2,
+         "agent loop reports repeated tool use as the max-turn-requests terminal outcome");
   auto entries = store.load();
-  expect(entries && std::ranges::any_of(*entries,
-                                        [](ava::session::SessionEntry const& entry) {
-                                          return entry.type == ava::session::EntryType::Error &&
-                                                 entry.data_json.find("maximum tool iterations") != std::string::npos;
-                                        }),
-         "agent loop persists max iteration guard as error event");
+  expect(entries && std::ranges::none_of(*entries, [](ava::session::SessionEntry const& entry) { return entry.type == ava::session::EntryType::Error; }),
+         "max-turn-requests is a terminal outcome rather than a persisted internal error");
 }
 
 }  // namespace

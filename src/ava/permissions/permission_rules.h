@@ -21,8 +21,11 @@ namespace ava::permissions {
 // the normalized workspace directory.  Persistent rules are consulted only after
 // the built-in policy has produced an Ask decision, but before session grants and
 // resolver prompts; built-in hard Deny decisions are never upgraded by durable
-// allow rules.  Matching deny rules always win over matching allow rules, and
-// malformed or unsupported storage fails closed by returning an authoritative deny
+// allow rules. Persistent allow rules cannot authorize repository-controlled
+// ctest or cmake --build commands; only a matching in-memory session grant or
+// one-shot resolver approval can do so. Matching deny rules always win over
+// matching allow rules, and malformed or unsupported storage fails closed by
+// returning an authoritative deny
 // instead of falling through to a resolver prompt.
 
 inline constexpr long long kCurrentPermissionRulesSchemaVersion = 1;

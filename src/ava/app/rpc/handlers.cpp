@@ -1,9 +1,11 @@
 #include "sys.h"
 #include "protocol.h"
+#include "runtime_navigation.h"
 #include "serialization.h"
 #include "session_operators.h"
-#include "ava/config/auth.h"
-#include "ava/config/openai_oauth.h"
+#include "ava/app/runtime_catalog.h"
+#include "ava/app/runtime_credentials.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/provider/registry.h"
 
 #include <algorithm>
@@ -11,101 +13,22 @@
 #include <vector>
 
 namespace ava::app::rpc {
-namespace {
 
-std::string model_cycle_key(std::string_view provider_id, std::string_view model_id)
+ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id, runtime::RunOptions options,
+                                                                   ava::provider::Transport& auth_transport, std::string_view purpose)
 {
-  return std::string(provider_id) + "/" + std::string(model_id);
-}
-
-std::vector<ava::config::ModelInfo> registered_cycle_models(runtime::Session const& session, ava::config::ModelRegistry const& registry)
-{
-  auto const providers = ava::provider::builtin_provider_registry();
-  std::vector<ava::config::ModelInfo> registered;
-  for (auto const& model : effective_models(registry))
-  {
-    if (providers.contains(model.provider_id))
-      registered.push_back(model);
-  }
-
-  if (!session.scoped_model_cycle)
-    return registered;
-
-  std::vector<ava::config::ModelInfo> scoped;
-  scoped.reserve(session.scoped_model_cycle->size());
-  for (auto const& id : *session.scoped_model_cycle)
-  {
-    auto const found = std::ranges::find_if(registered, [&](auto const& model) { return id == model_cycle_key(model.provider_id, model.model_id); });
-    if (found != registered.end())
-      scoped.push_back(*found);
-  }
-  return scoped;
-}
-
-ava::core::Result<std::vector<ava::config::ModelInfo>> cycle_model_candidates(runtime::Session const& session)
-{
-  auto registry = ava::config::load_model_registry(session.paths);
-  if (!registry)
-    return std::unexpected(std::move(registry.error()));
-  auto models = registered_cycle_models(session, *registry);
-  if (models.empty())
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "no registered provider models are enabled for cycling"));
-  return models;
-}
-
-}  // namespace
-
-ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id,
-                                                                     runtime::RunOptions options, ava::provider::Transport& auth_transport,
-                                                                     std::string_view purpose)
-{
-  if (!options.access_token.empty())
-    return options;
-
-  auto credential = ava::config::provider_credential_for_request(paths, provider_id, auth_transport);
-  if (!credential)
-    return std::unexpected(credential.error());
-  if (!*credential)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                  "RPC " + std::string(purpose) + " requires auth for provider `" + std::string(provider_id) + "`");
-    error.with_context("auth_file", paths.auth_file.string());
-    return std::unexpected(std::move(error));
-  }
-  options.access_token = (*credential)->access_token;
-  options.credential_type = (*credential)->credential_type;
-  options.openai_oauth = (*credential)->provider_id == "openai" && (*credential)->credential_type == "oauth";
-  options.openai_account_id = (*credential)->account_id;
-  if (options.openai_oauth && options.openai_account_id.empty())
-  {
-    options.openai_account_id = ava::config::openai_oauth_account_id_from_token((*credential)->access_token).value_or("");
-  }
-  return options;
+  return prepare_runtime_credentials(paths, provider_id, std::move(options), auth_transport, std::string("RPC ") + std::string(purpose));
 }
 
 ava::core::Result<runtime::Session> create_new_session(runtime::Session const& current, runtime::OpenOptions const& base_options)
 {
-  runtime::OpenOptions options = base_options;
-  options.workspace_dir = current.workspace_dir;
-  options.current_dir = current.current_dir;
-  options.mode = current.mode;
-  options.paths = current.paths;
-  options.requested_session_id = std::nullopt;
-  options.continue_last_session = false;
-  return open_runtime_session(options);
+  return create_runtime_session_like(current, base_options);
 }
 
 ava::core::Result<runtime::Session> open_requested_session(runtime::Session const& current, runtime::OpenOptions const& base_options,
-                                                           std::string_view requested_session_id)
+                                                         std::string_view requested_session_id)
 {
-  runtime::OpenOptions options = base_options;
-  options.workspace_dir = current.workspace_dir;
-  options.current_dir = current.current_dir;
-  options.mode = current.mode;
-  options.paths = current.paths;
-  options.requested_session_id = std::string(requested_session_id);
-  options.continue_last_session = false;
-  return open_runtime_session(options);
+  return open_runtime_session_like(current, base_options, requested_session_id);
 }
 
 ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::Session const& session, RpcCommand const& command)
@@ -117,74 +40,17 @@ ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::Sessi
     return resolve_runtime_model(session.paths, *command.provider, *command.model);
   }
 
-  auto current_provider_match = resolve_runtime_model(session.paths, session.model.provider_id, *command.model);
-  if (current_provider_match)
-    return current_provider_match;
-  if (current_provider_match.error().category() != ava::core::ErrorCategory::NotFound)
-  {
-    return std::unexpected(std::move(current_provider_match.error()));
-  }
-
-  auto registry = ava::config::load_model_registry(session.paths);
-  if (!registry)
-    return std::unexpected(std::move(registry.error()));
-  auto const providers = ava::provider::builtin_provider_registry();
-  std::vector<ava::config::ModelInfo> matches;
-  for (auto const& model : effective_models(*registry))
-  {
-    if (model.model_id == *command.model && providers.contains(model.provider_id))
-      matches.push_back(model);
-  }
-  if (matches.empty())
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "model is not configured");
-    error.with_context("model", *command.model);
-    return std::unexpected(std::move(error));
-  }
-  if (matches.size() > 1)
-  {
-    auto error = invalid_rpc("model id is ambiguous; provider is required");
-    error.with_context("model", *command.model);
-    error.with_context("matches", std::to_string(matches.size()));
-    return std::unexpected(std::move(error));
-  }
-  return matches.front();
+  return select_runtime_model(session, std::nullopt, *command.model);
 }
 
 ava::core::Result<ava::config::ModelInfo> next_runtime_model(runtime::Session const& session)
 {
-  auto models = cycle_model_candidates(session);
-  if (!models)
-    return std::unexpected(std::move(models.error()));
-
-  std::size_t next_index = 0;
-  for (std::size_t index = 0; index < models->size(); ++index)
-  {
-    if ((*models)[index].provider_id == session.model.provider_id && (*models)[index].model_id == session.model.model_id)
-    {
-      next_index = (index + 1) % models->size();
-      break;
-    }
-  }
-  return (*models)[next_index];
+  return cycle_runtime_model(session, 1);
 }
 
 ava::core::Result<ava::config::ModelInfo> previous_runtime_model(runtime::Session const& session)
 {
-  auto models = cycle_model_candidates(session);
-  if (!models)
-    return std::unexpected(std::move(models.error()));
-
-  std::size_t previous_index = models->size() - 1;
-  for (std::size_t index = 0; index < models->size(); ++index)
-  {
-    if ((*models)[index].provider_id == session.model.provider_id && (*models)[index].model_id == session.model.model_id)
-    {
-      previous_index = index == 0 ? models->size() - 1 : index - 1;
-      break;
-    }
-  }
-  return (*models)[previous_index];
+  return cycle_runtime_model(session, -1);
 }
 
 ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session const& session, std::string_view injected_provider_id,
@@ -194,8 +60,7 @@ ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session co
   {
     return ProviderHandle{.provider = &injected_provider, .owned = nullptr};
   }
-  auto registry = ava::provider::builtin_provider_registry();
-  auto provider = registry.create(session.model.provider_id);
+  auto provider = create_runtime_provider(session.model.provider_id);
   if (!provider)
     return std::unexpected(std::move(provider.error()));
   return ProviderHandle{.provider = nullptr, .owned = std::move(*provider)};
@@ -212,9 +77,9 @@ ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime:
 
 bool is_plugin_rpc_command(std::string_view type)
 {
-  return type == "list_plugins" || type == "plugin_failures" || type == "inspect_plugin" || type == "enable_plugin" || type == "disable_plugin" ||
-         type == "validate_plugin" || type == "list_plugin_prompts" || type == "get_plugin_prompt" || type == "list_plugin_skills" ||
-         type == "get_plugin_skill" || type == "run_plugin_command";
+  return type == "list_plugins" || type == "plugin_failures" || type == "inspect_plugin" || type == "install_plugin" || type == "remove_plugin" ||
+         type == "enable_plugin" || type == "disable_plugin" || type == "validate_plugin" || type == "list_plugin_prompts" || type == "get_plugin_prompt" ||
+         type == "list_plugin_skills" || type == "get_plugin_skill" || type == "run_plugin_command";
 }
 
 bool is_mcp_rpc_command(std::string_view type)
@@ -234,6 +99,12 @@ ava::core::Result<std::string> plugin_rpc_slash_command(RpcCommand const& comman
       return std::unexpected(invalid_rpc("validate_plugin requires path"));
     return "/plugins validate " + *command.path;
   }
+  if (command.type == "install_plugin")
+  {
+    if (!command.path || command.path->empty())
+      return std::unexpected(invalid_rpc("install_plugin requires path"));
+    return "/plugins install " + *command.path;
+  }
 
   if (!command.plugin_id || command.plugin_id->empty())
   {
@@ -245,6 +116,8 @@ ava::core::Result<std::string> plugin_rpc_slash_command(RpcCommand const& comman
     return "/plugins enable " + *command.plugin_id;
   if (command.type == "disable_plugin")
     return "/plugins disable " + *command.plugin_id;
+  if (command.type == "remove_plugin")
+    return "/plugins remove " + *command.plugin_id;
   if (command.type == "list_plugin_prompts")
     return "/plugins prompts " + *command.plugin_id;
   if (command.type == "list_plugin_skills")

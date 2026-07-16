@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/provider/anthropic_provider.h"
+#include "ava/provider/gemini_provider.h"
 #include "ava/provider/openai_compatible_provider.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/registry.h"
@@ -112,6 +113,10 @@ ProviderRegistry builtin_provider_registry()
                                         .reasoning_request_field = profile.reasoning_request_field,
                                         .reasoning_request_effort_string = profile.reasoning_request_effort_string,
                                         .include_stream_usage = profile.include_stream_usage});
+  }));
+  static_cast<void>(registry.register_provider(ava::config::gemini_provider_profile().provider_id, [] {
+    auto const& profile = ava::config::gemini_provider_profile();
+    return std::make_unique<GeminiProvider>(env_or_default(profile.default_base_url_env.c_str(), profile.default_base_url));
   }));
   static_cast<void>(registry.register_provider(ava::config::openai_provider_profile().provider_id, [] { return std::make_unique<OpenAIProvider>(); }));
   static_cast<void>(registry.register_provider(ava::config::openrouter_provider_profile().provider_id, [] {

@@ -360,6 +360,11 @@ std::string state_result_json(runtime::Session const& session, bool cancel_reque
   {
     json += ',';
     json += string_field_json("reasoning_level", session.reasoning->level);
+    if (session.reasoning->provider_level && *session.reasoning->provider_level != session.reasoning->level)
+    {
+      json += ',';
+      json += string_field_json("reasoning_provider_level", *session.reasoning->provider_level);
+    }
     if (session.reasoning->budget_tokens)
     {
       json += ',';
@@ -972,7 +977,7 @@ std::string prompt_result_json(std::string_view session_id, ava::agent::AgentLoo
   json += ',';
   json += string_field_json("final_text", result.final_text);
   json += ',';
-  json += string_field_json("stop_reason", result.stop_reason);
+  json += string_field_json("stop_reason", ava::core::to_string(result.outcome));
   json += ',';
   json += number_field_json("provider_iterations", result.provider_iterations);
   json += ',';

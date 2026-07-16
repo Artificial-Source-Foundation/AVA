@@ -1,17 +1,21 @@
 #include "sys.h"
-#include "ava/agent/tool_dispatcher.h"
-
 #include "ava/agent/question.h"
 #include "ava/agent/tool_dispatch_common.h"
 #include "ava/agent/tool_dispatch_patch.h"
+#include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/lsp_tools.h"
 #include "ava/tools/mutation_queue.h"
 #include "ava/tools/search_tools.h"
+#include "ava/tools/secure_workspace.h"
 #include "ava/tools/webfetch_tool.h"
 #include "ava/tools/websearch_tool.h"
+#include "ava/plugin/diagnostics.h"
+#include "ava/plugin/discovery.h"
+#include "ava/plugin/enablement.h"
+#include "ava/plugin/static_resources.h"
 #include "ava/plugin/tool_broker.h"
 #include "ava/mcp/tool_broker.h"
 #include "ava/context/skill_loader.h"
@@ -125,6 +129,36 @@ std::string xml_escape(std::string_view value)
     }
   }
   return escaped;
+}
+
+ava::plugin::PluginDiscoveryOptions plugin_discovery_options_for_context(ava::tools::ToolContext const& context)
+{
+  auto options = ava::plugin::default_plugin_discovery_options(context.workspace_dir);
+  if (!context.plugin_global_plugins_dir.empty())
+    options.global_plugins_dir = context.plugin_global_plugins_dir;
+  if (!context.plugin_project_plugins_dir.empty())
+    options.project_plugins_dir = context.plugin_project_plugins_dir;
+  if (!context.include_project_plugins)
+    options.project_plugins_dir = std::filesystem::path{};
+  return options;
+}
+
+std::filesystem::path plugin_enablement_file_for_context(ava::tools::ToolContext const& context)
+{
+  if (!context.plugin_enablement_file.empty())
+    return context.plugin_enablement_file;
+  return ava::plugin::default_plugin_enablement_file();
+}
+
+std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(ava::plugin::PluginDiagnostics const& diagnostics)
+{
+  std::vector<ava::context::DeclaredSkillFileOptions> files;
+  for (auto const& skill : ava::plugin::enabled_plugin_static_skill_files(diagnostics))
+  {
+    files.push_back(ava::context::DeclaredSkillFileOptions{
+        .path = skill.path, .name = skill.name, .description = skill.description, .source_type = ava::context::SkillSourceType::Plugin});
+  }
+  return files;
 }
 
 ava::core::VoidResult reject_oversized_task_arg(std::string_view value, std::string_view field, std::size_t max_bytes, std::string_view tool_name)
@@ -251,10 +285,13 @@ ToolDispatchResult read_file_result(ava::tools::ToolContext const& context, Prov
     return tool_error_result(call, result.error());
   std::string text = "{\"tool\":\"read_file\",\"ok\":true,\"path\":\"" + ava::core::json::escape(*path) + "\",\"content\":\"" +
                      ava::core::json::escape(result->content) + "\",\"truncated\":" + json_bool(result->truncated) +
-                     ",\"byte_limited\":" + json_bool(result->byte_limited) + ",\"line_limited\":" + json_bool(result->line_limited) +
-                     ",\"total_bytes\":" + std::to_string(result->total_bytes) + ",\"output_bytes\":" + std::to_string(result->output_bytes) +
-                     ",\"output_lines\":" + std::to_string(result->output_lines) + ",\"start_line\":" + std::to_string(result->start_line) +
-                     ",\"end_line\":" + std::to_string(result->end_line) + ",\"total_lines\":" + std::to_string(result->total_lines);
+                     ",\"byte_limited\":" + json_bool(result->byte_limited) + ",\"line_limited\":" + json_bool(result->line_limited);
+  if (result->totals_known)
+    text += ",\"total_bytes\":" + std::to_string(result->total_bytes);
+  text += ",\"output_bytes\":" + std::to_string(result->output_bytes) + ",\"output_lines\":" + std::to_string(result->output_lines) +
+          ",\"start_line\":" + std::to_string(result->start_line) + ",\"end_line\":" + std::to_string(result->end_line);
+  if (result->totals_known)
+    text += ",\"total_lines\":" + std::to_string(result->total_lines);
   if (result->next_offset_line > 0)
   {
     text += ",\"next_offset\":" + std::to_string(result->next_offset_line);
@@ -443,11 +480,18 @@ ToolDispatchResult bash_result(ava::tools::ToolContext const& context, ProviderT
                                       "{\"tool\":\"bash\",\"ok\":" + json_bool(result->exit_code == 0 && !result->timed_out && !result->canceled) +
                                       ",\"exit_code\":" + std::to_string(result->exit_code) + ",\"timed_out\":" + json_bool(result->timed_out) +
                                       ",\"canceled\":" + json_bool(result->canceled) + ",\"truncated\":" + json_bool(result->truncated) +
-                                      ",\"byte_limited\":" + json_bool(result->byte_limited) + ",\"line_limited\":" + json_bool(result->line_limited) +
-                                      ",\"total_bytes\":" + std::to_string(result->total_bytes) + ",\"output_bytes\":" + std::to_string(result->output_bytes) +
-                                      ",\"total_lines\":" + std::to_string(result->total_lines) + ",\"output_lines\":" + std::to_string(result->output_lines) +
-                                      ",\"omitted_lines\":" + std::to_string(result->omitted_lines) + ",\"output\":\"" +
-                                      ava::core::json::escape(result->output) + "\"";
+                                      ",\"byte_limited\":" + json_bool(result->byte_limited) + ",\"line_limited\":" + json_bool(result->line_limited);
+                                  if (result->totals_known)
+                                    text += ",\"total_bytes\":" + std::to_string(result->total_bytes);
+                                  text += ",\"output_bytes\":" + std::to_string(result->output_bytes);
+                                  if (result->totals_known)
+                                  {
+                                    text += ",\"total_lines\":" + std::to_string(result->total_lines);
+                                  }
+                                  text += ",\"output_lines\":" + std::to_string(result->output_lines);
+                                  if (result->totals_known)
+                                    text += ",\"omitted_lines\":" + std::to_string(result->omitted_lines);
+                                  text += ",\"output\":\"" + ava::core::json::escape(result->output) + "\"";
                                   if (result->truncated && result->line_limited)
                                   {
                                     text += ",\"truncation_hint\":\"Increase max_lines to retain more command output.\"";
@@ -572,9 +616,12 @@ ToolDispatchResult skill_result(ava::tools::ToolContext const& context, Provider
   auto name = required_safe_string_arg(call.arguments_json, "name", call.name);
   if (!name)
     return tool_error_result(call, name.error());
+  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options_for_context(context), plugin_enablement_file_for_context(context),
+                                                                    context.workspace_dir);
   auto skills = ava::context::load_skills(ava::context::SkillLoadOptions{.workspace_root = context.workspace_dir,
                                                                          .global_skill_dirs = context.skill_global_dirs,
                                                                          .project_skill_dirs = context.skill_project_dirs,
+                                                                         .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
                                                                          .include_project_skills = context.include_project_skills});
   auto const match = std::ranges::find_if(skills.skills, [&](ava::context::LoadedSkill const& skill) { return skill.name == *name; });
   if (match == skills.skills.end())
@@ -896,9 +943,31 @@ ToolExecutor builtin_tool_executor(std::string_view name)
   return nullptr;
 }
 
-ToolRegistry build_tool_registry(ava::tools::ToolContext const& context)
+ava::core::Result<ToolRegistry> build_tool_registry_result(ava::tools::ToolContext const& context)
 {
   ToolRegistry registry;
+  if (context.exact_builtin_tool_names)
+  {
+    if (!context.session_mcp_config)
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "exact tool composition requires an immutable session MCP configuration"));
+    for (auto const& name : *context.exact_builtin_tool_names)
+    {
+      auto const* entry = builtin_tool_registry().find(name);
+      if (entry == nullptr)
+      {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "requested built-in tool is unavailable");
+        error.with_context("tool", name);
+        return std::unexpected(std::move(error));
+      }
+      if (auto registered = registry.register_tool(*entry); !registered)
+        return std::unexpected(std::move(registered.error()));
+    }
+    if (auto registered = ava::mcp::register_enabled_mcp_tools(registry, context); !registered)
+      return std::unexpected(std::move(registered.error()));
+    return registry;
+  }
+
   for (auto const& entry : builtin_tool_registry().entries())
   {
     auto registered = registry.register_tool(entry);
@@ -909,9 +978,16 @@ ToolRegistry build_tool_registry(ava::tools::ToolContext const& context)
     }
   }
   ava::plugin::register_enabled_plugin_tools(registry, context);
-  ava::mcp::register_enabled_mcp_tools(registry, context);
+  if (auto registered = ava::mcp::register_enabled_mcp_tools(registry, context); !registered)
+    return std::unexpected(std::move(registered.error()));
   registry.apply_visibility_filter(context);
   return registry;
+}
+
+ToolRegistry build_tool_registry(ava::tools::ToolContext const& context)
+{
+  auto registry = build_tool_registry_result(context);
+  return registry ? std::move(*registry) : ToolRegistry{};
 }
 
 }  // namespace
@@ -946,7 +1022,33 @@ ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context)
   registry_ = build_tool_registry(context_);
 }
 
+ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context, ToolRegistry registry) : context_(std::move(context)), registry_(std::move(registry))
+{
+  if (!context_.mutation_queue)
+    context_.mutation_queue = std::make_shared<ava::tools::MutationQueue>();
+}
+
+ava::core::Result<ToolDispatcher> ToolDispatcher::create_strict(ava::tools::ToolContext context)
+{
+  if (context.require_descriptor_secure_workspace && !context.secure_workspace)
+  {
+    auto workspace = ava::tools::SecureWorkspace::open(context.workspace_dir);
+    if (!workspace)
+      return std::unexpected(std::move(workspace.error()));
+    context.secure_workspace = std::move(*workspace);
+  }
+  auto registry = build_tool_registry_result(context);
+  if (!registry)
+    return std::unexpected(std::move(registry.error()));
+  return ToolDispatcher(std::move(context), std::move(*registry));
+}
+
 ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall const& call) const
+{
+  return dispatch_with_context(context_, call);
+}
+
+ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch_with_context(ava::tools::ToolContext context, ProviderToolCall const& call) const
 {
   auto const arguments = call.arguments_json.empty() ? std::string("{}") : call.arguments_json;
   ProviderToolCall const normalized{.id = call.id, .name = call.name, .arguments_json = arguments};
@@ -969,22 +1071,75 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall 
     return std::unexpected(std::move(safe_id.error()));
   }
   auto const* tool = registry_.find(normalized.name);
-  if (tool != nullptr)
+  // Resolve before observing so only registry-owned canonical tool metadata can
+  // cross the trace boundary. Provider-supplied names and call IDs remain
+  // content/product data and are never used as trace correlation.
+  auto const trace_call_id = context.observation ? context.observation->next_id("tool") : std::string{};
+  auto emit_start = [&](std::string_view canonical_name, bool resolved) {
+    if (!context.observation)
+      return;
+    context.observation->emit(
+        ava::observability::TraceEventType::ToolDispatchStart, context.trace_context, [&normalized, &trace_call_id, canonical_name, resolved](auto& event) {
+          event.call_id = trace_call_id;
+          event.phase = ava::observability::TracePhase::Tool;
+          event.outcome = ava::observability::TraceOutcome::Started;
+          event.fields = {{.key = "tool_name",
+                           .value = resolved ? std::string(canonical_name) : "[omitted]",
+                           .provenance = resolved ? ava::observability::FieldProvenance::PublicMetadata : ava::observability::FieldProvenance::Content},
+                          {.key = "arguments_bytes", .value = std::to_string(normalized.arguments_json.size())}};
+        });
+  };
+  auto emit_result = [&](ToolDispatchResult const& result) {
+    if (!context.observation)
+      return;
+    context.observation->emit(ava::observability::TraceEventType::ToolDispatchResult, context.trace_context, [&result, &trace_call_id](auto& event) {
+      event.call_id = trace_call_id;
+      event.phase = ava::observability::TracePhase::Tool;
+      event.outcome = result.success ? ava::observability::TraceOutcome::Success
+                                     : (result.payload.status == ToolResultStatus::Canceled ? ava::observability::TraceOutcome::Canceled
+                                                                                            : ava::observability::TraceOutcome::Error);
+      event.fields = {{.key = "result_bytes", .value = std::to_string(result.result_text.size())}};
+    });
+  };
+  if (tool == nullptr)
   {
-    if (is_canceled(context_))
-      return with_tool_result_payload(tool_error_result(normalized, canceled_error(normalized)));
-    auto context = context_;
-    context.permission_request_ids = std::make_shared<std::vector<std::string>>();
-    if (context.lsp_diagnostics_provider)
-      context.lsp_diagnostics_provider->set_permission_request_ids(context.permission_request_ids);
-    auto result = tool->executor(context, normalized);
-    if (context.permission_request_ids && !context.permission_request_ids->empty())
-    {
-      result.payload.permission_request_ids = *context.permission_request_ids;
-    }
-    return with_tool_result_payload(std::move(result));
+    emit_start({}, false);
+    auto result = with_tool_result_payload(simple_error_result(normalized, ava::core::ErrorCategory::Tool, "unknown tool"));
+    emit_result(result);
+    return result;
   }
-  return with_tool_result_payload(simple_error_result(normalized, ava::core::ErrorCategory::Tool, "unknown tool"));
+
+  emit_start(tool->metadata.name, true);
+  context.trace_call_id = trace_call_id;
+  if (is_canceled(context))
+  {
+    auto result = with_tool_result_payload(tool_error_result(normalized, canceled_error(normalized)));
+    emit_result(result);
+    return result;
+  }
+  context.permission_request_ids = std::make_shared<std::vector<std::string>>();
+  if (context.announce_execution_after_permission)
+    context.execution_started = std::make_shared<std::atomic_bool>(false);
+  if (context.lsp_diagnostics_provider)
+    context.lsp_diagnostics_provider->set_permission_request_ids(context.permission_request_ids);
+  auto result = tool->executor(context, normalized);
+  if (context.permission_request_ids && !context.permission_request_ids->empty())
+  {
+    result.payload.permission_request_ids = *context.permission_request_ids;
+  }
+  result = with_tool_result_payload(std::move(result));
+  emit_result(result);
+  return result;
+}
+
+std::vector<ToolMetadata> ToolDispatcher::registered_tool_metadata() const
+{
+  return registry_.metadata();
+}
+
+std::vector<std::string> ToolDispatcher::registered_tool_schemas_json() const
+{
+  return registry_.tool_schemas_json(context_);
 }
 
 std::span<ToolMetadata const> ToolDispatcher::tool_metadata()

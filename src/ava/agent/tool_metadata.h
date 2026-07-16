@@ -72,9 +72,9 @@ inline constexpr std::
                     .description_family = std::string_view("filesystem")},
                 ToolMetadata{
                     .name = "glob",
-                    .description = "Find readable workspace files by glob pattern.",
+                    .description = "Find readable non-symlink workspace files by glob pattern.",
                     .schema_json =
-                        R"({"type":"function","name":"glob","description":"Find readable workspace files by glob pattern. Use this for file discovery when you know filename shapes; use grep for content search and list_directory for one directory.","parameters":{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern such as **/*.cpp or src/**/*.h. Bracket character classes are not supported."},"max_results":{"type":"integer","minimum":1,"maximum":10000,"description":"Maximum paths returned. Defaults to 2000 and is capped at 10000."}},"required":["pattern"]}})",
+                        R"({"type":"function","name":"glob","description":"Find readable non-symlink workspace files by glob pattern. Use this for file discovery when you know filename shapes; use grep for content search and list_directory for one directory.","parameters":{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern such as **/*.cpp or src/**/*.h. Bracket character classes are not supported."},"max_results":{"type":"integer","minimum":1,"maximum":10000,"description":"Maximum paths returned. Defaults to 2000 and is capped at 10000."}},"required":["pattern"]}})",
                     .permission_category = "search",
                     .output_bound_summary = "Matched paths are bounded by max_results and tool-level caps.",
                     .execution_mode = "synchronous",
@@ -82,9 +82,9 @@ inline constexpr std::
                     .description_family = std::string_view("search")},
                 ToolMetadata{
                     .name = "grep",
-                    .description = "Search readable workspace files for text or a regular expression.",
+                    .description = "Search readable non-symlink workspace files for text or a regular expression.",
                     .schema_json =
-                        R"({"type":"function","name":"grep","description":"Search readable workspace files for text. Defaults to literal, case-sensitive matching; set literal=false for ECMAScript regex and case_insensitive=true when casing is uncertain. Use read_file on matches for surrounding context.","parameters":{"type":"object","properties":{"pattern":{"type":"string","description":"Literal text by default, or an ECMAScript regex when literal is false."},"include":{"type":"string","description":"Glob limiting searched files. Defaults to **/*."},"max_matches":{"type":"integer","minimum":1,"maximum":10000,"description":"Maximum matched lines returned. Defaults to 2000 and is capped at 10000."},"literal":{"type":"boolean","description":"When true, pattern is matched literally. Defaults to true."},"case_insensitive":{"type":"boolean","description":"When true, matching ignores ASCII case. Defaults to false."}},"required":["pattern"]}})",
+                        R"({"type":"function","name":"grep","description":"Search readable non-symlink workspace files for text. Defaults to literal, case-sensitive matching; set literal=false for ECMAScript regex and case_insensitive=true when casing is uncertain. Use read_file on matches for surrounding context.","parameters":{"type":"object","properties":{"pattern":{"type":"string","description":"Literal text by default, or an ECMAScript regex when literal is false."},"include":{"type":"string","description":"Glob limiting searched files. Defaults to **/* and skips symlinked files."},"max_matches":{"type":"integer","minimum":1,"maximum":10000,"description":"Maximum matched lines returned. Defaults to 2000 and is capped at 10000."},"literal":{"type":"boolean","description":"When true, pattern is matched literally. Defaults to true."},"case_insensitive":{"type":"boolean","description":"When true, matching ignores ASCII case. Defaults to false."}},"required":["pattern"]}})",
                     .permission_category = "search",
                     .output_bound_summary = "Matched lines are bounded by max_matches and line truncation caps.",
                     .execution_mode = "synchronous",

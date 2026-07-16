@@ -14,12 +14,17 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 - `src/ava/core/`: shared primitives such as `Result<T>`, errors, JSON helpers, and IDs.
 - `src/ava/config/`: XDG paths, auth storage, model configuration, prompt configuration, and OpenAI OAuth support.
 - `src/ava/provider/`: provider contracts plus the OpenAI provider and `curl` transport.
-- `src/ava/agent/`: agent loop, mode handling, tool dispatch, and user-question plumbing.
+- `src/ava/agent/`: agent loop, mode handling, tool dispatch, user-question plumbing, configurable task subagents, and background job registry.
+- `src/ava/app/`: runtime orchestration, CLI/TUI/print/RPC glue, command dispatch, project trust, headless policy, and event serialization.
 - `src/ava/permissions/`: backend permission policy and prompt/decision types.
 - `src/ava/tools/`: built-in file, search, and shell tools. Keep filesystem and process safety checks here or in clearly permissioned call paths.
 - `src/ava/session/`: append-only JSONL session storage and session-level formatting/lifecycle helpers.
 - `src/ava/context/`: project/global instruction loading for provider context.
+- `src/ava/mcp/`: stdio MCP config, protocol, client lifecycle, tool/resource/prompt broker, and containment helpers.
+- `src/ava/plugin/`: local out-of-process plugin manifest, discovery, enablement, runner, diagnostics, tool broker, and event hooks.
+- `src/ava/lsp/`: LSP client and configured provider integration for diagnostics, symbols, definitions, and references.
 - `src/ava/tui/`: custom terminal UI rendering, input handling, runtime glue, and terminal abstraction.
+- `src/ava/desktop/`: optional Qt/QML desktop prototype.
 - `tests/`: focused test sources linked into the `ava_tests` CTest target, plus support fakes under `tests/support/`.
 
 ## Local Workflow

@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/tui/composer_internal.h"
+#include "ava/tui/text_wrap.h"
 
 #include <algorithm>
 #include <climits>
@@ -154,8 +155,7 @@ bool is_variation_selector(char32_t codepoint)
 
 bool is_emoji_cluster_start(char32_t codepoint)
 {
-  return (codepoint >= 0x1F000 && codepoint <= 0x1FAFF) || (codepoint >= 0x2600 && codepoint <= 0x26FF) ||
-         codepoint == 0x2705;
+  return (codepoint >= 0x1F000 && codepoint <= 0x1FAFF) || (codepoint >= 0x2600 && codepoint <= 0x26FF) || codepoint == 0x2705;
 }
 
 bool is_zero_width_codepoint(char32_t codepoint)
@@ -467,27 +467,7 @@ std::vector<std::string> wrap_transcript_text(std::string_view text, std::size_t
 {
   auto const sanitized = sanitize_terminal_text(text);
   auto const content_width = std::max<std::size_t>(1, width > 4 ? width - 4 : width);
-  std::vector<std::string> wrapped;
-  std::string current;
-  std::size_t columns = 0;
-  for (std::size_t index = 0; index < sanitized.size();)
-  {
-    auto const cell = terminal_text_cell(sanitized, index);
-    auto const chunk_length = cell.valid ? cell.bytes : std::size_t{1};
-    auto const chunk_columns = cell.columns;
-    if (columns + chunk_columns > content_width && !current.empty())
-    {
-      wrapped.push_back(std::move(current));
-      current.clear();
-      columns = 0;
-    }
-    current.append(sanitized.substr(index, chunk_length));
-    columns += chunk_columns;
-    index += chunk_length;
-  }
-  if (!current.empty() || wrapped.empty())
-    wrapped.push_back(std::move(current));
-  return wrapped;
+  return wrap_ansi_text(sanitized, content_width);
 }
 
 }  // namespace detail

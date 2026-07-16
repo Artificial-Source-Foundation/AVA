@@ -47,6 +47,7 @@ struct ProviderProfile
 
 [[nodiscard]] ProviderProfile const& anthropic_provider_profile();
 [[nodiscard]] ProviderProfile const& deepseek_provider_profile();
+[[nodiscard]] ProviderProfile const& gemini_provider_profile();
 [[nodiscard]] ProviderProfile const& kimi_provider_profile();
 [[nodiscard]] ProviderProfile const& moonshot_provider_profile();
 [[nodiscard]] ProviderProfile const& openai_provider_profile();

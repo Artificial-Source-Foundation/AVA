@@ -83,12 +83,31 @@ void BlockingInputBuf::close()
   cv_.notify_all();
 }
 
+bool BlockingInputBuf::wait_until_blocked(std::chrono::milliseconds timeout)
+{
+  std::unique_lock lock(mutex_);
+  return cv_.wait_for(lock, timeout, [&] { return blocked_; });
+}
+
+bool BlockingInputBuf::wait_until_eof_observed(std::chrono::milliseconds timeout)
+{
+  std::unique_lock lock(mutex_);
+  return cv_.wait_for(lock, timeout, [&] { return eof_observed_; });
+}
+
 int BlockingInputBuf::underflow()
 {
   std::unique_lock lock(mutex_);
+  blocked_ = buffer_.empty() && !closed_;
+  cv_.notify_all();
   cv_.wait(lock, [&] { return closed_ || !buffer_.empty(); });
+  blocked_ = false;
   if (buffer_.empty())
+  {
+    eof_observed_ = true;
+    cv_.notify_all();
     return traits_type::eof();
+  }
   current_ = buffer_.front();
   buffer_.pop_front();
   setg(&current_, &current_, &current_ + 1);
@@ -213,13 +232,13 @@ ava::provider::HttpResponse sse_response(std::string body)
   return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(body)};
 }
 
-std::string read_file_call_sse(std::string_view path)
+std::string read_file_call_sse(std::string_view path, std::string_view call_id)
 {
-  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_read\",\"name\":\"read_file\"}\n\n"
-         "data: "
-         "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_read\",\"delta\":\"{\\\"path\\\":"
-         "\\\"" +
-         ava::core::json::escape(path) +
+  auto const escaped_id = ava::core::json::escape(call_id);
+  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"" + escaped_id +
+         "\",\"name\":\"read_file\"}\n\n"
+         "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"" +
+         escaped_id + "\",\"delta\":\"{\\\"path\\\":\\\"" + ava::core::json::escape(path) +
          "\\\"}\"}\n\n"
          "data: [DONE]\n\n";
 }

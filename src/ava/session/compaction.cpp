@@ -224,7 +224,7 @@ CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries,
   return CompactionDecision{.should_compact = threshold > 0 && estimated >= threshold, .estimated_tokens = estimated, .threshold_tokens = threshold};
 }
 
-ava::core::VoidResult append_manual_compaction(SessionStore& store, ManualCompactionRequest request)
+ava::core::Result<SessionEntry> make_manual_compaction_entry(ManualCompactionRequest request)
 {
   bool const summary_unavailable = request.summary.empty();
   std::string const summary = summary_unavailable ? std::string(unavailable_summary) : request.summary;
@@ -234,12 +234,19 @@ ava::core::VoidResult append_manual_compaction(SessionStore& store, ManualCompac
     error.with_context("max_summary_bytes", std::to_string(request.config.max_summary_bytes));
     return std::unexpected(std::move(error));
   }
+  return SessionEntry{.id = ava::core::make_id("entry"),
+                      .parent_id = "",
+                      .type = EntryType::Compaction,
+                      .timestamp = now_timestamp(),
+                      .data_json = compaction_data_json(request, summary, summary_unavailable)};
+}
 
-  return store.append(SessionEntry{.id = ava::core::make_id("entry"),
-                                   .parent_id = "",
-                                   .type = EntryType::Compaction,
-                                   .timestamp = now_timestamp(),
-                                   .data_json = compaction_data_json(request, summary, summary_unavailable)});
+ava::core::VoidResult append_manual_compaction(SessionStore& store, ManualCompactionRequest request)
+{
+  auto entry = make_manual_compaction_entry(std::move(request));
+  if (!entry)
+    return std::unexpected(std::move(entry.error()));
+  return store.append(std::move(*entry));
 }
 
 }  // namespace ava::session

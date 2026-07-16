@@ -19,5 +19,7 @@ namespace ava::app {
 [[nodiscard]] ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, CommandRequest const& request);
 [[nodiscard]] ava::core::Result<CommandResult> run_import_command(runtime::Session& session, std::string_view argument);
 [[nodiscard]] ava::core::Result<CommandResult> run_export_command(runtime::Session& session, CommandRequest const& request);
+// Explicit fail-closed recovery after a verified terminal/drained append failure.
+[[nodiscard]] ava::core::Result<CommandResult> run_recover_persistence_command(runtime::Session& session);
 
 }  // namespace ava::app

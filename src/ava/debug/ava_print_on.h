@@ -47,6 +47,10 @@ namespace mcp {
 using utils::has_print_on::operator<<;
 } // namespace mcp
 
+namespace observability {
+using utils::has_print_on::operator<<;
+} // namespace observability
+
 namespace permissions {
 using utils::has_print_on::operator<<;
 } // namespace permissions

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/mcp/config.h"
-
 #include "ava/core/result.h"
 
 #include <chrono>
@@ -18,8 +17,10 @@ namespace ava::mcp {
 
 using CancelCallback = std::function<bool()>;
 
-struct McpStdioClientOptions {
+struct McpStdioClientOptions
+{
   std::filesystem::path workspace_dir;
+  bool clean_environment = false;
   std::chrono::milliseconds startup_timeout{3000};
   std::chrono::milliseconds request_timeout{5000};
   std::size_t max_message_bytes = 64 * 1024;
@@ -28,7 +29,8 @@ struct McpStdioClientOptions {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct McpInitialization {
+struct McpInitialization
+{
   std::string server_name;
   std::string server_version;
   std::string capabilities_json;
@@ -37,7 +39,8 @@ struct McpInitialization {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct McpToolDescription {
+struct McpToolDescription
+{
   std::string name;
   std::string description;
   std::string input_schema_json;
@@ -45,7 +48,8 @@ struct McpToolDescription {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct McpPromptArgumentDescription {
+struct McpPromptArgumentDescription
+{
   std::string name;
   std::string description;
   bool required = false;
@@ -53,7 +57,8 @@ struct McpPromptArgumentDescription {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct McpPromptDescription {
+struct McpPromptDescription
+{
   std::string name;
   std::string description;
   std::vector<McpPromptArgumentDescription> arguments;
@@ -61,7 +66,8 @@ struct McpPromptDescription {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct McpResourceDescription {
+struct McpResourceDescription
+{
   std::string uri;
   std::string name;
   std::string description;
@@ -70,7 +76,8 @@ struct McpResourceDescription {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct McpToolCallResult {
+struct McpToolCallResult
+{
   bool is_error = false;
   std::string content;
   std::string raw_json;
@@ -78,14 +85,16 @@ struct McpToolCallResult {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct McpPromptGetResult {
+struct McpPromptGetResult
+{
   std::string content;
   std::string raw_json;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct McpResourceReadResult {
+struct McpResourceReadResult
+{
   std::string content;
   std::string uri;
   std::string mime_type;
@@ -94,7 +103,8 @@ struct McpResourceReadResult {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-class McpStdioClient final {
+class McpStdioClient final
+{
  public:
   McpStdioClient(McpServerConfig server, McpStdioClientOptions options);
   ~McpStdioClient();
@@ -104,34 +114,29 @@ class McpStdioClient final {
   McpStdioClient(McpStdioClient&&) = delete;
   McpStdioClient& operator=(McpStdioClient&&) = delete;
 
-  [[nodiscard]] static ava::core::Result<std::unique_ptr<McpStdioClient>> start(
-      McpServerConfig server, McpStdioClientOptions options, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] static ava::core::Result<std::unique_ptr<McpStdioClient>> start(McpServerConfig server, McpStdioClientOptions options,
+                                                                                CancelCallback cancel_requested = nullptr);
 
   [[nodiscard]] McpServerConfig const& server() const noexcept;
   [[nodiscard]] McpInitialization const& initialization() const noexcept;
   [[nodiscard]] std::string const& stderr_tail() const noexcept;
   [[nodiscard]] bool stderr_truncated() const noexcept;
 
-  [[nodiscard]] ava::core::Result<std::vector<McpToolDescription>> list_tools(
-      CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::Result<McpToolCallResult> call_tool(std::string_view tool_name,
-                                                               std::string_view arguments_json,
+  [[nodiscard]] ava::core::Result<std::vector<McpToolDescription>> list_tools(CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Result<McpToolCallResult> call_tool(std::string_view tool_name, std::string_view arguments_json,
                                                                CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::Result<std::vector<McpPromptDescription>> list_prompts(
-      CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::Result<McpPromptGetResult> get_prompt(std::string_view prompt_name,
-                                                                  std::string_view arguments_json,
-                                                                  CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::Result<std::vector<McpResourceDescription>> list_resources(
-      CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::Result<McpResourceReadResult> read_resource(std::string_view uri,
-                                                                       CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Result<std::vector<McpPromptDescription>> list_prompts(CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Result<McpPromptGetResult> get_prompt(std::string_view prompt_name, std::string_view arguments_json,
+                                                                 CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Result<std::vector<McpResourceDescription>> list_resources(CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Result<McpResourceReadResult> read_resource(std::string_view uri, CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult shutdown(std::chrono::milliseconds grace = std::chrono::milliseconds(250));
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
-  struct JsonRpcResponse {
+  struct JsonRpcResponse
+  {
     std::string result_json;
     std::string raw_json;
 
@@ -140,24 +145,16 @@ class McpStdioClient final {
 
   [[nodiscard]] ava::core::VoidResult launch();
   [[nodiscard]] ava::core::VoidResult initialize(CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::Result<JsonRpcResponse> request(std::string_view method, std::string_view params_json,
-                                                           std::chrono::milliseconds timeout,
-                                                           std::string_view timeout_message,
-                                                           CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::VoidResult write_message(std::string_view message,
-                                                    std::chrono::steady_clock::time_point deadline,
-                                                    std::chrono::milliseconds timeout, std::string_view timeout_message,
-                                                    CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::Result<std::string> read_message(std::chrono::steady_clock::time_point deadline,
-                                                            std::chrono::milliseconds timeout,
-                                                            std::string_view timeout_message,
-                                                            std::string_view closed_message,
+  [[nodiscard]] ava::core::Result<JsonRpcResponse> request(std::string_view method, std::string_view params_json, std::chrono::milliseconds timeout,
+                                                           std::string_view timeout_message, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::VoidResult write_message(std::string_view message, std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
+                                                    std::string_view timeout_message, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Result<std::string> read_message(std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
+                                                            std::string_view timeout_message, std::string_view closed_message,
                                                             CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<std::optional<std::string>> try_extract_message();
-  [[nodiscard]] ava::core::VoidResult wait_for_writable(std::chrono::steady_clock::time_point deadline,
-                                                        std::chrono::milliseconds timeout,
-                                                        std::string_view timeout_message,
-                                                        CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::VoidResult wait_for_writable(std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
+                                                        std::string_view timeout_message, CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult drain_stdout();
   [[nodiscard]] ava::core::VoidResult drain_stderr();
   [[nodiscard]] ava::core::VoidResult reap_child();

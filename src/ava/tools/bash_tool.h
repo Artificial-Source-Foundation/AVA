@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
@@ -21,13 +22,14 @@ struct BashOptions
 
 struct BashResult
 {
-  int exit_code = -1;
+  std::int64_t exit_code = -1;
   bool timed_out = false;
   bool canceled = false;
   bool truncated = false;
   bool byte_limited = false;
   bool line_limited = false;
   bool spill_truncated = false;
+  bool totals_known = true;
   std::size_t total_bytes = 0;
   std::size_t output_bytes = 0;
   std::size_t total_lines = 0;

@@ -20,6 +20,8 @@ namespace {
 
 constexpr std::size_t max_model_config_bytes = 1024 * 1024;
 
+constexpr std::array<std::string_view, 8> kKnownReasoningLevels = {"off", "minimal", "low", "medium", "high", "xhigh", "enabled", "adaptive"};
+
 ava::core::Result<std::string> read_text(std::filesystem::path const& path)
 {
   std::error_code status_error;
@@ -86,6 +88,19 @@ std::string family_from_model_id(std::string_view model_id)
 bool is_number_delimiter(char ch)
 {
   return ch == ',' || ch == '}' || ch == ']' || std::isspace(static_cast<unsigned char>(ch)) != 0;
+}
+
+bool literal_value(std::string_view object, std::size_t start, std::string_view literal)
+{
+  if (object.substr(start, literal.size()) != literal)
+    return false;
+  auto const end = start + literal.size();
+  return end >= object.size() || is_number_delimiter(object[end]);
+}
+
+bool contains_string(std::vector<std::string> const& values, std::string_view value)
+{
+  return std::ranges::find(values, value) != values.end();
 }
 
 std::optional<long double> number_field(std::string_view object, std::string_view key)
@@ -281,6 +296,92 @@ std::optional<ModelPricing> model_pricing_from_item(std::string_view item)
   if (auto const object = ava::core::json::object_field(item, "pricing"))
     return pricing_from_object(*object);
   return pricing_from_object(item);
+}
+
+std::optional<std::size_t> json_string_value_end(std::string_view object, std::size_t start);
+std::optional<std::size_t> json_value_end(std::string_view object, std::size_t start);
+
+std::string json_string_literal_contents(std::string_view literal)
+{
+  std::string value;
+  if (literal.size() < 2 || literal.front() != '"' || literal.back() != '"')
+    return value;
+  bool escaped = false;
+  for (std::size_t index = 1; index + 1 < literal.size(); ++index)
+  {
+    char const ch = literal[index];
+    if (escaped)
+    {
+      value.push_back(ch);
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\')
+    {
+      escaped = true;
+      continue;
+    }
+    value.push_back(ch);
+  }
+  return value;
+}
+
+std::vector<ModelReasoningLevelMapping> reasoning_level_map_from_item(std::string_view item)
+{
+  auto object = ava::core::json::object_field(item, "reasoning_level_map");
+  if (!object)
+    object = ava::core::json::object_field(item, "thinking_level_map");
+  if (!object)
+    return {};
+
+  std::vector<ModelReasoningLevelMapping> mappings;
+  if (object->size() < 2 || object->front() != '{')
+    return mappings;
+
+  for (std::size_t index = 1; index < object->size();)
+  {
+    while (index < object->size() && (std::isspace(static_cast<unsigned char>((*object)[index])) != 0 || (*object)[index] == ',')) ++index;
+    if (index >= object->size() || (*object)[index] == '}')
+      break;
+    if ((*object)[index] != '"')
+      break;
+
+    auto const key_start = index;
+    auto const key_end = json_string_value_end(*object, key_start);
+    if (!key_end)
+      break;
+    auto const level = json_string_literal_contents(object->substr(key_start, *key_end - key_start));
+    index = *key_end;
+    while (index < object->size() && std::isspace(static_cast<unsigned char>((*object)[index])) != 0) ++index;
+    if (index >= object->size() || (*object)[index] != ':')
+      break;
+    ++index;
+    while (index < object->size() && std::isspace(static_cast<unsigned char>((*object)[index])) != 0) ++index;
+    auto const value_start = index;
+    auto const value_end = json_value_end(*object, value_start);
+    if (!value_end || value_start >= *value_end || level.empty())
+      break;
+
+    auto const value = object->substr(value_start, *value_end - value_start);
+    if (literal_value(*object, value_start, "null") || literal_value(*object, value_start, "false"))
+    {
+      mappings.push_back(ModelReasoningLevelMapping{.level = level, .provider_level = std::nullopt, .supported = false});
+    }
+    else if (literal_value(*object, value_start, "true"))
+    {
+      mappings.push_back(ModelReasoningLevelMapping{.level = level, .provider_level = std::nullopt, .supported = true});
+    }
+    else if (value.front() == '"' && value.back() == '"')
+    {
+      mappings.push_back(ModelReasoningLevelMapping{.level = level, .provider_level = json_string_literal_contents(value), .supported = true});
+    }
+    else
+    {
+      mappings.push_back(ModelReasoningLevelMapping{.level = level, .provider_level = std::nullopt, .supported = false});
+    }
+    index = *value_end;
+  }
+  return mappings;
 }
 
 std::string string_array_json(std::vector<std::string> const& values)
@@ -509,8 +610,7 @@ void erase_member(std::string& content, JsonMemberRange range)
   content.erase(erase_begin, erase_end - erase_begin);
 }
 
-ava::core::Result<std::string> update_scoped_model_cycle_json(std::string content,
-                                                              std::optional<std::vector<std::string>> const& scoped_model_cycle)
+ava::core::Result<std::string> update_scoped_model_cycle_json(std::string content, std::optional<std::vector<std::string>> const& scoped_model_cycle)
 {
   if (!ava::core::json::is_valid_object(content))
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model config is not a valid JSON object"));
@@ -639,6 +739,10 @@ ModelRegistry parse_model_registry(std::string_view content)
     {
       model.reasoning_format = *reasoning_format;
     }
+    if (has_any_field(item, {"reasoning_level_map", "thinking_level_map"}))
+    {
+      model.reasoning_level_mappings = reasoning_level_map_from_item(item);
+    }
     registry.models.push_back(std::move(model));
   }
   return registry;
@@ -654,8 +758,7 @@ ava::core::Result<ModelRegistry> load_model_registry(XdgPaths const& paths)
   return parse_model_registry(*content);
 }
 
-ava::core::VoidResult store_scoped_model_cycle(XdgPaths const& paths,
-                                               std::optional<std::vector<std::string>> scoped_model_cycle)
+ava::core::VoidResult store_scoped_model_cycle(XdgPaths const& paths, std::optional<std::vector<std::string>> scoped_model_cycle)
 {
   std::string content = "{}\n";
   if (std::filesystem::exists(paths.models_file))
@@ -714,6 +817,66 @@ ModelInfo select_default_model(ModelRegistry const& registry)
       .output_modalities = {},
       .reasoning_format = {},
   };
+}
+
+std::optional<ModelReasoningLevelMapping> find_reasoning_level_mapping(ModelInfo const& model, std::string_view level)
+{
+  for (auto it = model.reasoning_level_mappings.rbegin(); it != model.reasoning_level_mappings.rend(); ++it)
+  {
+    if (std::string_view(it->level) == level)
+      return *it;
+  }
+  return std::nullopt;
+}
+
+ModelReasoningLevelResolution resolve_reasoning_level(ModelInfo const& model, std::string_view level)
+{
+  ModelReasoningLevelResolution resolution{.level = std::string(level), .supported = false, .provider_level = std::nullopt, .explicit_mapping = false};
+  if (level.empty())
+    return resolution;
+
+  if (auto mapping = find_reasoning_level_mapping(model, level))
+  {
+    resolution.supported = mapping->supported;
+    resolution.provider_level = mapping->supported ? mapping->provider_level : std::nullopt;
+    resolution.explicit_mapping = true;
+    return resolution;
+  }
+
+  if (level == "off")
+  {
+    resolution.supported = true;
+    return resolution;
+  }
+
+  if (!model.supports_reasoning.value_or(false))
+  {
+    return resolution;
+  }
+
+  if (contains_string(model.reasoning_levels, level))
+  {
+    resolution.supported = true;
+    resolution.provider_level = std::string(level);
+  }
+  return resolution;
+}
+
+std::vector<std::string> supported_reasoning_levels(ModelInfo const& model)
+{
+  std::vector<std::string> levels;
+  auto append_if_supported = [&levels, &model](std::string_view level) {
+    auto const resolved = resolve_reasoning_level(model, level);
+    if (!resolved.supported || contains_string(levels, resolved.level))
+      return;
+    levels.push_back(resolved.level);
+  };
+
+  for (auto const level : kKnownReasoningLevels) append_if_supported(level);
+  for (auto const& mapping : model.reasoning_level_mappings) append_if_supported(mapping.level);
+  for (auto const& level : model.reasoning_levels) append_if_supported(level);
+
+  return levels;
 }
 
 std::optional<long double> usage_cost_usd(ModelPricing const& pricing, ava::provider::TokenUsage const& usage)

@@ -4,6 +4,7 @@
 
 #include "ava/permissions/permission_rules.h"
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -197,6 +198,64 @@ void test_permission_rule_matches_command_operations_without_path_targets()
          "persistent permission rules match command operations by exact command/tool without a path target");
 }
 
+void test_repository_build_test_persistent_allows_are_rejected_but_denies_win()
+{
+  auto const root = temp_root() / "permission-rules-build-test";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+
+  for (auto const& command : std::array{"ctest --test-dir build", "cmake --build=build", "cmake --build-and-test source build --build-generator Ninja",
+                                        "cmake --workflow --preset=ci", "/usr/bin/ctest --test-dir build", "/usr/bin/cmake --build build"})
+  {
+    auto const prompt = command_prompt(store, command);
+    auto persistent_allow =
+        ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                      .action = ava::permissions::PermissionAction::Allow,
+                                                                                                      .operation = ava::permissions::Operation::RunCommand,
+                                                                                                      .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                      .tool_name = "bash",
+                                                                                                      .target_path = {},
+                                                                                                      .command = prompt.command,
+                                                                                                      .reason = "never persist build test approval",
+                                                                                                      .actor = "test"});
+    expect(!persistent_allow && persistent_allow.error().category() == ava::core::ErrorCategory::InvalidArgument,
+           "persistent rules reject repository build/test allow command shapes");
+
+    ava::permissions::PersistentPermissionRule const legacy_allow{.rule_id = "permrule_legacy_build_test",
+                                                                  .scope = ava::permissions::PermissionRuleScope::Global,
+                                                                  .workspace_dir = {},
+                                                                  .action = ava::permissions::PermissionAction::Allow,
+                                                                  .operation = ava::permissions::Operation::RunCommand,
+                                                                  .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                  .tool_name = "bash",
+                                                                  .target_path = {},
+                                                                  .command = prompt.command,
+                                                                  .reason = "legacy repository test allow",
+                                                                  .actor = "test",
+                                                                  .created_at = "2026-07-11T00:00:00Z"};
+    write_file_with_mode(store.global_rules_file,
+                         std::string("{\"schema_version\":1,\"rules\":[") + ava::permissions::permission_rule_json(legacy_allow) + "]}", S_IRUSR | S_IWUSR);
+    auto legacy_match = ava::permissions::match_persistent_permission_rule(store, prompt);
+    expect(legacy_match && !*legacy_match, "legacy persistent repository build/test allows are ignored rather than auto-executed");
+  }
+
+  auto const prompt = command_prompt(store, "ctest --test-dir build");
+  auto persistent_deny =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Deny,
+                                                                                                    .operation = ava::permissions::Operation::RunCommand,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "bash",
+                                                                                                    .target_path = {},
+                                                                                                    .command = prompt.command,
+                                                                                                    .reason = "deny repository test",
+                                                                                                    .actor = "test"});
+  auto matched = ava::permissions::match_persistent_permission_rule(store, prompt);
+  expect(persistent_deny && matched && *matched && (*matched)->action == ava::permissions::PermissionAction::Deny,
+         "persistent deny rules continue to override repository build and test approvals");
+}
+
 void test_permission_rule_storage_fail_closed()
 {
   auto const root = temp_root() / "permission-rules-corrupt";
@@ -378,6 +437,7 @@ void run_permission_rules_tests()
   test_permission_rule_precedence_denies_win();
   test_permission_rule_precedence_prefers_specific_same_scope_rules();
   test_permission_rule_matches_command_operations_without_path_targets();
+  test_repository_build_test_persistent_allows_are_rejected_but_denies_win();
   test_permission_rule_storage_fail_closed();
   test_permission_rule_broad_permissions_rejected();
   test_permission_rule_workspace_legacy_path_is_not_enforceable();

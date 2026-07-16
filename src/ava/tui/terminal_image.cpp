@@ -39,6 +39,12 @@ bool env_present(char const* name)
   return value != nullptr && value[0] != '\0';
 }
 
+bool env_flag_enabled(char const* name)
+{
+  auto const value = env_value(name);
+  return value == "1" || value == "true" || value == "yes" || value == "on" || value == "enabled";
+}
+
 bool starts_with(std::string_view text, std::string_view prefix)
 {
   return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
@@ -47,6 +53,14 @@ bool starts_with(std::string_view text, std::string_view prefix)
 bool true_color_hint(std::string_view color_term)
 {
   return color_term == "truecolor" || color_term == "24bit";
+}
+
+std::string tmux_text_fallback_detail(bool hyperlinks)
+{
+  if (hyperlinks) {
+    return "image protocols disabled under tmux; OSC 8 hyperlinks enabled by explicit tmux forwarding hint";
+  }
+  return "image protocols disabled under tmux; set AVA_TUI_TMUX_HYPERLINKS=1 after configuring tmux hyperlinks to enable OSC 8";
 }
 
 TerminalImageCapabilities text_only(std::string detail, bool true_color = false, bool hyperlinks = false,
@@ -192,6 +206,7 @@ TerminalEnvironment current_terminal_environment()
                              .term = env_value("TERM"),
                              .color_term = env_value("COLORTERM"),
                              .tmux = env_present("TMUX"),
+                             .tmux_forwards_hyperlinks = env_flag_enabled("AVA_TUI_TMUX_HYPERLINKS"),
                              .kitty_window_id = env_present("KITTY_WINDOW_ID"),
                              .ghostty_resources_dir = env_present("GHOSTTY_RESOURCES_DIR"),
                              .wezterm_pane = env_present("WEZTERM_PANE"),
@@ -206,7 +221,8 @@ TerminalImageCapabilities detect_terminal_image_capabilities(TerminalEnvironment
 {
   auto const color_hint = true_color_hint(environment.color_term);
   if (environment.tmux || starts_with(environment.term, "tmux")) {
-    return text_only("image protocols disabled under tmux", color_hint, tmux_forwards_hyperlinks, "tmux");
+    auto const hyperlinks = tmux_forwards_hyperlinks || environment.tmux_forwards_hyperlinks;
+    return text_only(tmux_text_fallback_detail(hyperlinks), color_hint, hyperlinks, "tmux");
   }
   if (starts_with(environment.term, "screen")) {
     return text_only("image protocols disabled under screen", color_hint, false, "screen");

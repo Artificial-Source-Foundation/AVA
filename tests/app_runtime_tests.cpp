@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/observability/run_observer.h"
 #include "ava/app/clipboard_image.h"
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_palette.h"
@@ -28,6 +29,7 @@
 #include "ava/tui/keybindings.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/theme.h"
+#include "ava/plugin/enablement.h"
 #include "ava/config/auth.h"
 #include "ava/config/model_config.h"
 #include "ava/config/openai_oauth.h"
@@ -49,6 +51,7 @@
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <climits>
 #include <condition_variable>
@@ -67,6 +70,7 @@
 #include <utility>
 #include <vector>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -78,6 +82,28 @@ namespace {
 
 using namespace ava::tests;
 
+class RuntimeTraceClock final : public ava::observability::Clock
+{
+ public:
+  [[nodiscard]] std::int64_t now_ms() override { return next_.fetch_add(1, std::memory_order_relaxed); }
+
+ private:
+  std::atomic<std::int64_t> next_ = 1;
+};
+
+class RuntimeTraceCollector final : public ava::observability::RunObserver
+{
+ public:
+  void on_event(ava::observability::TraceEvent const& event) override
+  {
+    std::lock_guard lock(mutex);
+    events.push_back(event);
+  }
+
+  std::mutex mutex;
+  std::vector<ava::observability::TraceEvent> events;
+};
+
 std::string app_tiny_png_bytes()
 {
   std::string bytes;
@@ -86,6 +112,79 @@ std::string app_tiny_png_bytes()
   bytes.push_back(static_cast<char>(0x1A));
   bytes += "\nava-runtime-image";
   return bytes;
+}
+
+std::string shell_single_quoted(std::string_view value)
+{
+  std::string quoted = "'";
+  for (char const ch : value)
+  {
+    if (ch == '\'')
+      quoted += "'\\''";
+    else
+      quoted.push_back(ch);
+  }
+  quoted += "'";
+  return quoted;
+}
+
+std::string app_plugin_resource_manifest_json(std::string_view id, std::string_view name, std::filesystem::path const& marker_path,
+                                              std::string_view prompt_name, std::string_view prompt_description, std::string_view prompt_path,
+                                              std::string_view skill_name, std::string_view skill_description, std::string_view skill_path)
+{
+  return std::string("{\n") +
+         "  \"schema_version\": 1,\n"
+         "  \"id\": \"" +
+         ava::core::json::escape(id) +
+         "\",\n"
+         "  \"name\": \"" +
+         ava::core::json::escape(name) +
+         "\",\n"
+         "  \"version\": \"0.1.0\",\n"
+         "  \"api_version\": \"ava.plugin.v1\",\n"
+         "  \"description\": \"static resource autoload fixture\",\n"
+         "  \"entrypoint\": {\"command\": \"/bin/sh\", \"args\": [\"-c\", \"printf executed > " +
+         ava::core::json::escape(shell_single_quoted(marker_path.string())) +
+         "\"]},\n"
+         "  \"capabilities\": [],\n"
+         "  \"contributes\": {\n"
+         "    \"prompts\": [{\"name\": \"" +
+         ava::core::json::escape(prompt_name) + "\", \"description\": \"" + ava::core::json::escape(prompt_description) + "\", \"path\": \"" +
+         ava::core::json::escape(prompt_path) +
+         "\"}],\n"
+         "    \"skills\": [{\"name\": \"" +
+         ava::core::json::escape(skill_name) + "\", \"description\": \"" + ava::core::json::escape(skill_description) + "\", \"path\": \"" +
+         ava::core::json::escape(skill_path) +
+         "\"}]\n"
+         "  }\n"
+         "}";
+}
+
+std::string app_plugin_install_manifest_json(std::string_view id, std::string_view name, std::filesystem::path const& marker_path)
+{
+  return std::string("{\n") +
+         "  \"schema_version\": 1,\n"
+         "  \"id\": \"" +
+         ava::core::json::escape(id) +
+         "\",\n"
+         "  \"name\": \"" +
+         ava::core::json::escape(name) +
+         "\",\n"
+         "  \"version\": \"0.1.0\",\n"
+         "  \"api_version\": \"ava.plugin.v1\",\n"
+         "  \"description\": \"plugin install fixture\",\n"
+         "  \"entrypoint\": {\"command\": \"/bin/sh\", \"args\": [\"-c\", \"printf executed > " +
+         ava::core::json::escape(shell_single_quoted(marker_path.string())) +
+         "\"]},\n"
+         "  \"capabilities\": [\"tools\", \"commands\"],\n"
+         "  \"contributes\": {\n"
+         "    \"tools\": [{\"name\": \"todo_add\", \"description\": \"Add todo\", \"input_schema\": {\"type\": \"object\", "
+         "\"additionalProperties\": false}}],\n"
+         "    \"commands\": [{\"name\": \"status\", \"description\": \"Report install fixture status\"}],\n"
+         "    \"prompts\": [{\"name\": \"install-review\", \"description\": \"Review installed plugin\", \"path\": \"prompts/review.md\"}],\n"
+         "    \"skills\": [{\"name\": \"install-triage\", \"description\": \"Triage installed plugin\", \"path\": \"skills/triage.md\"}]\n"
+         "  }\n"
+         "}";
 }
 
 void test_command_classification()
@@ -106,10 +205,26 @@ void test_command_classification()
          "git diff output option is not auto-allowed");
   expect(ava::permissions::classify_command("git diff --no-index empty .ssh/work_key").action == ava::permissions::PermissionAction::Ask,
          "relative credential paths are not auto-allowed");
-  expect(ava::permissions::classify_command("cmake --build build").action == ava::permissions::PermissionAction::Allow,
-         "cmake build is allowed for non-TTY line shell verification");
-  expect(ava::permissions::classify_command("ctest --test-dir build").action == ava::permissions::PermissionAction::Allow,
-         "ctest is allowed for non-TTY line shell verification");
+  expect(ava::permissions::classify_command("cmake --build build").action == ava::permissions::PermissionAction::Ask,
+         "cmake build requires explicit approval because repository build rules can execute code");
+  expect(ava::permissions::classify_command("cmake --build build --target test").action == ava::permissions::PermissionAction::Ask,
+         "cmake build target variants cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("cmake --build=build").action == ava::permissions::PermissionAction::Ask,
+         "cmake equals-form build variants cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("/usr/bin/cmake --build build").action == ava::permissions::PermissionAction::Ask,
+         "path-qualified cmake builds cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("cmake --build-and-test source build --build-generator Ninja").action == ava::permissions::PermissionAction::Ask,
+         "cmake build-and-test variants cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("cmake --workflow --preset=ci").action == ava::permissions::PermissionAction::Ask,
+         "cmake workflow variants cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("ctest --test-dir build").action == ava::permissions::PermissionAction::Ask,
+         "ctest requires explicit approval because repository tests can execute code");
+  expect(ava::permissions::classify_command("ctest -S dashboard.cmake").action == ava::permissions::PermissionAction::Ask,
+         "ctest script variants cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("/usr/bin/ctest --test-dir build").action == ava::permissions::PermissionAction::Ask,
+         "path-qualified ctest cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("cmake -S . -B build").action == ava::permissions::PermissionAction::Ask,
+         "cmake configure remains an explicit-approval command");
   expect(ava::permissions::classify_command("rg hello src").action == ava::permissions::PermissionAction::Allow,
          "rg is allowed for non-TTY line shell inspection");
   expect(ava::permissions::classify_command("rg --pre ./filter hello src").action == ava::permissions::PermissionAction::Deny,
@@ -124,10 +239,36 @@ void test_command_classification()
   expect(ava::permissions::classify_command("cmake -E cat ~/.config/ava/auth.json").action == ava::permissions::PermissionAction::Deny,
          "cmake -E helper access is denied");
   expect(ava::permissions::classify_command("cmake -P docs/plan.md").action == ava::permissions::PermissionAction::Deny, "cmake -P script execution is denied");
+  expect(ava::permissions::classify_command("cmake --workflow -P docs/plan.md").action == ava::permissions::PermissionAction::Deny,
+         "cmake workflow recognition does not override script execution denial");
   expect(ava::permissions::classify_command("cmake -E copy docs/plan.md src/new.cpp").action == ava::permissions::PermissionAction::Deny,
          "cmake -E copy mutation is denied");
   expect(ava::permissions::classify_command("python3 scripts/run.py").action == ava::permissions::PermissionAction::Deny, "interpreters are denied");
   expect(ava::permissions::classify_command("bash -lc ls").action == ava::permissions::PermissionAction::Deny, "shell interpreters remain denied");
+}
+
+void test_repository_build_test_headless_decision_matrix()
+{
+  ava::permissions::PermissionPrompt const prompt{.permission_request_id = "permreq_build_test",
+                                                  .operation = ava::permissions::Operation::RunCommand,
+                                                  .mode = ava::agent::Mode::Build,
+                                                  .workspace_dir = std::filesystem::current_path(),
+                                                  .target_path = {},
+                                                  .command = "ctest --test-dir build",
+                                                  .tool_name = "bash",
+                                                  .reason = "repository test execution requires explicit approval",
+                                                  .risk = ava::permissions::PermissionRisk::High};
+  auto headless = ava::app::build_headless_permission_resolver(ava::app::HeadlessPermissionPolicyOptions{});
+  auto const resolved = headless(prompt);
+  expect(resolved && *resolved == ava::permissions::PermissionResolution::Deny,
+         "headless mode fails closed for repository test execution that asks interactively");
+
+  auto build_prompt = prompt;
+  build_prompt.command = "cmake --build build";
+  build_prompt.reason = "repository build execution requires explicit approval";
+  auto const build_resolved = headless(build_prompt);
+  expect(build_resolved && *build_resolved == ava::permissions::PermissionResolution::Deny,
+         "headless mode fails closed for repository build execution that asks interactively");
 }
 
 void test_app_event_serialization()
@@ -213,6 +354,7 @@ void test_app_runtime_open_session_and_context_prompt()
   reopen_options.requested_session_id = session_id.substr(0, 12);
   reopen_options.mode = ava::agent::Mode::Plan;
   reopen_options.paths = paths;
+  session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release runtime before reopen"));
   auto reopened = ava::app::open_runtime_session(reopen_options);
   expect(reopened && !reopened->created && reopened->store.session_id() == session_id,
          "runtime session resolves requested session id prefixes without creating a new session");
@@ -422,6 +564,454 @@ void test_app_runtime_cli_prompt_overrides()
              session->system_prompt.find("cli append prompt two") != std::string::npos &&
              session->system_prompt.find("Implement changes directly") == std::string::npos,
          "mode reloads preserve cli system prompt overrides");
+}
+
+void test_app_runtime_project_trust_malformed_diagnostics()
+{
+  auto const root = temp_root() / "app-runtime-project-trust-malformed";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  write_app_test_file(ava::app::project_trust_file(paths), "{\"schema_version\":1,\"decisions\":[\n");
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime opens with malformed project trust file fail-closed");
+  if (!session)
+    return;
+
+  expect(session->project_trust.decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session->project_trust),
+         "malformed project trust file leaves project resources skipped");
+  expect(session->project_trust.diagnostic.find("malformed project trust file") != std::string::npos &&
+             session->project_trust.diagnostic.find(ava::app::project_trust_file(paths).string()) != std::string::npos,
+         "runtime records a path-specific project trust parse diagnostic");
+
+  auto status = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/trust status"});
+  expect(status && status->handled && !status->output.empty() && status->output[0].find("decision=unknown") != std::string::npos &&
+             status->output[0].find("project_resources=skipped") != std::string::npos &&
+             status->output[0].find("diagnostic=invalid_argument: malformed project trust file") != std::string::npos,
+         "/trust status surfaces malformed trust-file diagnostics");
+
+  auto trusted = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/trust project"});
+  expect(trusted && trusted->handled && !trusted->output.empty() && trusted->output[0].find("project_resources=enabled") != std::string::npos &&
+             trusted->output[0].find("diagnostic=") == std::string::npos && session->project_trust.decision == ava::app::ProjectTrustDecision::Trusted,
+         "/trust project repairs a malformed trust file without retaining stale diagnostics");
+
+  write_app_test_file(ava::app::project_trust_file(paths), "{\"decisions\":\"not an array\"}\n");
+  auto reloaded = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/reload trust"});
+  expect(reloaded && reloaded->handled && !reloaded->output.empty() && reloaded->output[0].find("trust: loaded") != std::string::npos &&
+             reloaded->output[0].find("decision: unknown") != std::string::npos &&
+             reloaded->output[0].find("project_resources: skipped") != std::string::npos &&
+             reloaded->output[0].find("diagnostic: invalid_argument: malformed project trust file") != std::string::npos &&
+             session->project_trust.decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session->project_trust),
+         "/reload trust surfaces malformed trust diagnostics and keeps project resources fail-closed");
+}
+
+void test_app_runtime_enabled_plugin_resources_autoload()
+{
+  auto const root = temp_root() / "app-runtime-plugin-resource-autoload";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  auto const marker = root / "plugin-entrypoint-executed";
+  std::filesystem::create_directories(workspace);
+
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), trusted ? "plugin resource autoload test trusts project resources"
+                                      : "plugin resource autoload test trusts project resources: " + trusted.error().format());
+
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.autoload" / "plugin.json",
+                      app_plugin_resource_manifest_json("com.example.autoload", "Autoload Plugin", marker, "review", "Enabled review prompt",
+                                                        "prompts/review.md", "plugin-triage", "Enabled plugin triage skill", "skills/plugin-triage.md"));
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.autoload" / "prompts" / "review.md", "Enabled plugin prompt autoload marker.\n");
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.autoload" / "skills" / "plugin-triage.md", "Enabled plugin skill body autoload marker.\n");
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.disabled" / "plugin.json",
+                      app_plugin_resource_manifest_json("com.example.disabled", "Disabled Plugin", marker, "disabled-review", "Disabled review prompt",
+                                                        "prompts/review.md", "disabled-triage", "Disabled plugin triage skill", "skills/disabled-triage.md"));
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.disabled" / "prompts" / "review.md", "Disabled plugin prompt must not load.\n");
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.disabled" / "skills" / "disabled-triage.md", "Disabled plugin skill must not load.\n");
+
+  auto enabled = ava::plugin::set_plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, "com.example.autoload", true,
+                                                 ava::plugin::PluginScope::Project);
+  expect(enabled.has_value(), enabled ? "plugin resource autoload test enables project plugin"
+                                      : "plugin resource autoload test enables project plugin: " + enabled.error().format());
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime opens with enabled plugin static resources");
+  if (!session)
+    return;
+
+  auto has_context_source = [&](std::string_view needle, ava::context::ContextSourceType source_type) {
+    return std::ranges::any_of(session->context_sources,
+                               [&](auto const& source) { return source.source_type == source_type && source.path.string().find(needle) != std::string::npos; });
+  };
+  auto has_freshness_source = [&](ava::app::runtime::FreshnessSourceKind kind, std::string_view source_id, std::string_view name) {
+    return std::ranges::any_of(session->freshness_sources,
+                               [&](auto const& source) { return source.kind == kind && source.source_id == source_id && source.name == name; });
+  };
+
+  expect(session->system_prompt.find("Enabled plugin prompt autoload marker") != std::string::npos &&
+             session->system_prompt.find("<name>plugin-triage</name>") != std::string::npos &&
+             session->system_prompt.find("Enabled plugin triage skill") != std::string::npos &&
+             session->system_prompt.find("<scope>plugin</scope>") != std::string::npos,
+         "enabled plugin prompt and skill resources appear in the runtime system prompt");
+  expect(session->system_prompt.find("Disabled plugin prompt must not load") == std::string::npos &&
+             session->system_prompt.find("disabled-triage") == std::string::npos &&
+             session->system_prompt.find("Disabled plugin triage skill") == std::string::npos,
+         "disabled plugin prompt and skill resources are not added to runtime context");
+  expect(has_context_source("com.example.autoload/prompts/review.md", ava::context::ContextSourceType::Plugin) &&
+             !has_context_source("com.example.disabled/prompts/review.md", ava::context::ContextSourceType::Plugin),
+         "enabled plugin prompt resource is tracked as a plugin context source while disabled resources are skipped");
+  expect(has_freshness_source(ava::app::runtime::FreshnessSourceKind::PluginPrompt, "com.example.autoload", "review") &&
+             has_freshness_source(ava::app::runtime::FreshnessSourceKind::PluginSkill, "com.example.autoload", "plugin-triage") &&
+             !has_freshness_source(ava::app::runtime::FreshnessSourceKind::PluginPrompt, "com.example.disabled", "disabled-review") &&
+             !has_freshness_source(ava::app::runtime::FreshnessSourceKind::PluginSkill, "com.example.disabled", "disabled-triage"),
+         "runtime freshness records enabled plugin resources without loading disabled resources");
+
+  std::vector<ava::permissions::Operation> operations;
+  auto allow = [&operations](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    operations.push_back(prompt.operation);
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto skill_command = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/skill:plugin-triage", .permission_resolver = allow});
+  expect(skill_command && skill_command->handled && skill_command->prompt_message &&
+             skill_command->prompt_message->find("<skill_content name=\"plugin-triage\">") != std::string::npos &&
+             skill_command->prompt_message->find("Enabled plugin skill body autoload marker") != std::string::npos,
+         "enabled plugin static skill is loadable through slash skill commands");
+
+  ava::tools::ToolContext tool_context;
+  tool_context.workspace_dir = workspace;
+  tool_context.plugin_global_plugins_dir = paths.ava_config_dir / "plugins";
+  tool_context.plugin_project_plugins_dir = workspace / ".ava" / "plugins";
+  tool_context.plugin_enablement_file = paths.ava_state_dir / "plugin-enablement.json";
+  tool_context.include_project_plugins = true;
+  tool_context.include_project_skills = true;
+  tool_context.permission_resolver = allow;
+  ava::agent::ToolDispatcher dispatcher(tool_context);
+  auto tool_skill =
+      dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_plugin_skill", .name = "skill", .arguments_json = "{\"name\":\"plugin-triage\"}"});
+  expect(tool_skill && tool_skill->success && tool_skill->result_text.find("Enabled plugin skill body autoload marker") != std::string::npos,
+         "enabled plugin static skill is loadable through the provider skill tool");
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+                                           .status_code = 200,
+                                           .headers = {},
+                                           .body = "data: {\"type\":\"response.function_call.added\",\"item_id\":"
+                                                   "\"call_plugin_skill_runtime\",\"name\":\"skill\"}\n\n"
+                                                   "data: {\"type\":\"response.function_call_arguments.delta\","
+                                                   "\"item_id\":\"call_plugin_skill_runtime\",\"delta\":\"{\\\"name\\\":"
+                                                   "\\\"plugin-triage\\\"}\"}\n\n"
+                                                   "data: [DONE]\n\n",
+                                       },
+                                       ava::provider::HttpResponse{
+                                           .status_code = 200,
+                                           .headers = {},
+                                           .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":"
+                                                   "\"plugin skill done\"}\n\n"
+                                                   "data: [DONE]\n\n",
+                                       }});
+  std::vector<ava::app::runtime::Event> events;
+  ava::app::runtime::RunOptions run_options;
+  run_options.access_token = "token";
+  run_options.permission_resolver = allow;
+  run_options.event_sink = [&events](ava::app::runtime::Event const& event) {
+    events.push_back(event);
+    return ava::core::VoidResult{};
+  };
+  auto run = ava::app::run_prompt(*session, "load the plugin skill", provider, transport, run_options);
+  expect(run && run->final_text == "plugin skill done" &&
+             std::ranges::any_of(events,
+                                 [](ava::app::runtime::Event const& event) {
+                                   return event.type == ava::app::runtime::EventType::ToolResult && event.tool_name == "skill" &&
+                                          event.tool_result_json.find("Enabled plugin skill body autoload marker") != std::string::npos;
+                                 }),
+         "runtime agent loop loads enabled plugin static skills from the session plugin paths");
+  expect(std::ranges::find(operations, ava::permissions::Operation::SkillLoad) != operations.end(), "plugin static skill loading remains permission-gated");
+  expect(!std::filesystem::exists(marker), "static plugin resource autoload does not execute plugin entrypoints");
+}
+
+void test_app_runtime_project_plugin_resources_follow_trust_gate()
+{
+  auto const root = temp_root() / "app-runtime-plugin-resource-trust-gate";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  auto const global_marker = root / "global-plugin-entrypoint-executed";
+  auto const project_marker = root / "project-plugin-entrypoint-executed";
+  std::filesystem::create_directories(workspace);
+
+  write_app_test_file(
+      paths.ava_config_dir / "plugins" / "com.example.globalautoload" / "plugin.json",
+      app_plugin_resource_manifest_json("com.example.globalautoload", "Global Autoload Plugin", global_marker, "global-review", "Global review prompt",
+                                        "prompts/review.md", "global-triage", "Global plugin triage skill", "skills/global-triage.md"));
+  write_app_test_file(paths.ava_config_dir / "plugins" / "com.example.globalautoload" / "prompts" / "review.md",
+                      "Global enabled plugin prompt loads while project is untrusted.\n");
+  write_app_test_file(paths.ava_config_dir / "plugins" / "com.example.globalautoload" / "skills" / "global-triage.md", "Global enabled plugin skill body.\n");
+  write_app_test_file(
+      workspace / ".ava" / "plugins" / "com.example.projectautoload" / "plugin.json",
+      app_plugin_resource_manifest_json("com.example.projectautoload", "Project Autoload Plugin", project_marker, "project-review", "Project review prompt",
+                                        "prompts/review.md", "project-triage", "Project plugin triage skill", "skills/project-triage.md"));
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.projectautoload" / "prompts" / "review.md",
+                      "Project enabled plugin prompt must stay gated while untrusted.\n");
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.projectautoload" / "skills" / "project-triage.md",
+                      "Project enabled plugin skill body must stay gated.\n");
+
+  auto global_enabled = ava::plugin::set_plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, "com.example.globalautoload", true,
+                                                        ava::plugin::PluginScope::Global);
+  auto project_enabled = ava::plugin::set_plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, "com.example.projectautoload", true,
+                                                         ava::plugin::PluginScope::Project);
+  expect(global_enabled.has_value() && project_enabled.has_value(), "plugin resource trust-gate test enables global and project plugins");
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime opens with untrusted project plugin resources skipped");
+  if (!session)
+    return;
+
+  auto has_freshness_source = [&](ava::app::runtime::FreshnessSourceKind kind, std::string_view source_id, std::string_view name) {
+    return std::ranges::any_of(session->freshness_sources,
+                               [&](auto const& source) { return source.kind == kind && source.source_id == source_id && source.name == name; });
+  };
+
+  expect(session->project_trust.decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session->project_trust),
+         "project plugin resource trust-gate test starts with project resources excluded");
+  expect(session->system_prompt.find("Global enabled plugin prompt loads") != std::string::npos &&
+             session->system_prompt.find("<name>global-triage</name>") != std::string::npos &&
+             session->system_prompt.find("Project enabled plugin prompt must stay gated") == std::string::npos &&
+             session->system_prompt.find("project-triage") == std::string::npos,
+         "global enabled plugin resources load normally while project plugin resources remain gated");
+  expect(has_freshness_source(ava::app::runtime::FreshnessSourceKind::PluginPrompt, "com.example.globalautoload", "global-review") &&
+             has_freshness_source(ava::app::runtime::FreshnessSourceKind::PluginSkill, "com.example.globalautoload", "global-triage") &&
+             !has_freshness_source(ava::app::runtime::FreshnessSourceKind::PluginPrompt, "com.example.projectautoload", "project-review") &&
+             !has_freshness_source(ava::app::runtime::FreshnessSourceKind::PluginSkill, "com.example.projectautoload", "project-triage"),
+         "project plugin prompt and skill freshness sources are skipped when project resources are excluded");
+  expect(!std::filesystem::exists(global_marker) && !std::filesystem::exists(project_marker),
+         "global and project static plugin resource autoload does not execute plugin entrypoints");
+}
+
+void test_app_runtime_enabled_plugin_resource_failures_are_context_visible()
+{
+  auto const root = temp_root() / "app-runtime-plugin-resource-failures";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  auto const marker = root / "plugin-entrypoint-executed";
+  auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.failedresources";
+  std::filesystem::create_directories(workspace);
+
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), trusted ? "plugin resource failure test trusts project resources"
+                                      : "plugin resource failure test trusts project resources: " + trusted.error().format());
+
+  write_app_test_file(plugin_dir / "plugin.json", app_plugin_resource_manifest_json("com.example.failedresources", "Failed Resource Plugin", marker,
+                                                                                    "missing-review", "Missing review prompt", "prompts/missing.md",
+                                                                                    "broken-skill", "Broken plugin skill", "skills/broken.md"));
+  write_app_test_file(root / "outside-skill.md", "Outside skill target must not load.\n");
+  std::error_code dir_error;
+  std::filesystem::create_directories(plugin_dir / "skills", dir_error);
+  expect(!dir_error, "plugin resource failure test creates skill directory");
+  std::error_code symlink_error;
+  std::filesystem::create_symlink(root / "outside-skill.md", plugin_dir / "skills" / "broken.md", symlink_error);
+  expect(!symlink_error, "plugin resource failure test creates symlink skill fixture");
+  if (symlink_error)
+    return;
+
+  auto enabled = ava::plugin::set_plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, "com.example.failedresources", true,
+                                                 ava::plugin::PluginScope::Project);
+  expect(enabled.has_value(),
+         enabled ? "plugin resource failure test enables project plugin" : "plugin resource failure test enables project plugin: " + enabled.error().format());
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime opens with failed enabled plugin static resources tracked");
+  if (!session)
+    return;
+
+  auto missing_prompt = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context missing-review"});
+  expect(missing_prompt && missing_prompt->handled && !missing_prompt->output.empty() &&
+             missing_prompt->output[0].find("plugin_prompt  project  com.example.failedresources/missing-review") != std::string::npos &&
+             missing_prompt->output[0].find("status=missing") != std::string::npos,
+         "failed enabled plugin prompt resources remain visible in /context as missing");
+
+  auto broken_skill = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context broken-skill"});
+  expect(broken_skill && broken_skill->handled && !broken_skill->output.empty() &&
+             broken_skill->output[0].find("plugin_skill  project  com.example.failedresources/broken-skill") != std::string::npos &&
+             broken_skill->output[0].find("cause=symlink") != std::string::npos,
+         "failed enabled plugin skill resources remain visible in /context as symlink failures");
+  expect(session->system_prompt.find("Outside skill target must not load") == std::string::npos && !std::filesystem::exists(marker),
+         "failed plugin static resources do not load content or execute plugin entrypoints");
+}
+
+void test_app_runtime_plugin_install_remove_commands()
+{
+  auto const root = temp_root() / "app-runtime-plugin-install-remove";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  auto const marker = root / "installed-plugin-entrypoint-executed";
+  auto const source_plugin = root / "local-plugin-source";
+  auto const installed_plugin_dir = paths.ava_config_dir / "plugins" / "com.example.installed";
+  auto const stale_staging_dir = paths.ava_config_dir / "plugins" / "com.example.installed.installing-stale";
+  std::filesystem::create_directories(workspace);
+
+  write_app_test_file(source_plugin / "plugin.json", app_plugin_install_manifest_json("com.example.installed", "Installed Plugin", marker));
+  write_app_test_file(source_plugin / "prompts" / "review.md", "Installed plugin prompt content.\n");
+  write_app_test_file(source_plugin / "skills" / "triage.md", "Installed plugin skill content.\n");
+  write_app_test_file(stale_staging_dir / "plugin.json", app_plugin_install_manifest_json("com.example.installed", "Stale Installing Plugin", marker));
+  std::error_code source_permissions_error;
+  std::filesystem::permissions(source_plugin / "prompts" / "review.md",
+                               std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | std::filesystem::perms::owner_exec |
+                                   std::filesystem::perms::group_read | std::filesystem::perms::group_write | std::filesystem::perms::group_exec |
+                                   std::filesystem::perms::others_read | std::filesystem::perms::others_write | std::filesystem::perms::others_exec,
+                               std::filesystem::perm_options::replace, source_permissions_error);
+  expect(!source_permissions_error, "plugin install/remove command test widens source file permissions");
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "plugin install/remove command test opens runtime session");
+  if (!session)
+    return;
+
+  auto install = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins install " + source_plugin.generic_string()});
+  expect(install && install->handled && !install->output.empty() &&
+             install->output[0].find("Installed global plugin com.example.installed") != std::string::npos &&
+             install->output[0].find("status: disabled") != std::string::npos &&
+             install->output[0].find("no plugin process was started") != std::string::npos && std::filesystem::exists(installed_plugin_dir / "plugin.json") &&
+             !std::filesystem::exists(marker),
+         "plugin install ignores stale staging directories and copies a local directory without starting its entrypoint");
+  auto const installed_prompt_permissions = std::filesystem::status(installed_plugin_dir / "prompts" / "review.md").permissions();
+  expect((installed_prompt_permissions & (std::filesystem::perms::group_write | std::filesystem::perms::others_write | std::filesystem::perms::group_exec |
+                                          std::filesystem::perms::others_exec)) == std::filesystem::perms::none &&
+             (installed_prompt_permissions & std::filesystem::perms::owner_exec) != std::filesystem::perms::none,
+         "plugin install normalizes copied file permissions to owner-only while preserving owner execute when present");
+
+  auto plugins = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins list"});
+  expect(plugins && plugins->handled && !plugins->output.empty() && plugins->output[0].find("com.example.installed  disabled  global") != std::string::npos,
+         "installed plugin is discoverable and disabled by default");
+
+  auto prompt = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins prompt com.example.installed install-review"});
+  auto skill = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins skill com.example.installed install-triage"});
+  expect(prompt && prompt->handled && !prompt->output.empty() && prompt->output[0].find("Installed plugin prompt content") != std::string::npos && skill &&
+             skill->handled && !skill->output.empty() && skill->output[0].find("Installed plugin skill content") != std::string::npos,
+         "installed plugin static resources are readable from the installed copy before enablement");
+
+  auto enable = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins enable com.example.installed"});
+  expect(enable && enable->handled && !enable->output.empty() && enable->output[0].find("Enabled global plugin com.example.installed") != std::string::npos,
+         "installed global plugin can be enabled after install");
+
+  auto const slash_items = ava::app::command_catalog_slash_items(*session);
+  auto find_slash_item = [&slash_items](std::string_view command) -> ava::tui::SlashCommandItem const* {
+    for (auto const& item : slash_items)
+    {
+      if (item.command == command)
+        return &item;
+    }
+    return nullptr;
+  };
+  auto has_completion = [](ava::tui::SlashCommandItem const* item, std::size_t argument_index, std::string_view value,
+                           std::vector<std::string> previous_args = {}) {
+    return item != nullptr && std::ranges::any_of(item->argument_completions, [&](auto const& completion) {
+             return completion.argument_index == argument_index && completion.value == value && completion.required_previous_args == previous_args;
+           });
+  };
+  auto const* plugin_item = find_slash_item("/plugin");
+  expect(has_completion(plugin_item, 1, "com.example.installed", {"run"}) && has_completion(plugin_item, 2, "status", {"run", "com.example.installed"}) &&
+             !std::filesystem::exists(marker),
+         "enabled installed plugin contributes command completions without executing the plugin process");
+
+  auto remove_enabled = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins remove com.example.installed"});
+  expect(remove_enabled && remove_enabled->handled && !remove_enabled->output.empty() &&
+             remove_enabled->output[0].find("disable plugin before removing") != std::string::npos && std::filesystem::exists(installed_plugin_dir),
+         "plugin remove rejects enabled plugins and keeps the installed directory");
+
+  auto disable = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins disable com.example.installed"});
+  auto remove = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins remove com.example.installed"});
+  expect(disable && disable->handled && remove && remove->handled && !remove->output.empty() &&
+             remove->output[0].find("Removed global plugin com.example.installed") != std::string::npos && !std::filesystem::exists(installed_plugin_dir) &&
+             !std::filesystem::exists(marker),
+         "disabled installed global plugin can be removed without executing or stopping plugin processes");
+
+  auto plugins_after_remove = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins list"});
+  expect(plugins_after_remove && plugins_after_remove->handled && !plugins_after_remove->output.empty() &&
+             plugins_after_remove->output[0].find("com.example.installed") == std::string::npos && std::filesystem::exists(stale_staging_dir),
+         "removed plugin no longer appears in plugin discovery and stale install staging dirs remain ignored");
+
+  auto const symlink_source = root / "symlink-plugin-source";
+  auto const symlink_marker = root / "symlink-plugin-entrypoint-executed";
+  write_app_test_file(symlink_source / "plugin.json", app_plugin_install_manifest_json("com.example.symlinkinstall", "Symlink Install Plugin", symlink_marker));
+  write_app_test_file(symlink_source / "prompts" / "review.md", "Symlink plugin prompt content.\n");
+  write_app_test_file(symlink_source / "skills" / "triage.md", "Symlink plugin skill content.\n");
+  write_app_test_file(root / "external.txt", "external target must not copy\n");
+  std::error_code symlink_error;
+  std::filesystem::create_symlink(root / "external.txt", symlink_source / "linked.txt", symlink_error);
+  expect(!symlink_error, "plugin install/remove command test creates a symlink package fixture");
+  if (!symlink_error)
+  {
+    auto symlink_install = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins install " + symlink_source.generic_string()});
+    expect(symlink_install && symlink_install->handled && !symlink_install->output.empty() &&
+               symlink_install->output[0].find("plugin install source must not contain symlinks") != std::string::npos &&
+               !std::filesystem::exists(paths.ava_config_dir / "plugins" / "com.example.symlinkinstall") && !std::filesystem::exists(symlink_marker),
+           "plugin install rejects symlinked package contents and cleans the staging directory");
+  }
+}
+
+void test_app_context_reports_lsp_config_load_errors()
+{
+  auto const root = temp_root() / "app-runtime-lsp-config-diagnostics";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  write_app_test_file(paths.ava_config_dir / "lsp.json", "{\"version\":1,\"servers\":[{\"id\":\"bad id\",\"argv\":[\"server\"]}]}\n");
+  write_app_test_file(workspace / ".ava" / "lsp.json", "{\"version\":1,\"servers\":[{\"id\":\"project\",\"argv\":[\"server\"],\"timeout_ms\":99}]}\n");
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), trusted ? "LSP context diagnostic test trusts project resources"
+                                      : "LSP context diagnostic test trusts project resources: " + trusted.error().format());
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime opens even when configured LSP provider would fail to load");
+  if (!session)
+    return;
+
+  auto context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context lsp"});
+  expect(context && context->handled && !context->output.empty() && context->output[0].find("lsp_status=error") != std::string::npos &&
+             context->output[0].find("lsp_configs=2") != std::string::npos && context->output[0].find("lsp_servers=0") != std::string::npos &&
+             context->output[0].find("lsp_errors=2") != std::string::npos && context->output[0].find("lsp_config  global") != std::string::npos &&
+             context->output[0].find((paths.ava_config_dir / "lsp.json").string()) != std::string::npos &&
+             context->output[0].find("LSP server id is invalid") != std::string::npos && context->output[0].find("lsp_config  project") != std::string::npos &&
+             context->output[0].find((workspace / ".ava" / "lsp.json").string()) != std::string::npos &&
+             context->output[0].find("LSP server timeout is outside supported limits") != std::string::npos,
+         "/context lsp surfaces global and trusted-project LSP config load errors without treating them as generic provider unavailability");
 }
 
 void test_app_run_prompt_emits_events()
@@ -685,6 +1275,95 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
                events[0].trigger == "provider_transport" && events[0].remaining_ms == 500 && events[0].delay_ms == 1000 && events[0].status == "streaming",
            "runtime retry options map provider countdown ticks to explicit backend retry_tick events");
   }
+}
+
+void test_app_run_prompt_observation_shares_context_across_compaction_and_retry()
+{
+  auto const root = temp_root() / "app-runtime-observation-context";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "observed runtime compaction test opens session");
+  if (!session)
+    return;
+  session->model.context_window_tokens = 100;
+  auto seeded = session->store.append({.id = "observed-old-context",
+                                       .parent_id = "",
+                                       .type = ava::session::EntryType::UserMessage,
+                                       .timestamp = ava::session::now_timestamp(),
+                                       .data_json = "{\"text\":\"" + std::string(420, 'x') + "\"}"});
+  expect(seeded.has_value(), "observed runtime compaction test seeds enough context to require a summary request");
+  if (!seeded)
+    return;
+
+  auto collector = std::make_shared<RuntimeTraceCollector>();
+  auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<RuntimeTraceClock>(),
+                                                                          std::make_shared<ava::observability::CounterIdGenerator>());
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {ava::provider::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "0"}}, .body = "{\"error\":{\"message\":\"rate limited\"}}"},
+       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"OBSERVED SUMMARY\"}"},
+       sse_response(final_text_sse("observed answer"))});
+  ava::app::runtime::RunOptions run_options;
+  run_options.access_token = "CANARY_RUNTIME_TOKEN";
+  run_options.enable_transport_retries = true;
+  run_options.observation = observation;
+
+  auto result = ava::app::run_prompt(*session, "continue observed run", provider, transport, run_options);
+  expect(result && result->final_text == "observed answer" && transport.requests().size() == 3,
+         "one scripted run_prompt performs a retried compaction summary then its agent request");
+  if (!result)
+    return;
+
+  std::vector<ava::observability::TraceEvent> trace_events;
+  {
+    std::lock_guard lock(collector->mutex);
+    trace_events = collector->events;
+  }
+  std::string run_id;
+  std::string turn_id;
+  unsigned logical_requests = 0;
+  unsigned attempt_results = 0;
+  bool retry = false;
+  bool terminal = false;
+  for (auto const& event : trace_events)
+  {
+    if (run_id.empty())
+    {
+      run_id = event.run_id;
+      turn_id = event.turn_id;
+    }
+    expect(!event.run_id.empty() && !event.turn_id.empty() && event.run_id == run_id && event.turn_id == turn_id,
+           "compaction, retries, attempts, and agent events share one runtime-generated run/turn context");
+    logical_requests += event.type == ava::observability::TraceEventType::TransportRequestResult;
+    attempt_results += event.type == ava::observability::TraceEventType::TransportAttemptResult;
+    retry = retry || event.type == ava::observability::TraceEventType::TransportRetry;
+    terminal = terminal || (event.type == ava::observability::TraceEventType::AgentRunTerminal && event.outcome == ava::observability::TraceOutcome::Completed);
+  }
+  expect(!run_id.empty() && logical_requests == 2 && attempt_results == 3 && retry && terminal,
+         "trace contains both logical requests, the summary retry attempts, retry record, and completed agent terminal");
+
+  std::ifstream session_file(session->store.session_path(), std::ios::binary);
+  std::string session_json((std::istreambuf_iterator<char>(session_file)), std::istreambuf_iterator<char>());
+  auto messages_json = ava::app::rpc::messages_result_json(*session);
+  auto prompt_json = ava::app::rpc::prompt_result_json(session->store.session_id(), *result);
+  auto state_json = ava::app::rpc::state_result_json(*session, false);
+  auto has_observer_fields = [](std::string_view json) {
+    return json.find("agent.run_start") != std::string_view::npos || json.find("transport.attempt_result") != std::string_view::npos ||
+           json.find("\"sequence\":") != std::string_view::npos || json.find("\"timestamp_ms\":") != std::string_view::npos ||
+           json.find("\"run_id\":") != std::string_view::npos || json.find("CANARY_RUNTIME_TOKEN") != std::string_view::npos;
+  };
+  expect(messages_json && !has_observer_fields(session_json) && !has_observer_fields(*messages_json) && !has_observer_fields(prompt_json) &&
+             !has_observer_fields(state_json),
+         "observer-only fields and canaries never enter authoritative session or RPC JSON");
 }
 
 void test_app_run_prompt_emits_tool_progress_and_session_spill()
@@ -1533,21 +2212,21 @@ void test_app_command_dispatcher()
              context->output[0].find("mode=plan") != std::string::npos && context->output[0].find("model=openai/gpt-5.5") != std::string::npos &&
              context->output[0].find("prompt=override") != std::string::npos && context->output[0].find("plan.txt") != std::string::npos &&
              context->output[0].find("context_sources=1") != std::string::npos && context->output[0].find("prompt_commands=1") != std::string::npos &&
-             context->output[0].find("skills=") != std::string::npos && context->output[0].find("plugin_sources=4") != std::string::npos &&
+             context->output[0].find("skills=") != std::string::npos && context->output[0].find("plugin_sources=2") != std::string::npos &&
              context->output[0].find("workspace") != std::string::npos && context->output[0].find("AGENTS.md") != std::string::npos &&
              context->output[0].find("prompt_command  project  prompt-check") != std::string::npos &&
              context->output[0].find("skill  project  dispatcher-skill") != std::string::npos &&
              context->output[0].find("plugin_manifest  project  com.example.project/manifest") != std::string::npos &&
-             context->output[0].find("plugin_prompt  project  com.example.project/review") != std::string::npos &&
-             context->output[0].find("plugin_skill  project  com.example.project/triage") != std::string::npos &&
+             context->output[0].find("plugin_prompt  project  com.example.project/review") == std::string::npos &&
+             context->output[0].find("plugin_skill  project  com.example.project/triage") == std::string::npos &&
              context->output[0].find("loaded_bytes=") != std::string::npos && context->output[0].find("status=changed") != std::string::npos &&
              context->output[0].find("current_bytes=") != std::string::npos,
-         "command dispatcher /context reports context freshness metadata");
+         "command dispatcher /context reports context freshness metadata without loading disabled plugin resources");
   auto prompt_context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context prompt"});
   expect(prompt_context && prompt_context->handled && !prompt_context->output.empty() &&
              prompt_context->output[0].find("prompt=override") != std::string::npos && prompt_context->output[0].find("plan.txt") != std::string::npos &&
              prompt_context->output[0].find("prompt_command  project  prompt-check") != std::string::npos &&
-             prompt_context->output[0].find("plugin_prompt  project  com.example.project/review") != std::string::npos &&
+             prompt_context->output[0].find("plugin_prompt  project  com.example.project/review") == std::string::npos &&
              prompt_context->output[0].find("AGENTS.md") == std::string::npos,
          "command dispatcher /context can filter to prompt freshness metadata");
   auto prompt_command_context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context prompt-check"});
@@ -1563,10 +2242,8 @@ void test_app_command_dispatcher()
          "command dispatcher /context can filter to loaded skill freshness metadata");
   auto plugin_prompt_context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context review"});
   expect(plugin_prompt_context && plugin_prompt_context->handled && !plugin_prompt_context->output.empty() &&
-             plugin_prompt_context->output[0].find("plugin_prompt  project  com.example.project/review") != std::string::npos &&
-             plugin_prompt_context->output[0].find("status=changed") != std::string::npos &&
-             plugin_prompt_context->output[0].find("AGENTS.md") == std::string::npos,
-         "command dispatcher /context can filter to plugin prompt resource freshness metadata");
+             plugin_prompt_context->output[0].find("No context sources matching: review") != std::string::npos,
+         "command dispatcher /context does not report disabled plugin prompt resources loaded before plugin enablement");
   auto filtered_context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context AGENTS"});
   expect(filtered_context && filtered_context->handled && !filtered_context->output.empty() &&
              filtered_context->output[0].find("Context freshness:") != std::string::npos &&
@@ -2129,6 +2806,28 @@ void test_app_command_dispatcher()
   expect(malformed_import && malformed_import->handled && !malformed_import->output.empty() &&
              malformed_import->output[0].find("malformed session entry") != std::string::npos && session->store.session_id() == pre_failed_import_session_id,
          "command dispatcher /import surfaces malformed JSONL parse errors without switching sessions");
+  auto const pi_import_path = workspace / "pi-import.jsonl";
+  write_app_test_file(pi_import_path,
+                      "{\"type\":\"session\",\"version\":3,\"id\":\"d703a1a9-1b7b-4fb1-b512-c9738b1fe617\","
+                      "\"timestamp\":\"2025-11-20T23:33:50.805Z\",\"cwd\":\"/tmp/pi-project\"}\n"
+                      "{\"type\":\"message\",\"id\":\"a1b2c3d4\",\"parentId\":null,"
+                      "\"timestamp\":\"2025-11-20T23:33:51.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Hello\"}}\n");
+  auto pi_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import pi-import.jsonl --confirm"});
+  expect(pi_import && pi_import->handled && !pi_import->output.empty() &&
+             pi_import->output[0].find("Pi session import is not supported yet") != std::string::npos &&
+             pi_import->output[0].find("session entry data must be a JSON object") == std::string::npos &&
+             session->store.session_id() == pre_failed_import_session_id,
+         "command dispatcher /import rejects Pi JSONL with a specific unsupported-format error");
+  auto const pi_legacy_import_path = workspace / "pi-legacy-import.jsonl";
+  write_app_test_file(pi_legacy_import_path,
+                      "{\"type\":\"session\",\"id\":\"legacy-pi-session\",\"timestamp\":\"2025-11-20T23:33:50.805Z\","
+                      "\"cwd\":\"/tmp/pi-project\",\"provider\":\"anthropic\",\"modelId\":\"claude-sonnet-4-5\"}\n");
+  auto pi_legacy_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import pi-legacy-import.jsonl --confirm"});
+  expect(pi_legacy_import && pi_legacy_import->handled && !pi_legacy_import->output.empty() &&
+             pi_legacy_import->output[0].find("Pi session import is not supported yet") != std::string::npos &&
+             pi_legacy_import->output[0].find("session entry data must be a JSON object") == std::string::npos &&
+             session->store.session_id() == pre_failed_import_session_id,
+         "command dispatcher /import rejects legacy Pi JSONL headers with the same specific unsupported-format error");
   auto const future_import_path = workspace / "future-import.jsonl";
   write_app_test_file(future_import_path,
                       "{\"version\":99,\"id\":\"entry_future_start\",\"parent_id\":\"\",\"type\":\"session_start\","
@@ -2196,6 +2895,95 @@ void test_app_command_dispatcher()
 
   auto quit = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/quit"});
   expect(quit && quit->handled && quit->quit, "command dispatcher /quit requests shell exit");
+}
+
+void test_app_session_jsonl_import_export_attachment_caveat()
+{
+  auto const root = temp_root() / "app-session-jsonl-attachment-caveat";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "JSONL attachment caveat test opens runtime session");
+  if (!session)
+    return;
+
+  auto const attachment_json = std::string(R"({"id":"img_import_missing","type":"image","mime_type":"image/png","byte_size":12,)"
+                                           R"("sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                           R"("storage_path":"attachments/img_import_missing.png"})");
+  auto const redacted_attachment_json = std::string(R"({"id":"img_import_redacted","type":"image","mime_type":"image/png","byte_size":12,)"
+                                                    R"("sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                                    R"("storage_path":"attachments/img_import_redacted.png","redacted":true})");
+
+  auto const attached_entry = ava::session::SessionEntry{.id = "entry_jsonl_attachment_user",
+                                                         .parent_id = "",
+                                                         .type = ava::session::EntryType::UserMessage,
+                                                         .timestamp = "2026-05-02T00:00:01Z",
+                                                         .data_json = "{\"text\":\"see attached\",\"attachments\":[" + attachment_json + "]}"};
+  auto appended = session->store.append(attached_entry);
+  expect(appended.has_value(), "JSONL attachment caveat test seeds non-redacted image attachment metadata");
+
+  auto exported = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export jsonl attachment-export.jsonl"});
+  expect(exported && exported->handled && !exported->output.empty() &&
+             exported->output[0].find("note: raw JSONL exports include 1 image attachment") != std::string::npos &&
+             exported->output[0].find("not the attachment files") != std::string::npos && exported->tool_timeline.size() == 2 &&
+             exported->tool_timeline[1].structured_result_json.find("\"attachment_files_included\":false") != std::string::npos &&
+             exported->tool_timeline[1].structured_result_json.find("\"non_redacted_image_attachment_metadata_count\":1") != std::string::npos,
+         "command dispatcher /export jsonl warns when attachment files are not bundled");
+
+  auto write_import_entries = [](std::filesystem::path const& path, std::vector<ava::session::SessionEntry> const& entries) {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    for (auto const& entry : entries)
+    {
+      auto line = ava::session::serialize_session_entry_line(entry);
+      expect(line.has_value(), "JSONL attachment import test serializes fixture entry");
+      if (line)
+        file << *line << '\n';
+    }
+  };
+
+  auto const import_start = ava::session::SessionEntry{.id = "entry_import_attachment_start",
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::SessionStart,
+                                                       .timestamp = "2026-05-02T00:00:00Z",
+                                                       .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-5.5\"}"};
+  auto const missing_attachment_import_path = workspace / "missing-attachment-import.jsonl";
+  write_import_entries(missing_attachment_import_path, {import_start, attached_entry});
+
+  auto const session_before_missing_import = session->store.session_id();
+  auto missing_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import missing-attachment-import.jsonl --confirm"});
+  expect(missing_import && missing_import->handled && !missing_import->output.empty() &&
+             missing_import->output[0].find("raw JSONL does not include attachment files") != std::string::npos &&
+             missing_import->output[0].find("first_storage_path: attachments/img_import_missing.png") != std::string::npos &&
+             session->store.session_id() == session_before_missing_import,
+         "command dispatcher /import rejects non-redacted attachment metadata instead of creating dangling storage references");
+
+  auto const redacted_import_path = workspace / "redacted-attachment-import.jsonl";
+  auto const redacted_entry = ava::session::SessionEntry{.id = "entry_import_redacted_user",
+                                                         .parent_id = "",
+                                                         .type = ava::session::EntryType::UserMessage,
+                                                         .timestamp = "2026-05-02T00:00:01Z",
+                                                         .data_json = "{\"text\":\"redacted attached\",\"attachments\":[" + redacted_attachment_json + "]}"};
+  write_import_entries(redacted_import_path, {import_start, redacted_entry});
+
+  auto redacted_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import redacted-attachment-import.jsonl --confirm"});
+  auto redacted_entries = session->store.load();
+  expect(redacted_import && redacted_import->handled && !redacted_import->output.empty() &&
+             redacted_import->output[0].find("imported session") != std::string::npos && redacted_entries &&
+             std::ranges::any_of(*redacted_entries,
+                                 [](ava::session::SessionEntry const& entry) {
+                                   return entry.data_json.find("img_import_redacted") != std::string::npos &&
+                                          entry.data_json.find("\"redacted\":true") != std::string::npos;
+                                 }),
+         "command dispatcher /import still allows redacted attachment metadata that does not require local bytes");
 }
 
 void test_app_session_branch_commands()
@@ -2484,8 +3272,23 @@ void test_app_runtime_model_switch_persists_and_reopens()
   ava::app::runtime::OpenOptions reopen_options = open_options;
   reopen_options.requested_session_id = session_id;
   std::filesystem::remove(paths.models_file, remove_error);
+  auto same_process_contested = ava::app::open_runtime_session(reopen_options);
+  expect(!same_process_contested && same_process_contested.error().message().find("already owned") != std::string::npos,
+         "protocol-neutral runtime ownership excludes a second same-process mode");
+  pid_t const contender = fork();
+  if (contender == 0)
+  {
+    auto contested = ava::app::open_runtime_session(reopen_options);
+    _exit(!contested && contested.error().message().find("already owned") != std::string::npos ? 0 : 1);
+  }
+  int contender_status = 0;
+  if (contender > 0)
+    static_cast<void>(waitpid(contender, &contender_status, 0));
+  expect(contender > 0 && WIFEXITED(contender_status) && WEXITSTATUS(contender_status) == 0,
+         "TUI/print/RPC-style runtime owners contend on the same cross-process session lease");
+  session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "runtime owner released for reopen test"));
   auto reopened = ava::app::open_runtime_session(reopen_options);
-  expect(reopened.has_value(), "runtime model switch reopens persisted session");
+  expect(reopened.has_value(), "runtime releases its lease on normal lifetime end and reopens persisted session");
   expect(reopened && reopened->model.provider_id == "anthropic" && reopened->model.model_id == "claude-test",
          "runtime reopen restores latest persisted model_change");
   bool restored_emoji_quirk = false;
@@ -2822,7 +3625,8 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
   ava::app::runtime::OpenOptions reopen_options = open_options;
   reopen_options.requested_session_id = session_id;
   auto reopened = ava::app::open_runtime_session(reopen_options);
-  expect(reopened.has_value() && reopened->reasoning && reopened->reasoning->level == "low", "runtime reopen restores latest reasoning selection");
+  expect(!reopened && reopened.error().message().find("already owned") != std::string::npos,
+         "a second runtime cannot inspect reasoning by bypassing the active owner's lease");
 
   auto cleared = ava::app::set_runtime_reasoning(*session, std::nullopt);
   expect(cleared.has_value() && *cleared && !session->reasoning, "runtime reasoning selection can be cleared");
@@ -2844,8 +3648,8 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
     auto switched_back = ava::app::switch_runtime_model(*session, *openai_model);
     expect(switched_back.has_value() && *switched_back && !session->reasoning, "runtime model switches clear active reasoning selection");
     auto reopened_after_switch = ava::app::open_runtime_session(reopen_options);
-    expect(reopened_after_switch.has_value() && !reopened_after_switch->reasoning,
-           "runtime reopen does not resurrect reasoning across model_change boundaries");
+    expect(!reopened_after_switch && reopened_after_switch.error().message().find("already owned") != std::string::npos,
+           "runtime model-change persistence remains exclusively owned until the active runtime ends");
   }
 
   auto no_levels_model = ava::app::resolve_runtime_model(paths, "openai", "no-reasoning-levels");
@@ -2895,11 +3699,67 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
   }
 }
 
+void test_app_runtime_initial_reasoning_level_option()
+{
+  auto const root = temp_root() / "app-runtime-initial-reasoning-level";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  open_options.initial_reasoning_level = " high ";
+
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value() && session->reasoning && session->reasoning->level == "high", "runtime startup applies initial reasoning level");
+  if (!session)
+    return;
+  auto const session_id = session->store.session_id();
+
+  auto entries = session->store.load();
+  expect(entries.has_value(), "runtime startup reasoning test reloads session entries");
+  if (entries)
+  {
+    auto const reasoning_changes = std::ranges::count_if(*entries, [](auto const& entry) { return entry.type == ava::session::EntryType::ReasoningChange; });
+    expect(reasoning_changes == 1, "runtime startup reasoning appends one durable reasoning_change entry");
+  }
+
+  session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release runtime before startup reasoning reopen"));
+  ava::app::runtime::OpenOptions clear_options = open_options;
+  clear_options.requested_session_id = session_id;
+  clear_options.initial_reasoning_level = "off";
+  auto cleared = ava::app::open_runtime_session(clear_options);
+  expect(cleared.has_value() && !cleared->reasoning, "runtime startup reasoning accepts off as clear_reasoning alias");
+  if (cleared)
+  {
+    auto cleared_entries = cleared->store.load();
+    expect(cleared_entries.has_value(), "runtime startup reasoning clear reloads entries");
+    if (cleared_entries)
+    {
+      auto const reasoning_changes =
+          std::ranges::count_if(*cleared_entries, [](auto const& entry) { return entry.type == ava::session::EntryType::ReasoningChange; });
+      expect(reasoning_changes == 2, "runtime startup reasoning off appends a clear reasoning_change when clearing existing reasoning");
+    }
+  }
+
+  ava::app::runtime::OpenOptions invalid_options = open_options;
+  invalid_options.initial_reasoning_level = "minimal";
+  auto invalid = ava::app::open_runtime_session(invalid_options);
+  expect(!invalid.has_value() && invalid.error().format().find("option: --thinking") != std::string::npos &&
+             invalid.error().format().find("supported_levels: off, low, medium, high, xhigh") != std::string::npos,
+         "runtime startup reasoning reports clear --thinking validation errors");
+}
+
 }  // namespace
 
 void run_app_command_classification_tests()
 {
   test_command_classification();
+  test_repository_build_test_headless_decision_matrix();
 }
 
 void run_app_event_serialization_tests()
@@ -2913,19 +3773,28 @@ void run_app_runtime_tests()
   test_app_runtime_no_session_mode();
   test_app_runtime_session_startup_options();
   test_app_runtime_cli_prompt_overrides();
+  test_app_runtime_project_trust_malformed_diagnostics();
+  test_app_runtime_enabled_plugin_resources_autoload();
+  test_app_runtime_project_plugin_resources_follow_trust_gate();
+  test_app_runtime_enabled_plugin_resource_failures_are_context_visible();
+  test_app_runtime_plugin_install_remove_commands();
+  test_app_context_reports_lsp_config_load_errors();
   test_app_run_prompt_emits_events();
   test_app_run_prompt_expands_file_references();
   test_app_run_prompt_sends_imported_image_attachment();
   test_app_clipboard_image_file_override_imports_attachment();
   test_app_run_prompt_emits_provider_retry_events_when_enabled();
+  test_app_run_prompt_observation_shares_context_across_compaction_and_retry();
   test_app_run_prompt_emits_tool_progress_and_session_spill();
   test_app_first_run_auth_onboarding();
   test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call();
   test_app_command_dispatcher();
+  test_app_session_jsonl_import_export_attachment_caveat();
   test_app_session_branch_commands();
   test_app_session_new_resume_commands();
   test_app_session_metadata_commands();
   test_app_runtime_model_switch_persists_and_reopens();
   test_app_runtime_model_switch_rejects_incompatible_history();
   test_app_runtime_reasoning_selection_persists_and_requests();
+  test_app_runtime_initial_reasoning_level_option();
 }

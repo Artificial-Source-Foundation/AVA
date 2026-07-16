@@ -13,14 +13,58 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cerrno>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <utility>
+#include <vector>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace ava::app {
 namespace {
+
+class UniqueFileDescriptor
+{
+ public:
+  explicit UniqueFileDescriptor(int fd) : fd_(fd) { }
+  UniqueFileDescriptor(UniqueFileDescriptor const&) = delete;
+  UniqueFileDescriptor& operator=(UniqueFileDescriptor const&) = delete;
+  UniqueFileDescriptor(UniqueFileDescriptor&& other) noexcept : fd_(std::exchange(other.fd_, -1)) { }
+  UniqueFileDescriptor& operator=(UniqueFileDescriptor&& other) noexcept
+  {
+    if (this != &other)
+    {
+      reset();
+      fd_ = std::exchange(other.fd_, -1);
+    }
+    return *this;
+  }
+  ~UniqueFileDescriptor() { reset(); }
+
+  [[nodiscard]] int get() const { return fd_; }
+
+ private:
+  void reset()
+  {
+    if (fd_ >= 0)
+      ::close(fd_);
+    fd_ = -1;
+  }
+
+  int fd_ = -1;
+};
+
+struct OpenedInstallSourceFile
+{
+  UniqueFileDescriptor fd;
+  mode_t mode = 0;
+};
 
 std::string plugin_display_path(std::filesystem::path const& path, runtime::Session const& session)
 {
@@ -126,7 +170,7 @@ ava::core::Result<std::filesystem::path> plugin_resource_path(ava::plugin::Plugi
 
 ava::core::Result<std::string> read_plugin_resource(ava::plugin::PluginManifest const& manifest, ava::plugin::PluginResourceContribution const& resource)
 {
-  constexpr std::size_t max_resource_bytes = 64 * 1024;
+  constexpr std::size_t max_resource_bytes = ava::plugin::kPluginResourceContentMaxBytes;
   auto path = plugin_resource_path(manifest, resource);
   if (!path)
     return std::unexpected(std::move(path.error()));
@@ -234,6 +278,102 @@ std::string format_plugin_resource_text(ava::plugin::PluginManifest const& manif
   return output.str();
 }
 
+std::string dynamic_resource_plural(ava::plugin::PluginDynamicResourceKind kind)
+{
+  switch (kind)
+  {
+    case ava::plugin::PluginDynamicResourceKind::Prompt:
+      return "prompts";
+    case ava::plugin::PluginDynamicResourceKind::Skill:
+      return "skills";
+  }
+  return "resources";
+}
+
+std::string_view dynamic_resource_capability(ava::plugin::PluginDynamicResourceKind kind)
+{
+  return ava::plugin::plugin_dynamic_resource_capability(kind);
+}
+
+std::string_view dynamic_resource_contribution_kind(ava::plugin::PluginDynamicResourceKind kind)
+{
+  switch (kind)
+  {
+    case ava::plugin::PluginDynamicResourceKind::Prompt:
+      return "dynamic_prompt";
+    case ava::plugin::PluginDynamicResourceKind::Skill:
+      return "dynamic_skill";
+  }
+  return "dynamic_resource";
+}
+
+std::string invalid_dynamic_resource_name_text(ava::plugin::PluginDynamicResourceKind kind, std::string_view name)
+{
+  return "invalid dynamic " + std::string(ava::plugin::plugin_dynamic_resource_kind_name(kind)) + " name: " + sanitize_inline_text(std::string(name));
+}
+
+std::string dynamic_resource_unsupported_text(ava::plugin::PluginManifest const& manifest, ava::plugin::PluginDynamicResourceKind kind)
+{
+  return "plugin does not declare " + std::string(dynamic_resource_capability(kind)) + ": " + sanitize_inline_text(manifest.id);
+}
+
+struct DynamicResourceListEntry
+{
+  std::string plugin_id;
+  ava::plugin::PluginDynamicResource resource;
+};
+
+struct DynamicResourceFailure
+{
+  std::string plugin_id;
+  std::string message;
+};
+
+std::string format_dynamic_resource_list_text(ava::plugin::PluginDynamicResourceKind kind, std::vector<DynamicResourceListEntry> const& entries,
+                                              std::vector<DynamicResourceFailure> const& failures)
+{
+  std::ostringstream output;
+  output << "Dynamic plugin " << dynamic_resource_plural(kind) << ":\n";
+  if (entries.empty() && failures.empty())
+  {
+    output << "  none";
+    return output.str();
+  }
+  for (auto const& entry : entries)
+  {
+    output << "  " << sanitize_inline_text(entry.plugin_id) << "/" << sanitize_inline_text(entry.resource.name);
+    if (!entry.resource.description.empty())
+      output << " - " << sanitize_inline_text(entry.resource.description);
+    output << "\n";
+  }
+  for (auto const& failure : failures)
+  {
+    output << "  " << sanitize_inline_text(failure.plugin_id) << "  error: " << sanitize_inline_text(failure.message) << "\n";
+  }
+  auto text = output.str();
+  if (!text.empty() && text.back() == '\n')
+    text.pop_back();
+  return text;
+}
+
+std::string format_dynamic_resource_text(ava::plugin::PluginManifest const& manifest, ava::plugin::PluginDynamicResourceKind kind, std::string_view name,
+                                         std::string content)
+{
+  std::ostringstream output;
+  output << "Plugin dynamic " << ava::plugin::plugin_dynamic_resource_kind_name(kind) << " " << sanitize_inline_text(manifest.id) << "/"
+         << sanitize_inline_text(std::string(name)) << "\n\n";
+  output << content;
+  return output.str();
+}
+
+ava::core::VoidResult record_dynamic_resource_result(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result,
+                                                     std::string const& call_id, ava::agent::ToolTimelineStatus status, std::string result_summary,
+                                                     std::string result_content, ava::tools::ToolContext const& context)
+{
+  auto const permission_ids = context.permission_request_ids ? *context.permission_request_ids : std::vector<std::string>{};
+  return record_tool_result(session, sink, result, call_id, "plugin_resource", status, std::move(result_summary), std::move(result_content), permission_ids);
+}
+
 ava::plugin::PluginStatus const* find_plugin_status(ava::plugin::PluginDiagnostics const& diagnostics, std::string_view plugin_id)
 {
   for (auto const& status : diagnostics.plugins)
@@ -259,6 +399,16 @@ std::string plugin_not_found_text(ava::plugin::PluginDiagnostics const& diagnost
     return "plugin id is ambiguous: " + sanitize_inline_text(std::string(plugin_id)) + " (see /plugins failures)";
   }
   return "plugin not found: " + sanitize_inline_text(std::string(plugin_id));
+}
+
+bool plugin_command_error_is_canceled(ava::core::Error const& error)
+{
+  for (auto const& context : error.context())
+  {
+    if (context.key == "canceled" && context.value == "true")
+      return true;
+  }
+  return error.message().find("canceled") != std::string::npos;
 }
 
 std::string format_plugin_list_text(ava::plugin::PluginDiagnostics const& diagnostics, runtime::Session const& session)
@@ -377,6 +527,27 @@ std::string format_valid_plugin_manifest_text(ava::plugin::PluginManifest const&
   return output.str();
 }
 
+std::string format_plugin_installed_text(ava::plugin::PluginManifest const& manifest, std::filesystem::path const& source_dir,
+                                         std::filesystem::path const& destination_dir, runtime::Session const& session)
+{
+  std::ostringstream output;
+  output << "Installed global plugin " << sanitize_inline_text(manifest.id) << "\n";
+  output << "  source: " << plugin_display_path(source_dir, session) << "\n";
+  output << "  target: " << plugin_display_path(destination_dir, session) << "\n";
+  output << "  status: disabled\n";
+  output << "  note: no plugin process was started; use /plugins enable " << sanitize_inline_text(manifest.id) << " to enable it.";
+  return output.str();
+}
+
+std::string format_plugin_removed_text(ava::plugin::PluginManifest const& manifest, std::filesystem::path const& removed_dir, runtime::Session const& session)
+{
+  std::ostringstream output;
+  output << "Removed global plugin " << sanitize_inline_text(manifest.id) << "\n";
+  output << "  path: " << plugin_display_path(removed_dir, session) << "\n";
+  output << "  note: no plugin process was stopped.";
+  return output.str();
+}
+
 std::filesystem::path plugin_validate_path(runtime::Session const& session, std::string_view path_text)
 {
   auto path = std::filesystem::path(std::string(path_text));
@@ -406,6 +577,491 @@ std::string plugin_validate_argument(std::string_view plugins_argument)
     ++index;
   }
   return trim_ascii_whitespace(plugins_argument.substr(index));
+}
+
+std::filesystem::path normalized_absolute(std::filesystem::path const& path)
+{
+  std::error_code canonical_error;
+  auto const canonical = std::filesystem::weakly_canonical(path, canonical_error);
+  return canonical_error ? std::filesystem::absolute(path).lexically_normal() : canonical;
+}
+
+ava::core::Error filesystem_errno_error(ava::core::ErrorCategory category, std::string message, std::filesystem::path const& path, int error_number)
+{
+  return ava::core::Error(category, std::move(message)).with_context("path", path.string()).with_context("cause", std::strerror(error_number));
+}
+
+mode_t safe_installed_file_mode(mode_t source_mode)
+{
+  mode_t mode = S_IRUSR | S_IWUSR;
+  if ((source_mode & (S_IXUSR | S_IXGRP | S_IXOTH)) != 0)
+    mode |= S_IXUSR;
+  return mode;
+}
+
+ava::core::VoidResult set_safe_directory_permissions(std::filesystem::path const& path)
+{
+  std::error_code permission_error;
+  std::filesystem::permissions(path, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace, permission_error);
+  if (permission_error)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to set plugin install directory permissions")
+                               .with_context("path", path.string())
+                               .with_context("cause", permission_error.message()));
+  }
+  return {};
+}
+
+ava::core::Result<OpenedInstallSourceFile> open_install_source_file_no_follow(std::filesystem::path const& source)
+{
+  int fd = -1;
+  do
+  {
+    fd = ::open(source.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  } while (fd < 0 && errno == EINTR);
+  if (fd < 0)
+  {
+    auto const error_number = errno;
+    auto const category = error_number == ELOOP ? ava::core::ErrorCategory::InvalidArgument : ava::core::ErrorCategory::Io;
+    auto const message = error_number == ELOOP ? "plugin install source must not contain symlinks" : "failed to open plugin install source file";
+    return std::unexpected(filesystem_errno_error(category, message, source, error_number));
+  }
+
+  UniqueFileDescriptor source_fd(fd);
+  struct stat file_stat{};
+  if (::fstat(source_fd.get(), &file_stat) != 0)
+  {
+    auto const error_number = errno;
+    return std::unexpected(filesystem_errno_error(ava::core::ErrorCategory::Io, "failed to inspect plugin install source file", source, error_number));
+  }
+  if (!S_ISREG(file_stat.st_mode))
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin install source must contain only directories and regular files")
+                               .with_context("path", source.string()));
+  }
+  return OpenedInstallSourceFile{.fd = std::move(source_fd), .mode = file_stat.st_mode};
+}
+
+ava::core::Result<UniqueFileDescriptor> create_install_target_file_no_follow(std::filesystem::path const& target, mode_t mode)
+{
+  int fd = -1;
+  do
+  {
+    fd = ::open(target.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, mode);
+  } while (fd < 0 && errno == EINTR);
+  if (fd < 0)
+  {
+    auto const error_number = errno;
+    return std::unexpected(filesystem_errno_error(ava::core::ErrorCategory::Io, "failed to create plugin install file", target, error_number));
+  }
+  return UniqueFileDescriptor(fd);
+}
+
+ava::core::VoidResult copy_regular_file_no_follow(std::filesystem::path const& source, std::filesystem::path const& target)
+{
+  auto source_file = open_install_source_file_no_follow(source);
+  if (!source_file)
+    return std::unexpected(std::move(source_file.error()));
+
+  auto const target_mode = safe_installed_file_mode(source_file->mode);
+  auto target_file = create_install_target_file_no_follow(target, target_mode);
+  if (!target_file)
+    return std::unexpected(std::move(target_file.error()));
+
+  std::array<char, 64 * 1024> buffer{};
+  while (true)
+  {
+    ssize_t read_count = ::read(source_file->fd.get(), buffer.data(), buffer.size());
+    if (read_count < 0 && errno == EINTR)
+      continue;
+    if (read_count < 0)
+    {
+      auto const error_number = errno;
+      return std::unexpected(filesystem_errno_error(ava::core::ErrorCategory::Io, "failed to read plugin install source file", source, error_number));
+    }
+    if (read_count == 0)
+      break;
+
+    char const* cursor = buffer.data();
+    auto remaining = static_cast<std::size_t>(read_count);
+    while (remaining > 0)
+    {
+      ssize_t written = ::write(target_file->get(), cursor, remaining);
+      if (written < 0 && errno == EINTR)
+        continue;
+      if (written < 0)
+      {
+        auto const error_number = errno;
+        return std::unexpected(filesystem_errno_error(ava::core::ErrorCategory::Io, "failed to write plugin install file", target, error_number));
+      }
+      cursor += written;
+      remaining -= static_cast<std::size_t>(written);
+    }
+  }
+
+  if (::fchmod(target_file->get(), target_mode) != 0)
+  {
+    auto const error_number = errno;
+    return std::unexpected(filesystem_errno_error(ava::core::ErrorCategory::Io, "failed to set plugin install file permissions", target, error_number));
+  }
+  return {};
+}
+
+ava::core::VoidResult ensure_global_plugin_install_root(std::filesystem::path const& root)
+{
+  std::error_code status_error;
+  auto const status = std::filesystem::symlink_status(root, status_error);
+  if (status_error && status_error != std::errc::no_such_file_or_directory)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect global plugin directory")
+                               .with_context("path", root.string())
+                               .with_context("cause", status_error.message()));
+  }
+  if (!status_error && std::filesystem::exists(status))
+  {
+    if (std::filesystem::is_symlink(status))
+    {
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "global plugin directory must not be a symlink").with_context("path", root.string()));
+    }
+    if (!std::filesystem::is_directory(status))
+    {
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "global plugin directory is not a directory").with_context("path", root.string()));
+    }
+    return set_safe_directory_permissions(root);
+  }
+
+  std::error_code create_error;
+  std::filesystem::create_directories(root, create_error);
+  if (create_error)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create global plugin directory")
+                               .with_context("path", root.string())
+                               .with_context("cause", create_error.message()));
+  }
+  return set_safe_directory_permissions(root);
+}
+
+ava::core::Result<std::filesystem::path> plugin_install_source_dir(runtime::Session const& session, std::string_view path_text)
+{
+  auto const source_path = plugin_validate_path(session, path_text);
+  std::error_code status_error;
+  auto const status = std::filesystem::symlink_status(source_path, status_error);
+  if (status_error)
+  {
+    auto error = ava::core::Error(status_error == std::errc::no_such_file_or_directory ? ava::core::ErrorCategory::NotFound : ava::core::ErrorCategory::Io,
+                                  "failed to inspect plugin install source");
+    error.with_context("path", source_path.string());
+    error.with_context("cause", status_error.message());
+    return std::unexpected(std::move(error));
+  }
+  if (std::filesystem::is_symlink(status))
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin install source must not be a symlink").with_context("path", source_path.string()));
+  }
+  if (std::filesystem::is_directory(status))
+    return source_path;
+  if (std::filesystem::is_regular_file(status) && source_path.filename() == "plugin.json")
+  {
+    auto const parent = source_path.parent_path();
+    std::error_code parent_error;
+    auto const parent_status = std::filesystem::symlink_status(parent, parent_error);
+    if (parent_error || std::filesystem::is_symlink(parent_status) || !std::filesystem::is_directory(parent_status))
+    {
+      auto error = ava::core::Error(parent_error ? ava::core::ErrorCategory::Io : ava::core::ErrorCategory::InvalidArgument,
+                                    "plugin install manifest parent must be a real directory");
+      error.with_context("path", parent.string());
+      if (parent_error)
+        error.with_context("cause", parent_error.message());
+      return std::unexpected(std::move(error));
+    }
+    return parent;
+  }
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin install source must be a directory or plugin.json file")
+                             .with_context("path", source_path.string()));
+}
+
+ava::core::VoidResult ensure_install_source_is_separate(std::filesystem::path const& source_dir, std::filesystem::path const& global_root)
+{
+  auto const source = normalized_absolute(source_dir);
+  auto const root = normalized_absolute(global_root);
+  if (path_is_within(source, root))
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin install source must not contain the global plugin directory")
+                               .with_context("source", source_dir.string())
+                               .with_context("global_plugins", global_root.string()));
+  }
+  return {};
+}
+
+ava::core::VoidResult ensure_destination_available(std::filesystem::path const& destination)
+{
+  std::error_code status_error;
+  auto const status = std::filesystem::symlink_status(destination, status_error);
+  if (status_error && status_error != std::errc::no_such_file_or_directory)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect plugin install destination")
+                               .with_context("path", destination.string())
+                               .with_context("cause", status_error.message()));
+  }
+  if (!status_error && std::filesystem::exists(status))
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin install destination already exists").with_context("path", destination.string()));
+  }
+  return {};
+}
+
+ava::core::Result<std::filesystem::path> make_install_temp_dir(std::filesystem::path const& global_root, std::string const& plugin_id)
+{
+  for (int attempt = 0; attempt < 8; ++attempt)
+  {
+    auto const temp_dir = global_root / (plugin_id + ".installing-" + ava::core::make_id("plugin"));
+    std::error_code create_error;
+    if (std::filesystem::create_directory(temp_dir, create_error))
+    {
+      if (auto permissions = set_safe_directory_permissions(temp_dir); !permissions)
+      {
+        std::error_code remove_error;
+        std::filesystem::remove_all(temp_dir, remove_error);
+        return std::unexpected(std::move(permissions.error()));
+      }
+      return temp_dir;
+    }
+    if (create_error && create_error != std::errc::file_exists)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create plugin install staging directory")
+                                 .with_context("path", temp_dir.string())
+                                 .with_context("cause", create_error.message()));
+    }
+  }
+  return std::unexpected(
+      ava::core::Error(ava::core::ErrorCategory::Io, "failed to allocate plugin install staging directory").with_context("path", global_root.string()));
+}
+
+ava::core::VoidResult copy_plugin_directory_entry(std::filesystem::path const& source_dir, std::filesystem::path const& temp_dir,
+                                                  std::filesystem::directory_entry const& entry)
+{
+  std::error_code status_error;
+  auto const status = entry.symlink_status(status_error);
+  if (status_error)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect plugin install source entry")
+                               .with_context("path", entry.path().string())
+                               .with_context("cause", status_error.message()));
+  }
+  if (std::filesystem::is_symlink(status))
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin install source must not contain symlinks")
+                               .with_context("path", entry.path().string()));
+  }
+
+  std::error_code relative_error;
+  auto const relative = std::filesystem::relative(entry.path(), source_dir, relative_error);
+  if (relative_error || relative.empty())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to resolve plugin install source entry");
+    error.with_context("path", entry.path().string());
+    if (relative_error)
+      error.with_context("cause", relative_error.message());
+    return std::unexpected(std::move(error));
+  }
+  auto const target = temp_dir / relative;
+  if (std::filesystem::is_directory(status))
+  {
+    std::error_code create_error;
+    std::filesystem::create_directories(target, create_error);
+    if (create_error)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create plugin install directory")
+                                 .with_context("path", target.string())
+                                 .with_context("cause", create_error.message()));
+    }
+    return set_safe_directory_permissions(target);
+  }
+  if (!std::filesystem::is_regular_file(status))
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin install source must contain only directories and regular files")
+                               .with_context("path", entry.path().string()));
+  }
+
+  std::error_code create_error;
+  std::filesystem::create_directories(target.parent_path(), create_error);
+  if (create_error)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create plugin install file parent")
+                               .with_context("path", target.parent_path().string())
+                               .with_context("cause", create_error.message()));
+  }
+  if (auto permissions = set_safe_directory_permissions(target.parent_path()); !permissions)
+    return std::unexpected(std::move(permissions.error()));
+  return copy_regular_file_no_follow(entry.path(), target);
+}
+
+ava::core::VoidResult copy_plugin_directory(std::filesystem::path const& source_dir, std::filesystem::path const& temp_dir)
+{
+  std::error_code iterate_error;
+  std::filesystem::recursive_directory_iterator iterator(source_dir, std::filesystem::directory_options::none, iterate_error);
+  std::filesystem::recursive_directory_iterator end;
+  if (iterate_error)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect plugin install source directory")
+                               .with_context("path", source_dir.string())
+                               .with_context("cause", iterate_error.message()));
+  }
+  while (iterator != end)
+  {
+    auto const entry = *iterator;
+    if (auto copied = copy_plugin_directory_entry(source_dir, temp_dir, entry); !copied)
+      return copied;
+    iterator.increment(iterate_error);
+    if (iterate_error)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect plugin install source directory entry")
+                                 .with_context("path", source_dir.string())
+                                 .with_context("cause", iterate_error.message()));
+    }
+  }
+  return {};
+}
+
+void cleanup_install_temp_dir(std::filesystem::path const& temp_dir)
+{
+  if (temp_dir.empty())
+    return;
+  std::error_code remove_error;
+  std::filesystem::remove_all(temp_dir, remove_error);
+}
+
+ava::core::Result<std::string> install_plugin_from_path(runtime::Session const& session, std::string_view path_text)
+{
+  auto source_dir = plugin_install_source_dir(session, path_text);
+  if (!source_dir)
+    return std::unexpected(std::move(source_dir.error()));
+
+  auto manifest = ava::plugin::load_plugin_manifest(*source_dir / "plugin.json");
+  if (!manifest)
+    return std::unexpected(std::move(manifest.error()));
+
+  auto const diagnostics = plugin_diagnostics(session);
+  if (find_plugin_status(diagnostics, manifest->id) || has_duplicate_plugin_failure(diagnostics, manifest->id))
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin id is already discovered").with_context("plugin", manifest->id));
+  }
+
+  auto const global_root = plugin_discovery_options(session).global_plugins_dir;
+  if (auto ensured = ensure_global_plugin_install_root(global_root); !ensured)
+    return std::unexpected(std::move(ensured.error()));
+  if (auto separate = ensure_install_source_is_separate(*source_dir, global_root); !separate)
+    return std::unexpected(std::move(separate.error()));
+
+  auto const destination = global_root / manifest->id;
+  if (auto available = ensure_destination_available(destination); !available)
+    return std::unexpected(std::move(available.error()));
+
+  auto temp_dir = make_install_temp_dir(global_root, manifest->id);
+  if (!temp_dir)
+    return std::unexpected(std::move(temp_dir.error()));
+
+  if (auto copied = copy_plugin_directory(*source_dir, *temp_dir); !copied)
+  {
+    cleanup_install_temp_dir(*temp_dir);
+    return std::unexpected(std::move(copied.error()));
+  }
+
+  auto installed_manifest = ava::plugin::load_plugin_manifest(*temp_dir / "plugin.json");
+  if (!installed_manifest)
+  {
+    cleanup_install_temp_dir(*temp_dir);
+    return std::unexpected(std::move(installed_manifest.error()));
+  }
+  if (installed_manifest->id != manifest->id)
+  {
+    cleanup_install_temp_dir(*temp_dir);
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "installed plugin id changed during copy")
+                               .with_context("expected", manifest->id)
+                               .with_context("actual", installed_manifest->id));
+  }
+
+  if (auto available = ensure_destination_available(destination); !available)
+  {
+    cleanup_install_temp_dir(*temp_dir);
+    return std::unexpected(std::move(available.error()));
+  }
+  std::error_code rename_error;
+  std::filesystem::rename(*temp_dir, destination, rename_error);
+  if (rename_error)
+  {
+    cleanup_install_temp_dir(*temp_dir);
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to install plugin directory")
+                               .with_context("source", temp_dir->string())
+                               .with_context("target", destination.string())
+                               .with_context("cause", rename_error.message()));
+  }
+
+  auto final_manifest = ava::plugin::load_plugin_manifest(destination / "plugin.json");
+  if (!final_manifest)
+    return std::unexpected(std::move(final_manifest.error()));
+  return format_plugin_installed_text(*final_manifest, *source_dir, destination, session);
+}
+
+ava::core::VoidResult ensure_removable_global_plugin(ava::plugin::PluginStatus const& status, std::filesystem::path const& global_root)
+{
+  if (status.plugin.scope != ava::plugin::PluginScope::Global)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "only global installed plugins can be removed")
+                               .with_context("plugin", status.plugin.manifest.id));
+  }
+  if (status.enabled)
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "disable plugin before removing it").with_context("plugin", status.plugin.manifest.id));
+  }
+  auto const root = normalized_absolute(global_root);
+  auto const directory = normalized_absolute(status.plugin.manifest.directory);
+  if (directory == root || !path_is_within(root, directory))
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin directory is outside global plugin directory")
+                               .with_context("plugin", status.plugin.manifest.id)
+                               .with_context("path", status.plugin.manifest.directory.string()));
+  }
+  std::error_code status_error;
+  auto const directory_status = std::filesystem::symlink_status(status.plugin.manifest.directory, status_error);
+  if (status_error || std::filesystem::is_symlink(directory_status) || !std::filesystem::is_directory(directory_status))
+  {
+    auto error = ava::core::Error(status_error ? ava::core::ErrorCategory::Io : ava::core::ErrorCategory::InvalidArgument,
+                                  "plugin directory is not a removable directory");
+    error.with_context("plugin", status.plugin.manifest.id);
+    error.with_context("path", status.plugin.manifest.directory.string());
+    if (status_error)
+      error.with_context("cause", status_error.message());
+    return std::unexpected(std::move(error));
+  }
+  return {};
+}
+
+ava::core::Result<std::string> remove_plugin_by_id(runtime::Session const& session, ava::plugin::PluginStatus const& status)
+{
+  auto const global_root = plugin_discovery_options(session).global_plugins_dir;
+  if (auto root = ensure_global_plugin_install_root(global_root); !root)
+    return std::unexpected(std::move(root.error()));
+  if (auto removable = ensure_removable_global_plugin(status, global_root); !removable)
+    return std::unexpected(std::move(removable.error()));
+
+  auto const removed_dir = status.plugin.manifest.directory;
+  auto const manifest = status.plugin.manifest;
+  std::error_code remove_error;
+  std::filesystem::remove_all(removed_dir, remove_error);
+  if (remove_error)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to remove plugin directory")
+                               .with_context("plugin", manifest.id)
+                               .with_context("path", removed_dir.string())
+                               .with_context("cause", remove_error.message()));
+  }
+  return format_plugin_removed_text(manifest, removed_dir, session);
 }
 
 struct PluginRunArguments
@@ -451,7 +1107,10 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
   CommandResult result;
   result.handled = true;
   auto const usage = [&]() {
-    add_output(result, missing_argument("/plugins <list|inspect|enable|disable|validate|failures|prompts|prompt|skills|skill> ..."));
+    add_output(result, missing_argument("/plugins "
+                                        "<list|inspect|install|remove|enable|disable|validate|failures|prompts|prompt|skills|skill|dynamic-prompts|dynamic-"
+                                        "prompt|dynamic-skills|dynamic-skill> "
+                                        "..."));
     return result;
   };
 
@@ -533,6 +1192,252 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
       return result;
     }
     add_output(result, format_plugin_resource_text(status->plugin.manifest, *resource, subcommand, session, std::move(*content)));
+    return result;
+  }
+
+  if (subcommand == "dynamic-prompts" || subcommand == "dynamic-skills")
+  {
+    if (args.size() != 1)
+      return usage();
+    auto const kind = subcommand == "dynamic-prompts" ? ava::plugin::PluginDynamicResourceKind::Prompt : ava::plugin::PluginDynamicResourceKind::Skill;
+    auto const kind_name = std::string(ava::plugin::plugin_dynamic_resource_kind_name(kind));
+    auto const diagnostics = plugin_diagnostics(session);
+    std::vector<DynamicResourceListEntry> entries;
+    std::vector<DynamicResourceFailure> failures;
+
+    for (auto const& status : diagnostics.plugins)
+    {
+      if (!status.enabled)
+        continue;
+      if (!ava::plugin::plugin_has_capability(status.plugin.manifest, dynamic_resource_capability(kind)))
+        continue;
+      auto const call_id = ava::core::make_id("dynres");
+      auto const call_label = status.plugin.manifest.id + ":" + kind_name + ":list";
+      if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "plugin_resource", call_label); !recorded)
+      {
+        return std::unexpected(std::move(recorded.error()));
+      }
+
+      auto context = make_tool_context(session, request.permission_resolver);
+      context.permission_tool_name = "plugin_resource";
+      context.cancel_requested = request.cancel_requested;
+      context.permission_request_ids = std::make_shared<std::vector<std::string>>();
+
+      auto fail = [&](std::string text, ava::agent::ToolTimelineStatus timeline_status = ava::agent::ToolTimelineStatus::Error) -> ava::core::VoidResult {
+        failures.push_back(DynamicResourceFailure{.plugin_id = status.plugin.manifest.id, .message = text});
+        return record_dynamic_resource_result(session, request.event_sink, result, call_id, timeline_status, std::move(text), {}, context);
+      };
+
+      if (request.cancel_requested && request.cancel_requested())
+      {
+        if (auto recorded = fail("plugin resource list canceled", ava::agent::ToolTimelineStatus::Canceled); !recorded)
+        {
+          return std::unexpected(std::move(recorded.error()));
+        }
+        continue;
+      }
+
+      if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::PluginExecute, status.plugin.manifest.path, call_label,
+                                                          "plugin_resource", "plugin dynamic resource lookup requires permission");
+          !permission)
+      {
+        if (auto recorded = fail(permission.error().format()); !recorded)
+        {
+          return std::unexpected(std::move(recorded.error()));
+        }
+        continue;
+      }
+
+      ava::plugin::PluginRunnerOptions options;
+      options.workspace_dir = session.workspace_dir;
+      auto process = ava::plugin::PluginProcess::start(status.plugin.manifest, options, request.cancel_requested);
+      if (!process)
+      {
+        auto const status =
+            plugin_command_error_is_canceled(process.error()) ? ava::agent::ToolTimelineStatus::Canceled : ava::agent::ToolTimelineStatus::Error;
+        if (auto recorded = fail(process.error().format(), status); !recorded)
+        {
+          return std::unexpected(std::move(recorded.error()));
+        }
+        continue;
+      }
+
+      auto proxy_handler = ava::plugin::make_core_service_proxy_handler(context, status.plugin.manifest, std::string(dynamic_resource_contribution_kind(kind)),
+                                                                        "list", call_label, call_id);
+      auto listed = (*process)->list_resources(kind, request.cancel_requested, std::move(proxy_handler));
+      auto shutdown = (*process)->shutdown();
+      if (!listed)
+      {
+        auto const status = plugin_command_error_is_canceled(listed.error()) ? ava::agent::ToolTimelineStatus::Canceled : ava::agent::ToolTimelineStatus::Error;
+        if (auto recorded = fail(listed.error().format(), status); !recorded)
+        {
+          return std::unexpected(std::move(recorded.error()));
+        }
+        continue;
+      }
+      if (!shutdown)
+      {
+        if (auto recorded = fail(shutdown.error().format()); !recorded)
+        {
+          return std::unexpected(std::move(recorded.error()));
+        }
+        continue;
+      }
+      if (!listed->ok)
+      {
+        auto text = "plugin dynamic " + kind_name + " list failed: " + listed->content;
+        if (auto recorded = fail(std::move(text)); !recorded)
+        {
+          return std::unexpected(std::move(recorded.error()));
+        }
+        continue;
+      }
+
+      for (auto const& resource : listed->resources)
+      {
+        entries.push_back(DynamicResourceListEntry{.plugin_id = status.plugin.manifest.id, .resource = resource});
+      }
+      if (auto recorded = record_dynamic_resource_result(session, request.event_sink, result, call_id, ava::agent::ToolTimelineStatus::Success,
+                                                         std::to_string(listed->resources.size()) + " dynamic " + dynamic_resource_plural(kind), {}, context);
+          !recorded)
+      {
+        return std::unexpected(std::move(recorded.error()));
+      }
+    }
+
+    add_output(result, format_dynamic_resource_list_text(kind, entries, failures));
+    return result;
+  }
+
+  if (subcommand == "dynamic-prompt" || subcommand == "dynamic-skill")
+  {
+    if (args.size() != 3)
+      return usage();
+    auto const kind = subcommand == "dynamic-prompt" ? ava::plugin::PluginDynamicResourceKind::Prompt : ava::plugin::PluginDynamicResourceKind::Skill;
+    auto const kind_name = std::string(ava::plugin::plugin_dynamic_resource_kind_name(kind));
+    auto const diagnostics = plugin_diagnostics(session);
+    auto const* status = find_plugin_status(diagnostics, args[1]);
+    if (!status)
+    {
+      add_output(result, plugin_not_found_text(diagnostics, args[1]));
+      return result;
+    }
+    if (!status->enabled)
+    {
+      add_output(result, "plugin is disabled: " + sanitize_inline_text(args[1]));
+      return result;
+    }
+    if (!ava::plugin::is_valid_dynamic_resource_name(args[2]))
+    {
+      add_output(result, invalid_dynamic_resource_name_text(kind, args[2]));
+      return result;
+    }
+    if (!ava::plugin::plugin_has_capability(status->plugin.manifest, dynamic_resource_capability(kind)))
+    {
+      add_output(result, dynamic_resource_unsupported_text(status->plugin.manifest, kind));
+      return result;
+    }
+
+    auto const call_id = ava::core::make_id("dynres");
+    auto const call_label = status->plugin.manifest.id + ":" + kind_name + ":" + args[2];
+    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "plugin_resource", call_label); !recorded)
+    {
+      return std::unexpected(std::move(recorded.error()));
+    }
+
+    auto context = make_tool_context(session, request.permission_resolver);
+    context.permission_tool_name = "plugin_resource";
+    context.cancel_requested = request.cancel_requested;
+    context.permission_request_ids = std::make_shared<std::vector<std::string>>();
+
+    auto fail = [&](std::string text, ava::agent::ToolTimelineStatus status = ava::agent::ToolTimelineStatus::Error) -> ava::core::Result<CommandResult> {
+      if (auto recorded = record_dynamic_resource_result(session, request.event_sink, result, call_id, status, text, {}, context); !recorded)
+      {
+        return std::unexpected(std::move(recorded.error()));
+      }
+      add_output(result, std::move(text));
+      return result;
+    };
+
+    if (request.cancel_requested && request.cancel_requested())
+    {
+      return fail("plugin resource read canceled", ava::agent::ToolTimelineStatus::Canceled);
+    }
+
+    if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::PluginExecute, status->plugin.manifest.path, call_label,
+                                                        "plugin_resource", "plugin dynamic resource read requires permission");
+        !permission)
+    {
+      return fail(permission.error().format());
+    }
+
+    ava::plugin::PluginRunnerOptions options;
+    options.workspace_dir = session.workspace_dir;
+    auto process = ava::plugin::PluginProcess::start(status->plugin.manifest, options, request.cancel_requested);
+    if (!process)
+    {
+      auto const status = plugin_command_error_is_canceled(process.error()) ? ava::agent::ToolTimelineStatus::Canceled : ava::agent::ToolTimelineStatus::Error;
+      return fail(process.error().format(), status);
+    }
+    auto proxy_handler = ava::plugin::make_core_service_proxy_handler(context, status->plugin.manifest, std::string(dynamic_resource_contribution_kind(kind)),
+                                                                      args[2], call_label, call_id);
+    auto content = (*process)->read_resource(kind, args[2], request.cancel_requested, std::move(proxy_handler));
+    auto shutdown = (*process)->shutdown();
+    if (!content)
+    {
+      auto const status = plugin_command_error_is_canceled(content.error()) ? ava::agent::ToolTimelineStatus::Canceled : ava::agent::ToolTimelineStatus::Error;
+      return fail(content.error().format(), status);
+    }
+    if (!shutdown)
+      return fail(shutdown.error().format());
+    if (!content->ok)
+    {
+      return fail("plugin dynamic " + kind_name + " " + status->plugin.manifest.id + "/" + args[2] + " failed: " + content->content);
+    }
+
+    if (auto recorded = record_dynamic_resource_result(session, request.event_sink, result, call_id, ava::agent::ToolTimelineStatus::Success, "ok",
+                                                       content->content, context);
+        !recorded)
+    {
+      return std::unexpected(std::move(recorded.error()));
+    }
+    add_output(result, format_dynamic_resource_text(status->plugin.manifest, kind, args[2], std::move(content->content)));
+    return result;
+  }
+
+  if (subcommand == "install")
+  {
+    auto const path_text = plugin_validate_argument(argument);
+    if (path_text.empty())
+      return usage();
+    auto installed = install_plugin_from_path(session, path_text);
+    if (!installed)
+    {
+      add_output(result, installed.error().format());
+      return result;
+    }
+    add_output(result, std::move(*installed));
+    return result;
+  }
+
+  if (subcommand == "remove")
+  {
+    if (args.size() != 2)
+      return usage();
+    auto const diagnostics = plugin_diagnostics(session);
+    auto const* status = find_plugin_status(diagnostics, args[1]);
+    if (!status)
+    {
+      add_output(result, plugin_not_found_text(diagnostics, args[1]));
+      return result;
+    }
+    auto removed = remove_plugin_by_id(session, *status);
+    if (!removed)
+    {
+      add_output(result, removed.error().format());
+      return result;
+    }
+    add_output(result, std::move(*removed));
     return result;
   }
 

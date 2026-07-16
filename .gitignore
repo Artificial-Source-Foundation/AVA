@@ -1,9 +1,11 @@
 # CMake build trees
 build*/
 
-# Local compiler tooling output
+# Local compiler/tooling output
 compile_commands.json
 .cache/
+__pycache__/
+*.py[cod]
 
 # Local scratch/log output
 *.log

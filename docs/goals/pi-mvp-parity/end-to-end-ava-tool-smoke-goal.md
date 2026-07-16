@@ -131,7 +131,7 @@ Record the relevant capture paths or exact skip reason. Do not add new visual re
 | Broad provider ecosystem work | Provider breadth is tracked separately. This smoke should use existing provider paths. |
 | Full Pi/OpenCode server/API dogfood | AVA's MVP automation contract is stdio JSONL RPC. HTTP/server surfaces remain deferred. |
 | TUI rewrite or new visual harness | Existing TUI smokes cover terminal behavior; this goal proves the model/tool/session pipeline. |
-| Parallel tool execution | Parallel tools are deferred until permission, cancellation, ordering, and replay semantics are designed. |
+| Parallel tool execution | Public/default parallel tools remain deferred for this smoke. The internal read/search AgentLoop opt-in has no CLI/RPC/TUI surface yet, so a full-binary smoke should wait until a public/headless opt-in is added. |
 
 ## Validation Commands
 

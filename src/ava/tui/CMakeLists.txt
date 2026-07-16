@@ -22,6 +22,7 @@ add_library(ava_tui
   "terminal_image.cpp"
   "theme.cpp"
   "text.cpp"
+  "text_wrap.cpp"
   "tool_cards.cpp"
 )
 

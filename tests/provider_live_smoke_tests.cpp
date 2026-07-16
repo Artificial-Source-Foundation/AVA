@@ -88,6 +88,14 @@ std::vector<LiveSmokeCase> configured_live_smokes()
                                   .credential_type = "api_key",
                                   .label = "DeepSeek"});
   }
+  if (auto token = env_value("GEMINI_API_KEY"))
+  {
+    cases.push_back(LiveSmokeCase{.provider_id = "gemini",
+                                  .model_id = env_or("AVA_LIVE_GEMINI_MODEL", "gemini-2.5-pro"),
+                                  .access_token = *token,
+                                  .credential_type = "api_key",
+                                  .label = "Gemini"});
+  }
   if (auto token = env_value("KIMI_API_KEY"))
   {
     cases.push_back(LiveSmokeCase{.provider_id = "kimi",
@@ -156,7 +164,7 @@ void run_live_smoke_case(ava::provider::ProviderRegistry& registry, ava::provide
     if (event.type == ava::provider::StreamEventType::Done)
     {
       saw_done = true;
-      stop_reason = event.stop_reason;
+      stop_reason = event.finish_reason ? std::string(ava::provider::to_string(*event.finish_reason)) : std::string{};
     }
   }
   if (!saw_text || !saw_done)

@@ -115,7 +115,13 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     done_seen = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,
                                     completed_reasoning_texts);
-    events.push_back(StreamEvent{.type = StreamEventType::Done, .text = "", .tool_call_id = "", .tool_name = "", .error_message = "", .usage = std::nullopt});
+    events.push_back(StreamEvent{.type = StreamEventType::Done,
+                                 .text = "",
+                                 .tool_call_id = "",
+                                 .tool_name = "",
+                                 .error_message = "",
+                                 .usage = std::nullopt,
+                                 .finish_reason = ProviderFinishReason::Completed});
     return;
   }
   if (!is_json_object_shape(data))
@@ -285,13 +291,14 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     done_seen = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,
                                     completed_reasoning_texts);
-    events.push_back(StreamEvent{.type = StreamEventType::Done,
-                                 .text = "",
-                                 .tool_call_id = "",
-                                 .tool_name = "",
-                                 .error_message = "",
-                                 .usage = parse_openai_usage(data),
-                                 .stop_reason = detail::openai_response_stop_reason(data)});
+    events.push_back(
+        StreamEvent{.type = StreamEventType::Done,
+                    .text = "",
+                    .tool_call_id = "",
+                    .tool_name = "",
+                    .error_message = "",
+                    .usage = parse_openai_usage(data),
+                    .finish_reason = type == "response.completed" ? ProviderFinishReason::Completed : detail::openai_response_finish_reason(data)});
     return;
   }
   if (type == "response.error" || type == "response.failed")

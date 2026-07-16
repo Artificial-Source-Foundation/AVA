@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AVA custom TUI theme",
+  "description": "Editor-facing schema for files under $XDG_CONFIG_HOME/ava/themes/*.json. The AVA runtime loader remains authoritative.",
+  "$comment": "This intentionally documents AVA's current minimal custom theme shape: name, optional vars, and eight ncurses color roles. It is not Pi's broader 51-token theme schema.",
+  "type": "object",
+  "required": ["name", "colors"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional editor schema URI; ignored by AVA."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!\\.{1,2}$)[^\\s/\\\\]+$",
+      "description": "Unique custom theme name. AVA rejects whitespace, path separators, '.', '..', built-in aliases, and reset aliases."
+    },
+    "vars": {
+      "type": "object",
+      "description": "Optional color variables referenced by string color values. AVA reports undefined variables and cycles at load time.",
+      "additionalProperties": {
+        "$ref": "#/$defs/colorValue"
+      }
+    },
+    "colors": {
+      "type": "object",
+      "description": "AVA's current eight ncurses palette roles.",
+      "required": [
+        "text",
+        "muted",
+        "success",
+        "warning",
+        "error",
+        "accent",
+        "screenBg",
+        "composerBg"
+      ],
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/colorValue"
+        },
+        "muted": {
+          "$ref": "#/$defs/colorValue"
+        },
+        "success": {
+          "$ref": "#/$defs/colorValue"
+        },
+        "warning": {
+          "$ref": "#/$defs/colorValue"
+        },
+        "error": {
+          "$ref": "#/$defs/colorValue"
+        },
+        "accent": {
+          "$ref": "#/$defs/colorValue"
+        },
+        "screenBg": {
+          "$ref": "#/$defs/colorValue"
+        },
+        "composerBg": {
+          "$ref": "#/$defs/colorValue"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "colorValue": {
+      "description": "Color value accepted by AVA: empty string for terminal default, 0-255 xterm color integer, 6-digit #RRGGBB string approximated to xterm-256, or a key from vars.",
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        {
+          "type": "string"
+        }
+      ]
+    }
+  }
+}

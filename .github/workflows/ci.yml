@@ -7,20 +7,77 @@ on:
   pull_request:
     branches:
       - develop
+  workflow_dispatch:
+    inputs:
+      run_acpx:
+        description: Run the opt-in alpha acpx interoperability smoke
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
   test:
-    name: Build and test
+    name: Build and test (${{ matrix.build_type }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type:
+          - Debug
+          - Release
     env:
       CC: gcc-16
       CXX: g++-16
       GITACHE_ROOT: ${{ github.workspace }}/.gitache
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           submodules: recursive
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev universal-ctags
+
+      - name: Restore gitache cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.GITACHE_ROOT }}
+          key: gitache-${{ runner.os }}-${{ matrix.build_type }}-${{ hashFiles('.gitmodules') }}
+          restore-keys: |
+            gitache-${{ runner.os }}-${{ matrix.build_type }}-
+
+      - name: Configure
+        run: |
+          mkdir -p "$GITACHE_ROOT"
+          cmake -S . -B build -G Ninja -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --parallel
+
+  tsan:
+    name: ThreadSanitizer coordinator and ACP peer
+    runs-on: ubuntu-24.04
+    env:
+      CC: gcc-16
+      CXX: g++-16
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          submodules: recursive
+          persist-credentials: false
 
       - name: Install dependencies
         run: |
@@ -30,24 +87,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev
 
-      - name: Restore gitache cache
-        uses: actions/cache@v5
-        with:
-          path: ${{ env.GITACHE_ROOT }}
-          key: gitache-${{ runner.os }}-${{ hashFiles('.gitmodules') }}
-          restore-keys: |
-            gitache-${{ runner.os }}-
-
       - name: Configure
-        run: |
-          mkdir -p "$GITACHE_ROOT"
-          cmake -S . -B build -G Ninja -DAVA_BUILD_TESTS=ON
+        run: cmake --preset tsan -G Ninja
 
-      - name: Build
-        run: cmake --build build --parallel
+      - name: Build focused test target
+        run: cmake --build --preset tsan --target ava_tests --parallel
 
-      - name: Test
-        run: ctest --test-dir build --output-on-failure --parallel
+      - name: Test focused coordinator and ACP peer races
+        run: ctest --preset tsan
 
   sanitizer:
     name: Sanitizers
@@ -57,9 +104,10 @@ jobs:
       CXX: g++-16
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Install dependencies
         run: |
@@ -77,3 +125,106 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build-sanitize --output-on-failure --parallel
+
+  acp-sdk-interop:
+    name: Official ACP SDK interoperability (Release)
+    runs-on: ubuntu-24.04
+    env:
+      CC: gcc-16
+      CXX: g++-16
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up exact Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24.13.1
+
+      - name: Install C++ dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev
+
+      - name: Install locked official SDK test dependencies
+        working-directory: tests/acp-sdk
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Configure required SDK interoperability
+        run: cmake -S . -B build-sdk -G Ninja -DAVA_BUILD_TESTS=ON -DAVA_REQUIRE_ACP_SDK_INTEROP=ON -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build AVA and test helpers
+        run: cmake --build build-sdk --target ava ava_tests ava_fake_provider_server ava_fake_mcp_server --parallel
+
+      - name: Run focused credential-free ACP tests
+        run: |
+          mkdir -p "${{ runner.temp }}/ava-sdk-parent"/{home,config,data,state,cache,tmp}
+          env -i \
+            HOME="${{ runner.temp }}/ava-sdk-parent/home" \
+            XDG_CONFIG_HOME="${{ runner.temp }}/ava-sdk-parent/config" \
+            XDG_DATA_HOME="${{ runner.temp }}/ava-sdk-parent/data" \
+            XDG_STATE_HOME="${{ runner.temp }}/ava-sdk-parent/state" \
+            XDG_CACHE_HOME="${{ runner.temp }}/ava-sdk-parent/cache" \
+            TMPDIR="${{ runner.temp }}/ava-sdk-parent/tmp" \
+            PATH="/usr/local/bin:/usr/bin:/bin" \
+            LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+            ctest --test-dir build-sdk --output-on-failure \
+              -R '^(ava_cli[.]acp_sdk_interop|ava_cli[.]acp_subprocess|ava_tests[.]acp|ava_tests[.]acp_support_manifest|ava_tests[.]acp_interop_manifest)$'
+
+  acpx-interop:
+    name: Opt-in acpx interoperability (Release)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_acpx
+    runs-on: ubuntu-24.04
+    env:
+      CC: gcc-16
+      CXX: g++-16
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up exact Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24.13.1
+
+      - name: Install C++ dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev
+
+      - name: Install locked acpx test dependencies
+        working-directory: tests/acp-acpx
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Configure opt-in acpx interoperability
+        run: cmake -S . -B build-acpx -G Ninja -DAVA_BUILD_TESTS=ON -DAVA_ENABLE_ACPX_INTEROP=ON -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build AVA and fake provider
+        run: cmake --build build-acpx --target ava ava_fake_provider_server --parallel
+
+      - name: Run opt-in credential-free acpx and manifest tests
+        run: |
+          mkdir -p "${{ runner.temp }}/ava-acpx-parent"/{home,config,data,state,cache,tmp}
+          env -i \
+            HOME="${{ runner.temp }}/ava-acpx-parent/home" \
+            XDG_CONFIG_HOME="${{ runner.temp }}/ava-acpx-parent/config" \
+            XDG_DATA_HOME="${{ runner.temp }}/ava-acpx-parent/data" \
+            XDG_STATE_HOME="${{ runner.temp }}/ava-acpx-parent/state" \
+            XDG_CACHE_HOME="${{ runner.temp }}/ava-acpx-parent/cache" \
+            TMPDIR="${{ runner.temp }}/ava-acpx-parent/tmp" \
+            PATH="/usr/local/bin:/usr/bin:/bin" \
+            LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+            ctest --test-dir build-acpx --output-on-failure \
+              -R '^(ava_cli[.]acpx_interop|ava_tests[.]acp_interop_manifest)$'

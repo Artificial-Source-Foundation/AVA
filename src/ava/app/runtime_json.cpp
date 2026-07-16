@@ -135,8 +135,8 @@ void append_json_escaped_char(std::string& output, std::string_view object, std:
   }
 }
 
-std::string session_start_data_json(ava::agent::Mode mode, ava::config::ModelInfo const& model, runtime::BasePromptMetadata const& base_prompt,
-                                    std::size_t context_source_count)
+std::string session_start_data_json(ava::agent::Mode mode, ava::config::ModelInfo const& model, BasePromptMetadata const& base_prompt,
+                                    std::size_t context_source_count, std::filesystem::path const& original_cwd)
 {
   std::string json = "{\"mode\":\"" + ava::agent::to_string(mode) + "\",\"provider\":\"" + ava::core::json::escape(model.provider_id) + "\",\"model\":\"" +
                      ava::core::json::escape(model.model_id) +
@@ -168,6 +168,8 @@ std::string session_start_data_json(ava::agent::Mode mode, ava::config::ModelInf
   {
     json += ",\"reasoning_format\":\"" + ava::core::json::escape(model.reasoning_format) + "\"";
   }
+  if (!original_cwd.empty())
+    json += ",\"original_cwd\":\"" + ava::core::json::escape(original_cwd.string()) + "\"";
   json += '}';
   return json;
 }
@@ -184,7 +186,8 @@ std::string model_change_data_json(ava::config::ModelInfo const& previous, ava::
   json += ",\"api_family\":\"" + ava::core::json::escape(current.api_family) + "\"";
   json += ",\"input_modalities\":" + string_array_json(current.input_modalities);
   json += ",\"output_modalities\":" + string_array_json(current.output_modalities);
-  json += ",\"reasoning_levels\":" + string_array_json(current.reasoning_levels);
+  json += ",\"reasoning_levels\":" + string_array_json(ava::config::supported_reasoning_levels(current));
+  json += ",\"raw_reasoning_levels\":" + string_array_json(current.reasoning_levels);
   json += ",\"compatibility_quirks\":" + string_array_json(current.compatibility_quirks);
   json += optional_integer_json("context_window_tokens", current.context_window_tokens);
   json += optional_integer_json("max_output_tokens", current.max_output_tokens);
@@ -200,7 +203,7 @@ std::string model_change_data_json(ava::config::ModelInfo const& previous, ava::
   return json;
 }
 
-std::string reasoning_change_data_json(ava::config::ModelInfo const& model, std::optional<runtime::ReasoningSelection> const& selection)
+std::string reasoning_change_data_json(ava::config::ModelInfo const& model, std::optional<ReasoningSelection> const& selection)
 {
   std::string json = "{\"provider\":\"" + ava::core::json::escape(model.provider_id) + "\",\"model\":\"" + ava::core::json::escape(model.model_id) + "\"";
   if (!model.reasoning_format.empty())
@@ -212,6 +215,8 @@ std::string reasoning_change_data_json(ava::config::ModelInfo const& model, std:
   if (selection)
   {
     json += ",\"level\":\"" + ava::core::json::escape(selection->level) + "\"";
+    if (selection->provider_level && *selection->provider_level != selection->level)
+      json += ",\"provider_level\":\"" + ava::core::json::escape(*selection->provider_level) + "\"";
     if (selection->budget_tokens)
       json += ",\"budget_tokens\":" + std::to_string(*selection->budget_tokens);
     if (!selection->display.empty())
@@ -367,34 +372,45 @@ std::optional<bool> bool_json_field(std::string_view object, std::string_view ke
 }
 
 ava::core::VoidResult append_session_start(ava::session::SessionStore& store, ava::agent::Mode mode, ava::config::ModelInfo const& model,
-                                           runtime::BasePromptMetadata const& base_prompt, std::size_t context_source_count)
+                                           BasePromptMetadata const& base_prompt, std::size_t context_source_count,
+                                           std::filesystem::path const& original_cwd)
 {
   return store.append(ava::session::SessionEntry{
       .id = ava::core::make_id("entry"),
       .parent_id = "",
       .type = ava::session::EntryType::SessionStart,
       .timestamp = ava::session::now_timestamp(),
-      .data_json = session_start_data_json(mode, model, base_prompt, context_source_count),
+      .data_json = session_start_data_json(mode, model, base_prompt, context_source_count, original_cwd),
   });
+}
+
+ava::session::SessionEntry make_model_change_entry(ava::config::ModelInfo const& previous, ava::config::ModelInfo const& current)
+{
+  return ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                    .parent_id = "",
+                                    .type = ava::session::EntryType::ModelChange,
+                                    .timestamp = ava::session::now_timestamp(),
+                                    .data_json = model_change_data_json(previous, current)};
 }
 
 ava::core::VoidResult append_model_change(ava::session::SessionStore& store, ava::config::ModelInfo const& previous, ava::config::ModelInfo const& current)
 {
-  return store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                 .parent_id = "",
-                                                 .type = ava::session::EntryType::ModelChange,
-                                                 .timestamp = ava::session::now_timestamp(),
-                                                 .data_json = model_change_data_json(previous, current)});
+  return store.append(make_model_change_entry(previous, current));
+}
+
+ava::session::SessionEntry make_reasoning_change_entry(ava::config::ModelInfo const& model, std::optional<ReasoningSelection> const& selection)
+{
+  return ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                    .parent_id = "",
+                                    .type = ava::session::EntryType::ReasoningChange,
+                                    .timestamp = ava::session::now_timestamp(),
+                                    .data_json = reasoning_change_data_json(model, selection)};
 }
 
 ava::core::VoidResult append_reasoning_change(ava::session::SessionStore& store, ava::config::ModelInfo const& model,
-                                              std::optional<runtime::ReasoningSelection> const& selection)
+                                              std::optional<ReasoningSelection> const& selection)
 {
-  return store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                 .parent_id = "",
-                                                 .type = ava::session::EntryType::ReasoningChange,
-                                                 .timestamp = ava::session::now_timestamp(),
-                                                 .data_json = reasoning_change_data_json(model, selection)});
+  return store.append(make_reasoning_change_entry(model, selection));
 }
 
 }  // namespace ava::app::runtime

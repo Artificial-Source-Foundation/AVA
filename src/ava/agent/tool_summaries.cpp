@@ -201,14 +201,19 @@ std::string summarize_tool_result(ToolDispatchResult const& result)
   if (result.name == "read_file")
   {
     auto const output_lines = payload.output_lines.value_or(size_field(result.result_text, "output_lines").value_or(0));
-    auto const total_lines = payload.total_lines.value_or(size_field(result.result_text, "total_lines").value_or(0));
-    if (total_lines > 0 || output_lines > 0)
+    auto const total_lines = payload.total_lines ? payload.total_lines : size_field(result.result_text, "total_lines");
+    if (total_lines.value_or(0) > 0 || output_lines > 0)
     {
       auto const start_line = payload.start_line.value_or(size_field(result.result_text, "start_line").value_or(0));
       auto const end_line = payload.end_line.value_or(size_field(result.result_text, "end_line").value_or(0));
       auto const next_offset = payload.next_offset_line.value_or(
           size_field(result.result_text, "next_offset_line").value_or(size_field(result.result_text, "next_offset").value_or(0)));
-      std::string summary = line_range_summary(start_line, end_line, total_lines);
+      std::string summary;
+      if (total_lines)
+        summary = line_range_summary(start_line, end_line, *total_lines);
+      else
+        summary =
+            "lines " + std::to_string(start_line) + "-" + std::to_string(end_line) + " (" + std::to_string(output_lines) + " retained; original total unknown)";
       if (payload.truncated || bool_field_is_true(result.result_text, "truncated"))
         summary += " (truncated)";
       if (next_offset > 0)
@@ -216,8 +221,9 @@ std::string summarize_tool_result(ToolDispatchResult const& result)
       return summary;
     }
     auto const output_bytes = payload.output_bytes.value_or(size_field(result.result_text, "output_bytes").value_or(0));
-    auto const total_bytes = payload.total_bytes.value_or(size_field(result.result_text, "total_bytes").value_or(output_bytes));
-    std::string summary = "read " + std::to_string(output_bytes) + "/" + std::to_string(total_bytes) + " bytes";
+    auto const total_bytes = payload.total_bytes ? payload.total_bytes : size_field(result.result_text, "total_bytes");
+    auto summary = total_bytes ? "read " + std::to_string(output_bytes) + "/" + std::to_string(*total_bytes) + " bytes"
+                               : "read " + std::to_string(output_bytes) + " retained bytes (original total unknown)";
     if (payload.truncated || bool_field_is_true(result.result_text, "truncated"))
       summary += " (truncated)";
     return summary;
@@ -254,14 +260,18 @@ std::string summarize_tool_result(ToolDispatchResult const& result)
     if (bool_field_is_true(result.result_text, "truncated"))
     {
       auto const output_lines = payload.output_lines.value_or(size_field(result.result_text, "output_lines").value_or(0));
-      auto const total_lines = payload.total_lines.value_or(size_field(result.result_text, "total_lines").value_or(0));
-      if (total_lines > 0 || output_lines > 0)
+      auto const total_lines = payload.total_lines ? payload.total_lines : size_field(result.result_text, "total_lines");
+      if (total_lines)
       {
-        summary += " (output truncated to " + std::to_string(output_lines) + "/" + std::to_string(total_lines) + " lines)";
+        summary += " (output truncated to " + std::to_string(output_lines) + "/" + std::to_string(*total_lines) + " lines)";
+      }
+      else if (output_lines > 0)
+      {
+        summary += " (output truncated; " + std::to_string(output_lines) + " retained lines; original total unknown)";
       }
       else
       {
-        summary += " (output truncated)";
+        summary += " (output truncated; original total unknown)";
       }
     }
     return summary;

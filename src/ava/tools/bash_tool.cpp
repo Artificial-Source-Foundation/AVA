@@ -254,7 +254,7 @@ void finalize_output(BashResult& result, BashOptions const& options, bool saw_ou
   result.output_bytes = result.output.size();
   result.output_lines = logical_line_count(result.output);
   result.omitted_lines = result.total_lines > result.output_lines ? result.total_lines - result.output_lines : 0;
-  result.truncated = result.byte_limited || result.line_limited || result.output_bytes < result.total_bytes;
+  result.truncated = result.truncated || result.byte_limited || result.line_limited || result.output_bytes < result.total_bytes;
 }
 
 ssize_t read_retry(int fd, char* data, std::size_t size)
@@ -367,19 +367,129 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   {
     return std::unexpected(permission.error());
   }
+  BashResult result;
+  std::string process_outcome = "error";
+  // Provider call IDs are product data. A direct process invocation receives
+  // its own observer-only correlation ID rather than leaking that raw value.
+  auto trace_process_call_id = context.trace_call_id;
+  if (context.observation && trace_process_call_id.empty())
+    trace_process_call_id = context.observation->next_id("process");
+  struct ProcessTraceScope
+  {
+    ava::tools::ToolContext const& context;
+    std::string const& call_id;
+    std::string& outcome;
+    BashResult const& result;
+    ~ProcessTraceScope() noexcept
+    {
+      if (context.observation)
+        context.observation->emit(ava::observability::TraceEventType::ProcessResult, context.trace_context, [this](auto& event) {
+          event.call_id = call_id;
+          event.phase = ava::observability::TracePhase::Process;
+          event.outcome = outcome == "canceled" ? ava::observability::TraceOutcome::Canceled
+                                                : (outcome == "success" ? ava::observability::TraceOutcome::Success : ava::observability::TraceOutcome::Error);
+          event.fields = {{.key = "tool", .value = "bash"}, {.key = "output_bytes", .value = std::to_string(result.output_bytes)}};
+        });
+    }
+  } trace{context, trace_process_call_id, process_outcome, result};
+  auto observe_process_start = [&] {
+    if (context.observation)
+      context.observation->emit(ava::observability::TraceEventType::ProcessStart, context.trace_context, [&trace_process_call_id](auto& event) {
+        event.call_id = trace_process_call_id;
+        event.phase = ava::observability::TracePhase::Process;
+        event.outcome = ava::observability::TraceOutcome::Started;
+        event.fields = {{.key = "tool", .value = "bash"}};
+      });
+  };
+  // Permission approval is the operation boundary: every subsequent cancel,
+  // parse, pipe, or fork failure receives this matching observer-only pair.
+  observe_process_start();
   if (is_canceled(context))
   {
-    BashResult result;
     result.exit_code = -1;
     result.canceled = true;
+    process_outcome = "canceled";
     return result;
   }
+  if (auto started = announce_tool_execution_start(context); !started)
+    return std::unexpected(std::move(started.error()));
 
   auto argv_strings = parse_command_argv(command);
   if (!argv_strings)
   {
     return std::unexpected(argv_strings.error());
   }
+
+  if (context.command_executor)
+  {
+    std::error_code status_error;
+    auto const workspace_status = std::filesystem::symlink_status(context.workspace_dir, status_error);
+    if (status_error || !std::filesystem::is_directory(workspace_status) || std::filesystem::is_symlink(workspace_status))
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "command workspace must be an existing non-symlink directory");
+      error.with_context("path", context.workspace_dir.string());
+      if (status_error)
+        error.with_context("cause", status_error.message());
+      return std::unexpected(std::move(error));
+    }
+    std::error_code canonical_error;
+    auto canonical_cwd = std::filesystem::canonical(context.workspace_dir, canonical_error);
+    if (canonical_error)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to canonicalize command workspace");
+      error.with_context("path", context.workspace_dir.string());
+      error.with_context("cause", canonical_error.message());
+      return std::unexpected(std::move(error));
+    }
+    auto executed = context.command_executor->execute(CommandExecutionRequest{.argv = std::move(*argv_strings),
+                                                                              .cwd = std::move(canonical_cwd),
+                                                                              .timeout = options.timeout,
+                                                                              .output_byte_limit = options.max_bytes,
+                                                                              .cancel_requested = context.cancel_requested});
+    if (!executed)
+      return std::unexpected(std::move(executed.error()));
+
+    bool saw_output = false;
+    bool previous_was_newline = false;
+    std::size_t newline_count = 0;
+    append_output(result, executed->output, options, saw_output, previous_was_newline, newline_count);
+    result.exit_code = executed->exit_code;
+    result.timed_out = executed->timed_out;
+    result.canceled = executed->canceled;
+    result.truncated = executed->truncated;
+    result.byte_limited = result.byte_limited || executed->truncated;
+    result.totals_known = !executed->truncated;
+    finalize_output(result, options, saw_output, previous_was_newline, newline_count);
+    if (!result.totals_known)
+    {
+      result.total_bytes = 0;
+      result.total_lines = 0;
+      result.omitted_lines = 0;
+    }
+    if (result.truncated && !context.spill_dir.empty())
+    {
+      SpillBuffer spill_buffer;
+      spill_buffer.append(executed->output);
+      auto spill = write_spill_file(context, "bash", "txt", spill_buffer);
+      if (!spill)
+        return std::unexpected(std::move(spill.error()));
+      result.spill_path = spill->path;
+      result.spill_truncated = spill->truncated || executed->truncated;
+      if (auto progress = emit_tool_progress(context, "bash output spilled " + std::to_string(spill->bytes_written) + " bytes", "running"); !progress)
+        return std::unexpected(std::move(progress.error()));
+    }
+    if (result.output_bytes > 0)
+    {
+      auto const summary = result.totals_known
+                               ? "bash completed with " + std::to_string(result.total_bytes) + " output bytes"
+                               : "bash completed with " + std::to_string(result.output_bytes) + " retained output bytes; original total unknown";
+      if (auto progress = emit_tool_progress(context, summary, "completed"); !progress)
+        return std::unexpected(std::move(progress.error()));
+    }
+    process_outcome = result.canceled ? "canceled" : (result.timed_out ? "timed_out" : (result.exit_code == 0 ? "success" : "error"));
+    return result;
+  }
+
   std::vector<char*> argv;
   argv.reserve(argv_strings->size() + 1);
   for (auto& arg : *argv_strings)
@@ -403,6 +513,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to fork process");
     error.with_context("cause", std::strerror(errno));
+    process_outcome = "spawn_error";
     return std::unexpected(std::move(error));
   }
 
@@ -449,7 +560,6 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     return std::unexpected(std::move(error));
   }
 
-  BashResult result;
   SpillBuffer spill_buffer;
   bool running = true;
   bool saw_output = false;
@@ -587,6 +697,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
       return std::unexpected(std::move(progress.error()));
     }
   }
+  process_outcome = result.canceled ? "canceled" : (result.timed_out ? "timed_out" : (result.exit_code == 0 ? "success" : "error"));
   return result;
 }
 

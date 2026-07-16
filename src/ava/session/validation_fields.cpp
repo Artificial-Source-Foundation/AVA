@@ -1,8 +1,6 @@
 #include "sys.h"
-#include "ava/session/validation_fields.h"
-
 #include "ava/session/session_store.h"
-
+#include "ava/session/validation_fields.h"
 #include "ava/core/json.h"
 
 #include <cctype>
@@ -25,21 +23,25 @@ bool supported_entry_version(long long version)
 bool bool_field_is_true(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
-  if (!start) return false;
+  if (!start)
+    return false;
   auto const end = *start + std::string_view("true").size();
-  if (end > object.size() || object.substr(*start, std::string_view("true").size()) != "true") return false;
-  return end == object.size() || object[end] == ',' || object[end] == '}' || object[end] == ']' || object[end] == ' ' ||
-         object[end] == '\t' || object[end] == '\n' || object[end] == '\r';
+  if (end > object.size() || object.substr(*start, std::string_view("true").size()) != "true")
+    return false;
+  return end == object.size() || object[end] == ',' || object[end] == '}' || object[end] == ']' || object[end] == ' ' || object[end] == '\t' ||
+         object[end] == '\n' || object[end] == '\r';
 }
 
 bool bool_field_is_false(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
-  if (!start) return false;
+  if (!start)
+    return false;
   auto const end = *start + std::string_view("false").size();
-  if (end > object.size() || object.substr(*start, std::string_view("false").size()) != "false") return false;
-  return end == object.size() || object[end] == ',' || object[end] == '}' || object[end] == ']' || object[end] == ' ' ||
-         object[end] == '\t' || object[end] == '\n' || object[end] == '\r';
+  if (end > object.size() || object.substr(*start, std::string_view("false").size()) != "false")
+    return false;
+  return end == object.size() || object[end] == ',' || object[end] == '}' || object[end] == ']' || object[end] == ' ' || object[end] == '\t' ||
+         object[end] == '\n' || object[end] == '\r';
 }
 
 bool valid_status(std::string_view status)
@@ -49,12 +51,10 @@ bool valid_status(std::string_view status)
 
 bool valid_operation(std::string_view operation)
 {
-  return operation == "read" || operation == "search" || operation == "edit" || operation == "bash" ||
-         operation == "network.fetch" || operation == "network.search" || operation == "lsp.server.launch" || operation == "lsp.query" ||
-         operation == "skill" || operation == "plugin.execute" || operation == "plugin.tool.call" ||
-         operation == "plugin.command.run" || operation == "plugin.event.observe" ||
-         operation == "mcp.server.launch" || operation == "mcp.server.connect" || operation == "mcp.tool.call" ||
-         operation == "mcp.resource.read";
+  return operation == "read" || operation == "search" || operation == "edit" || operation == "bash" || operation == "network.fetch" ||
+         operation == "network.search" || operation == "lsp.server.launch" || operation == "lsp.query" || operation == "skill" ||
+         operation == "plugin.execute" || operation == "plugin.tool.call" || operation == "plugin.command.run" || operation == "plugin.event.observe" ||
+         operation == "mcp.server.launch" || operation == "mcp.server.connect" || operation == "mcp.tool.call" || operation == "mcp.resource.read";
 }
 
 bool valid_mode(std::string_view mode)
@@ -69,13 +69,19 @@ bool valid_action(std::string_view action)
 
 bool valid_resolution(std::string_view resolution)
 {
-  return resolution == "allow" || resolution == "deny";
+  return resolution == "allow" || resolution == "deny" || resolution == "cancel";
 }
 
 bool valid_resolution_source(std::string_view source)
 {
-  return source == "policy" || source == "resolver" || source == "session_grant" || source == "no_resolver" ||
-         source == "resolver_failed" || source == "persistent_rule" || source == "persistent_rule_error";
+  if (source == "policy" || source == "resolver" || source == "session_grant" || source == "no_resolver" || source == "resolver_failed" ||
+      source == "persistent_rule" || source == "persistent_rule_error" || source == "client_cancel" || source == "hard_scope" || source == "session_config" ||
+      source == "client")
+    return true;
+
+  // Legacy persisted ACP-specific aliases remain readable but are not emitted by current writers.
+  return source == "acp_hard_policy" || source == "acp_session_mcp" || source == "acp_client" || source == "acp_session_grant" ||
+         source == "acp_client_cancel" || source == "acp_client_error";
 }
 
 bool valid_risk(std::string_view risk)
@@ -86,7 +92,8 @@ bool valid_risk(std::string_view risk)
 bool present_non_empty_string(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
-  if (!start) return true;
+  if (!start)
+    return true;
   auto const value = ava::core::json::string_field(object, key);
   return value && !value->empty();
 }
@@ -94,30 +101,37 @@ bool present_non_empty_string(std::string_view object, std::string_view key)
 bool present_boolean(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
-  if (!start) return true;
+  if (!start)
+    return true;
   return bool_field_is_true(object, key) || bool_field_is_false(object, key);
 }
 
 bool required_boolean(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
-  if (!start) return false;
+  if (!start)
+    return false;
   return bool_field_is_true(object, key) || bool_field_is_false(object, key);
 }
 
 bool present_integer_matching(std::string_view object, std::string_view key, bool require_positive)
 {
   auto const start = ava::core::json::field_value_start(object, key);
-  if (!start) return true;
+  if (!start)
+    return true;
   std::size_t end = *start;
-  if (end < object.size() && object[end] == '-') ++end;
+  if (end < object.size() && object[end] == '-')
+    ++end;
   auto const digits_start = end;
   while (end < object.size() && std::isdigit(static_cast<unsigned char>(object[end])) != 0) ++end;
-  if (end == digits_start) return false;
+  if (end == digits_start)
+    return false;
   while (end < object.size() && std::isspace(static_cast<unsigned char>(object[end])) != 0) ++end;
-  if (end < object.size() && !is_json_value_delimiter(object[end])) return false;
+  if (end < object.size() && !is_json_value_delimiter(object[end]))
+    return false;
   auto const value = ava::core::json::integer_field(object, key);
-  if (!value) return false;
+  if (!value)
+    return false;
   return require_positive ? *value > 0 : *value >= 0;
 }
 

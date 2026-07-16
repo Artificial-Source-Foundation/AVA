@@ -282,6 +282,10 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
                                                            std::size_t estimated_tokens, ava::provider::Provider const& provider,
                                                            ava::provider::Transport& transport, runtime::RunOptions const& options)
 {
+  if (session.offline || options.offline)
+  {
+    return std::unexpected(offline_provider_error("compact"));
+  }
   if (options.access_token.empty())
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "compaction requires provider access token"));
@@ -295,6 +299,23 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
     retry_transport.emplace(transport, runtime::runtime_retry_options(session, summary_options));
     summary_transport = &*retry_transport;
     summary_options.enable_transport_retries = false;
+  }
+  // Compaction is a provider request in the same runtime turn, so observe its
+  // logical request with the already-established run/turn context. Do not
+  // construct the decorator on the disabled path.
+  std::optional<ava::provider::ObservedTransport> observed_transport;
+  if (summary_options.observation && summary_options.observation->enabled())
+  {
+    try
+    {
+      observed_transport.emplace(*summary_transport,
+                                 ava::provider::TransportObservation{.observation = summary_options.observation, .context = summary_options.trace_context});
+      summary_transport = &*observed_transport;
+    }
+    catch (...)
+    {
+      summary_options.observation->account_external_failure();
+    }
   }
 
   constexpr std::string_view system_prompt =
@@ -351,9 +372,9 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
 
 namespace ava::app::runtime {
 
-ava::core::Result<bool> compact_runtime_context(runtime::Session& session, ava::session::SessionStore& store, std::string_view trigger,
-                                                ava::provider::Provider const& provider, ava::provider::Transport& transport,
-                                                runtime::RunOptions const& options, std::vector<std::string> const& replayed_user_messages)
+ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::SessionStore& store, std::string_view trigger,
+                                                ava::provider::Provider const& provider, ava::provider::Transport& transport, RunOptions const& options,
+                                                std::vector<std::string> const& replayed_user_messages)
 {
   if (options.access_token.empty())
   {
@@ -404,7 +425,7 @@ ava::core::Result<bool> compact_runtime_context(runtime::Session& session, ava::
 
     if (trigger == "context_overflow" && !context_retry_event_emitted)
     {
-      auto retry_event = base_compaction_event_locked(session, options, runtime::EventType::Retry);
+      auto retry_event = base_compaction_event_locked(session, options, EventType::Retry);
       retry_event.trigger = trigger_text;
       retry_event.reason = "context_overflow";
       retry_event.status = "started";
@@ -419,7 +440,7 @@ ava::core::Result<bool> compact_runtime_context(runtime::Session& session, ava::
       context_retry_event_emitted = true;
     }
 
-    auto start_event = base_compaction_event_locked(session, options, runtime::EventType::CompactionStart);
+    auto start_event = base_compaction_event_locked(session, options, EventType::CompactionStart);
     start_event.trigger = trigger_text;
     start_event.status = "started";
     start_event.attempt = attempt + 1;
@@ -458,13 +479,16 @@ ava::core::Result<bool> compact_runtime_context(runtime::Session& session, ava::
         last_current_entries = current_entries->size();
         return false;
       }
-      auto appended = ava::session::append_manual_compaction(store, ava::session::ManualCompactionRequest{.summary = *summary,
-                                                                                                          .instructions = "",
-                                                                                                          .config = *config,
-                                                                                                          .estimated_tokens = estimated_tokens,
-                                                                                                          .threshold_tokens = threshold_tokens,
-                                                                                                          .trigger = trigger_text,
-                                                                                                          .recent_context = *recent_context});
+      auto entry = ava::session::make_manual_compaction_entry(ava::session::ManualCompactionRequest{.summary = *summary,
+                                                                                                    .instructions = "",
+                                                                                                    .config = *config,
+                                                                                                    .estimated_tokens = estimated_tokens,
+                                                                                                    .threshold_tokens = threshold_tokens,
+                                                                                                    .trigger = trigger_text,
+                                                                                                    .recent_context = *recent_context});
+      if (!entry)
+        return std::unexpected(std::move(entry.error()));
+      auto appended = options.active_append_route ? options.active_append_route(std::move(*entry)) : session.append_owned(std::move(*entry));
       if (!appended)
         return std::unexpected(std::move(appended.error()));
       return true;
@@ -483,7 +507,7 @@ ava::core::Result<bool> compact_runtime_context(runtime::Session& session, ava::
       return std::unexpected(std::move(appended.error()));
     if (*appended)
     {
-      auto end_event = base_compaction_event_locked(session, options, runtime::EventType::CompactionEnd);
+      auto end_event = base_compaction_event_locked(session, options, EventType::CompactionEnd);
       end_event.trigger = trigger_text;
       end_event.status = "completed";
       end_event.attempt = attempt + 1;
@@ -499,7 +523,7 @@ ava::core::Result<bool> compact_runtime_context(runtime::Session& session, ava::
     }
     if (snapshot_stale && attempt + 1 < max_compaction_attempts)
     {
-      auto retry_event = base_compaction_event_locked(session, options, runtime::EventType::Retry);
+      auto retry_event = base_compaction_event_locked(session, options, EventType::Retry);
       retry_event.trigger = trigger_text;
       retry_event.reason = "stale_compaction_snapshot";
       retry_event.status = "started";

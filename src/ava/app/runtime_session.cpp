@@ -238,7 +238,12 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
   if (options.initial_reasoning_level)
   {
     if (auto applied = apply_initial_reasoning_level(session, *options.initial_reasoning_level); !applied)
-      return std::unexpected(std::move(applied.error()));
+    {
+      auto error = std::move(applied.error());
+      store = std::move(session.store);
+      lease = std::move(session.lease);
+      return std::unexpected(std::move(error));
+    }
   }
   return session;
 }
@@ -261,6 +266,7 @@ ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions co
   auto const session_read_limits = options.session_read_limits.value_or(ava::session::legacy_unbounded_session_read_limits());
 
   bool created = true;
+  bool created_from_fork = false;
   bool load_existing_entries = false;
   bool append_session_start = true;
   ava::session::SessionLease lease;
@@ -296,6 +302,7 @@ ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions co
       return std::unexpected(std::move(branch.error()));
     store = std::move(branch->store);
     lease = std::move(branch->lease);
+    created_from_fork = true;
     load_existing_entries = true;
     append_session_start = false;
   }
@@ -349,8 +356,15 @@ ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions co
       return std::unexpected(std::move(recovered.error()));
   }
 
-  return construct_runtime_session(options, *store, lease, created, load_existing_entries, created && append_session_start,
-                                   options.initial_session_name.has_value() && !options.fork_session_id);
+  auto session = construct_runtime_session(options, *store, lease, created, load_existing_entries, created && append_session_start,
+                                           options.initial_session_name.has_value() && !options.fork_session_id);
+  if (!session && created_from_fork)
+  {
+    auto error = std::move(session.error());
+    ava::session::rollback_created_session_with_context(*store, lease, error);
+    return std::unexpected(std::move(error));
+  }
+  return session;
 }
 
 ava::core::Result<runtime::Session> open_owned_runtime_session(runtime::OpenOptions const& options, ava::session::SessionStore& store,

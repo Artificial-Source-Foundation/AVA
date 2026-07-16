@@ -68,6 +68,10 @@ struct BranchSummaryResult
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// Roll back only a newly-created session JSONL file while preserving any attachment tree in place.
+// The primary error remains authoritative; rollback observations are appended as context.
+void rollback_created_session_with_context(SessionStore const& store, SessionLease const& lease, ava::core::Error& error);
+
 [[nodiscard]] ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOptions options);
 [[nodiscard]] ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOptions options);
 

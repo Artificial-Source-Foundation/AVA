@@ -16,6 +16,7 @@
 #include "ava/app/runtime.h"
 #include "ava/agent/question.h"
 #include "ava/config/auth.h"
+#include "ava/session/attachments.h"
 #include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
 #include "ava/session/validation.h"
@@ -1235,6 +1236,79 @@ void test_app_rpc_session_fork_and_clone_commands()
   auto active_destination_contender = ava::session::SessionLease::acquire(session->store.session_path());
   expect(!active_destination_contender && active_destination_contender.error().message().find("already owned") != std::string::npos,
          "RPC fork/clone transfers the active destination lease directly into the replacement runtime");
+}
+
+void test_app_rpc_branch_construction_failure_rolls_back_created_file()
+{
+  auto const root = temp_root() / "app-rpc-branch-rollback";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto source = ava::app::open_runtime_session(open_options);
+  expect(source.has_value(), "RPC rollback test opens an active source session");
+  if (!source)
+    return;
+  auto entries = source->store.load();
+  expect(entries && !entries->empty(), "RPC rollback test loads the source start entry");
+  if (!entries || entries->empty())
+    return;
+  auto appended =
+      source->store.append(ava::session::SessionEntry{.id = "entry_rpc_rollback_attachment",
+                                                      .parent_id = entries->back().id,
+                                                      .type = ava::session::EntryType::UserMessage,
+                                                      .timestamp = "2026-07-16T00:00:00Z",
+                                                      .data_json = "{\"text\":\"attachment\",\"attachments\":[{\"id\":\"rpc_rollback_img\","
+                                                                   "\"type\":\"image\",\"mime_type\":\"image/png\",\"byte_size\":5,"
+                                                                   "\"sha256\":\"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\","
+                                                                   "\"storage_path\":\"attachments/rollback.txt\"}]}",
+                                                      .version = 2});
+  auto const source_attachment = ava::session::attachment_storage_root(source->store) / "attachments" / "rollback.txt";
+  write_app_test_file(source_attachment, "hello");
+  expect(appended.has_value(), "RPC rollback test appends a copyable source attachment reference");
+  if (!appended)
+    return;
+
+  auto const source_id = source->store.session_id();
+  auto const source_path = source->store.session_path();
+  std::filesystem::create_directories(paths.models_file);
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  std::istringstream in("{\"id\":\"fork-rollback\",\"type\":\"fork_session\"}\n");
+  std::ostringstream out;
+  auto result = ava::app::run_rpc_loop(*source, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto const jsonl = out.str();
+  auto const marker = std::string("created_session_id: ");
+  auto const marker_offset = jsonl.find(marker);
+  std::optional<std::string> created_id;
+  if (marker_offset != std::string::npos)
+  {
+    auto const value_start = marker_offset + marker.size();
+    auto const value_end = jsonl.find("\\n", value_start);
+    created_id = jsonl.substr(value_start, value_end == std::string::npos ? std::string::npos : value_end - value_start);
+  }
+  bool destination_jsonl_removed = false;
+  bool destination_attachment_retained = false;
+  if (created_id)
+  {
+    auto destination =
+        ava::session::SessionStore(ava::session::SessionStoreOptions{.root_dir = paths.sessions_dir, .workspace_dir = workspace, .session_id = *created_id});
+    auto const destination_attachment = ava::session::attachment_storage_root(destination) / "attachments" / "rollback.txt";
+    destination_jsonl_removed = !std::filesystem::exists(destination.session_path());
+    destination_attachment_retained = read_rpc_golden(destination_attachment) == "hello";
+  }
+  auto source_contender = ava::session::SessionLease::acquire(source_path);
+  expect(result && created_id && jsonl.find("\"id\":\"fork-rollback\"") != std::string::npos && jsonl.find("\"success\":false") != std::string::npos &&
+             jsonl.find("rollback_attachment_disposition: preserved") != std::string::npos && destination_jsonl_removed && destination_attachment_retained &&
+             source->store.session_id() == source_id && !source_contender && source_contender.error().message().find("already owned") != std::string::npos,
+         "RPC branch runtime-construction failure preserves the primary error, removes only destination JSONL, retains copied attachments, and leaves the "
+         "source active");
 }
 
 void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
@@ -2638,6 +2712,7 @@ void run_app_rpc_tests()
   test_app_rpc_session_metadata_name_and_labels();
   test_app_rpc_session_tree_command_and_switch_navigation();
   test_app_rpc_session_fork_and_clone_commands();
+  test_app_rpc_branch_construction_failure_rolls_back_created_file();
   test_app_rpc_noncurrent_branch_source_recovers_torn_tail();
   test_app_rpc_summarize_branch_appends_to_source_session();
   test_app_rpc_model_commands();

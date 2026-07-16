@@ -515,7 +515,11 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     auto owned_options = owned_replacement_options(context.session, context.open_options);
     auto opened = open_owned_runtime_session(owned_options, branched->store, branched->lease, true);
     if (!opened)
-      return handled(write_error(context.output, command.id, opened.error()));
+    {
+      auto error = std::move(opened.error());
+      ava::session::rollback_created_session_with_context(branched->store, branched->lease, error);
+      return handled(write_error(context.output, command.id, error));
+    }
     opened->created = true;
     if (auto replaced = replace_runtime_session(context.session, std::move(*opened)); !replaced)
       return handled(write_error(context.output, command.id, replaced.error()));

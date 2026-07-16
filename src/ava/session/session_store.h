@@ -149,6 +149,8 @@ class SessionStore
   void set_before_append_identity_check_for_test(std::function<void()> hook);
   void set_after_append_write_for_test(std::function<void()> hook);
   void set_after_recovery_quarantine_publication_for_test(std::function<void()> hook);
+  void set_before_created_file_rollback_detach_for_test(std::function<void()> hook);
+  void set_after_created_file_rollback_detach_for_test(std::function<void()> hook);
   // Repairs only a single incomplete final JSONL record while the matching
   // exclusive lease is held. All scanning and mutation are subject to explicit
   // read limits and cancellation. A returned path names the quarantined exact
@@ -189,6 +191,8 @@ class SessionStore
   std::function<void()> before_append_identity_check_for_test_;
   std::function<void()> after_append_write_for_test_;
   std::function<void()> after_recovery_quarantine_publication_for_test_;
+  std::function<void()> before_created_file_rollback_detach_for_test_;
+  std::function<void()> after_created_file_rollback_detach_for_test_;
 };
 
 // Legacy CLI/TUI/RPC reads retain their historical unbounded file/entry policy

@@ -121,6 +121,14 @@ std::string app_read_binary_file(std::filesystem::path const& path)
   return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
 }
 
+std::optional<std::string> app_error_context(ava::core::Error const& error, std::string_view key)
+{
+  auto const found = std::ranges::find_if(error.context(), [key](ava::core::ErrorContext const& context) { return context.key == key; });
+  if (found == error.context().end())
+    return std::nullopt;
+  return found->value;
+}
+
 std::string shell_single_quoted(std::string_view value)
 {
   std::string quoted = "'";
@@ -3891,6 +3899,115 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
   }
 }
 
+void test_app_runtime_branch_construction_failure_rolls_back_created_file()
+{
+  auto seed_source_attachment = [](ava::app::runtime::Session& session) {
+    auto entries = session.store.load();
+    if (!entries || entries->empty())
+      return false;
+    auto appended =
+        session.store.append(ava::session::SessionEntry{.id = "entry_rollback_attachment",
+                                                        .parent_id = entries->back().id,
+                                                        .type = ava::session::EntryType::UserMessage,
+                                                        .timestamp = "2026-07-16T00:00:00Z",
+                                                        .data_json = "{\"text\":\"attachment\",\"attachments\":[{\"id\":\"rollback_img\","
+                                                                     "\"type\":\"image\",\"mime_type\":\"image/png\",\"byte_size\":5,"
+                                                                     "\"sha256\":\"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\","
+                                                                     "\"storage_path\":\"attachments/rollback.txt\"}]}",
+                                                        .version = 2});
+    if (!appended)
+      return false;
+    auto const attachment = ava::session::attachment_storage_root(session.store) / "attachments" / "rollback.txt";
+    write_app_test_file(attachment, "hello");
+    return true;
+  };
+
+  {
+    auto const root = temp_root() / "app-runtime-tui-branch-rollback";
+    std::error_code remove_error;
+    std::filesystem::remove_all(root, remove_error);
+    auto const workspace = root / "workspace";
+    auto const paths = app_test_paths(root);
+    std::filesystem::create_directories(workspace);
+
+    ava::app::runtime::OpenOptions options;
+    options.workspace_dir = workspace;
+    options.current_dir = workspace;
+    options.paths = paths;
+    auto source = ava::app::open_runtime_session(options);
+    expect(source.has_value() && seed_source_attachment(*source), "TUI rollback test opens an active source with a copyable attachment");
+    if (!source)
+      return;
+    auto const source_id = source->store.session_id();
+    auto const source_path = source->store.session_path();
+    std::filesystem::create_directories(paths.models_file);
+
+    auto forked = ava::app::run_command(*source, ava::app::CommandRequest{.command = "/fork rollback"});
+    auto const created_id = forked ? std::optional<std::string>{} : app_error_context(forked.error(), "created_session_id");
+    bool destination_jsonl_removed = false;
+    bool destination_attachment_retained = false;
+    if (created_id)
+    {
+      auto destination =
+          ava::session::SessionStore(ava::session::SessionStoreOptions{.root_dir = paths.sessions_dir, .workspace_dir = workspace, .session_id = *created_id});
+      auto const destination_attachment = ava::session::attachment_storage_root(destination) / "attachments" / "rollback.txt";
+      destination_jsonl_removed = !std::filesystem::exists(destination.session_path());
+      destination_attachment_retained = app_read_binary_file(destination_attachment) == "hello";
+    }
+    auto source_contender = ava::session::SessionLease::acquire(source_path);
+    expect(!forked && created_id && forked.error().message().find("rollback") == std::string::npos &&
+               forked.error().format().find("rollback_attachment_disposition: preserved") != std::string::npos && destination_jsonl_removed &&
+               destination_attachment_retained && source->store.session_id() == source_id && !source_contender &&
+               source_contender.error().message().find("already owned") != std::string::npos,
+           "TUI branch runtime-construction failure keeps the source active, removes only destination JSONL, and retains copied attachments with rollback "
+           "context");
+  }
+
+  {
+    auto const root = temp_root() / "app-runtime-startup-fork-rollback";
+    std::error_code remove_error;
+    std::filesystem::remove_all(root, remove_error);
+    auto const workspace = root / "workspace";
+    auto const paths = app_test_paths(root);
+    std::filesystem::create_directories(workspace);
+
+    ava::app::runtime::OpenOptions seed_options;
+    seed_options.workspace_dir = workspace;
+    seed_options.current_dir = workspace;
+    seed_options.paths = paths;
+    auto source = ava::app::open_runtime_session(seed_options);
+    expect(source.has_value() && seed_source_attachment(*source), "startup fork rollback test creates a source with a copyable attachment");
+    if (!source)
+      return;
+    auto const source_id = source->store.session_id();
+    auto const source_path = source->store.session_path();
+    auto const source_bytes = app_read_binary_file(source_path);
+    source = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release startup fork rollback source"));
+
+    auto fork_options = seed_options;
+    fork_options.fork_session_id = source_id;
+    fork_options.initial_reasoning_level = "minimal";
+    auto forked = ava::app::open_runtime_session(fork_options);
+    auto const created_id = forked ? std::optional<std::string>{} : app_error_context(forked.error(), "created_session_id");
+    bool destination_jsonl_removed = false;
+    bool destination_attachment_retained = false;
+    if (created_id)
+    {
+      auto destination =
+          ava::session::SessionStore(ava::session::SessionStoreOptions{.root_dir = paths.sessions_dir, .workspace_dir = workspace, .session_id = *created_id});
+      auto const destination_attachment = ava::session::attachment_storage_root(destination) / "attachments" / "rollback.txt";
+      destination_jsonl_removed = !std::filesystem::exists(destination.session_path());
+      destination_attachment_retained = app_read_binary_file(destination_attachment) == "hello";
+    }
+    auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
+    expect(!forked && created_id && forked.error().message().find("rollback") == std::string::npos &&
+               forked.error().format().find("rollback_attachment_disposition: preserved") != std::string::npos && destination_jsonl_removed &&
+               destination_attachment_retained && source_store && app_read_binary_file(source_path) == source_bytes,
+           "startup fork construction failure removes only destination JSONL, retains copied attachments, reports rollback context, and preserves the source "
+           "session");
+  }
+}
+
 void test_app_runtime_initial_reasoning_level_option()
 {
   auto const root = temp_root() / "app-runtime-initial-reasoning-level";
@@ -3989,5 +4106,6 @@ void run_app_runtime_tests()
   test_app_runtime_model_switch_persists_and_reopens();
   test_app_runtime_model_switch_rejects_incompatible_history();
   test_app_runtime_reasoning_selection_persists_and_requests();
+  test_app_runtime_branch_construction_failure_rolls_back_created_file();
   test_app_runtime_initial_reasoning_level_option();
 }

@@ -21,24 +21,6 @@ ava::core::Error branch_error(ava::core::ErrorCategory category, std::string mes
   return ava::core::Error(category, std::move(message));
 }
 
-void attach_rollback_context(SessionStore const& store, SessionLease const& lease, ava::core::Error& error)
-{
-  if (auto removed = store.remove_created_file(lease); !removed)
-  {
-    error.with_context("rollback_path", store.session_path().string());
-    error.with_context("rollback_cause", removed.error().format());
-  }
-  std::error_code attachments_remove_error;
-  std::filesystem::remove_all(attachment_storage_root(store), attachments_remove_error);
-  std::error_code directory_remove_error;
-  std::filesystem::remove(store.session_path().parent_path(), directory_remove_error);
-  if (attachments_remove_error)
-  {
-    error.with_context("rollback_attachment_path", attachment_storage_root(store).string());
-    error.with_context("rollback_attachment_cause", attachments_remove_error.message());
-  }
-}
-
 void append_json_string_field(std::string& json, std::string_view key, std::string_view value)
 {
   json += ",\"";
@@ -265,6 +247,34 @@ ava::core::Result<std::size_t> copy_count_for_branch(std::vector<SessionEntry> c
 
 }  // namespace
 
+void rollback_created_session_with_context(SessionStore const& store, SessionLease const& lease, ava::core::Error& error)
+{
+  error.with_context("created_session_id", store.session_id());
+  if (auto removed = store.remove_created_file(lease); !removed)
+  {
+    error.with_context("rollback_path", store.session_path().string());
+    error.with_context("rollback_cause", removed.error().format());
+  }
+
+  auto const attachment_path = attachment_storage_root(store);
+  std::error_code inspection_error;
+  auto const attachment_status = std::filesystem::symlink_status(attachment_path, inspection_error);
+  if (inspection_error)
+  {
+    if (inspection_error != std::errc::no_such_file_or_directory)
+    {
+      error.with_context("rollback_attachment_path", attachment_path.string());
+      error.with_context("rollback_attachment_disposition", "preserved");
+      error.with_context("rollback_attachment_inspection_cause", inspection_error.message());
+    }
+  }
+  else if (std::filesystem::exists(attachment_status))
+  {
+    error.with_context("rollback_attachment_path", attachment_path.string());
+    error.with_context("rollback_attachment_disposition", "preserved");
+  }
+}
+
 ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOptions options)
 {
   if (options.source_session_id.empty())
@@ -315,8 +325,7 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
     {
       auto error = std::move(appended.error());
       error.with_context("source_session_id", options.source_session_id);
-      error.with_context("created_session_id", created->session_id());
-      attach_rollback_context(*created, *destination_lease, error);
+      rollback_created_session_with_context(*created, *destination_lease, error);
       return std::unexpected(std::move(error));
     }
   }
@@ -325,8 +334,7 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
   {
     auto error = std::move(copied_attachments.error());
     error.with_context("source_session_id", options.source_session_id);
-    error.with_context("created_session_id", created->session_id());
-    attach_rollback_context(*created, *destination_lease, error);
+    rollback_created_session_with_context(*created, *destination_lease, error);
     return std::unexpected(std::move(error));
   }
 
@@ -343,8 +351,7 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
   {
     auto error = std::move(metadata.error());
     error.with_context("source_session_id", options.source_session_id);
-    error.with_context("created_session_id", created->session_id());
-    attach_rollback_context(*created, *destination_lease, error);
+    rollback_created_session_with_context(*created, *destination_lease, error);
     return std::unexpected(std::move(error));
   }
 

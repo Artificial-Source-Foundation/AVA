@@ -3499,6 +3499,171 @@ void test_image_attachment_import()
   }
 }
 
+std::optional<std::filesystem::path> created_session_rollback_quarantine(std::filesystem::path const& session_path)
+{
+  auto const prefix = "." + session_path.filename().string() + ".rollback.";
+  std::error_code iterator_error;
+  for (std::filesystem::directory_iterator iterator(session_path.parent_path(), iterator_error), end; !iterator_error && iterator != end;
+       iterator.increment(iterator_error))
+  {
+    if (iterator->path().filename().string().starts_with(prefix))
+      return iterator->path();
+  }
+  return std::nullopt;
+}
+
+void test_created_session_rollback_is_identity_safe_and_preserves_attachments()
+{
+  auto const root = temp_root() / "created-session-rollback";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const sessions_dir = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto create_owned = [&]() -> std::pair<ava::session::SessionStore, ava::session::SessionLease> {
+    auto store = ava::session::SessionStore::create(workspace, sessions_dir);
+    expect(store.has_value(), "created-session rollback test creates a store");
+    if (!store)
+      return {ava::session::SessionStore(ava::session::SessionStoreOptions{}), ava::session::SessionLease{}};
+    auto lease = ava::session::SessionLease::create_and_acquire(store->session_path());
+    expect(lease.has_value(), "created-session rollback test acquires the creating lease");
+    if (!lease)
+      return {std::move(*store), ava::session::SessionLease{}};
+    return {std::move(*store), std::move(*lease)};
+  };
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      auto removed = store.remove_created_file(lease);
+      expect(removed && !std::filesystem::exists(path) && !created_session_rollback_quarantine(path),
+             "created-session rollback removes exactly the creating JSONL without leaving a quarantine sibling");
+    }
+  }
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      auto const parked_original = root / "parked-original.jsonl";
+      store.set_before_created_file_rollback_detach_for_test([&] {
+        std::filesystem::rename(path, parked_original);
+        write_binary_file(path, "replacement-session");
+      });
+      auto removed = store.remove_created_file(lease);
+      expect(!removed && read_binary_file(path) == "replacement-session" && std::filesystem::exists(parked_original),
+             "created-session rollback fails closed and preserves a replaced session basename");
+    }
+  }
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      auto const parked_original = root / "fifo-parked-original.jsonl";
+      store.set_before_created_file_rollback_detach_for_test([&] {
+        std::filesystem::rename(path, parked_original);
+        expect(::mkfifo(path.c_str(), 0600) == 0, "created-session rollback test installs a FIFO replacement");
+      });
+      auto removed = store.remove_created_file(lease);
+      std::error_code fifo_status_error;
+      auto const fifo_status = std::filesystem::symlink_status(path, fifo_status_error);
+      expect(!removed && !fifo_status_error && std::filesystem::is_fifo(fifo_status) && std::filesystem::exists(parked_original) &&
+                 !created_session_rollback_quarantine(path),
+             "created-session rollback inspects a FIFO replacement without blocking and restores it without deletion");
+    }
+  }
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      auto const original_parent = path.parent_path();
+      auto const moved_parent = root / "moved-session-parent";
+      store.set_after_created_file_rollback_detach_for_test([&] {
+        std::filesystem::rename(original_parent, moved_parent);
+        std::filesystem::create_directories(original_parent);
+        write_binary_file(path, "parent-replacement-session");
+      });
+      auto removed = store.remove_created_file(lease);
+      expect(removed && read_binary_file(path) == "parent-replacement-session" && !created_session_rollback_quarantine(moved_parent / path.filename()),
+             "descriptor-anchored rollback cannot redirect deletion into a replacement parent directory");
+    }
+  }
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      store.set_after_created_file_rollback_detach_for_test([&] { write_binary_file(path, "republished-session"); });
+      auto removed = store.remove_created_file(lease);
+      expect(!removed && read_binary_file(path) == "republished-session" && created_session_rollback_quarantine(path) &&
+                 removed.error().format().find("created session name was republished") != std::string::npos &&
+                 removed.error().format().find("quarantine_path:") != std::string::npos,
+             "rollback preserves and reports its exact quarantine when the original name is republished after detach");
+    }
+  }
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      auto const parked_original = root / "mismatch-parked-original.jsonl";
+      store.set_after_created_file_rollback_detach_for_test([&] {
+        auto quarantine = created_session_rollback_quarantine(path);
+        if (!quarantine)
+          return;
+        std::filesystem::rename(*quarantine, parked_original);
+        write_binary_file(*quarantine, "quarantine-replacement");
+      });
+      auto removed = store.remove_created_file(lease);
+      expect(!removed && std::filesystem::exists(parked_original) && read_binary_file(path) == "quarantine-replacement" &&
+                 !created_session_rollback_quarantine(path),
+             "rollback restores a detached quarantine mismatch to the original name without deleting either inode");
+    }
+  }
+
+  {
+    auto [store, creating_lease] = create_owned();
+    if (!creating_lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      auto no_token = store.remove_created_file(ava::session::SessionLease{});
+      creating_lease = ava::session::SessionLease{};
+      auto noncreating_lease = ava::session::SessionLease::acquire(path);
+      auto noncreating =
+          noncreating_lease ? store.remove_created_file(*noncreating_lease) : ava::core::VoidResult(std::unexpected(std::move(noncreating_lease.error())));
+      expect(!no_token && !noncreating && std::filesystem::exists(path),
+             "created-session rollback rejects missing and non-creating leases without deleting the session");
+    }
+  }
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const attachment_file = ava::session::attachment_storage_root(store) / "nested" / "attachment.bin";
+      write_binary_file(attachment_file, "retained attachment bytes");
+      ava::core::Error primary(ava::core::ErrorCategory::Unknown, "runtime construction failed");
+      ava::session::rollback_created_session_with_context(store, lease, primary);
+      auto const formatted = primary.format();
+      expect(!std::filesystem::exists(store.session_path()) && read_binary_file(attachment_file) == "retained attachment bytes" &&
+                 primary.message() == "runtime construction failed" && formatted.find("created_session_id: " + store.session_id()) != std::string::npos &&
+                 formatted.find("rollback_attachment_path: " + ava::session::attachment_storage_root(store).string()) != std::string::npos &&
+                 formatted.find("rollback_attachment_disposition: preserved") != std::string::npos,
+             "session rollback preserves an attachment subtree byte-for-byte and reports its retained path without replacing the primary error");
+    }
+  }
+}
+
 void test_provider_base64_encoding()
 {
   expect(ava::provider::base64_encode("") == "", "base64 encoder handles empty input");
@@ -3538,5 +3703,6 @@ void run_session_tests()
   test_image_attachment_message_reconstruction_and_validation();
   test_image_attachment_storage_boundary();
   test_image_attachment_import();
+  test_created_session_rollback_is_identity_safe_and_preserves_attachments();
   test_provider_base64_encoding();
 }

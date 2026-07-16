@@ -674,7 +674,11 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
   auto owned_options = owned_replacement_options(session);
   auto opened = open_owned_runtime_session(owned_options, branched->store, branched->lease, true);
   if (!opened)
-    return std::unexpected(std::move(opened.error()));
+  {
+    auto error = std::move(opened.error());
+    ava::session::rollback_created_session_with_context(branched->store, branched->lease, error);
+    return std::unexpected(std::move(error));
+  }
   opened->created = true;
   if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)
     return std::unexpected(std::move(replaced.error()));

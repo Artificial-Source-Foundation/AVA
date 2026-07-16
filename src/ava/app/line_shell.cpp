@@ -471,7 +471,7 @@ std::optional<std::string> compact_token_status(ava::session::SessionStats const
   return output.str();
 }
 
-std::optional<std::string> token_status_for_session(ava::app::RuntimeSession const& session)
+std::optional<std::string> token_status_for_session(ava::app::runtime::RuntimeSession const& session)
 {
   auto entries = session.store.load();
   if (!entries)
@@ -500,7 +500,7 @@ bool contains_value(std::vector<std::string> const& values, std::string_view val
   return std::ranges::find_if(values, [&](auto const& existing) { return existing == value; }) != values.end();
 }
 
-std::vector<std::string> registered_model_cycle_values(ava::app::RuntimeSession const& session)
+std::vector<std::string> registered_model_cycle_values(ava::app::runtime::RuntimeSession const& session)
 {
   auto view = ava::app::scoped_model_selector_view(session, {});
   std::vector<std::string> values;
@@ -525,7 +525,7 @@ std::vector<std::string> normalized_model_scope(std::vector<std::string> const& 
   return normalized;
 }
 
-void store_model_scope(ava::app::RuntimeSession& session,
+void store_model_scope(ava::app::runtime::RuntimeSession& session,
                        std::vector<std::string> candidate,
                        std::vector<std::string> const& all_values,
                        bool reset_full_scope_to_all)
@@ -539,7 +539,7 @@ void store_model_scope(ava::app::RuntimeSession& session,
   session.scoped_model_cycle = std::move(normalized);
 }
 
-std::vector<std::string> active_model_scope_or_all(ava::app::RuntimeSession const& session,
+std::vector<std::string> active_model_scope_or_all(ava::app::runtime::RuntimeSession const& session,
                                                    std::vector<std::string> const& all_values)
 {
   if (session.scoped_model_cycle)
@@ -577,14 +577,14 @@ ava::tui::SelectListView preserve_scoped_model_selector_state(ava::tui::SelectLi
   return view;
 }
 
-ava::tui::SelectListView refreshed_scoped_model_selector(ava::app::RuntimeSession const& session,
+ava::tui::SelectListView refreshed_scoped_model_selector(ava::app::runtime::RuntimeSession const& session,
                                                          ava::tui::SelectListView const& previous)
 {
   return preserve_scoped_model_selector_state(
       ava::app::scoped_model_selector_view(session, scoped_model_selector_footer_hint()), previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::RuntimeSession& session,
+ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::runtime::RuntimeSession& session,
                                                                 ava::tui::SelectListView const& previous,
                                                                 std::string_view value)
 {
@@ -605,7 +605,7 @@ ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::Runtim
   return refreshed_scoped_model_selector(session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> enable_scoped_models(ava::app::RuntimeSession& session,
+ava::core::Result<ava::tui::SelectListView> enable_scoped_models(ava::app::runtime::RuntimeSession& session,
                                                                  ava::tui::SelectListView const& previous,
                                                                  std::vector<std::string> targets)
 {
@@ -620,7 +620,7 @@ ava::core::Result<ava::tui::SelectListView> enable_scoped_models(ava::app::Runti
   return refreshed_scoped_model_selector(session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> clear_scoped_models(ava::app::RuntimeSession& session,
+ava::core::Result<ava::tui::SelectListView> clear_scoped_models(ava::app::runtime::RuntimeSession& session,
                                                                 ava::tui::SelectListView const& previous,
                                                                 std::vector<std::string> targets)
 {
@@ -634,7 +634,7 @@ ava::core::Result<ava::tui::SelectListView> clear_scoped_models(ava::app::Runtim
   return refreshed_scoped_model_selector(session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(ava::app::RuntimeSession& session,
+ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(ava::app::runtime::RuntimeSession& session,
                                                                          ava::tui::SelectListView const& previous,
                                                                          std::string_view selected_value)
 {
@@ -668,7 +668,7 @@ ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(ava::ap
   return refreshed_scoped_model_selector(session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(ava::app::RuntimeSession& session,
+ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(ava::app::runtime::RuntimeSession& session,
                                                                  ava::tui::SelectListView const& previous,
                                                                  std::string_view selected_value,
                                                                  bool up)
@@ -688,7 +688,7 @@ ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(ava::app::Runti
   return refreshed_scoped_model_selector(session, previous);
 }
 
-ava::core::Result<std::string> save_scoped_model_cycle(ava::app::RuntimeSession& session)
+ava::core::Result<std::string> save_scoped_model_cycle(ava::app::runtime::RuntimeSession& session)
 {
   std::optional<std::vector<std::string>> scope_to_save = std::nullopt;
   if (session.scoped_model_cycle)
@@ -709,7 +709,7 @@ ava::core::Result<std::string> save_scoped_model_cycle(ava::app::RuntimeSession&
   return std::string("scoped model cycle saved: ") + std::to_string(scope_to_save->size()) + " models enabled";
 }
 
-ava::permissions::PermissionRuleStore permission_rule_store_for_session(ava::app::RuntimeSession const& session)
+ava::permissions::PermissionRuleStore permission_rule_store_for_session(ava::app::runtime::RuntimeSession const& session)
 {
   return ava::permissions::PermissionRuleStore{
       .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
@@ -731,7 +731,7 @@ ava::permissions::PermissionRuleMode permission_rule_mode_for_agent_mode(ava::ag
 }
 
 ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rule_for_prompt(
-    ava::app::RuntimeSession const& session, ava::permissions::PermissionPrompt const& prompt,
+    ava::app::runtime::RuntimeSession const& session, ava::permissions::PermissionPrompt const& prompt,
     ava::permissions::PermissionAction action)
 {
   auto reason = prompt.reason.empty() ? std::string("remembered from TUI permission prompt") : prompt.reason;
@@ -754,7 +754,7 @@ ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rul
 struct ShellState
 {
   // Lifetime contract: references are stack-scoped and must outlive each run loop invocation.
-  ava::app::RuntimeSession& session;
+  ava::app::runtime::RuntimeSession& session;
 };
 
 struct LineResult
@@ -792,7 +792,7 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
     add_output(line_result, provider.error().format() + std::string(offline_suffix));
     return line_result;
   }
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RuntimeRunOptions run_options;
   run_options.access_token = (*credential)->access_token;
   run_options.credential_type = (*credential)->credential_type;
   run_options.openai_oauth = (*credential)->provider_id == "openai" && (*credential)->credential_type == "oauth";
@@ -803,7 +803,7 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
 
 LineResult handle_line(ShellState& state, std::string const& line, ava::permissions::PermissionResolver permission_resolver = nullptr,
                        ava::agent::QuestionResolver question_resolver = nullptr, std::vector<ava::app::CommandHotkey> const& hotkeys = {},
-                       ava::app::RuntimeEventSink event_sink = nullptr, std::function<bool()> cancel_requested = nullptr,
+                       ava::app::runtime::RuntimeEventSink event_sink = nullptr, std::function<bool()> cancel_requested = nullptr,
                        std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr,
                        std::vector<ava::session::ImageAttachmentRef> image_attachments = {})
 {
@@ -816,7 +816,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
     {
       return with_provider_runtime(
           state, "\nother slash tool commands still work offline.",
-          [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::RuntimeRunOptions run_options) {
+          [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RuntimeRunOptions run_options) {
             run_options.cancel_requested = cancel_requested;
             run_options.event_sink = event_sink;
             auto command_result = ava::app::run_command(
@@ -859,7 +859,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
     if (command_result->prompt_message)
     {
       return with_provider_runtime(state, "\nthis command expands to a prompt and needs provider auth.",
-                                   [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::RuntimeRunOptions run_options) {
+                                   [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RuntimeRunOptions run_options) {
                                      run_options.permission_resolver = permission_resolver;
                                      run_options.question_resolver = question_resolver;
                                      run_options.event_sink = std::move(event_sink);
@@ -895,7 +895,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
   }
 
   return with_provider_runtime(state, "\nslash tool commands still work offline.",
-                               [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::RuntimeRunOptions run_options) {
+                               [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RuntimeRunOptions run_options) {
                                  run_options.permission_resolver = permission_resolver;
                                  run_options.question_resolver = question_resolver;
                                  run_options.event_sink = std::move(event_sink);
@@ -1001,7 +1001,7 @@ int run_tui(ShellState state)
     return themes;
   };
   auto runtime_open_options = [&state]() {
-    ava::app::RuntimeOpenOptions options;
+    ava::app::runtime::RuntimeOpenOptions options;
     options.workspace_dir = state.session.workspace_dir;
     options.current_dir = state.session.current_dir;
     options.mode = state.session.mode;
@@ -1466,7 +1466,7 @@ int run_tui(ShellState state)
 
 namespace ava::app {
 
-int run_interactive(RuntimeSession& session)
+int run_interactive(runtime::RuntimeSession& session)
 {
   ShellState state{.session = session};
   if (ava::tui::terminal_is_tty())

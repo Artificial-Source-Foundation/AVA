@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 
-namespace ava::app {
+namespace ava::app::runtime {
 
 // Describe one file that contributed to the prompt context, with its origin type and a content fingerprint.
 struct ContextSourceMetadata
@@ -20,4 +20,4 @@ struct ContextSourceMetadata
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app
+}  // namespace ava::app::runtime

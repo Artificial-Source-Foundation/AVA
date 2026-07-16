@@ -7,7 +7,7 @@
 
 namespace ava::app {
 
-// Optional correlation identifiers supplied when converting a RuntimeEvent into an EventEnvelope, carried alongside the event's own envelope IDs.
+// Optional correlation identifiers supplied when converting a runtime::RuntimeEvent into an EventEnvelope, carried alongside the event's own envelope IDs.
 struct EventEnvelopeContext
 {
   std::optional<std::string> event_id;

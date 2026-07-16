@@ -64,16 +64,16 @@ std::string terminal_output_text(std::string_view text, bool sanitize)
   return sanitize ? sanitize_terminal_output_text(text) : std::string(text);
 }
 
-void write_text_event_diagnostic(RuntimeEvent const& event, std::ostream& err, bool sanitize)
+void write_text_event_diagnostic(runtime::RuntimeEvent const& event, std::ostream& err, bool sanitize)
 {
-  if (event.type == RuntimeEventType::ToolStart) {
+  if (event.type == runtime::RuntimeEventType::ToolStart) {
     err << "tool_start";
     if (!event.tool_name.empty()) err << " " << terminal_output_text(event.tool_name, sanitize);
     if (!event.text.empty()) err << ": " << terminal_output_text(event.text, sanitize);
     err << '\n';
     return;
   }
-  if (event.type == RuntimeEventType::ToolResult) {
+  if (event.type == runtime::RuntimeEventType::ToolResult) {
     err << "tool_result";
     if (!event.tool_name.empty()) err << " " << terminal_output_text(event.tool_name, sanitize);
     if (!event.status.empty()) err << " " << terminal_output_text(event.status, sanitize);
@@ -85,12 +85,12 @@ void write_text_event_diagnostic(RuntimeEvent const& event, std::ostream& err, b
     }
     return;
   }
-  if (event.type == RuntimeEventType::Error) {
+  if (event.type == runtime::RuntimeEventType::Error) {
     err << terminal_output_text(event.error_details.empty() ? event.error_message : event.error_details, sanitize) << '\n';
   }
 }
 
-RuntimeRunOptions print_runtime_options(RuntimeRunOptions options)
+runtime::RuntimeRunOptions print_runtime_options(runtime::RuntimeRunOptions options)
 {
   if (!options.permission_resolver) {
     options.permission_resolver = deny_permission_resolver();
@@ -99,7 +99,7 @@ RuntimeRunOptions print_runtime_options(RuntimeRunOptions options)
   return options;
 }
 
-ava::permissions::PermissionRuleStore permission_rule_store_for_print_session(RuntimeSession const& session)
+ava::permissions::PermissionRuleStore permission_rule_store_for_print_session(runtime::RuntimeSession const& session)
 {
   return ava::permissions::PermissionRuleStore{
       .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
@@ -108,10 +108,10 @@ ava::permissions::PermissionRuleStore permission_rule_store_for_print_session(Ru
   };
 }
 
-RuntimeEvent runtime_error_event(RuntimeSession const& session, ava::core::Error const& error)
+runtime::RuntimeEvent runtime_error_event(runtime::RuntimeSession const& session, ava::core::Error const& error)
 {
-  RuntimeEvent event;
-  event.type = RuntimeEventType::Error;
+  runtime::RuntimeEvent event;
+  event.type = runtime::RuntimeEventType::Error;
   event.timestamp = ava::session::now_timestamp();
   event.session_id = session.store.session_id();
   event.mode = session.mode;
@@ -136,7 +136,7 @@ ava::core::Result<std::string> merge_print_prompt(PrintPromptInputs const& input
       ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "print mode requires a prompt argument or stdin"));
 }
 
-ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& session, std::string const& prompt,
+ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::RuntimeSession& session, std::string const& prompt,
                                                                 ava::provider::Provider const& provider,
                                                                 ava::provider::Transport& transport,
                                                                 PrintModeRunOptions const& options, std::ostream& out,
@@ -149,7 +149,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
   EventBus event_bus;
   if (options.output_format == PrintOutputFormat::Json) {
     event_bus.subscribe([&out, &emitted_error](EventEnvelope const& envelope) {
-      if (envelope.name == to_string(RuntimeEventType::Error)) emitted_error = true;
+      if (envelope.name == to_string(runtime::RuntimeEventType::Error)) emitted_error = true;
       out << serialize_event_envelope_jsonl(envelope);
       if (!out) {
         return ava::core::VoidResult{
@@ -159,8 +159,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
     });
     runtime_options.event_sink = make_runtime_event_bus_adapter(event_bus);
   } else {
-    runtime_options.event_sink = [&err, &emitted_error, sanitize = options.sanitize_terminal_diagnostics](RuntimeEvent const& event) {
-      if (event.type == RuntimeEventType::Error) emitted_error = true;
+    runtime_options.event_sink = [&err, &emitted_error, sanitize = options.sanitize_terminal_diagnostics](runtime::RuntimeEvent const& event) {
+      if (event.type == runtime::RuntimeEventType::Error) emitted_error = true;
       write_text_event_diagnostic(event, err, sanitize);
       if (!err) {
         return ava::core::VoidResult{
@@ -241,7 +241,7 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   ava::provider::Provider const& provider = options.provider_override
                                                 ? options.provider_override->get()
                                                 : static_cast<ava::provider::Provider const&>(**default_provider);
-  RuntimeRunOptions runtime_options;
+  runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = (*request_credential)->access_token;
   runtime_options.credential_type = (*request_credential)->credential_type;
   runtime_options.openai_oauth =

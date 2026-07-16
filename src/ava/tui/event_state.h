@@ -65,7 +65,7 @@ struct TuiEventState
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-void apply_runtime_event(TuiEventState& state, ava::app::RuntimeEvent const& event);
+void apply_runtime_event(TuiEventState& state, ava::app::runtime::RuntimeEvent const& event);
 void apply_event_envelope(TuiEventState& state, ava::app::EventEnvelope const& envelope);
 
 [[nodiscard]] std::vector<TranscriptItem> event_state_transcript_snapshot(TuiEventState const& state);

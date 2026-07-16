@@ -167,7 +167,7 @@ std::vector<std::string> model_diagnostics(ava::config::ModelInfo const& model, 
   return diagnostics;
 }
 
-std::string format_models_text(RuntimeSession const& session, ava::config::ModelRegistry const& registry, std::string_view query)
+std::string format_models_text(runtime::RuntimeSession const& session, ava::config::ModelRegistry const& registry, std::string_view query)
 {
   auto const providers = ava::provider::builtin_provider_registry();
   auto models = effective_models(registry);
@@ -281,7 +281,7 @@ std::string provider_credential_status(ava::config::XdgPaths const& paths,
   return sanitize_inline_text(type) + " source=" + sanitize_inline_text(source);
 }
 
-std::string format_providers_text(RuntimeSession const& session, ava::config::ModelRegistry const& registry,
+std::string format_providers_text(runtime::RuntimeSession const& session, ava::config::ModelRegistry const& registry,
                                   std::string_view query)
 {
   auto const provider_registry = ava::provider::builtin_provider_registry();
@@ -333,7 +333,7 @@ std::vector<std::string> model_configuration_diagnostics(ava::config::ModelInfo 
   return model_diagnostics(model, provider_registered);
 }
 
-ava::core::Result<CommandResult> run_models_command(RuntimeSession& session, std::string_view query)
+ava::core::Result<CommandResult> run_models_command(runtime::RuntimeSession& session, std::string_view query)
 {
   CommandResult result;
   result.handled = true;
@@ -345,7 +345,7 @@ ava::core::Result<CommandResult> run_models_command(RuntimeSession& session, std
   return result;
 }
 
-ava::core::Result<CommandResult> run_providers_command(RuntimeSession& session, std::string_view query)
+ava::core::Result<CommandResult> run_providers_command(runtime::RuntimeSession& session, std::string_view query)
 {
   CommandResult result;
   result.handled = true;

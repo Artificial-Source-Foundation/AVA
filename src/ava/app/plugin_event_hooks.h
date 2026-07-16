@@ -14,7 +14,9 @@
 
 namespace ava::app {
 
+namespace runtime {
 struct RuntimeSession;
+} // namespace runtime
 
 using PluginEventHookFailureSink = std::function<void(std::string_view plugin_id, std::string_view event_name, ava::core::Error const& error)>;
 
@@ -38,12 +40,12 @@ struct PluginEventObserverOptions
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-[[nodiscard]] PluginEventObserverOptions plugin_event_observer_options(RuntimeSession& session,
+[[nodiscard]] PluginEventObserverOptions plugin_event_observer_options(runtime::RuntimeSession& session,
                                                                        ava::permissions::PermissionResolver permission_resolver = nullptr,
                                                                        std::mutex* session_mutex = nullptr);
 
 // Event hooks are observational and best-effort: hook launch, protocol, timeout,
 // and shutdown failures are intentionally not surfaced to the originating event.
-[[nodiscard]] RuntimeEventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, RuntimeEventSink next = nullptr);
+[[nodiscard]] runtime::RuntimeEventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, runtime::RuntimeEventSink next = nullptr);
 
 }  // namespace ava::app

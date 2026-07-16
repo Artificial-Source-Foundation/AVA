@@ -61,7 +61,7 @@ ava::core::Result<std::string> resolve_session_id(std::filesystem::path const& w
 
 }  // namespace
 
-ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const& options)
+ava::core::Result<runtime::RuntimeSession> open_runtime_session(runtime::RuntimeOpenOptions const& options)
 {
   if (options.requested_session_id && options.continue_last_session)
   {
@@ -153,7 +153,7 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
     loaded_entries = std::move(*entries);
   }
 
-  std::optional<RuntimeReasoningSelection> reasoning;
+  std::optional<runtime::RuntimeReasoningSelection> reasoning;
   if (loaded_entries)
     reasoning = runtime::latest_persisted_reasoning(*loaded_entries, model);
 
@@ -180,7 +180,7 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
       return std::unexpected(metadata.error());
   }
 
-  return RuntimeSession{.store = std::move(*store),
+  return runtime::RuntimeSession{.store = std::move(*store),
                         .mode = options.mode,
                         .model = std::move(model),
                         .base_prompt = std::move(prompt_state->base_prompt),
@@ -200,9 +200,9 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
                         .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>()};
 }
 
-std::string to_string(RuntimeFreshnessSourceKind kind)
+std::string to_string(runtime::RuntimeFreshnessSourceKind kind)
 {
-  using enum RuntimeFreshnessSourceKind;
+  using enum runtime::RuntimeFreshnessSourceKind;
   switch (kind)
   {
     case SystemPrompt:

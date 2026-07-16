@@ -110,9 +110,9 @@ struct CommandRegistryOptions
 [[nodiscard]] std::vector<PromptCommandSourceFile> prompt_command_source_files(std::filesystem::path const& workspace_dir,
                                                                                ava::config::XdgPaths const& paths,
                                                                                bool include_project_commands = true);
-[[nodiscard]] CommandRegistry load_command_registry(RuntimeSession& session, CommandRegistryOptions options = {});
+[[nodiscard]] CommandRegistry load_command_registry(runtime::RuntimeSession& session, CommandRegistryOptions options = {});
 [[nodiscard]] CommandRegistryEntry const* find_command_registry_entry(CommandRegistry const& registry, std::string_view line) noexcept;
-[[nodiscard]] bool command_registry_contains(RuntimeSession& session, std::string_view line);
+[[nodiscard]] bool command_registry_contains(runtime::RuntimeSession& session, std::string_view line);
 [[nodiscard]] ava::core::Result<std::string> expand_prompt_command_template(std::string_view template_text, std::string_view argument_text);
 [[nodiscard]] ava::core::Result<std::string> mcp_prompt_arguments_json(CommandRegistryEntry const& entry, std::string_view argument_text);
 

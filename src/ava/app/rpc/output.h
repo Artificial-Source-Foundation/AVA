@@ -14,7 +14,7 @@ namespace ava::app::rpc {
 
 struct ResolverEventPayload
 {
-  RuntimePayloadType payload_type = RuntimePayloadType::Queue;
+  runtime::RuntimePayloadType payload_type = runtime::RuntimePayloadType::Queue;
   std::string json = "{}";
 
   AVA_DEBUG_PRINT_MEMBERS_ON
@@ -29,15 +29,15 @@ struct ResolverEventPayload
 
 void subscribe_event_envelope_writer(EventBus& bus, output_ts& output);
 [[nodiscard]] EventEnvelopeContext rpc_event_context(std::string_view request_id);
-[[nodiscard]] std::string session_id_snapshot(RuntimeSession const& session, std::mutex& session_mutex);
+[[nodiscard]] std::string session_id_snapshot(runtime::RuntimeSession const& session, std::mutex& session_mutex);
 [[nodiscard]] EventEnvelope resolver_event_envelope(std::string name, std::string request_id, std::string correlation_id, std::string session_id,
                                                     std::string payload_json);
 [[nodiscard]] EventEnvelope resolver_event_envelope(std::string name, std::string request_id, std::string correlation_id, std::string session_id,
                                                     ResolverEventPayload payload);
 
-[[nodiscard]] ava::core::VoidResult write_queue_event(output_ts& output, RuntimeSession const& session, std::mutex& session_mutex, std::string_view name,
+[[nodiscard]] ava::core::VoidResult write_queue_event(output_ts& output, runtime::RuntimeSession const& session, std::mutex& session_mutex, std::string_view name,
                                                       QueuedRpcMessage const& queued, std::string_view reason = {});
-[[nodiscard]] ava::core::VoidResult write_skipped_queue_events(output_ts& output, RuntimeSession const& session, std::mutex& session_mutex,
+[[nodiscard]] ava::core::VoidResult write_skipped_queue_events(output_ts& output, runtime::RuntimeSession const& session, std::mutex& session_mutex,
                                                                ClearedRpcQueues const& cleared, std::string_view reason);
 [[nodiscard]] ava::core::VoidResult write_follow_up_errors(output_ts& output, std::vector<QueuedRpcMessage> const& follow_ups, std::string_view reason);
 

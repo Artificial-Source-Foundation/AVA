@@ -417,7 +417,7 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -434,7 +434,7 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"rpc answer\"}\n\n"
               "data: [DONE]\n\n",
   }});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -467,7 +467,7 @@ void test_app_rpc_prompt_imports_image_attachments()
   auto const image_path = workspace / "screen.png";
   write_app_test_file(image_path, rpc_tiny_png_bytes());
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -484,7 +484,7 @@ void test_app_rpc_prompt_imports_image_attachments()
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"rpc image answer\"}\n\n"
               "data: [DONE]\n\n",
   }});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -522,7 +522,7 @@ void test_app_rpc_prompt_imports_inline_image_uploads()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -539,7 +539,7 @@ void test_app_rpc_prompt_imports_inline_image_uploads()
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"rpc upload answer\"}\n\n"
               "data: [DONE]\n\n",
   }});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -578,7 +578,7 @@ void test_app_rpc_prompt_rejects_inline_image_upload_mime_mismatch()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -590,7 +590,7 @@ void test_app_rpc_prompt_rejects_inline_image_upload_mime_mismatch()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   std::istringstream in("{\"id\":\"p-upload-bad\",\"type\":\"prompt\",\"message\":\"describe\",\"images\":[{\"type\":\"image\",\"data\":\"" +
                         ava::provider::base64_encode(rpc_tiny_png_bytes()) + "\",\"mimeType\":\"image/jpeg\"}]}\n");
@@ -614,7 +614,7 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -627,7 +627,7 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ChunkedStreamingTransport transport({"data: {\"type\":\"response.output_text.delta\",\"delta\":\"rpc \"}\n\n",
                                        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"stream\"}\n\n", "data: [DONE]\n\n"});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -658,7 +658,7 @@ void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -672,7 +672,7 @@ void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event()
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"retry later\"}}"},
                                        ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"retry later\"}}"},
                                        ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"retry later\"}}"}});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   runtime_options.enable_transport_retries = true;
 
@@ -708,7 +708,7 @@ void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -725,7 +725,7 @@ void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag()
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"after cancel\"}\n\n"
               "data: [DONE]\n\n",
   }});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -763,7 +763,7 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
                                                                                           .source_path = {}});
   expect(stored.has_value(), "RPC OAuth refresh test stores expired credential");
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -793,7 +793,7 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out); });
+  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RuntimeRunOptions{}, in, out); });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello refreshed rpc\"}\n");
   bool const completed = output_buffer.wait_contains("\"success\":true", std::chrono::seconds(2));
   input_buffer.close();
@@ -820,7 +820,7 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -835,7 +835,7 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command()
       "not json\n{\"id\":\"s1\",\"type\":\"get_state\"}\n"
       "{\"id\":\"u1\",\"type\":\"unknown\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RuntimeRunOptions{}, in, out);
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC loop continues after malformed and unknown commands");
   expect(std::count(jsonl.begin(), jsonl.end(), '\n') == 3 && jsonl.find("\"id\":\"\"") != std::string::npos &&
@@ -854,7 +854,7 @@ void test_app_rpc_state_list_sessions_and_open_session()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -874,7 +874,7 @@ void test_app_rpc_state_list_sessions_and_open_session()
       "{\"id\":\"open\",\"type\":\"open_session\",\"session_id\":\"" +
       first_id + "\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*second, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*second, open_options, provider, transport, ava::app::runtime::RuntimeRunOptions{}, in, out);
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC state/list/open loop completes successfully");
   expect(jsonl.find("\"id\":\"state\"") != std::string::npos && jsonl.find(second_id) != std::string::npos &&
@@ -893,7 +893,7 @@ void test_app_rpc_session_metadata_name_and_labels()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -911,7 +911,7 @@ void test_app_rpc_session_metadata_name_and_labels()
       "{\"id\":\"after\",\"type\":\"session_metadata\"}\n"
       "{\"id\":\"bad\",\"type\":\"set_session_labels\",\"labels\":[\"dup\",\"dup\"]}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RuntimeRunOptions{}, in, out);
   auto const jsonl = out.str();
   auto metadata = ava::session::load_session_metadata(session->store);
   auto entries = session->store.load();
@@ -936,7 +936,7 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -977,7 +977,7 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
                         parent_id + "\"}\n" + "{\"id\":\"tree2\",\"type\":\"session_tree\"}\n";
   std::istringstream in(requests);
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*child, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*child, open_options, provider, transport, ava::app::runtime::RuntimeRunOptions{}, in, out);
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC session_tree loop completes successfully");
   expect(jsonl.find("\"id\":\"tree\"") != std::string::npos && jsonl.find("\"current_session_id\":\"" + child_id + "\"") != std::string::npos &&
@@ -1001,7 +1001,7 @@ void test_app_rpc_session_fork_and_clone_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -1031,7 +1031,7 @@ void test_app_rpc_session_fork_and_clone_commands()
                         "{\"id\":\"clone_meta\",\"type\":\"session_metadata\"}\n";
   std::istringstream in(requests);
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RuntimeRunOptions{}, in, out);
   auto const jsonl = out.str();
   auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
   bool source_unchanged = false;
@@ -1062,7 +1062,7 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -1091,7 +1091,7 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
                         "{\"id\":\"stats\",\"type\":\"get_session_stats\"}\n";
   std::istringstream in(requests);
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RuntimeRunOptions{}, in, out);
   auto const jsonl = out.str();
   auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
   bool source_has_summary = false;
@@ -1118,7 +1118,7 @@ void test_app_rpc_model_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -1137,7 +1137,7 @@ void test_app_rpc_model_commands()
       "{\"id\":\"stats\",\"type\":\"get_session_stats\"}\n"
       "{\"id\":\"cycle\",\"type\":\"cycle_model\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RuntimeRunOptions{}, in, out);
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC model command loop completes successfully");
   expect(jsonl.find("\"id\":\"list\"") != std::string::npos && jsonl.find("\"models\"") != std::string::npos &&
@@ -1180,7 +1180,7 @@ void test_app_rpc_reasoning_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -1197,7 +1197,7 @@ void test_app_rpc_reasoning_commands()
       "{\"id\":\"invalid\",\"type\":\"set_reasoning\",\"reasoning_level\":\"ultra\"}\n"
       "{\"id\":\"clear\",\"type\":\"clear_reasoning\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RuntimeRunOptions{}, in, out);
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC reasoning command loop completes successfully");
   expect(jsonl.find("\"id\":\"set\"") != std::string::npos && jsonl.find("\"reasoning_enabled\":true") != std::string::npos &&
@@ -1229,7 +1229,7 @@ void test_app_rpc_protocol_version_and_session_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -1332,7 +1332,7 @@ void test_app_rpc_protocol_version_and_session_commands()
       "{\"id\":\"switch\",\"type\":\"switch_session\",\"session_id\":\"" +
       initial_id + "\"}\n");
   std::ostringstream out;
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
   auto const jsonl = out.str();
@@ -1375,7 +1375,7 @@ void test_app_rpc_protocol_version_and_resolver_reply_errors()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -1398,7 +1398,7 @@ void test_app_rpc_protocol_version_and_resolver_reply_errors()
       "{\"id\":\"state\",\"type\":\"get_state\",\"protocol_version\":1}\n";
   std::istringstream in(input);
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RuntimeRunOptions{}, in, out);
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC protocol error loop recovers after unsupported commands");
   expect(jsonl.find("unsupported RPC protocol version") != std::string::npos && jsonl.find("RPC protocol_version must be an integer") != std::string::npos &&
@@ -1426,7 +1426,7 @@ void test_app_rpc_mcp_command_responses()
   expect(trusted.has_value(),
          trusted ? "RPC MCP command test trusts project config" : "RPC MCP command test trusts project config: " + trusted.error().format());
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -1436,7 +1436,7 @@ void test_app_rpc_mcp_command_responses()
     return;
 
   std::vector<ava::permissions::PermissionPrompt> prompts;
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.permission_resolver =
       [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
@@ -1488,7 +1488,7 @@ void test_app_rpc_command_responses_for_context_compact_export()
   expect(trusted.has_value(),
          trusted ? "RPC command test trusts project plugin resources" : "RPC command test trusts project plugin resources: " + trusted.error().format());
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -1517,7 +1517,7 @@ void test_app_rpc_command_responses_for_context_compact_export()
       "{\"id\":\"exp-html\",\"type\":\"export_html\"}\n"
       "{\"id\":\"exp-html-file\",\"type\":\"export_html\",\"outputPath\":\"rpc-session.html\"}\n");
   std::ostringstream out;
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   runtime_options.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Allow, "test export write"};
@@ -1555,7 +1555,7 @@ void test_app_rpc_compact_provider_failure_is_error_response()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -1568,7 +1568,7 @@ void test_app_rpc_compact_provider_failure_is_error_response()
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"summary failed\"}}"}});
   std::istringstream in("{\"id\":\"cmp-fail\",\"type\":\"compact\"}\n");
   std::ostringstream out;
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
 
   auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
@@ -1590,7 +1590,7 @@ void test_app_rpc_compact_cancellation_is_error_response_without_provider_reques
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -1603,7 +1603,7 @@ void test_app_rpc_compact_cancellation_is_error_response_without_provider_reques
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"unused\"}"}});
   std::istringstream in("{\"id\":\"cmp-cancel\",\"type\":\"compact\"}\n");
   std::ostringstream out;
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   runtime_options.cancel_requested = [] { return true; };
 

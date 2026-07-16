@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <string>
 
-namespace ava::app {
+namespace ava::app::runtime {
 
 // Extracted completion slice of a RuntimeEvent: terminal status, stop reason, a human-readable reason and the provider/tool call accounting for the finished run.
 struct RuntimeCompletionPayload
@@ -19,4 +19,4 @@ struct RuntimeCompletionPayload
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app
+}  // namespace ava::app::runtime

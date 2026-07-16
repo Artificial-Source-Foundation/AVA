@@ -72,7 +72,7 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
     file << "outside permission note";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -86,7 +86,7 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
   ava::app::HeadlessPermissionPolicyOptions policy_options;
   auto read_only_added = ava::app::add_headless_allow_policy(policy_options, "read-only");
   expect(read_only_added.has_value(), "RPC permission policy test configures read-only allow");
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   runtime_options.permission_resolver = ava::app::build_headless_permission_resolver(policy_options);
   BlockingInputBuf input_buffer;
@@ -127,7 +127,7 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
       file << "outside permission note";
     }
 
-    ava::app::RuntimeOpenOptions open_options;
+    ava::app::runtime::RuntimeOpenOptions open_options;
     open_options.workspace_dir = workspace;
     open_options.current_dir = workspace;
     open_options.paths = paths;
@@ -139,7 +139,7 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
     ava::provider::OpenAIProvider const provider("https://api.example.test");
     ava::tests::FakeTransport transport(
         {sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("after " + decision_text))});
-    ava::app::RuntimeRunOptions runtime_options;
+    ava::app::runtime::RuntimeRunOptions runtime_options;
     runtime_options.access_token = "token";
     BlockingInputBuf input_buffer;
     std::istream in(&input_buffer);
@@ -193,7 +193,7 @@ void test_app_rpc_permission_reply_session_grant_flow()
     file << "outside grant note";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -205,7 +205,7 @@ void test_app_rpc_permission_reply_session_grant_flow()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("first grant done")),
                                        sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("second grant done"))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -252,7 +252,7 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
   std::filesystem::create_directories(workspace);
   auto const outside_path = root / "outside-created.txt";
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -264,7 +264,7 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response(write_file_call_sse(outside_path.generic_string(), "rpc new\n")), sse_response(final_text_sse("after diff deny"))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -312,7 +312,7 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
     file << "outside persistent rule note";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -324,7 +324,7 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("persistent rule allow done"))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -391,7 +391,7 @@ void test_app_rpc_question_reply_flow()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -402,7 +402,7 @@ void test_app_rpc_question_reply_flow()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(question_call_sse()), sse_response(final_text_sse("question done"))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -438,7 +438,7 @@ void test_app_rpc_question_reply_selected_option_flow()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -449,7 +449,7 @@ void test_app_rpc_question_reply_selected_option_flow()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(question_call_sse()), sse_response(final_text_sse("selected question done"))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -490,7 +490,7 @@ void test_app_rpc_question_reply_selected_options_flow()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -501,7 +501,7 @@ void test_app_rpc_question_reply_selected_options_flow()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(multi_question_call_sse()), sse_response(final_text_sse("multi question done"))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);

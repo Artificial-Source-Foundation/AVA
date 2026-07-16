@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace ava::app {
+namespace ava::app::runtime {
 
 // Carry per-invocation run controls for run_prompt and compaction summary generation: credentials, streaming/retry toggles, callbacks for events, permissions,
 // questions, cancellation and steering, plus an optional session lock and image attachments.
@@ -37,4 +37,4 @@ struct RuntimeRunOptions
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app
+}  // namespace ava::app::runtime

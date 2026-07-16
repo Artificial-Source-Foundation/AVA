@@ -1,15 +1,16 @@
 #pragma once
 
+#include "ContextSourceMetadata.h"
+#include "RuntimeBasePromptMetadata.h"
+#include "RuntimeFreshnessSourceMetadata.h"
+
 #include "ava/debug/print_members_on.h"
-#include "ava/app/ContextSourceMetadata.h"
-#include "ava/app/RuntimeBasePromptMetadata.h"
-#include "ava/app/RuntimeFreshnessSourceMetadata.h"
 #include "ava/agent/mode.h"
 
 #include <string>
 #include <vector>
 
-namespace ava::app {
+namespace ava::app::runtime {
 
 // Bundle the assembled prompt for one mode: the active agent mode, base prompt metadata, contributing context and freshness sources, and the resulting system
 // prompt text.
@@ -26,4 +27,4 @@ struct RuntimePromptState
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app
+}  // namespace ava::app::runtime

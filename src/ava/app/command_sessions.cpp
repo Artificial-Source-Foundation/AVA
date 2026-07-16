@@ -206,7 +206,7 @@ ava::core::Result<ExportCommandArguments> parse_export_command_arguments(std::st
   return parsed;
 }
 
-std::filesystem::path resolve_export_path(RuntimeSession const& session, std::string_view path)
+std::filesystem::path resolve_export_path(runtime::RuntimeSession const& session, std::string_view path)
 {
   auto resolved = std::filesystem::path(std::string(path));
   if (resolved.is_relative())
@@ -241,7 +241,7 @@ bool session_matches_query(ava::session::SessionTreeNode const& node, std::strin
          metadata_labels_match(node.metadata.labels, query);
 }
 
-bool context_source_matches_query(ContextSourceMetadata const& source, std::string_view query)
+bool context_source_matches_query(runtime::ContextSourceMetadata const& source, std::string_view query)
 {
   return contains_ascii_case_insensitive(source.path.generic_string(), query) ||
          contains_ascii_case_insensitive(ava::context::to_string(source.source_type), query);
@@ -287,7 +287,7 @@ std::string context_file_status(std::filesystem::path const& path, std::size_t l
   return "status=changed current_bytes=" + std::to_string(current_bytes);
 }
 
-bool prompt_matches_query(RuntimeSession const& session, std::string_view query)
+bool prompt_matches_query(runtime::RuntimeSession const& session, std::string_view query)
 {
   if (query.empty())
     return true;
@@ -297,29 +297,29 @@ bool prompt_matches_query(RuntimeSession const& session, std::string_view query)
   return session.base_prompt.source_path && contains_ascii_case_insensitive(session.base_prompt.source_path->generic_string(), query);
 }
 
-std::string_view freshness_source_kind_text(RuntimeFreshnessSourceKind kind)
+std::string_view freshness_source_kind_text(runtime::RuntimeFreshnessSourceKind kind)
 {
   switch (kind)
   {
-    case RuntimeFreshnessSourceKind::SystemPrompt:
+    case runtime::RuntimeFreshnessSourceKind::SystemPrompt:
       return "system_prompt";
-    case RuntimeFreshnessSourceKind::AppendSystemPrompt:
+    case runtime::RuntimeFreshnessSourceKind::AppendSystemPrompt:
       return "append_system_prompt";
-    case RuntimeFreshnessSourceKind::PromptCommand:
+    case runtime::RuntimeFreshnessSourceKind::PromptCommand:
       return "prompt_command";
-    case RuntimeFreshnessSourceKind::Skill:
+    case runtime::RuntimeFreshnessSourceKind::Skill:
       return "skill";
-    case RuntimeFreshnessSourceKind::PluginManifest:
+    case runtime::RuntimeFreshnessSourceKind::PluginManifest:
       return "plugin_manifest";
-    case RuntimeFreshnessSourceKind::PluginPrompt:
+    case runtime::RuntimeFreshnessSourceKind::PluginPrompt:
       return "plugin_prompt";
-    case RuntimeFreshnessSourceKind::PluginSkill:
+    case runtime::RuntimeFreshnessSourceKind::PluginSkill:
       return "plugin_skill";
   }
   return "unknown";
 }
 
-bool freshness_source_matches_query(RuntimeFreshnessSourceMetadata const& source, std::string_view query)
+bool freshness_source_matches_query(runtime::RuntimeFreshnessSourceMetadata const& source, std::string_view query)
 {
   if (query.empty())
     return true;
@@ -328,12 +328,12 @@ bool freshness_source_matches_query(RuntimeFreshnessSourceMetadata const& source
          contains_ascii_case_insensitive(source.path.generic_string(), query);
 }
 
-std::size_t freshness_source_count(std::vector<RuntimeFreshnessSourceMetadata> const& sources, RuntimeFreshnessSourceKind kind)
+std::size_t freshness_source_count(std::vector<runtime::RuntimeFreshnessSourceMetadata> const& sources, runtime::RuntimeFreshnessSourceKind kind)
 {
   return static_cast<std::size_t>(std::ranges::count_if(sources, [&](auto const& source) { return source.kind == kind; }));
 }
 
-std::string freshness_source_status_text(RuntimeFreshnessSourceMetadata const& source)
+std::string freshness_source_status_text(runtime::RuntimeFreshnessSourceMetadata const& source)
 {
   if (source.path.empty())
     return "<inline>  loaded_bytes=" + std::to_string(source.byte_count) + "  status=inline";
@@ -341,9 +341,9 @@ std::string freshness_source_status_text(RuntimeFreshnessSourceMetadata const& s
          context_file_status(source.path, source.byte_count, source.content_fingerprint);
 }
 
-RuntimeEvent base_command_event(RuntimeSession const& session, RuntimeEventType type)
+runtime::RuntimeEvent base_command_event(runtime::RuntimeSession const& session, runtime::RuntimeEventType type)
 {
-  RuntimeEvent event;
+  runtime::RuntimeEvent event;
   event.type = type;
   event.timestamp = ava::session::now_timestamp();
   event.session_id = session.store.session_id();
@@ -353,7 +353,7 @@ RuntimeEvent base_command_event(RuntimeSession const& session, RuntimeEventType 
   return event;
 }
 
-ava::core::VoidResult emit_command_event(CommandRequest const& request, RuntimeEvent event)
+ava::core::VoidResult emit_command_event(CommandRequest const& request, runtime::RuntimeEvent event)
 {
   if (!request.event_sink)
     return {};
@@ -447,9 +447,9 @@ std::string format_session_tree_line(ava::session::SessionTreeNode const& node, 
   return output;
 }
 
-ava::core::Result<RuntimeSession> reopen_session(RuntimeSession const& current, std::string_view session_id)
+ava::core::Result<runtime::RuntimeSession> reopen_session(runtime::RuntimeSession const& current, std::string_view session_id)
 {
-  RuntimeOpenOptions options;
+  runtime::RuntimeOpenOptions options;
   options.workspace_dir = current.workspace_dir;
   options.current_dir = current.current_dir;
   options.requested_session_id = std::string(session_id);
@@ -461,9 +461,9 @@ ava::core::Result<RuntimeSession> reopen_session(RuntimeSession const& current, 
   return open_runtime_session(options);
 }
 
-ava::core::Result<RuntimeSession> create_fresh_session(RuntimeSession const& current)
+ava::core::Result<runtime::RuntimeSession> create_fresh_session(runtime::RuntimeSession const& current)
 {
-  RuntimeOpenOptions options;
+  runtime::RuntimeOpenOptions options;
   options.workspace_dir = current.workspace_dir;
   options.current_dir = current.current_dir;
   options.continue_last_session = false;
@@ -474,7 +474,7 @@ ava::core::Result<RuntimeSession> create_fresh_session(RuntimeSession const& cur
   return open_runtime_session(options);
 }
 
-ava::core::Result<CommandResult> run_branch_command(RuntimeSession& session, std::string_view name, ava::session::SessionBranchMode mode)
+ava::core::Result<CommandResult> run_branch_command(runtime::RuntimeSession& session, std::string_view name, ava::session::SessionBranchMode mode)
 {
   CommandResult result;
   result.handled = true;
@@ -517,7 +517,7 @@ ava::core::Result<CommandResult> run_branch_command(RuntimeSession& session, std
   return result;
 }
 
-ava::core::Result<CommandResult> run_sessions_rename_command(RuntimeSession& session, std::string_view arguments)
+ava::core::Result<CommandResult> run_sessions_rename_command(runtime::RuntimeSession& session, std::string_view arguments)
 {
   CommandResult result;
   result.handled = true;
@@ -561,7 +561,7 @@ ava::core::Result<CommandResult> run_sessions_rename_command(RuntimeSession& ses
   return result;
 }
 
-ava::core::Result<CommandResult> run_sessions_labels_command(RuntimeSession& session, std::string_view arguments)
+ava::core::Result<CommandResult> run_sessions_labels_command(runtime::RuntimeSession& session, std::string_view arguments)
 {
   CommandResult result;
   result.handled = true;
@@ -618,7 +618,7 @@ ava::core::Result<CommandResult> run_sessions_labels_command(RuntimeSession& ses
   return result;
 }
 
-ava::core::Result<CommandResult> run_sessions_archive_command(RuntimeSession& session, std::string_view arguments, bool archived)
+ava::core::Result<CommandResult> run_sessions_archive_command(runtime::RuntimeSession& session, std::string_view arguments, bool archived)
 {
   CommandResult result;
   result.handled = true;
@@ -729,7 +729,7 @@ std::string cost_text(ava::session::SessionStats const& stats)
   return "incomplete (" + std::to_string(stats.unknown_cost_entries) + " unknown)";
 }
 
-std::string format_session_stats_text(RuntimeSession const& session, ava::session::SessionStats const& stats)
+std::string format_session_stats_text(runtime::RuntimeSession const& session, ava::session::SessionStats const& stats)
 {
   std::ostringstream output;
   output << "Session stats\n";
@@ -761,7 +761,7 @@ std::string format_session_stats_text(RuntimeSession const& session, ava::sessio
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_sessions_command(RuntimeSession& session, std::string_view query)
+ava::core::Result<CommandResult> run_sessions_command(runtime::RuntimeSession& session, std::string_view query)
 {
   CommandResult result;
   result.handled = true;
@@ -826,17 +826,17 @@ ava::core::Result<CommandResult> run_sessions_command(RuntimeSession& session, s
   return result;
 }
 
-ava::core::Result<CommandResult> run_fork_command(RuntimeSession& session, std::string_view name)
+ava::core::Result<CommandResult> run_fork_command(runtime::RuntimeSession& session, std::string_view name)
 {
   return run_branch_command(session, name, ava::session::SessionBranchMode::Fork);
 }
 
-ava::core::Result<CommandResult> run_clone_command(RuntimeSession& session, std::string_view name)
+ava::core::Result<CommandResult> run_clone_command(runtime::RuntimeSession& session, std::string_view name)
 {
   return run_branch_command(session, name, ava::session::SessionBranchMode::Clone);
 }
 
-ava::core::Result<CommandResult> run_new_session_command(RuntimeSession& session, std::string_view name)
+ava::core::Result<CommandResult> run_new_session_command(runtime::RuntimeSession& session, std::string_view name)
 {
   CommandResult result;
   result.handled = true;
@@ -867,7 +867,7 @@ ava::core::Result<CommandResult> run_new_session_command(RuntimeSession& session
   return result;
 }
 
-ava::core::Result<CommandResult> run_resume_command(RuntimeSession& session, std::string_view session_id)
+ava::core::Result<CommandResult> run_resume_command(runtime::RuntimeSession& session, std::string_view session_id)
 {
   CommandResult result;
   result.handled = true;
@@ -888,7 +888,7 @@ ava::core::Result<CommandResult> run_resume_command(RuntimeSession& session, std
   return result;
 }
 
-ava::core::Result<CommandResult> run_name_command(RuntimeSession& session, std::string_view name)
+ava::core::Result<CommandResult> run_name_command(runtime::RuntimeSession& session, std::string_view name)
 {
   CommandResult result;
   result.handled = true;
@@ -915,7 +915,7 @@ ava::core::Result<CommandResult> run_name_command(RuntimeSession& session, std::
   return result;
 }
 
-ava::core::Result<CommandResult> run_labels_command(RuntimeSession& session, std::string_view labels)
+ava::core::Result<CommandResult> run_labels_command(runtime::RuntimeSession& session, std::string_view labels)
 {
   CommandResult result;
   result.handled = true;
@@ -953,7 +953,7 @@ ava::core::Result<CommandResult> run_labels_command(RuntimeSession& session, std
   return result;
 }
 
-ava::core::Result<CommandResult> run_mode_command(RuntimeSession& session)
+ava::core::Result<CommandResult> run_mode_command(runtime::RuntimeSession& session)
 {
   CommandResult result;
   result.handled = true;
@@ -970,7 +970,7 @@ ava::core::Result<CommandResult> run_mode_command(RuntimeSession& session)
   return result;
 }
 
-ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, std::string_view query)
+ava::core::Result<CommandResult> run_context_command(runtime::RuntimeSession& session, std::string_view query)
 {
   CommandResult result;
   result.handled = true;
@@ -997,16 +997,16 @@ ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, st
     output += " bytes=" + std::to_string(session.base_prompt.byte_count) + "\n";
   }
   output += "  context_sources=" + std::to_string(session.context_sources.size()) + "\n";
-  auto const system_prompt_sources = freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::SystemPrompt) +
-                                     freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::AppendSystemPrompt);
+  auto const system_prompt_sources = freshness_source_count(session.freshness_sources, runtime::RuntimeFreshnessSourceKind::SystemPrompt) +
+                                     freshness_source_count(session.freshness_sources, runtime::RuntimeFreshnessSourceKind::AppendSystemPrompt);
   output += "  system_prompt_sources=" + std::to_string(system_prompt_sources) + "\n";
-  auto const prompt_command_sources = freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PromptCommand);
+  auto const prompt_command_sources = freshness_source_count(session.freshness_sources, runtime::RuntimeFreshnessSourceKind::PromptCommand);
   output += "  prompt_commands=" + std::to_string(prompt_command_sources) + "\n";
-  auto const skill_sources = freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::Skill);
+  auto const skill_sources = freshness_source_count(session.freshness_sources, runtime::RuntimeFreshnessSourceKind::Skill);
   output += "  skills=" + std::to_string(skill_sources) + "\n";
-  auto const plugin_sources = freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginManifest) +
-                              freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginPrompt) +
-                              freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginSkill);
+  auto const plugin_sources = freshness_source_count(session.freshness_sources, runtime::RuntimeFreshnessSourceKind::PluginManifest) +
+                              freshness_source_count(session.freshness_sources, runtime::RuntimeFreshnessSourceKind::PluginPrompt) +
+                              freshness_source_count(session.freshness_sources, runtime::RuntimeFreshnessSourceKind::PluginSkill);
   output += "  plugin_sources=" + std::to_string(plugin_sources) + "\n";
 
   bool matched_source = false;
@@ -1046,7 +1046,7 @@ ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, st
   return result;
 }
 
-ava::core::Result<CommandResult> run_stats_command(RuntimeSession& session)
+ava::core::Result<CommandResult> run_stats_command(runtime::RuntimeSession& session)
 {
   CommandResult result;
   result.handled = true;
@@ -1060,7 +1060,7 @@ ava::core::Result<CommandResult> run_stats_command(RuntimeSession& session)
   return result;
 }
 
-ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_compact_command(runtime::RuntimeSession& session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;
@@ -1104,7 +1104,7 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
       return fail_compaction(std::move(entries.error()));
     }
     auto const estimated_tokens = ava::session::estimate_session_tokens(*entries);
-    auto start_event = base_command_event(session, RuntimeEventType::CompactionStart);
+    auto start_event = base_command_event(session, runtime::RuntimeEventType::CompactionStart);
     start_event.trigger = "manual";
     start_event.status = "started";
     start_event.attempt = attempt + 1;
@@ -1171,7 +1171,7 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
     }
     if (!snapshot_stale)
     {
-      auto end_event = base_command_event(session, RuntimeEventType::CompactionEnd);
+      auto end_event = base_command_event(session, runtime::RuntimeEventType::CompactionEnd);
       end_event.trigger = "manual";
       end_event.status = "completed";
       end_event.attempt = attempt + 1;
@@ -1187,7 +1187,7 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
     }
     if (attempt + 1 < max_compaction_attempts)
     {
-      auto retry_event = base_command_event(session, RuntimeEventType::Retry);
+      auto retry_event = base_command_event(session, runtime::RuntimeEventType::Retry);
       retry_event.trigger = "manual";
       retry_event.reason = "stale_compaction_snapshot";
       retry_event.status = "started";
@@ -1266,7 +1266,7 @@ ava::core::Result<std::vector<ava::session::SessionEntry>> load_import_session_e
   return entries;
 }
 
-ava::core::Result<CommandResult> run_import_command(RuntimeSession& session, std::string_view argument)
+ava::core::Result<CommandResult> run_import_command(runtime::RuntimeSession& session, std::string_view argument)
 {
   CommandResult result;
   result.handled = true;
@@ -1353,7 +1353,7 @@ ava::core::Result<CommandResult> run_import_command(RuntimeSession& session, std
   return result;
 }
 
-ava::core::Result<CommandResult> run_export_command(RuntimeSession& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_export_command(runtime::RuntimeSession& session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;

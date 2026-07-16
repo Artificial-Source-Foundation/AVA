@@ -1,10 +1,11 @@
 #pragma once
 
-#include "ava/app/ContextSourceMetadata.h"
-#include "ava/app/RuntimeBasePromptMetadata.h"
-#include "ava/app/RuntimeFreshnessSourceMetadata.h"
-#include "ava/app/RuntimePromptOverrides.h"
-#include "ava/app/RuntimeReasoningSelection.h"
+#include "ContextSourceMetadata.h"
+#include "RuntimeBasePromptMetadata.h"
+#include "RuntimeFreshnessSourceMetadata.h"
+#include "RuntimePromptOverrides.h"
+#include "RuntimeReasoningSelection.h"
+
 #include "ava/app/project_trust.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/debug/print_members_on.h"
@@ -18,7 +19,7 @@
 #include <string>
 #include <vector>
 
-namespace ava::app {
+namespace ava::app::runtime {
 
 // Hold the mutable application state associated with an open runtime session.
 //
@@ -47,4 +48,4 @@ struct RuntimeSession
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app
+}  // namespace ava::app::runtime

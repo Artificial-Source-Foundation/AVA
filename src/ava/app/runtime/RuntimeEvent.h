@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace ava::app {
+namespace ava::app::runtime {
 
 // Categorize the kind of runtime lifecycle or notification event being emitted, driving event-sink dispatch and payload selection.
 enum class RuntimeEventType
@@ -95,4 +95,4 @@ struct RuntimeEvent
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app
+}  // namespace ava::app::runtime

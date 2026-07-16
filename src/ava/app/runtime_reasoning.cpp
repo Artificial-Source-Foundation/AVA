@@ -15,14 +15,14 @@ bool has_reasoning_level(ava::config::ModelInfo const& model, std::string_view l
   return std::ranges::find(model.reasoning_levels, level) != model.reasoning_levels.end();
 }
 
-bool same_reasoning_selection(std::optional<RuntimeReasoningSelection> const& left, std::optional<RuntimeReasoningSelection> const& right)
+bool same_reasoning_selection(std::optional<runtime::RuntimeReasoningSelection> const& left, std::optional<runtime::RuntimeReasoningSelection> const& right)
 {
   if (!left || !right)
     return !left && !right;
   return left->level == right->level && left->budget_tokens == right->budget_tokens && left->display == right->display;
 }
 
-ava::core::VoidResult validate_reasoning_selection(ava::config::ModelInfo const& model, RuntimeReasoningSelection const& selection)
+ava::core::VoidResult validate_reasoning_selection(ava::config::ModelInfo const& model, runtime::RuntimeReasoningSelection const& selection)
 {
   auto const level = trim(selection.level);
   if (level.empty())
@@ -64,14 +64,14 @@ ava::core::VoidResult validate_reasoning_selection(ava::config::ModelInfo const&
 
 }  // namespace
 
-ava::provider::ProviderReasoningOptions provider_reasoning_options(RuntimeReasoningSelection const& selection)
+ava::provider::ProviderReasoningOptions provider_reasoning_options(runtime::RuntimeReasoningSelection const& selection)
 {
   return ava::provider::ProviderReasoningOptions{.type = selection.level, .budget_tokens = selection.budget_tokens, .display = selection.display};
 }
 
-std::optional<RuntimeReasoningSelection> latest_persisted_reasoning(std::vector<ava::session::SessionEntry> const& entries, ava::config::ModelInfo const& model)
+std::optional<runtime::RuntimeReasoningSelection> latest_persisted_reasoning(std::vector<ava::session::SessionEntry> const& entries, ava::config::ModelInfo const& model)
 {
-  std::optional<RuntimeReasoningSelection> latest;
+  std::optional<runtime::RuntimeReasoningSelection> latest;
   bool saw_change = false;
   for (auto const& entry : entries)
   {
@@ -102,7 +102,7 @@ std::optional<RuntimeReasoningSelection> latest_persisted_reasoning(std::vector<
       latest = std::nullopt;
       continue;
     }
-    latest = RuntimeReasoningSelection{.level = std::move(level),
+    latest = runtime::RuntimeReasoningSelection{.level = std::move(level),
                                        .budget_tokens = ava::core::json::integer_field(entry.data_json, "budget_tokens"),
                                        .display = ava::core::json::string_field(entry.data_json, "display").value_or("")};
   }
@@ -117,7 +117,7 @@ std::optional<RuntimeReasoningSelection> latest_persisted_reasoning(std::vector<
 
 namespace ava::app {
 
-ava::core::Result<bool> set_runtime_reasoning(RuntimeSession& session, std::optional<RuntimeReasoningSelection> selection)
+ava::core::Result<bool> set_runtime_reasoning(runtime::RuntimeSession& session, std::optional<runtime::RuntimeReasoningSelection> selection)
 {
   if (selection)
   {

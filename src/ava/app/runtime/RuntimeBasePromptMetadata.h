@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <optional>
 
-namespace ava::app {
+namespace ava::app::runtime {
 
 // Track where the active base prompt came from and how large it is, including a fingerprint for staleness checks.
 struct RuntimeBasePromptMetadata
@@ -20,4 +20,4 @@ struct RuntimeBasePromptMetadata
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app
+}  // namespace ava::app::runtime

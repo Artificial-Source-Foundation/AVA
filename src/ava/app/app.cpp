@@ -163,7 +163,7 @@ std::string_view exit_status_text(int status, bool sessionless)
   return sessionless ? "session discarded with warnings" : "session saved with warnings";
 }
 
-void print_exit_card(ava::app::RuntimeSession const& session, int status)
+void print_exit_card(ava::app::runtime::RuntimeSession const& session, int status)
 {
   bool const use_color = stdout_is_tty() && std::getenv("NO_COLOR") == nullptr;
   auto const blue = use_color ? std::string_view("\x1b[38;2;77;158;246m") : std::string_view("");
@@ -214,7 +214,7 @@ int run(int argc, char** argv)
   auto print_output_format = ava::app::PrintOutputFormat::Text;
   bool print_output_flag_seen = false;
   bool print_permission_flag_seen = false;
-  ava::app::RuntimePromptOverrides prompt_overrides;
+  ava::app::runtime::RuntimePromptOverrides prompt_overrides;
   ava::app::HeadlessPermissionPolicyOptions headless_permission_policy;
   ava::agent::ToolVisibilityOptions tool_visibility;
 
@@ -654,7 +654,7 @@ int run(int argc, char** argv)
     runtime_paths.sessions_dir = resolved_session_dir.lexically_normal();
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::RuntimeOpenOptions open_options;
   open_options.workspace_dir = std::filesystem::current_path();
   open_options.current_dir = open_options.workspace_dir;
   open_options.requested_session_id = requested_session_id;

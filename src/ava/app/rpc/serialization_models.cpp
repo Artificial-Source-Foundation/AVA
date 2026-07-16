@@ -43,7 +43,7 @@ std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry 
   return models;
 }
 
-std::string model_info_json(ava::config::ModelInfo const& model, ava::app::RuntimeSession const& session, bool configured)
+std::string model_info_json(ava::config::ModelInfo const& model, ava::app::runtime::RuntimeSession const& session, bool configured)
 {
   bool const registered = ava::provider::builtin_provider_registry().contains(model.provider_id);
   std::string json = "{";

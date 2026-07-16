@@ -986,13 +986,13 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
                                             .provider_id = "openai",
                                             .model_id = "gpt-test",
                                             .current_dir = workspace},
-      [&forwarded](ava::app::RuntimeEvent const&) -> ava::core::VoidResult {
+      [&forwarded](ava::app::runtime::RuntimeEvent const&) -> ava::core::VoidResult {
         forwarded = true;
         return {};
       });
 
-  ava::app::RuntimeEvent event;
-  event.type = ava::app::RuntimeEventType::ToolResult;
+  ava::app::runtime::RuntimeEvent event;
+  event.type = ava::app::runtime::RuntimeEventType::ToolResult;
   event.call_id = "call_hook";
   event.tool_name = "demo";
   event.status = "success";
@@ -1066,13 +1066,13 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
            .provider_id = "openai",
            .model_id = "gpt-test",
            .current_dir = workspace},
-      [&forwarded](ava::app::RuntimeEvent const&) -> ava::core::VoidResult {
+      [&forwarded](ava::app::runtime::RuntimeEvent const&) -> ava::core::VoidResult {
         forwarded = true;
         return {};
       });
 
-  ava::app::RuntimeEvent event;
-  event.type = ava::app::RuntimeEventType::ToolResult;
+  ava::app::runtime::RuntimeEvent event;
+  event.type = ava::app::runtime::RuntimeEventType::ToolResult;
   event.call_id = "call_diag";
   event.tool_name = "demo";
   event.status = "success";

@@ -1491,18 +1491,18 @@ int run_interactive_composer(TuiRuntimeOptions options)
   std::deque<std::shared_ptr<PendingQuestionRequest>> pending_question_requests;
   std::atomic_bool accept_prompt_requests{true};
   std::mutex prompt_audit_mutex;
-  ava::app::RuntimeEventSink prompt_audit_sink;
+  ava::app::runtime::RuntimeEventSink prompt_audit_sink;
 
   auto emit_prompt_audit = [&](std::string status, std::string text, std::string permission_request_id = {},
                                std::string tool_name = {}, std::string reason = {}, std::string resolution_reason = {}) {
-    ava::app::RuntimeEventSink sink;
+    ava::app::runtime::RuntimeEventSink sink;
     {
       std::lock_guard<std::mutex> lock(prompt_audit_mutex);
       sink = prompt_audit_sink;
     }
     if (!sink) return;
-    ava::app::RuntimeEvent event;
-    event.type = ava::app::RuntimeEventType::ProviderEvent;
+    ava::app::runtime::RuntimeEvent event;
+    event.type = ava::app::runtime::RuntimeEventType::ProviderEvent;
     event.status = std::move(status);
     event.text = std::move(text);
     event.tool_name = std::move(tool_name);
@@ -2960,8 +2960,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
           };
         }
       }
-      auto runtime_event_to_bus_sink = [&]() -> ava::app::RuntimeEventSink {
-        return [&](ava::app::RuntimeEvent const& event) {
+      auto runtime_event_to_bus_sink = [&]() -> ava::app::runtime::RuntimeEventSink {
+        return [&](ava::app::runtime::RuntimeEvent const& event) {
           ava::app::EventEnvelopeContext event_context;
           {
             std::lock_guard lock(event_context_mutex);
@@ -2973,7 +2973,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           return event_bus.publish(ava::app::to_event_envelope(event, event_context));
         };
       };
-      auto event_sink = supports_active_queue ? runtime_event_to_bus_sink() : ava::app::RuntimeEventSink{};
+      auto event_sink = supports_active_queue ? runtime_event_to_bus_sink() : ava::app::runtime::RuntimeEventSink{};
       {
         std::lock_guard<std::mutex> lock(prompt_audit_mutex);
         prompt_audit_sink = event_sink;

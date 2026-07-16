@@ -115,9 +115,9 @@ ava::core::Result<std::string> decode_rpc_image_base64(std::string_view data)
 //
 // Returns an error only for unrecoverable conditions (stdout irreversibly broken, or stdin failed);
 // per-request errors are written back to the client and the loop continues.
-ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options,
+ava::core::VoidResult run_rpc_loop(runtime::RuntimeSession& session, runtime::RuntimeOpenOptions const& open_options,
                                    ava::provider::Provider const& provider, ava::provider::Transport& transport,
-                                   ava::provider::Transport& auth_transport, RuntimeRunOptions runtime_options,
+                                   ava::provider::Transport& auth_transport, runtime::RuntimeRunOptions runtime_options,
                                    std::istream& in, std::ostream& out)
 {
   // Register per-thread debug support; run_rpc_loop is always entered on a freshly created thread.
@@ -694,7 +694,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       }
       // compact needs a provider and fully-resolved runtime options because it calls the model to
       // produce the compaction summary; resolve them up front (under the session lock for provider).
-      std::optional<RuntimeRunOptions> compact_runtime_options;
+      std::optional<runtime::RuntimeRunOptions> compact_runtime_options;
       std::optional<rpc::ProviderHandle> compact_provider;
       if (command->type == "compact") {
         ava::config::XdgPaths paths;
@@ -901,9 +901,9 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
   return {};
 }
 
-ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options,
+ava::core::VoidResult run_rpc_loop(runtime::RuntimeSession& session, runtime::RuntimeOpenOptions const& open_options,
                                    ava::provider::Provider const& provider, ava::provider::Transport& transport,
-                                   RuntimeRunOptions runtime_options, std::istream& in, std::ostream& out)
+                                   runtime::RuntimeRunOptions runtime_options, std::istream& in, std::ostream& out)
 {
   return run_rpc_loop(session, open_options, provider, transport, transport, std::move(runtime_options), in, out);
 }
@@ -916,7 +916,7 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
     return 1;
   }
 
-  RuntimeRunOptions runtime_options;
+  runtime::RuntimeRunOptions runtime_options;
   runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
   runtime_options.question_resolver = nullptr;
   runtime_options.enable_transport_retries = true;

@@ -37,7 +37,7 @@ std::string provider_connect_command(std::string_view provider_id)
          " --api-key-stdin";
 }
 
-std::string auth_setup_message(RuntimeSession const& session, std::string_view prefix)
+std::string auth_setup_message(runtime::RuntimeSession const& session, std::string_view prefix)
 {
   auto const provider_id = session.model.provider_id.empty() ? std::string("openai") : session.model.provider_id;
   auto const env_key = provider_env_key(provider_id);
@@ -51,7 +51,7 @@ std::string auth_setup_message(RuntimeSession const& session, std::string_view p
 
 }  // namespace
 
-std::optional<std::string> first_run_auth_onboarding_message(RuntimeSession const& session)
+std::optional<std::string> first_run_auth_onboarding_message(runtime::RuntimeSession const& session)
 {
   auto credential = ava::config::provider_credential_for_startup(session.paths, session.model.provider_id);
   if (!credential) {
@@ -63,7 +63,7 @@ std::optional<std::string> first_run_auth_onboarding_message(RuntimeSession cons
   return auth_setup_message(session, "Provider auth is not configured for `" + provider_id + "`.");
 }
 
-std::string provider_auth_required_message(RuntimeSession const& session, std::string_view offline_suffix)
+std::string provider_auth_required_message(runtime::RuntimeSession const& session, std::string_view offline_suffix)
 {
   auto const provider_id = session.model.provider_id.empty() ? std::string("openai") : session.model.provider_id;
   auto message = auth_setup_message(session, "Auth is required for provider `" + provider_id + "`.");

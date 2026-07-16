@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace ava::app {
+namespace ava::app::runtime {
 
 // Carry user-supplied overrides for the assembled system prompt: a full replacement and/or appended fragments.
 struct RuntimePromptOverrides
@@ -17,4 +17,4 @@ struct RuntimePromptOverrides
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app
+}  // namespace ava::app::runtime

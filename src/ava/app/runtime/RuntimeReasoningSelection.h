@@ -5,7 +5,7 @@
 #include <optional>
 #include <string>
 
-namespace ava::app {
+namespace ava::app::runtime {
 
 // Express a selected reasoning configuration: an opaque level, an optional token budget and a display label.
 struct RuntimeReasoningSelection
@@ -17,4 +17,4 @@ struct RuntimeReasoningSelection
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app
+}  // namespace ava::app::runtime

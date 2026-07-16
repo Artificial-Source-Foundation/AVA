@@ -1,7 +1,8 @@
 #pragma once
 
+#include "RuntimePromptOverrides.h"
+
 #include "ava/debug/print_members_on.h"
-#include "ava/app/RuntimePromptOverrides.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_visibility.h"
 #include "ava/config/xdg_paths.h"
@@ -10,7 +11,7 @@
 #include <optional>
 #include <string>
 
-namespace ava::app {
+namespace ava::app::runtime {
 
 // Collect the inputs that callers supply when opening a runtime session, such as workspace and
 // current directories, optional session selection, agent mode, tool visibility and prompt overrides.
@@ -33,4 +34,4 @@ struct RuntimeOpenOptions
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app
+}  // namespace ava::app::runtime

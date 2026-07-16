@@ -38,7 +38,7 @@ constexpr std::size_t kMaxPluginResourceFreshnessBytes = 64 * 1024;
 
 struct RuntimePromptResource
 {
-  RuntimeFreshnessSourceKind kind = RuntimeFreshnessSourceKind::SystemPrompt;
+  runtime::RuntimeFreshnessSourceKind kind = runtime::RuntimeFreshnessSourceKind::SystemPrompt;
   std::string scope;
   std::string name;
   std::filesystem::path path;
@@ -103,13 +103,13 @@ ava::core::Result<std::string> read_freshness_file(std::filesystem::path const& 
   return content;
 }
 
-void add_freshness_file(std::vector<RuntimeFreshnessSourceMetadata>& sources, RuntimeFreshnessSourceKind kind, std::string scope, std::string source_id,
+void add_freshness_file(std::vector<runtime::RuntimeFreshnessSourceMetadata>& sources, runtime::RuntimeFreshnessSourceKind kind, std::string scope, std::string source_id,
                         std::string name, std::filesystem::path const& path, std::size_t max_bytes = kMaxRuntimeFreshnessBytes)
 {
   auto content = read_freshness_file(path, max_bytes);
   if (!content)
     return;
-  sources.push_back(RuntimeFreshnessSourceMetadata{.kind = kind,
+  sources.push_back(runtime::RuntimeFreshnessSourceMetadata{.kind = kind,
                                                    .scope = std::move(scope),
                                                    .source_id = std::move(source_id),
                                                    .name = std::move(name),
@@ -118,12 +118,12 @@ void add_freshness_file(std::vector<RuntimeFreshnessSourceMetadata>& sources, Ru
                                                    .content_fingerprint = ava::core::content_fingerprint(*content)});
 }
 
-void add_prompt_command_freshness_sources(std::vector<RuntimeFreshnessSourceMetadata>& sources, ava::config::XdgPaths const& paths,
+void add_prompt_command_freshness_sources(std::vector<runtime::RuntimeFreshnessSourceMetadata>& sources, ava::config::XdgPaths const& paths,
                                           std::filesystem::path const& workspace_dir, bool include_project_resources)
 {
   for (auto const& command : prompt_command_source_files(workspace_dir, paths, include_project_resources))
   {
-    sources.push_back(RuntimeFreshnessSourceMetadata{.kind = RuntimeFreshnessSourceKind::PromptCommand,
+    sources.push_back(runtime::RuntimeFreshnessSourceMetadata{.kind = runtime::RuntimeFreshnessSourceKind::PromptCommand,
                                                      .scope = command.scope,
                                                      .source_id = command.command_name,
                                                      .name = command.command_name,
@@ -133,8 +133,8 @@ void add_prompt_command_freshness_sources(std::vector<RuntimeFreshnessSourceMeta
   }
 }
 
-ava::core::Result<std::optional<RuntimePromptResource>> load_prompt_resource(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir,
-                                                                             bool include_project_resources, RuntimeFreshnessSourceKind kind, std::string name)
+ava::core::Result<std::optional<runtime::RuntimePromptResource>> load_prompt_resource(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir,
+                                                                             bool include_project_resources, runtime::RuntimeFreshnessSourceKind kind, std::string name)
 {
   std::filesystem::path selected_path;
   std::string scope;
@@ -148,7 +148,7 @@ ava::core::Result<std::optional<RuntimePromptResource>> load_prompt_resource(ava
   {
     auto const global_path = paths.ava_config_dir / name;
     if (!std::filesystem::exists(global_path))
-      return std::optional<RuntimePromptResource>{};
+      return std::optional<runtime::RuntimePromptResource>{};
     selected_path = global_path;
     scope = "global";
   }
@@ -156,13 +156,13 @@ ava::core::Result<std::optional<RuntimePromptResource>> load_prompt_resource(ava
   auto text = read_freshness_file(selected_path, kMaxRuntimeFreshnessBytes);
   if (!text)
     return std::unexpected(std::move(text.error()));
-  return RuntimePromptResource{
+  return runtime::RuntimePromptResource{
       .kind = kind, .scope = std::move(scope), .name = std::move(name), .path = normalized_absolute(selected_path), .text = std::move(*text)};
 }
 
-void add_prompt_resource_freshness_source(std::vector<RuntimeFreshnessSourceMetadata>& sources, RuntimePromptResource const& resource)
+void add_prompt_resource_freshness_source(std::vector<runtime::RuntimeFreshnessSourceMetadata>& sources, runtime::RuntimePromptResource const& resource)
 {
-  sources.push_back(RuntimeFreshnessSourceMetadata{.kind = resource.kind,
+  sources.push_back(runtime::RuntimeFreshnessSourceMetadata{.kind = resource.kind,
                                                    .scope = resource.scope,
                                                    .source_id = resource.name,
                                                    .name = resource.name,
@@ -171,10 +171,10 @@ void add_prompt_resource_freshness_source(std::vector<RuntimeFreshnessSourceMeta
                                                    .content_fingerprint = ava::core::content_fingerprint(resource.text)});
 }
 
-void add_inline_prompt_freshness_source(std::vector<RuntimeFreshnessSourceMetadata>& sources, RuntimeFreshnessSourceKind kind, std::string source_id,
+void add_inline_prompt_freshness_source(std::vector<runtime::RuntimeFreshnessSourceMetadata>& sources, runtime::RuntimeFreshnessSourceKind kind, std::string source_id,
                                         std::string name, std::string_view text)
 {
-  sources.push_back(RuntimeFreshnessSourceMetadata{.kind = kind,
+  sources.push_back(runtime::RuntimeFreshnessSourceMetadata{.kind = kind,
                                                    .scope = "cli",
                                                    .source_id = std::move(source_id),
                                                    .name = std::move(name),
@@ -183,23 +183,23 @@ void add_inline_prompt_freshness_source(std::vector<RuntimeFreshnessSourceMetada
                                                    .content_fingerprint = ava::core::content_fingerprint(text)});
 }
 
-void add_skill_freshness_sources(std::vector<RuntimeFreshnessSourceMetadata>& sources, std::vector<ava::context::LoadedSkill> const& skills)
+void add_skill_freshness_sources(std::vector<runtime::RuntimeFreshnessSourceMetadata>& sources, std::vector<ava::context::LoadedSkill> const& skills)
 {
   for (auto const& skill : skills)
   {
-    add_freshness_file(sources, RuntimeFreshnessSourceKind::Skill, ava::context::to_string(skill.source_type), skill.name, skill.name, skill.path,
+    add_freshness_file(sources, runtime::RuntimeFreshnessSourceKind::Skill, ava::context::to_string(skill.source_type), skill.name, skill.name, skill.path,
                        skill.byte_count == 0 ? kMaxRuntimeFreshnessBytes : skill.byte_count);
   }
 }
 
-void add_plugin_resource_freshness_source(std::vector<RuntimeFreshnessSourceMetadata>& sources, ava::plugin::PluginStatus const& status,
-                                          ava::plugin::PluginResourceContribution const& resource, RuntimeFreshnessSourceKind kind)
+void add_plugin_resource_freshness_source(std::vector<runtime::RuntimeFreshnessSourceMetadata>& sources, ava::plugin::PluginStatus const& status,
+                                          ava::plugin::PluginResourceContribution const& resource, runtime::RuntimeFreshnessSourceKind kind)
 {
   add_freshness_file(sources, kind, std::string(ava::plugin::to_string(status.plugin.scope)), status.plugin.manifest.id, resource.name,
                      status.plugin.manifest.directory / resource.path, kMaxPluginResourceFreshnessBytes);
 }
 
-void add_plugin_freshness_sources(std::vector<RuntimeFreshnessSourceMetadata>& sources, ava::config::XdgPaths const& paths,
+void add_plugin_freshness_sources(std::vector<runtime::RuntimeFreshnessSourceMetadata>& sources, ava::config::XdgPaths const& paths,
                                   std::filesystem::path const& workspace_dir, bool include_project_resources)
 {
   auto const diagnostics = ava::plugin::collect_plugin_diagnostics(
@@ -209,17 +209,17 @@ void add_plugin_freshness_sources(std::vector<RuntimeFreshnessSourceMetadata>& s
   for (auto const& status : diagnostics.plugins)
   {
     auto const& manifest = status.plugin.manifest;
-    add_freshness_file(sources, RuntimeFreshnessSourceKind::PluginManifest, std::string(ava::plugin::to_string(status.plugin.scope)), manifest.id, "manifest",
+    add_freshness_file(sources, runtime::RuntimeFreshnessSourceKind::PluginManifest, std::string(ava::plugin::to_string(status.plugin.scope)), manifest.id, "manifest",
                        manifest.path);
     for (auto const& prompt : manifest.contributes.prompts)
-      add_plugin_resource_freshness_source(sources, status, prompt, RuntimeFreshnessSourceKind::PluginPrompt);
-    for (auto const& skill : manifest.contributes.skills) add_plugin_resource_freshness_source(sources, status, skill, RuntimeFreshnessSourceKind::PluginSkill);
+      add_plugin_resource_freshness_source(sources, status, prompt, runtime::RuntimeFreshnessSourceKind::PluginPrompt);
+    for (auto const& skill : manifest.contributes.skills) add_plugin_resource_freshness_source(sources, status, skill, runtime::RuntimeFreshnessSourceKind::PluginSkill);
   }
 }
 
-RuntimeBasePromptMetadata base_prompt_metadata(ava::config::PromptSelection const& prompt)
+runtime::RuntimeBasePromptMetadata base_prompt_metadata(ava::config::PromptSelection const& prompt)
 {
-  return RuntimeBasePromptMetadata{.from_override = prompt.from_override,
+  return runtime::RuntimeBasePromptMetadata{.from_override = prompt.from_override,
                                    .source_path = prompt.source_path,
                                    .byte_count = prompt.text.size(),
                                    .content_fingerprint = ava::core::content_fingerprint(prompt.text)};
@@ -227,9 +227,9 @@ RuntimeBasePromptMetadata base_prompt_metadata(ava::config::PromptSelection cons
 
 }  // namespace
 
-ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::XdgPaths const& paths, ava::config::ModelInfo const& model, ava::agent::Mode mode,
+ava::core::Result<runtime::RuntimePromptState> load_runtime_prompt_state(ava::config::XdgPaths const& paths, ava::config::ModelInfo const& model, ava::agent::Mode mode,
                                                                 std::filesystem::path const& workspace_dir, std::filesystem::path const& current_dir,
-                                                                bool include_project_resources, RuntimePromptOverrides const& prompt_overrides)
+                                                                bool include_project_resources, runtime::RuntimePromptOverrides const& prompt_overrides)
 {
   auto prompt = ava::config::select_prompt(paths, model, mode);
   if (!prompt)
@@ -259,7 +259,7 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::Xdg
   });
   auto loaded_subagents =
       ava::agent::load_subagents(ava::agent::SubagentLoadOptions{.workspace_root = workspace_dir, .include_project_agents = include_project_resources});
-  std::vector<RuntimeFreshnessSourceMetadata> freshness_sources;
+  std::vector<runtime::RuntimeFreshnessSourceMetadata> freshness_sources;
   auto selected_prompt = std::move(*prompt);
   auto system_prompt = selected_prompt.text;
 
@@ -267,12 +267,12 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::Xdg
   {
     selected_prompt = ava::config::PromptSelection{.text = *prompt_overrides.system_prompt, .from_override = true};
     system_prompt = *prompt_overrides.system_prompt;
-    add_inline_prompt_freshness_source(freshness_sources, RuntimeFreshnessSourceKind::SystemPrompt, "--system-prompt", "--system-prompt",
+    add_inline_prompt_freshness_source(freshness_sources, runtime::RuntimeFreshnessSourceKind::SystemPrompt, "--system-prompt", "--system-prompt",
                                        *prompt_overrides.system_prompt);
   }
   else
   {
-    auto system_resource = load_prompt_resource(paths, workspace_dir, include_project_resources, RuntimeFreshnessSourceKind::SystemPrompt, "SYSTEM.md");
+    auto system_resource = load_prompt_resource(paths, workspace_dir, include_project_resources, runtime::RuntimeFreshnessSourceKind::SystemPrompt, "SYSTEM.md");
     if (!system_resource)
       return std::unexpected(std::move(system_resource.error()));
     if (*system_resource)
@@ -289,7 +289,7 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::Xdg
     for (auto const& append_prompt : prompt_overrides.append_system_prompts)
     {
       ++append_index;
-      add_inline_prompt_freshness_source(freshness_sources, RuntimeFreshnessSourceKind::AppendSystemPrompt, "--append-system-prompt",
+      add_inline_prompt_freshness_source(freshness_sources, runtime::RuntimeFreshnessSourceKind::AppendSystemPrompt, "--append-system-prompt",
                                          std::to_string(append_index), append_prompt);
       if (append_prompt.empty())
         continue;
@@ -303,7 +303,7 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::Xdg
   else
   {
     auto append_resource =
-        load_prompt_resource(paths, workspace_dir, include_project_resources, RuntimeFreshnessSourceKind::AppendSystemPrompt, "APPEND_SYSTEM.md");
+        load_prompt_resource(paths, workspace_dir, include_project_resources, runtime::RuntimeFreshnessSourceKind::AppendSystemPrompt, "APPEND_SYSTEM.md");
     if (!append_resource)
       return std::unexpected(std::move(append_resource.error()));
     if (*append_resource)
@@ -320,7 +320,7 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::Xdg
 
   system_prompt += ava::context::format_context_for_prompt(*loaded_context) + ava::context::format_available_skills_for_prompt(loaded_skills.skills) +
                    ava::agent::format_available_subagents_for_prompt(loaded_subagents.subagents);
-  return RuntimePromptState{.mode = mode,
+  return runtime::RuntimePromptState{.mode = mode,
                             .base_prompt = base_prompt_metadata(selected_prompt),
                             .context_sources = std::move(context_sources),
                             .freshness_sources = std::move(freshness_sources),
@@ -332,9 +332,9 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::Xdg
 namespace ava::app {
 namespace {
 
-RuntimeEvent base_event(RuntimeSession const& session, RuntimeEventType type)
+runtime::RuntimeEvent base_event(runtime::RuntimeSession const& session, runtime::RuntimeEventType type)
 {
-  RuntimeEvent event;
+  runtime::RuntimeEvent event;
   event.type = type;
   event.timestamp = ava::session::now_timestamp();
   event.session_id = session.store.session_id();
@@ -344,7 +344,7 @@ RuntimeEvent base_event(RuntimeSession const& session, RuntimeEventType type)
   return event;
 }
 
-RuntimeEvent base_event_locked(RuntimeSession const& session, RuntimeEventType type, std::mutex* mutex)
+runtime::RuntimeEvent base_event_locked(runtime::RuntimeSession const& session, runtime::RuntimeEventType type, std::mutex* mutex)
 {
   if (!mutex)
     return base_event(session, type);
@@ -423,7 +423,7 @@ std::vector<PromptFileReference> prompt_file_references(std::string_view text)
   return references;
 }
 
-ava::tools::ToolContext prompt_file_reference_context(RuntimeSession& session, RuntimeRunOptions const& options)
+ava::tools::ToolContext prompt_file_reference_context(runtime::RuntimeSession& session, runtime::RuntimeRunOptions const& options)
 {
   return ava::tools::ToolContext{.workspace_dir = session.workspace_dir,
                                  .spill_dir = session.store.session_path().parent_path() / "spill",
@@ -448,7 +448,7 @@ ava::tools::ToolContext prompt_file_reference_context(RuntimeSession& session, R
                                  .tool_visibility = session.tool_visibility};
 }
 
-ava::core::Result<std::string> expand_prompt_file_references(RuntimeSession& session, std::string const& user_message, RuntimeRunOptions const& options)
+ava::core::Result<std::string> expand_prompt_file_references(runtime::RuntimeSession& session, std::string const& user_message, runtime::RuntimeRunOptions const& options)
 {
   auto references = prompt_file_references(user_message);
   if (references.empty())
@@ -495,13 +495,13 @@ ava::core::Result<std::string> expand_prompt_file_references(RuntimeSession& ses
 
 }  // namespace
 
-ava::core::Result<RuntimePromptState> select_runtime_prompt_state(RuntimeSession const& session, ava::agent::Mode mode)
+ava::core::Result<runtime::RuntimePromptState> select_runtime_prompt_state(runtime::RuntimeSession const& session, ava::agent::Mode mode)
 {
   return runtime::load_runtime_prompt_state(session.paths, session.model, mode, session.workspace_dir, session.current_dir,
                                             project_resources_trusted(session.project_trust), session.prompt_overrides);
 }
 
-void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prompt_state)
+void apply_runtime_prompt_state(runtime::RuntimeSession& session, runtime::RuntimePromptState prompt_state)
 {
   session.mode = prompt_state.mode;
   session.base_prompt = std::move(prompt_state.base_prompt);
@@ -510,8 +510,8 @@ void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prom
   session.system_prompt = std::move(prompt_state.system_prompt);
 }
 
-ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& session, std::string const& user_message, ava::provider::Provider const& provider,
-                                                          ava::provider::Transport& transport, RuntimeRunOptions const& options)
+ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::RuntimeSession& session, std::string const& user_message, ava::provider::Provider const& provider,
+                                                          ava::provider::Transport& transport, runtime::RuntimeRunOptions const& options)
 {
   auto plugin_observer_options = plugin_event_observer_options(session, options.permission_resolver, options.session_mutex);
   plugin_observer_options.cancel_requested = options.cancel_requested;
@@ -535,13 +535,13 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
   if (!expanded_user_message)
     return std::unexpected(std::move(expanded_user_message.error()));
 
-  auto session_event = base_event_locked(session, RuntimeEventType::SessionStart, options.session_mutex);
+  auto session_event = base_event_locked(session, runtime::RuntimeEventType::SessionStart, options.session_mutex);
   if (auto emitted = emit_event(event_sink, session_event); !emitted)
   {
     return std::unexpected(std::move(emitted.error()));
   }
 
-  auto user_event = base_event_locked(session, RuntimeEventType::UserMessage, options.session_mutex);
+  auto user_event = base_event_locked(session, runtime::RuntimeEventType::UserMessage, options.session_mutex);
   user_event.text = *expanded_user_message;
   if (auto emitted = emit_event(event_sink, user_event); !emitted)
   {
@@ -585,7 +585,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
             if (sink_error)
               return;
             auto event =
-                base_event_locked(session, entry.status == ava::agent::ToolTimelineStatus::Running ? RuntimeEventType::ToolStart : RuntimeEventType::ToolResult,
+                base_event_locked(session, entry.status == ava::agent::ToolTimelineStatus::Running ? runtime::RuntimeEventType::ToolStart : runtime::RuntimeEventType::ToolResult,
                                   options.session_mutex);
             event.call_id = entry.call_id;
             event.tool_name = entry.name;
@@ -638,7 +638,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       .on_tool_progress = [&session, &options, &event_sink, &sink_error](ava::agent::ToolProgressEntry const& entry) -> ava::core::VoidResult {
         if (sink_error)
           return std::unexpected(*sink_error);
-        auto event = base_event_locked(session, RuntimeEventType::ToolProgress, options.session_mutex);
+        auto event = base_event_locked(session, runtime::RuntimeEventType::ToolProgress, options.session_mutex);
         event.call_id = entry.call_id;
         event.tool_name = entry.name;
         event.text = entry.text;
@@ -654,12 +654,12 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
         if (sink_error)
           return std::unexpected(*sink_error);
         auto event = base_event_locked(session,
-                                       stream_event.type == ava::provider::StreamEventType::TextDelta        ? RuntimeEventType::MessageUpdate
-                                       : stream_event.type == ava::provider::StreamEventType::ReasoningStart ? RuntimeEventType::ReasoningStart
-                                       : stream_event.type == ava::provider::StreamEventType::ReasoningDelta ? RuntimeEventType::ReasoningDelta
-                                       : stream_event.type == ava::provider::StreamEventType::ReasoningEnd   ? RuntimeEventType::ReasoningEnd
-                                       : stream_event.type == ava::provider::StreamEventType::Done           ? RuntimeEventType::MessageEnd
-                                                                                                             : RuntimeEventType::ProviderEvent,
+                                       stream_event.type == ava::provider::StreamEventType::TextDelta        ? runtime::RuntimeEventType::MessageUpdate
+                                       : stream_event.type == ava::provider::StreamEventType::ReasoningStart ? runtime::RuntimeEventType::ReasoningStart
+                                       : stream_event.type == ava::provider::StreamEventType::ReasoningDelta ? runtime::RuntimeEventType::ReasoningDelta
+                                       : stream_event.type == ava::provider::StreamEventType::ReasoningEnd   ? runtime::RuntimeEventType::ReasoningEnd
+                                       : stream_event.type == ava::provider::StreamEventType::Done           ? runtime::RuntimeEventType::MessageEnd
+                                                                                                             : runtime::RuntimeEventType::ProviderEvent,
                                        options.session_mutex);
         event.text = stream_event.text;
         event.call_id = stream_event.tool_call_id;
@@ -705,11 +705,11 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
   if (!result)
   {
     auto event =
-        base_event_locked(session, is_agent_loop_canceled_error(result.error()) ? RuntimeEventType::Canceled : RuntimeEventType::Error, options.session_mutex);
+        base_event_locked(session, is_agent_loop_canceled_error(result.error()) ? runtime::RuntimeEventType::Canceled : runtime::RuntimeEventType::Error, options.session_mutex);
     event.error_category = ava::core::to_string(result.error().category());
     event.error_message = result.error().message();
     event.error_details = result.error().format();
-    if (event.type == RuntimeEventType::Canceled)
+    if (event.type == runtime::RuntimeEventType::Canceled)
     {
       event.text = "stopped by user";
       event.reason = result.error().message();
@@ -718,14 +718,14 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
     return std::unexpected(result.error());
   }
 
-  auto assistant_event = base_event_locked(session, RuntimeEventType::AssistantMessage, options.session_mutex);
+  auto assistant_event = base_event_locked(session, runtime::RuntimeEventType::AssistantMessage, options.session_mutex);
   assistant_event.text = result->final_text;
   if (auto emitted = emit_event(event_sink, assistant_event); !emitted)
   {
     return std::unexpected(std::move(emitted.error()));
   }
 
-  auto done_event = base_event_locked(session, RuntimeEventType::Done, options.session_mutex);
+  auto done_event = base_event_locked(session, runtime::RuntimeEventType::Done, options.session_mutex);
   done_event.stop_reason = result->stop_reason;
   done_event.provider_iterations = result->provider_iterations;
   done_event.tool_calls = result->tool_calls;

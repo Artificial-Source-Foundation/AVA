@@ -19,20 +19,20 @@ std::string payload_type_for_resolver_event(std::string_view name)
   if (name == "permission_requested" || name == "permission_replied" || name == "permission_rule_added" || name == "permission_rule_removed" ||
       name == "permission_grant_revoked" || name == "permission_grants_cleared")
   {
-    return std::string(ava::app::to_string(RuntimePayloadType::Permission));
+    return std::string(ava::app::to_string(runtime::RuntimePayloadType::Permission));
   }
   if (name == "question_requested" || name == "question_replied")
   {
-    return std::string(ava::app::to_string(RuntimePayloadType::Question));
+    return std::string(ava::app::to_string(runtime::RuntimePayloadType::Question));
   }
   if (name == "cancel_requested")
   {
-    return std::string(ava::app::to_string(RuntimePayloadType::Cancellation));
+    return std::string(ava::app::to_string(runtime::RuntimePayloadType::Cancellation));
   }
   if (name == "steer_queued" || name == "steer_applied" || name == "steer_skipped" || name == "follow_up_queued" || name == "follow_up_started" ||
       name == "follow_up_skipped")
   {
-    return std::string(ava::app::to_string(RuntimePayloadType::Queue));
+    return std::string(ava::app::to_string(runtime::RuntimePayloadType::Queue));
   }
   return {};
 }
@@ -41,17 +41,17 @@ std::string payload_type_for_resolver_event(std::string_view name)
 
 ResolverEventPayload resolver_permission_payload(std::string payload_json)
 {
-  return ResolverEventPayload{.payload_type = RuntimePayloadType::Permission, .json = std::move(payload_json)};
+  return ResolverEventPayload{.payload_type = runtime::RuntimePayloadType::Permission, .json = std::move(payload_json)};
 }
 
 ResolverEventPayload resolver_question_payload(std::string payload_json)
 {
-  return ResolverEventPayload{.payload_type = RuntimePayloadType::Question, .json = std::move(payload_json)};
+  return ResolverEventPayload{.payload_type = runtime::RuntimePayloadType::Question, .json = std::move(payload_json)};
 }
 
 ResolverEventPayload resolver_queue_payload(std::string payload_json)
 {
-  return ResolverEventPayload{.payload_type = RuntimePayloadType::Queue, .json = std::move(payload_json)};
+  return ResolverEventPayload{.payload_type = runtime::RuntimePayloadType::Queue, .json = std::move(payload_json)};
 }
 
 //static
@@ -103,7 +103,7 @@ EventEnvelopeContext rpc_event_context(std::string_view request_id)
   return context;
 }
 
-std::string session_id_snapshot(RuntimeSession const& session, std::mutex& session_mutex)
+std::string session_id_snapshot(runtime::RuntimeSession const& session, std::mutex& session_mutex)
 {
   std::lock_guard lock(session_mutex);
   return session.store.session_id();
@@ -140,7 +140,7 @@ EventEnvelope resolver_event_envelope(std::string name, std::string request_id, 
   return envelope;
 }
 
-ava::core::VoidResult write_queue_event(output_ts& output, RuntimeSession const& session, std::mutex& session_mutex, std::string_view name,
+ava::core::VoidResult write_queue_event(output_ts& output, runtime::RuntimeSession const& session, std::mutex& session_mutex, std::string_view name,
                                         QueuedRpcMessage const& queued, std::string_view reason)
 {
   auto envelope = resolver_event_envelope(std::string(name), queued.request_id, queued.correlation_id, session_id_snapshot(session, session_mutex),
@@ -148,7 +148,7 @@ ava::core::VoidResult write_queue_event(output_ts& output, RuntimeSession const&
   return Output::write_record(output, serialize_event_envelope_jsonl(envelope));
 }
 
-ava::core::VoidResult write_skipped_queue_events(output_ts& output, RuntimeSession const& session, std::mutex& session_mutex, ClearedRpcQueues const& cleared,
+ava::core::VoidResult write_skipped_queue_events(output_ts& output, runtime::RuntimeSession const& session, std::mutex& session_mutex, ClearedRpcQueues const& cleared,
                                                  std::string_view reason)
 {
   for (auto const& queued : cleared.steering_messages)

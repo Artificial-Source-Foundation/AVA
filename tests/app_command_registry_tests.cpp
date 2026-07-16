@@ -24,10 +24,10 @@ namespace {
 
 using namespace ava::tests;
 
-ava::app::RuntimeSession open_test_session(std::filesystem::path const& root, std::filesystem::path const& workspace)
+ava::app::runtime::RuntimeSession open_test_session(std::filesystem::path const& root, std::filesystem::path const& workspace)
 {
   auto paths = app_test_paths(root);
-  ava::app::RuntimeOpenOptions options;
+  ava::app::runtime::RuntimeOpenOptions options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;

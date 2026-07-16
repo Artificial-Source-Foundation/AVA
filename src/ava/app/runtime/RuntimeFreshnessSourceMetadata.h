@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <string>
 
-namespace ava::app {
+namespace ava::app::runtime {
 
 // Identify which subsystem produced a freshness source entry during prompt assembly.
 enum class RuntimeFreshnessSourceKind
@@ -35,4 +35,4 @@ struct RuntimeFreshnessSourceMetadata
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app
+}  // namespace ava::app::runtime

@@ -20,15 +20,15 @@ namespace ava::app::rpc {
 
 [[nodiscard]] std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry);
 
-[[nodiscard]] std::string state_result_json(RuntimeSession const& session, bool cancel_requested);
-[[nodiscard]] ava::core::Result<std::string> list_sessions_result_json(RuntimeSession const& session);
-[[nodiscard]] ava::core::Result<std::string> session_tree_result_json(RuntimeSession const& session);
-[[nodiscard]] ava::core::Result<std::string> list_models_result_json(RuntimeSession const& session);
+[[nodiscard]] std::string state_result_json(runtime::RuntimeSession const& session, bool cancel_requested);
+[[nodiscard]] ava::core::Result<std::string> list_sessions_result_json(runtime::RuntimeSession const& session);
+[[nodiscard]] ava::core::Result<std::string> session_tree_result_json(runtime::RuntimeSession const& session);
+[[nodiscard]] ava::core::Result<std::string> list_models_result_json(runtime::RuntimeSession const& session);
 [[nodiscard]] std::string command_result_json(CommandResult const& result);
 [[nodiscard]] std::string command_registry_result_json(CommandRegistry const& registry);
-[[nodiscard]] ava::core::Result<std::string> messages_result_json(RuntimeSession const& session);
-[[nodiscard]] ava::core::Result<std::string> session_stats_result_json(RuntimeSession const& session);
-[[nodiscard]] ava::core::Result<std::string> session_validation_result_json(RuntimeSession const& session);
+[[nodiscard]] ava::core::Result<std::string> messages_result_json(runtime::RuntimeSession const& session);
+[[nodiscard]] ava::core::Result<std::string> session_stats_result_json(runtime::RuntimeSession const& session);
+[[nodiscard]] ava::core::Result<std::string> session_validation_result_json(runtime::RuntimeSession const& session);
 [[nodiscard]] std::string permission_request_payload_json(std::string_view resolver_request_id, ava::permissions::PermissionPrompt const& prompt);
 [[nodiscard]] std::string question_request_payload_json(std::string_view resolver_request_id, ava::agent::QuestionPrompt const& prompt);
 [[nodiscard]] std::string permission_reply_payload_json(std::string_view resolver_request_id, std::string_view decision,

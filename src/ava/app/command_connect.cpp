@@ -161,7 +161,7 @@ std::string connect_provider_display_name(std::string_view provider_id)
   return ava::config::provider_display_name(provider_id);
 }
 
-std::vector<ava::agent::QuestionOption> provider_options(RuntimeSession const& session)
+std::vector<ava::agent::QuestionOption> provider_options(runtime::RuntimeSession const& session)
 {
   std::vector<ava::agent::QuestionOption> options;
   std::vector<std::string> groups;
@@ -192,7 +192,7 @@ std::vector<ava::agent::QuestionOption> provider_options(RuntimeSession const& s
   return options;
 }
 
-ava::core::Result<std::string> resolve_connect_provider(RuntimeSession& session, CommandRequest const& request, std::vector<std::string> const& args)
+ava::core::Result<std::string> resolve_connect_provider(runtime::RuntimeSession& session, CommandRequest const& request, std::vector<std::string> const& args)
 {
   if (!args.empty())
     return args[0];
@@ -299,7 +299,7 @@ ava::core::VoidResult prompt_oauth_wait(CommandRequest const& request, std::stri
   return {};
 }
 
-ava::core::VoidResult store_connect_credential(RuntimeSession const& session, std::string_view provider_id, ConnectMethod method, std::string secret)
+ava::core::VoidResult store_connect_credential(runtime::RuntimeSession const& session, std::string_view provider_id, ConnectMethod method, std::string secret)
 {
   if (provider_id == "openai")
   {
@@ -319,7 +319,7 @@ ava::core::VoidResult store_connect_credential(RuntimeSession const& session, st
                                                                                                .source = "connect"});
 }
 
-ava::core::Result<std::string> store_openai_oauth_result(RuntimeSession const& session, ava::config::OpenAICredential const& credential)
+ava::core::Result<std::string> store_openai_oauth_result(runtime::RuntimeSession const& session, ava::config::OpenAICredential const& credential)
 {
   auto stored = ava::config::store_openai_credential(session.paths, credential);
   if (!stored)
@@ -327,7 +327,7 @@ ava::core::Result<std::string> store_openai_oauth_result(RuntimeSession const& s
   return "Stored OpenAI OAuth credential at " + session.paths.auth_file.string();
 }
 
-ava::core::Result<std::string> run_openai_browser_oauth(RuntimeSession const& session, CommandRequest const& request)
+ava::core::Result<std::string> run_openai_browser_oauth(runtime::RuntimeSession const& session, CommandRequest const& request)
 {
   auto oauth_session = ava::config::make_openai_oauth_session();
   if (!oauth_session)
@@ -359,7 +359,7 @@ ava::core::Result<std::string> run_openai_browser_oauth(RuntimeSession const& se
   return store_openai_oauth_result(session, *credential);
 }
 
-ava::core::Result<std::string> run_openai_headless_oauth(RuntimeSession const& session, CommandRequest const& request)
+ava::core::Result<std::string> run_openai_headless_oauth(runtime::RuntimeSession const& session, CommandRequest const& request)
 {
   ava::provider::CurlCliTransport transport;
   auto authorization = ava::config::start_openai_oauth_device_authorization(transport);
@@ -389,7 +389,7 @@ ava::core::Result<std::string> run_openai_headless_oauth(RuntimeSession const& s
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_connect_command(RuntimeSession& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_connect_command(runtime::RuntimeSession& session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;

@@ -144,8 +144,7 @@ std::vector<PermissionPromptChoice> permission_choices(bool remember_available)
 {
   if (!remember_available)
     return {PermissionPromptChoice::Deny, PermissionPromptChoice::Allow};
-  return {PermissionPromptChoice::Deny, PermissionPromptChoice::Allow, PermissionPromptChoice::DenyRemember,
-          PermissionPromptChoice::AllowRemember};
+  return {PermissionPromptChoice::Deny, PermissionPromptChoice::Allow, PermissionPromptChoice::DenyRemember, PermissionPromptChoice::AllowRemember};
 }
 
 PermissionPromptChoice next_permission_choice(PermissionPromptChoice selected, bool remember_available)
@@ -245,10 +244,10 @@ std::string permission_dock_keys(bool remember_available, std::size_t width)
   if (remember_available)
   {
     std::array const candidates = {
-        std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " reject  " + key_pill("R") + " remember selected  " +
-            key_pill("Enter") + " confirm  " + key_pill("Esc") + " reject",
-        std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject  " + key_pill("R") + " remember  " + key_pill("Enter") +
-            " ok  " + key_pill("Esc") + " no",
+        std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " reject  " + key_pill("R") + " remember selected  " + key_pill("Enter") +
+            " confirm  " + key_pill("Esc") + " reject",
+        std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject  " + key_pill("R") + " remember  " + key_pill("Enter") + " ok  " +
+            key_pill("Esc") + " no",
         std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=reject " + key_pill("R") + "=remember",
     };
 
@@ -365,6 +364,49 @@ std::vector<std::size_t> matching_option_indices(QuestionPromptView const& promp
       indices.push_back(index);
   }
   return indices;
+}
+
+std::size_t visible_option_window_start(std::vector<std::size_t> const& indices, std::size_t selected, std::size_t row_budget)
+{
+  if (indices.empty() || row_budget == 0)
+    return 0;
+  auto const selected_it = std::ranges::find(indices, selected);
+  auto const selected_visible = selected_it == indices.end() ? std::size_t{0} : static_cast<std::size_t>(selected_it - indices.begin());
+  return selected_visible >= row_budget ? selected_visible - row_budget + 1 : std::size_t{0};
+}
+
+struct QuestionModalContentRow
+{
+  std::optional<std::size_t> option_index;
+  std::string section;
+};
+
+std::vector<QuestionModalContentRow> visible_question_modal_rows(QuestionPromptView const& prompt, std::size_t row_budget)
+{
+  std::vector<QuestionModalContentRow> all_rows;
+  auto const matches = matching_option_indices(prompt);
+  if (matches.empty() || row_budget == 0)
+    return all_rows;
+
+  if (prompt.searchable)
+    all_rows.push_back(QuestionModalContentRow{.option_index = std::nullopt, .section = "Popular"});
+  for (std::size_t visible = 0; visible < matches.size(); ++visible)
+  {
+    if (prompt.searchable && visible == 4)
+      all_rows.push_back(QuestionModalContentRow{.option_index = std::nullopt, .section = "Other"});
+    all_rows.push_back(QuestionModalContentRow{.option_index = matches[visible], .section = {}});
+  }
+
+  auto const selected = std::min(prompt.selected_option_index, prompt.options.size() - 1);
+  auto const selected_it = std::ranges::find_if(all_rows, [selected](QuestionModalContentRow const& row) { return row.option_index == selected; });
+  auto const selected_row = selected_it == all_rows.end() ? std::size_t{0} : static_cast<std::size_t>(selected_it - all_rows.begin());
+  auto start = selected_row >= row_budget ? selected_row - row_budget + 1 : std::size_t{0};
+  if (start > 0 && all_rows[start].option_index && !all_rows[start - 1].option_index && selected_row - (start - 1) < row_budget)
+  {
+    --start;
+  }
+  auto const end = std::min(all_rows.size(), start + row_budget);
+  return std::vector<QuestionModalContentRow>(all_rows.begin() + static_cast<std::ptrdiff_t>(start), all_rows.begin() + static_cast<std::ptrdiff_t>(end));
 }
 
 std::optional<std::size_t> option_index_for_shortcut(QuestionPromptInputResult const& result, char character)
@@ -511,15 +553,13 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
   constexpr std::size_t kReservedActionLines = 2;
   if (!metadata_text.empty() && !prompt.diff_preview.empty())
   {
-    auto const inline_metadata =
-        std::string(kSgrWarning) + std::string(metadata_text) + std::string(kSgrReset);
+    auto const inline_metadata = std::string(kSgrWarning) + std::string(metadata_text) + std::string(kSgrReset);
     auto const candidate = lines.back() + "  " + inline_metadata;
     lines.back() = fit_line_preserving_sgr(candidate, width);
     metadata_text.clear();
   }
 
-  if (auto metadata = permission_dock_metadata(metadata_text, width);
-      !metadata.empty() && max_lines > lines.size() + kReservedActionLines)
+  if (auto metadata = permission_dock_metadata(metadata_text, width); !metadata.empty() && max_lines > lines.size() + kReservedActionLines)
   {
     lines.push_back(std::move(metadata));
   }
@@ -553,14 +593,12 @@ std::vector<std::string> render_question_prompt(QuestionPromptView const& prompt
     return lines;
 
   auto const option_budget = prompt.allow_custom && max_lines > lines.size() + 2 ? max_lines - lines.size() - 2 : max_lines - lines.size() - 1;
-  auto const option_count = std::min(prompt.options.size(), option_budget);
-  for (std::size_t index = 0; index < option_count; ++index)
+  auto const matches = matching_option_indices(prompt);
+  auto const start = visible_option_window_start(matches, prompt.selected_option_index, option_budget);
+  auto const end = std::min(matches.size(), start + option_budget);
+  for (std::size_t visible = start; visible < end; ++visible)
   {
-    lines.push_back(question_option_line(prompt, index, width));
-  }
-  if (option_count < prompt.options.size() && lines.size() < max_lines)
-  {
-    lines.push_back(fit_line_preserving_sgr("  ... more options", width));
+    lines.push_back(question_option_line(prompt, matches[visible], width));
   }
   if (prompt.allow_custom && lines.size() < max_lines)
   {
@@ -622,33 +660,24 @@ std::vector<std::string> render_question_modal(QuestionPromptView const& prompt,
 
   if (!prompt.options.empty())
   {
-    if (prompt.searchable)
-    {
-      lines.push_back(modal_line(std::string(kSgrWarning) + "Popular" + std::string(kSgrReset), width));
-      if (lines.size() >= max_lines)
-        return lines;
-    }
     auto const matches = matching_option_indices(prompt);
     auto const reserved_footer = std::size_t{2};
     auto const budget = max_lines > lines.size() + reserved_footer ? max_lines - lines.size() - reserved_footer : 0;
-    auto const count = std::min(matches.size(), budget);
-    std::size_t rendered_options = 0;
-    for (std::size_t visible = 0; visible < count && lines.size() + reserved_footer < max_lines; ++visible)
+    auto const content_rows = visible_question_modal_rows(prompt, budget);
+    for (auto const& row : content_rows)
     {
-      if (prompt.searchable && visible == 4 && lines.size() + reserved_footer + 1 < max_lines)
+      if (row.option_index)
       {
-        lines.push_back(modal_line(std::string(kSgrWarning) + "Other" + std::string(kSgrReset), width));
+        lines.push_back(modal_option_line(prompt, *row.option_index, width));
       }
-      lines.push_back(modal_option_line(prompt, matches[visible], width));
-      ++rendered_options;
+      else
+      {
+        lines.push_back(modal_line(std::string(kSgrWarning) + row.section + std::string(kSgrReset), width));
+      }
     }
-    if (rendered_options == 0 && lines.size() < max_lines)
+    if (matches.empty() && lines.size() + reserved_footer < max_lines)
     {
       lines.push_back(modal_line(std::string(kSgrMuted) + "No matches. Press Enter to use custom provider id." + std::string(kSgrReset), width));
-    }
-    else if (rendered_options < matches.size() && lines.size() < max_lines)
-    {
-      lines.push_back(modal_line(std::string(kSgrMuted) + "..." + std::string(kSgrReset), width));
     }
   }
 
@@ -666,8 +695,7 @@ std::vector<std::string> render_question_modal(QuestionPromptView const& prompt,
 
 }  // namespace detail
 
-PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event,
-                                                           bool remember_available)
+PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event, bool remember_available)
 {
   switch (event.key)
   {
@@ -686,9 +714,8 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
       }
       if ((event.character == 'r' || event.character == 'R') && remember_available)
       {
-        auto const remembered = detail::permission_choice_is_remember(selected_choice)
-                                    ? detail::one_shot_permission_choice(selected_choice)
-                                    : detail::remembered_permission_choice(selected_choice);
+        auto const remembered = detail::permission_choice_is_remember(selected_choice) ? detail::one_shot_permission_choice(selected_choice)
+                                                                                       : detail::remembered_permission_choice(selected_choice);
         return {.selected_choice = remembered, .action = PermissionPromptInputAction::Redraw};
       }
       break;
@@ -697,14 +724,15 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
     case Key::Enter:
       return {.selected_choice = selected_choice, .action = detail::resolve_permission_choice_action(selected_choice)};
     case Key::Tab:
-      return {.selected_choice = detail::next_permission_choice(selected_choice, remember_available),
-              .action = PermissionPromptInputAction::Redraw};
+      return {.selected_choice = detail::next_permission_choice(selected_choice, remember_available), .action = PermissionPromptInputAction::Redraw};
     case Key::ArrowLeft:
-      return {.selected_choice = detail::previous_permission_choice(selected_choice, remember_available),
-              .action = PermissionPromptInputAction::Redraw};
+    case Key::ArrowUp:
+    case Key::MouseWheelUp:
+      return {.selected_choice = detail::previous_permission_choice(selected_choice, remember_available), .action = PermissionPromptInputAction::Redraw};
     case Key::ArrowRight:
-      return {.selected_choice = detail::next_permission_choice(selected_choice, remember_available),
-              .action = PermissionPromptInputAction::Redraw};
+    case Key::ArrowDown:
+    case Key::MouseWheelDown:
+      return {.selected_choice = detail::next_permission_choice(selected_choice, remember_available), .action = PermissionPromptInputAction::Redraw};
     case Key::Escape:
     case Key::CtrlC:
     case Key::CtrlD:
@@ -777,8 +805,6 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
     case Key::AltW:
     case Key::CtrlAltRightBracket:
     case Key::AltY:
-    case Key::ArrowUp:
-    case Key::ArrowDown:
     case Key::PageUp:
     case Key::PageDown:
     case Key::Home:
@@ -789,8 +815,6 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
     case Key::ShiftEnd:
     case Key::ShiftCtrlHome:
     case Key::ShiftCtrlEnd:
-    case Key::MouseWheelUp:
-    case Key::MouseWheelDown:
     case Key::MouseLeftClick:
     case Key::MouseLeftDrag:
     case Key::MouseLeftRelease:
@@ -855,21 +879,25 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
     }
     result.selected_option_index = std::min(result.selected_option_index, result.options.size() - 1);
   };
-  auto move_search_selection = [&](int delta) {
+  auto move_selection = [&](std::ptrdiff_t delta, bool wrap) {
     auto const matches = matching_indices();
     if (matches.empty())
       return;
     auto const current = std::ranges::find(matches, result.selected_option_index);
-    auto visible = current == matches.end() ? std::size_t{0} : static_cast<std::size_t>(current - matches.begin());
-    if (delta < 0)
+    auto const visible = current == matches.end() ? std::ptrdiff_t{0} : std::distance(matches.begin(), current);
+    auto next = visible + delta;
+    auto const count = static_cast<std::ptrdiff_t>(matches.size());
+    if (wrap)
     {
-      visible = visible == 0 ? matches.size() - 1 : visible - 1;
+      next %= count;
+      if (next < 0)
+        next += count;
     }
     else
     {
-      visible = (visible + 1) % matches.size();
+      next = std::clamp(next, std::ptrdiff_t{0}, count - 1);
     }
-    result.selected_option_index = matches[visible];
+    result.selected_option_index = matches[static_cast<std::size_t>(next)];
   };
   auto toggle_selected = [&]() {
     if (!has_options)
@@ -1018,34 +1046,62 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
       }
       break;
     case Key::ArrowUp:
-      if (prompt.searchable && has_options)
+    case Key::MouseWheelUp:
+      if (has_options && !matching_indices().empty())
       {
-        move_search_selection(-1);
-        result.action = QuestionPromptInputAction::Redraw;
-        return result;
-      }
-      if (has_options && result.selected_option_index > 0)
-      {
-        --result.selected_option_index;
+        move_selection(-1, true);
         result.action = QuestionPromptInputAction::Redraw;
         return result;
       }
       break;
     case Key::ArrowDown:
     case Key::Tab:
-      if (prompt.searchable && has_options)
+    case Key::MouseWheelDown:
+      if (has_options && !matching_indices().empty())
       {
-        move_search_selection(1);
-        result.action = QuestionPromptInputAction::Redraw;
-        return result;
-      }
-      if (has_options)
-      {
-        result.selected_option_index = (result.selected_option_index + 1) % result.options.size();
+        move_selection(1, true);
         result.action = QuestionPromptInputAction::Redraw;
         return result;
       }
       break;
+    case Key::PageUp:
+      if (has_options && !matching_indices().empty())
+      {
+        move_selection(-5, false);
+        result.action = QuestionPromptInputAction::Redraw;
+        return result;
+      }
+      break;
+    case Key::PageDown:
+      if (has_options && !matching_indices().empty())
+      {
+        move_selection(5, false);
+        result.action = QuestionPromptInputAction::Redraw;
+        return result;
+      }
+      break;
+    case Key::Home:
+    case Key::CtrlHome: {
+      auto const matches = matching_indices();
+      if (!matches.empty())
+      {
+        result.selected_option_index = matches.front();
+        result.action = QuestionPromptInputAction::Redraw;
+        return result;
+      }
+      break;
+    }
+    case Key::End:
+    case Key::CtrlEnd: {
+      auto const matches = matching_indices();
+      if (!matches.empty())
+      {
+        result.selected_option_index = matches.back();
+        result.action = QuestionPromptInputAction::Redraw;
+        return result;
+      }
+      break;
+    }
     case Key::Enter:
       if (prompt.searchable)
       {
@@ -1142,18 +1198,10 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
     case Key::CtrlArrowRight:
     case Key::AltArrowLeft:
     case Key::AltArrowRight:
-    case Key::PageUp:
-    case Key::PageDown:
-    case Key::Home:
-    case Key::End:
-    case Key::CtrlHome:
-    case Key::CtrlEnd:
     case Key::ShiftHome:
     case Key::ShiftEnd:
     case Key::ShiftCtrlHome:
     case Key::ShiftCtrlEnd:
-    case Key::MouseWheelUp:
-    case Key::MouseWheelDown:
     case Key::MouseLeftClick:
     case Key::MouseLeftDrag:
     case Key::MouseLeftRelease:

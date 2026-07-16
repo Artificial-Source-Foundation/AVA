@@ -1,10 +1,8 @@
 #include "sys.h"
-#include "ava/session/session_branch.h"
-
 #include "ava/session/attachments.h"
 #include "ava/session/record.h"
+#include "ava/session/session_branch.h"
 #include "ava/session/validation.h"
-
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
@@ -23,19 +21,19 @@ ava::core::Error branch_error(ava::core::ErrorCategory category, std::string mes
   return ava::core::Error(category, std::move(message));
 }
 
-void attach_rollback_context(SessionStore const& store, ava::core::Error& error)
+void attach_rollback_context(SessionStore const& store, SessionLease const& lease, ava::core::Error& error)
 {
-  std::error_code remove_error;
-  std::filesystem::remove(store.session_path(), remove_error);
+  if (auto removed = store.remove_created_file(lease); !removed)
+  {
+    error.with_context("rollback_path", store.session_path().string());
+    error.with_context("rollback_cause", removed.error().format());
+  }
   std::error_code attachments_remove_error;
   std::filesystem::remove_all(attachment_storage_root(store), attachments_remove_error);
   std::error_code directory_remove_error;
   std::filesystem::remove(store.session_path().parent_path(), directory_remove_error);
-  if (remove_error) {
-    error.with_context("rollback_path", store.session_path().string());
-    error.with_context("rollback_cause", remove_error.message());
-  }
-  if (attachments_remove_error) {
+  if (attachments_remove_error)
+  {
     error.with_context("rollback_attachment_path", attachment_storage_root(store).string());
     error.with_context("rollback_attachment_cause", attachments_remove_error.message());
   }
@@ -69,32 +67,37 @@ bool has_control_byte(std::string_view value)
 std::optional<bool> bool_field(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
-  if (!start) return std::nullopt;
+  if (!start)
+    return std::nullopt;
   auto const value = object.substr(*start);
-  if (value.starts_with("true") && (value.size() == 4 || value[4] == ',' || value[4] == '}' || std::isspace(static_cast<unsigned char>(value[4])) != 0)) return true;
-  if (value.starts_with("false") && (value.size() == 5 || value[5] == ',' || value[5] == '}' || std::isspace(static_cast<unsigned char>(value[5])) != 0)) return false;
+  if (value.starts_with("true") && (value.size() == 4 || value[4] == ',' || value[4] == '}' || std::isspace(static_cast<unsigned char>(value[4])) != 0))
+    return true;
+  if (value.starts_with("false") && (value.size() == 5 || value[5] == ',' || value[5] == '}' || std::isspace(static_cast<unsigned char>(value[5])) != 0))
+    return false;
   return std::nullopt;
 }
 
-ava::core::VoidResult write_branch_attachment(SessionStore const& created, ImageAttachmentRef const& metadata,
-                                              std::string_view bytes)
+ava::core::VoidResult write_branch_attachment(SessionStore const& created, ImageAttachmentRef const& metadata, std::string_view bytes)
 {
   auto destination = resolve_attachment_storage_path(created, metadata.storage_path);
-  if (!destination) return std::unexpected(std::move(destination.error()));
+  if (!destination)
+    return std::unexpected(std::move(destination.error()));
 
   std::error_code mkdir_error;
   std::filesystem::create_directories(destination->parent_path(), mkdir_error);
-  if (mkdir_error) {
+  if (mkdir_error)
+  {
     auto error = branch_error(ava::core::ErrorCategory::Io, "failed to create branch attachment directory");
     error.with_context("path", destination->parent_path().string());
     error.with_context("cause", mkdir_error.message());
     return std::unexpected(std::move(error));
   }
-  for (auto const& directory : {attachment_storage_root(created), destination->parent_path()}) {
+  for (auto const& directory : {attachment_storage_root(created), destination->parent_path()})
+  {
     std::error_code permissions_error;
-    std::filesystem::permissions(directory, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace,
-                                 permissions_error);
-    if (permissions_error) {
+    std::filesystem::permissions(directory, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace, permissions_error);
+    if (permissions_error)
+    {
       auto error = branch_error(ava::core::ErrorCategory::Io, "failed to set branch attachment directory permissions");
       error.with_context("path", directory.string());
       error.with_context("cause", permissions_error.message());
@@ -104,18 +107,23 @@ ava::core::VoidResult write_branch_attachment(SessionStore const& created, Image
 
   std::error_code status_error;
   auto const status = std::filesystem::symlink_status(*destination, status_error);
-  if (!status_error && std::filesystem::exists(status)) {
-    if (std::filesystem::is_symlink(status)) {
+  if (!status_error && std::filesystem::exists(status))
+  {
+    if (std::filesystem::is_symlink(status))
+    {
       auto error = branch_error(ava::core::ErrorCategory::PermissionDenied, "branch attachment path must not be a symlink");
       error.with_context("path", destination->string());
       return std::unexpected(std::move(error));
     }
-    if (!std::filesystem::is_regular_file(status)) {
+    if (!std::filesystem::is_regular_file(status))
+    {
       auto error = branch_error(ava::core::ErrorCategory::InvalidArgument, "branch attachment path is not a regular file");
       error.with_context("path", destination->string());
       return std::unexpected(std::move(error));
     }
-  } else if (status_error && status_error != std::errc::no_such_file_or_directory) {
+  }
+  else if (status_error && status_error != std::errc::no_such_file_or_directory)
+  {
     auto error = branch_error(ava::core::ErrorCategory::Io, "failed to inspect branch attachment path");
     error.with_context("path", destination->string());
     error.with_context("cause", status_error.message());
@@ -123,22 +131,25 @@ ava::core::VoidResult write_branch_attachment(SessionStore const& created, Image
   }
 
   std::ofstream file(*destination, std::ios::binary | std::ios::trunc);
-  if (!file) {
+  if (!file)
+  {
     auto error = branch_error(ava::core::ErrorCategory::Io, "failed to open branch attachment");
     error.with_context("path", destination->string());
     return std::unexpected(std::move(error));
   }
   file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
   file.flush();
-  if (!file) {
+  if (!file)
+  {
     auto error = branch_error(ava::core::ErrorCategory::Io, "failed to write branch attachment");
     error.with_context("path", destination->string());
     return std::unexpected(std::move(error));
   }
   std::error_code file_permissions_error;
-  std::filesystem::permissions(*destination, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-                               std::filesystem::perm_options::replace, file_permissions_error);
-  if (file_permissions_error) {
+  std::filesystem::permissions(*destination, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write, std::filesystem::perm_options::replace,
+                               file_permissions_error);
+  if (file_permissions_error)
+  {
     auto error = branch_error(ava::core::ErrorCategory::Io, "failed to set branch attachment file permissions");
     error.with_context("path", destination->string());
     error.with_context("cause", file_permissions_error.message());
@@ -146,20 +157,24 @@ ava::core::VoidResult write_branch_attachment(SessionStore const& created, Image
   }
 
   auto verified = load_image_attachment(created, metadata);
-  if (!verified) return std::unexpected(std::move(verified.error()));
+  if (!verified)
+    return std::unexpected(std::move(verified.error()));
   return {};
 }
 
-ava::core::VoidResult copy_branch_image_attachments(SessionStore const& source, SessionStore const& created,
-                                                    std::vector<SessionEntry> const& entries,
+ava::core::VoidResult copy_branch_image_attachments(SessionStore const& source, SessionStore const& created, std::vector<SessionEntry> const& entries,
                                                     std::size_t copy_count)
 {
-  for (std::size_t index = 0; index < copy_count; ++index) {
+  for (std::size_t index = 0; index < copy_count; ++index)
+  {
     auto const& entry = entries[index];
-    if (entry.type != EntryType::UserMessage) continue;
+    if (entry.type != EntryType::UserMessage)
+      continue;
     auto const sanitized = sanitized_message_data_json(entry.data_json);
-    for (auto const& attachment : ava::core::json::objects_in_array_field(sanitized, "attachments")) {
-      if (bool_field(attachment, "redacted").value_or(false)) continue;
+    for (auto const& attachment : ava::core::json::objects_in_array_field(sanitized, "attachments"))
+    {
+      if (bool_field(attachment, "redacted").value_or(false))
+        continue;
       auto const byte_size = ava::core::json::integer_field(attachment, "byte_size").value_or(0);
       auto metadata = ImageAttachmentRef{.id = ava::core::json::string_field(attachment, "id").value_or(""),
                                          .mime_type = ava::core::json::string_field(attachment, "mime_type").value_or(""),
@@ -167,8 +182,10 @@ ava::core::VoidResult copy_branch_image_attachments(SessionStore const& source, 
                                          .sha256 = ava::core::json::string_field(attachment, "sha256").value_or(""),
                                          .byte_size = byte_size > 0 ? static_cast<std::size_t>(byte_size) : 0};
       auto loaded = load_image_attachment(source, metadata);
-      if (!loaded) return std::unexpected(std::move(loaded.error()));
-      if (auto copied = write_branch_attachment(created, metadata, loaded->bytes); !copied) {
+      if (!loaded)
+        return std::unexpected(std::move(loaded.error()));
+      if (auto copied = write_branch_attachment(created, metadata, loaded->bytes); !copied)
+      {
         return std::unexpected(std::move(copied.error()));
       }
     }
@@ -179,7 +196,8 @@ ava::core::VoidResult copy_branch_image_attachments(SessionStore const& source, 
 ava::core::VoidResult validate_required_text(std::string_view value, std::string_view field, std::size_t max_bytes, bool allow_summary_whitespace)
 {
   bool const has_invalid_control = allow_summary_whitespace ? has_control_byte_except_summary_whitespace(value) : has_control_byte(value);
-  if (value.empty() || value.size() > max_bytes || has_invalid_control) {
+  if (value.empty() || value.size() > max_bytes || has_invalid_control)
+  {
     auto error = branch_error(ava::core::ErrorCategory::InvalidArgument, "branch summary field is invalid");
     error.with_context("field", std::string(field));
     error.with_context("max_bytes", std::to_string(max_bytes));
@@ -188,24 +206,27 @@ ava::core::VoidResult validate_required_text(std::string_view value, std::string
   return {};
 }
 
-ava::core::Result<std::pair<std::size_t, std::size_t>> resolve_branch_summary_range(
-    std::vector<SessionEntry> const& entries, std::string_view root_entry_id, std::string_view tip_entry_id)
+ava::core::Result<std::pair<std::size_t, std::size_t>> resolve_branch_summary_range(std::vector<SessionEntry> const& entries, std::string_view root_entry_id,
+                                                                                    std::string_view tip_entry_id)
 {
   auto const root = std::ranges::find_if(entries, [&](SessionEntry const& entry) { return entry.id == root_entry_id; });
-  if (root == entries.end()) {
+  if (root == entries.end())
+  {
     auto error = branch_error(ava::core::ErrorCategory::NotFound, "branch summary root entry not found");
     error.with_context("branch_root_entry_id", std::string(root_entry_id));
     return std::unexpected(std::move(error));
   }
   auto const tip = std::ranges::find_if(entries, [&](SessionEntry const& entry) { return entry.id == tip_entry_id; });
-  if (tip == entries.end()) {
+  if (tip == entries.end())
+  {
     auto error = branch_error(ava::core::ErrorCategory::NotFound, "branch summary tip entry not found");
     error.with_context("branch_tip_entry_id", std::string(tip_entry_id));
     return std::unexpected(std::move(error));
   }
   auto const root_index = static_cast<std::size_t>(std::distance(entries.begin(), root));
   auto const tip_index = static_cast<std::size_t>(std::distance(entries.begin(), tip));
-  if (root_index > tip_index) {
+  if (root_index > tip_index)
+  {
     auto error = branch_error(ava::core::ErrorCategory::InvalidArgument, "branch summary root must not be after tip");
     error.with_context("branch_root_entry_id", std::string(root_entry_id));
     error.with_context("branch_tip_entry_id", std::string(tip_entry_id));
@@ -214,30 +235,31 @@ ava::core::Result<std::pair<std::size_t, std::size_t>> resolve_branch_summary_ra
   return std::pair<std::size_t, std::size_t>{root_index, tip_index};
 }
 
-ava::core::Result<std::size_t> copy_count_for_branch(std::vector<SessionEntry> const& entries,
-                                                     std::string_view branch_from_entry_id,
-                                                     SessionBranchMode mode,
+ava::core::Result<std::size_t> copy_count_for_branch(std::vector<SessionEntry> const& entries, std::string_view branch_from_entry_id, SessionBranchMode mode,
                                                      std::string& resolved_branch_from_entry_id)
 {
   resolved_branch_from_entry_id = std::string(branch_from_entry_id);
-  if (entries.empty()) {
-    if (resolved_branch_from_entry_id.empty()) return std::size_t{0};
+  if (entries.empty())
+  {
+    if (resolved_branch_from_entry_id.empty())
+      return std::size_t{0};
     auto error = branch_error(ava::core::ErrorCategory::NotFound, "branch source entry not found");
     error.with_context("branch_from_entry_id", resolved_branch_from_entry_id);
     return std::unexpected(std::move(error));
   }
 
-  if (resolved_branch_from_entry_id.empty()) resolved_branch_from_entry_id = entries.back().id;
-  auto const found = std::ranges::find_if(entries, [&](SessionEntry const& entry) {
-    return entry.id == resolved_branch_from_entry_id;
-  });
-  if (found == entries.end()) {
+  if (resolved_branch_from_entry_id.empty())
+    resolved_branch_from_entry_id = entries.back().id;
+  auto const found = std::ranges::find_if(entries, [&](SessionEntry const& entry) { return entry.id == resolved_branch_from_entry_id; });
+  if (found == entries.end())
+  {
     auto error = branch_error(ava::core::ErrorCategory::NotFound, "branch source entry not found");
     error.with_context("branch_from_entry_id", resolved_branch_from_entry_id);
     return std::unexpected(std::move(error));
   }
 
-  if (mode == SessionBranchMode::Clone) return entries.size();
+  if (mode == SessionBranchMode::Clone)
+    return entries.size();
   return static_cast<std::size_t>(std::distance(entries.begin(), found)) + 1;
 }
 
@@ -245,50 +267,66 @@ ava::core::Result<std::size_t> copy_count_for_branch(std::vector<SessionEntry> c
 
 ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOptions options)
 {
-  if (options.source_session_id.empty()) {
+  if (options.source_session_id.empty())
+  {
     return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "source session id is required"));
   }
-  if (auto valid_source = validate_session_id(options.source_session_id); !valid_source) {
+  if (auto valid_source = validate_session_id(options.source_session_id); !valid_source)
+  {
     return std::unexpected(std::move(valid_source.error()));
   }
-  if (options.mode == SessionBranchMode::Clone && !options.branch_from_entry_id.empty()) {
+  if (options.mode == SessionBranchMode::Clone && !options.branch_from_entry_id.empty())
+  {
     auto error = branch_error(ava::core::ErrorCategory::InvalidArgument, "clone session branch does not support branch_from_entry_id");
     error.with_context("branch_from_entry_id", options.branch_from_entry_id);
     return std::unexpected(std::move(error));
   }
-  if (auto valid_entry = validate_parent_id(options.branch_from_entry_id, "session_branch"); !valid_entry) {
+  if (auto valid_entry = validate_parent_id(options.branch_from_entry_id, "session_branch"); !valid_entry)
+  {
     return std::unexpected(std::move(valid_entry.error()));
   }
 
   auto source = SessionStore::open(options.workspace_dir, options.source_session_id, options.root_dir);
-  if (!source) return std::unexpected(std::move(source.error()));
-  auto source_entries = source->load();
-  if (!source_entries) return std::unexpected(std::move(source_entries.error()));
+  if (!source)
+    return std::unexpected(std::move(source.error()));
+  auto source_entries = source->load_bounded(options.read_limits.value_or(legacy_unbounded_session_read_limits()));
+  if (!source_entries)
+    return std::unexpected(std::move(source_entries.error()));
 
   std::string resolved_branch_from_entry_id;
-  auto copy_count = copy_count_for_branch(*source_entries, options.branch_from_entry_id, options.mode,
-                                          resolved_branch_from_entry_id);
-  if (!copy_count) return std::unexpected(std::move(copy_count.error()));
+  auto copy_count = copy_count_for_branch(*source_entries, options.branch_from_entry_id, options.mode, resolved_branch_from_entry_id);
+  if (!copy_count)
+    return std::unexpected(std::move(copy_count.error()));
 
   auto created = SessionStore::create(options.workspace_dir, options.root_dir);
-  if (!created) return std::unexpected(std::move(created.error()));
+  if (!created)
+    return std::unexpected(std::move(created.error()));
+  auto destination_lease = SessionLease::create_and_acquire(created->session_path());
+  if (!destination_lease)
+  {
+    auto error = std::move(destination_lease.error());
+    error.with_context("created_session_id", created->session_id());
+    return std::unexpected(std::move(error));
+  }
 
-  for (std::size_t index = 0; index < *copy_count; ++index) {
-    if (auto appended = created->append((*source_entries)[index]); !appended) {
+  for (std::size_t index = 0; index < *copy_count; ++index)
+  {
+    if (auto appended = created->append((*source_entries)[index]); !appended)
+    {
       auto error = std::move(appended.error());
       error.with_context("source_session_id", options.source_session_id);
       error.with_context("created_session_id", created->session_id());
-      attach_rollback_context(*created, error);
+      attach_rollback_context(*created, *destination_lease, error);
       return std::unexpected(std::move(error));
     }
   }
 
-  if (auto copied_attachments = copy_branch_image_attachments(*source, *created, *source_entries, *copy_count);
-      !copied_attachments) {
+  if (auto copied_attachments = copy_branch_image_attachments(*source, *created, *source_entries, *copy_count); !copied_attachments)
+  {
     auto error = std::move(copied_attachments.error());
     error.with_context("source_session_id", options.source_session_id);
     error.with_context("created_session_id", created->session_id());
-    attach_rollback_context(*created, error);
+    attach_rollback_context(*created, *destination_lease, error);
     return std::unexpected(std::move(error));
   }
 
@@ -301,15 +339,17 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
   metadata_update.branch_origin = options.mode == SessionBranchMode::Clone ? "clone" : "fork";
   metadata_update.actor = std::move(options.actor);
   auto metadata = append_session_metadata(*created, std::move(metadata_update));
-  if (!metadata) {
+  if (!metadata)
+  {
     auto error = std::move(metadata.error());
     error.with_context("source_session_id", options.source_session_id);
     error.with_context("created_session_id", created->session_id());
-    attach_rollback_context(*created, error);
+    attach_rollback_context(*created, *destination_lease, error);
     return std::unexpected(std::move(error));
   }
 
   return SessionBranchResult{.store = std::move(*created),
+                             .lease = std::move(*destination_lease),
                              .source_session_id = std::move(options.source_session_id),
                              .branch_from_entry_id = std::move(resolved_branch_from_entry_id),
                              .copied_entry_count = *copy_count,
@@ -318,51 +358,69 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
 
 ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOptions options)
 {
-  if (options.source_session_id.empty()) {
+  if (options.source_session_id.empty())
+  {
     return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "source session id is required"));
   }
-  if (auto valid_source = validate_session_id(options.source_session_id); !valid_source) {
+  if (auto valid_source = validate_session_id(options.source_session_id); !valid_source)
+  {
     return std::unexpected(std::move(valid_source.error()));
   }
-  if (auto valid_root = validate_parent_id(options.branch_root_entry_id, "branch_summary"); !valid_root) {
+  if (auto valid_root = validate_parent_id(options.branch_root_entry_id, "branch_summary"); !valid_root)
+  {
     return std::unexpected(std::move(valid_root.error()));
   }
-  if (auto valid_tip = validate_parent_id(options.branch_tip_entry_id, "branch_summary"); !valid_tip) {
+  if (auto valid_tip = validate_parent_id(options.branch_tip_entry_id, "branch_summary"); !valid_tip)
+  {
     return std::unexpected(std::move(valid_tip.error()));
   }
-  if (auto valid = validate_required_text(options.summary, "summary", 8192, true); !valid) return std::unexpected(std::move(valid.error()));
-  if (auto valid = validate_required_text(options.provider, "provider", 256, false); !valid) return std::unexpected(std::move(valid.error()));
-  if (auto valid = validate_required_text(options.model, "model", 256, false); !valid) return std::unexpected(std::move(valid.error()));
-  if (auto valid = validate_required_text(options.reason, "reason", 1024, false); !valid) return std::unexpected(std::move(valid.error()));
-  if (!options.actor.empty()) {
-    if (auto valid = validate_required_text(options.actor, "actor", 64, false); !valid) return std::unexpected(std::move(valid.error()));
+  if (auto valid = validate_required_text(options.summary, "summary", 8192, true); !valid)
+    return std::unexpected(std::move(valid.error()));
+  if (auto valid = validate_required_text(options.provider, "provider", 256, false); !valid)
+    return std::unexpected(std::move(valid.error()));
+  if (auto valid = validate_required_text(options.model, "model", 256, false); !valid)
+    return std::unexpected(std::move(valid.error()));
+  if (auto valid = validate_required_text(options.reason, "reason", 1024, false); !valid)
+    return std::unexpected(std::move(valid.error()));
+  if (!options.actor.empty())
+  {
+    if (auto valid = validate_required_text(options.actor, "actor", 64, false); !valid)
+      return std::unexpected(std::move(valid.error()));
   }
 
   auto source = SessionStore::open(options.workspace_dir, options.source_session_id, options.root_dir);
-  if (!source) return std::unexpected(std::move(source.error()));
+  if (!source)
+    return std::unexpected(std::move(source.error()));
   auto entries = source->load();
-  if (!entries) return std::unexpected(std::move(entries.error()));
-  if (entries->empty()) {
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  if (entries->empty())
+  {
     return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "source session has no entries"));
   }
   auto range = resolve_branch_summary_range(*entries, options.branch_root_entry_id, options.branch_tip_entry_id);
-  if (!range) return std::unexpected(std::move(range.error()));
+  if (!range)
+    return std::unexpected(std::move(range.error()));
 
   // Best-effort guard for concurrent appenders. SessionStore appends are not an
   // atomic read-modify-write transaction, so a writer after this check can still
   // win; the summary append remains safe for the single-runtime path this API uses.
   auto latest_entries = source->load();
-  if (!latest_entries) return std::unexpected(std::move(latest_entries.error()));
-  if (latest_entries->empty()) {
+  if (!latest_entries)
+    return std::unexpected(std::move(latest_entries.error()));
+  if (latest_entries->empty())
+  {
     return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "source session has no entries"));
   }
-  if (latest_entries->size() != entries->size() || latest_entries->back().id != entries->back().id) {
+  if (latest_entries->size() != entries->size() || latest_entries->back().id != entries->back().id)
+  {
     auto error = branch_error(ava::core::ErrorCategory::Session, "source session changed while appending branch summary");
     error.with_context("source_session_id", options.source_session_id);
     return std::unexpected(std::move(error));
   }
   auto latest_range = resolve_branch_summary_range(*latest_entries, options.branch_root_entry_id, options.branch_tip_entry_id);
-  if (!latest_range) return std::unexpected(std::move(latest_range.error()));
+  if (!latest_range)
+    return std::unexpected(std::move(latest_range.error()));
 
   std::string data = "{\"schema_version\":1";
   append_json_string_field(data, "summary", options.summary);
@@ -372,7 +430,8 @@ ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOption
   append_json_string_field(data, "provider", options.provider);
   append_json_string_field(data, "model", options.model);
   append_json_string_field(data, "reason", options.reason);
-  if (!options.actor.empty()) append_json_string_field(data, "actor", options.actor);
+  if (!options.actor.empty())
+    append_json_string_field(data, "actor", options.actor);
   data += '}';
 
   auto entry = SessionEntry{.id = ava::core::make_id("entry"),
@@ -380,7 +439,8 @@ ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOption
                             .type = EntryType::BranchSummary,
                             .timestamp = now_timestamp(),
                             .data_json = std::move(data)};
-  if (auto appended = source->append(entry); !appended) {
+  if (auto appended = source->append(entry); !appended)
+  {
     return std::unexpected(std::move(appended.error()));
   }
   return BranchSummaryResult{.source_session_id = std::move(options.source_session_id), .entry = std::move(entry)};

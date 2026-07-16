@@ -626,8 +626,6 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
         auto const registered = providers.contains(model.provider_id);
         add_completion(item, 0, model.provider_id + "/" + model.model_id, model_completion_description(model, registered), "Models", {}, false, registered,
                        registered ? "" : "provider is not registered");
-        add_completion(item, 0, model.model_id, model.provider_id + "/" + model.display_name, "Models", {}, false, registered,
-                       registered ? "" : "provider is not registered");
       }
     }
   }

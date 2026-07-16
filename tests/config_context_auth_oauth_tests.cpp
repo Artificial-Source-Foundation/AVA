@@ -1276,6 +1276,31 @@ void test_builtin_provider_model_metadata_contracts()
     expect(!ava::config::validate_reasoning_request(*openai, "high", std::nullopt, "summarized"), "OpenAI reasoning rejects display options");
   }
 
+  auto verify_gpt56_model = [&builtin](std::string_view model_id, long double input_price, long double output_price, long double cache_read_price,
+                                       long double cache_write_price) {
+    auto const model = ava::config::find_model(builtin, "openai", model_id);
+    expect(model.has_value(), "GPT-5.6 builtin model exists: " + std::string(model_id));
+    if (!model)
+      return;
+    expect(model->context_window_tokens && *model->context_window_tokens == 272'000 && model->max_output_tokens && *model->max_output_tokens == 128'000 &&
+               model->supports_reasoning.value_or(false) && contains_string(model->reasoning_levels, "minimal") &&
+               contains_string(model->reasoning_levels, "max") && contains_string(model->input_modalities, "image") && model->pricing &&
+               model->pricing->input_per_million == input_price && model->pricing->output_per_million == output_price &&
+               model->pricing->cache_read_per_million == cache_read_price && model->pricing->cache_write_per_million == cache_write_price,
+           "GPT-5.6 model carries short-context limits, modalities, and current pricing: " + std::string(model_id));
+    auto const off = ava::config::resolve_reasoning_level(*model, "off");
+    auto const minimal = ava::config::resolve_reasoning_level(*model, "minimal");
+    auto const xhigh = ava::config::resolve_reasoning_level(*model, "xhigh");
+    auto const max = ava::config::resolve_reasoning_level(*model, "max");
+    expect(off.supported && off.provider_level && *off.provider_level == "none" && minimal.supported && minimal.provider_level &&
+               *minimal.provider_level == "low" && xhigh.supported && xhigh.provider_level && *xhigh.provider_level == "xhigh" && max.supported &&
+               max.provider_level && *max.provider_level == "max",
+           "GPT-5.6 reasoning maps off, minimal, xhigh, and max compatibly across API-key and ChatGPT OAuth routes: " + std::string(model_id));
+  };
+  verify_gpt56_model("gpt-5.6-sol", 5.0L, 30.0L, 0.5L, 6.25L);
+  verify_gpt56_model("gpt-5.6-terra", 2.5L, 15.0L, 0.25L, 3.125L);
+  verify_gpt56_model("gpt-5.6-luna", 1.0L, 6.0L, 0.1L, 1.25L);
+
   auto const anthropic = ava::config::find_model(builtin, "anthropic", "claude-sonnet-4-5");
   expect(anthropic.has_value(), "Anthropic reasoning metadata fixture exists");
   auto const anthropic_profile = profiles.find("anthropic");
@@ -1408,7 +1433,9 @@ void test_model_and_prompt_config()
   expect(openai_profile && openai_profile->display_name == "OpenAI" && openai_profile->api_family == selected.api_family && openai_profile->supports_oauth &&
              openai_profile->runtime_selectable,
          "provider profile centralizes OpenAI display, API family, and OAuth capability");
-  expect(ava::config::model_display_label("gpt-5.5") == "GPT-5.5", "model profile centralizes GPT display labels");
+  expect(ava::config::model_display_label("gpt-5.5") == "GPT-5.5" && ava::config::model_display_label("gpt-5.6-sol") == "GPT-5.6 Sol" &&
+             ava::config::model_display_label("gpt-5.6-terra") == "GPT-5.6 Terra" && ava::config::model_display_label("gpt-5.6-luna") == "GPT-5.6 Luna",
+         "model profile centralizes current GPT display labels");
   auto const vercel_profile = ava::config::find_provider_profile("vercel");
   expect(vercel_profile && vercel_profile->display_name == "Vercel AI Gateway" && vercel_profile->connect_detail == "API key" &&
              !vercel_profile->runtime_selectable,

@@ -240,6 +240,11 @@ using CompactionSummaryGenerator =
                                                  std::string_view instructions, std::size_t estimated_tokens)>;
 
 [[nodiscard]] ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const& options);
+// Builds a normal runtime around an already-owned persistent store. The store
+// and lease are consumed only on success, so callers can perform identity-safe
+// rollback after a failed handoff.
+[[nodiscard]] ava::core::Result<RuntimeSession> open_owned_runtime_session(RuntimeOpenOptions const& options, ava::session::SessionStore& store,
+                                                                           ava::session::SessionLease& lease, bool created);
 
 [[nodiscard]] ava::core::Result<RuntimePromptState> select_runtime_prompt_state(RuntimeSession const& session, ava::agent::Mode mode);
 

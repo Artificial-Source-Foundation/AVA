@@ -2,7 +2,6 @@
 
 #include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
-
 #include "ava/core/result.h"
 
 #include <filesystem>
@@ -12,7 +11,11 @@
 
 namespace ava::session {
 
-enum class SessionBranchMode { Fork, Clone };
+enum class SessionBranchMode
+{
+  Fork,
+  Clone
+};
 
 struct SessionBranchOptions
 {
@@ -22,6 +25,7 @@ struct SessionBranchOptions
   std::string branch_from_entry_id;
   std::optional<std::string> name;
   std::optional<std::vector<std::string>> labels;
+  std::optional<SessionReadLimits> read_limits = std::nullopt;
   SessionBranchMode mode = SessionBranchMode::Fork;
   std::string actor = "rpc";
 
@@ -31,6 +35,7 @@ struct SessionBranchOptions
 struct SessionBranchResult
 {
   SessionStore store;
+  SessionLease lease;
   std::string source_session_id;
   std::string branch_from_entry_id;
   std::size_t copied_entry_count = 0;

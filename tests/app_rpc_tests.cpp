@@ -1191,6 +1191,11 @@ void test_app_rpc_session_fork_and_clone_commands()
     return;
   auto const branch_from_entry_id = source_entries->front().id;
   auto const source_count = source_entries->size();
+  auto const valid_source_bytes = read_rpc_golden(session->store.session_path());
+  {
+    std::ofstream file(session->store.session_path(), std::ios::binary | std::ios::app);
+    file << "{\"version\":3,\"id\":\"rpc-current-torn";
+  }
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
@@ -1213,10 +1218,10 @@ void test_app_rpc_session_fork_and_clone_commands()
   if (source_store)
   {
     auto source_after = source_store->load();
-    source_unchanged = source_after && source_after->size() == source_count;
+    source_unchanged = source_after && source_after->size() == source_count && read_rpc_golden(source_store->session_path()) == valid_source_bytes;
   }
   expect(result.has_value(), "RPC fork/clone loop completes successfully");
-  expect(source_unchanged, "RPC fork/clone commands do not write to the source session");
+  expect(source_unchanged, "RPC fork uses its existing lease to recover the current source and later branching does not add source entries");
   expect(jsonl.find("\"id\":\"fork\"") != std::string::npos && jsonl.find("\"id\":\"fork_meta\"") != std::string::npos &&
              jsonl.find("\"created\":true") != std::string::npos && jsonl.find("\"name\":\"Forked\"") != std::string::npos &&
              jsonl.find("\"labels\":[\"forked\"]") != std::string::npos && jsonl.find("\"parent_session_id\":\"" + source_id + "\"") != std::string::npos &&
@@ -1226,6 +1231,53 @@ void test_app_rpc_session_fork_and_clone_commands()
   expect(jsonl.find("\"id\":\"clone\"") != std::string::npos && jsonl.find("\"id\":\"clone_meta\"") != std::string::npos &&
              jsonl.find("\"name\":\"Cloned\"") != std::string::npos && jsonl.find("\"branch_origin\":\"clone\"") != std::string::npos,
          "RPC clone_session creates and switches to a clone with provenance metadata");
+  auto active_destination_contender = ava::session::SessionLease::acquire(session->store.session_path());
+  expect(!active_destination_contender && active_destination_contender.error().message().find("already owned") != std::string::npos,
+         "RPC fork/clone transfers the active destination lease directly into the replacement runtime");
+}
+
+void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
+{
+  auto const root = temp_root() / "app-rpc-noncurrent-torn-branch";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto source = ava::app::open_runtime_session(open_options);
+  expect(source.has_value(), "RPC noncurrent torn branch test opens source runtime");
+  if (!source)
+    return;
+  auto const source_id = source->store.session_id();
+  auto const source_path = source->store.session_path();
+  auto const valid_source_bytes = read_rpc_golden(source_path);
+  source = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release source runtime before RPC branch"));
+
+  auto current = ava::app::open_runtime_session(open_options);
+  expect(current.has_value(), "RPC noncurrent torn branch test opens a different current runtime");
+  if (!current)
+    return;
+  {
+    std::ofstream file(source_path, std::ios::binary | std::ios::app);
+    file << "{\"version\":3,\"id\":\"rpc-torn";
+  }
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  std::istringstream in("{\"id\":\"clone\",\"type\":\"clone_session\",\"session_id\":\"" + source_id + "\"}\n");
+  std::ostringstream out;
+  auto result = ava::app::run_rpc_loop(*current, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
+  auto cloned_entries = current->store.load();
+  auto cloned_metadata = ava::session::load_session_metadata(current->store);
+  expect(result && out.str().find("\"id\":\"clone\"") != std::string::npos && current->store.session_id() != source_id && cloned_entries &&
+             cloned_entries->size() == 2 && cloned_metadata && cloned_metadata->source_session_id == source_id && cloned_metadata->branch_origin == "clone" &&
+             read_rpc_golden(source_path) == valid_source_bytes,
+         "RPC branching temporarily leases and recovers a different source before holding it through clone creation");
 }
 
 void test_app_rpc_summarize_branch_appends_to_source_session()
@@ -2585,6 +2637,7 @@ void run_app_rpc_tests()
   test_app_rpc_session_metadata_name_and_labels();
   test_app_rpc_session_tree_command_and_switch_navigation();
   test_app_rpc_session_fork_and_clone_commands();
+  test_app_rpc_noncurrent_branch_source_recovers_torn_tail();
   test_app_rpc_summarize_branch_appends_to_source_session();
   test_app_rpc_model_commands();
   test_app_rpc_reasoning_commands();

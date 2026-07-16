@@ -1148,8 +1148,10 @@ int run_tui(ShellState state)
               append_result(line_result, handle_line(state, follow_up->message, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
                                                      context.cancel_requested, context.take_steering_messages));
             }
-            return ava::tui::TuiSubmitResult{
-                .quit = line_result.quit, .output = line_result.output, .tool_timeline = tui_tool_timeline(line_result.tool_timeline)};
+            return ava::tui::TuiSubmitResult{.quit = line_result.quit,
+                                             .output = line_result.output,
+                                             .tool_timeline = tui_tool_timeline(line_result.tool_timeline),
+                                             .context_source_count = state.session.context_sources.size()};
           },
       .on_attach_image = [&state](std::string const& path) -> ava::core::Result<ava::session::ImageAttachmentRef> {
         auto source = std::filesystem::path(path);

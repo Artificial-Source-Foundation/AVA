@@ -104,6 +104,26 @@ def wait_for_absent(tmux_exe: str, session: str, pattern: str, label: str, timeo
     raise RuntimeError(f"timed out waiting for {label}; still matched /{pattern}/\nlast screen:\n{last}")
 
 
+def pane_cursor_position(tmux_exe: str, session: str) -> str:
+    result = tmux(tmux_exe, "display-message", "-p", "-t", f"{session}:0.0", "#{cursor_x},#{cursor_y}")
+    return result.stdout.strip()
+
+
+def wait_for_cursor_change(tmux_exe: str, session: str, previous: str, label: str, timeout: float = 8.0) -> str:
+    deadline = time.monotonic() + timeout
+    last = previous
+    while time.monotonic() < deadline:
+        status = tmux(tmux_exe, "has-session", "-t", session, check=False)
+        if status.returncode != 0:
+            raise RuntimeError(f"tmux session exited before {label}\nlast cursor position: {last}")
+        last = pane_cursor_position(tmux_exe, session)
+        if last != previous:
+            return last
+        time.sleep(0.1)
+    screen = capture(tmux_exe, session)
+    raise RuntimeError(f"timed out waiting for {label}; cursor remained at {last}\nscreen:\n{screen}")
+
+
 def wait_for_pane_command(tmux_exe: str, session: str, pattern: str, label: str, timeout: float = 8.0) -> str:
     compiled = re.compile(pattern)
     deadline = time.monotonic() + timeout
@@ -126,6 +146,36 @@ def send_keys(tmux_exe: str, session: str, *keys: str) -> None:
 
 def send_literal(tmux_exe: str, session: str, text: str) -> None:
     tmux(tmux_exe, "send-keys", "-t", f"{session}:0.0", "-l", text)
+
+
+def selected_modal_row(screen: str) -> str:
+    for raw_line in screen.splitlines():
+        line = raw_line.strip()
+        if line.startswith("› "):
+            return line
+    return ""
+
+
+def selected_modal_identity(row: str) -> str:
+    return re.sub(r"^›\s+(?:[●✓]\s+)?", "", row)
+
+
+def wait_for_selected_modal_change(
+    tmux_exe: str, session: str, previous: str, label: str, timeout: float = 8.0
+) -> tuple[str, str]:
+    deadline = time.monotonic() + timeout
+    last_screen = ""
+    last_row = ""
+    while time.monotonic() < deadline:
+        last_screen = capture(tmux_exe, session)
+        last_row = selected_modal_row(last_screen)
+        if last_row and last_row != previous:
+            return last_row, last_screen
+        time.sleep(0.05)
+    raise RuntimeError(
+        f"timed out waiting for {label}; selected row did not change from {previous!r}\n"
+        f"last selected row: {last_row!r}\nscreen:\n{last_screen}"
+    )
 
 
 def wait_for_session_exit(tmux_exe: str, session: str, timeout: float = 8.0) -> None:
@@ -151,6 +201,24 @@ def wait_for_request_count(path: pathlib.Path, expected_count: int, label: str, 
     raise RuntimeError(
         f"timed out waiting for {label}; expected at least {expected_count} provider requests\nlast log:\n{last}"
     )
+
+
+def wait_for_json_file(path: pathlib.Path, predicate, label: str, timeout: float = 8.0) -> str:
+    deadline = time.monotonic() + timeout
+    last = ""
+    last_error = "file does not exist"
+    while time.monotonic() < deadline:
+        if path.exists():
+            last = path.read_text(encoding="utf-8", errors="replace")
+            try:
+                value = json.loads(last)
+                last_error = "predicate not satisfied"
+                if predicate(value):
+                    return last
+            except json.JSONDecodeError as exc:
+                last_error = str(exc)
+        time.sleep(0.1)
+    raise RuntimeError(f"timed out waiting for {label}; {last_error}\nlast content:\n{last}")
 
 
 def assert_request_count_stays(path: pathlib.Path, expected_count: int, label: str, duration: float = 1.2) -> str:
@@ -269,6 +337,7 @@ def main() -> int:
         encoding="utf-8",
     )
     fake_editor.chmod(0o755)
+    editor_command = f"/bin/sh {shlex.quote(str(fake_editor))}"
     (workspace / "my folder").mkdir(parents=True, exist_ok=True)
     (workspace / "my folder" / "space file.txt").write_text("space path\n", encoding="utf-8")
     (workspace / ".ava" / "commands").mkdir(parents=True, exist_ok=True)
@@ -276,6 +345,53 @@ def main() -> int:
         "---\ndescription: Trust smoke command\n---\nTrust smoke $1\n", encoding="utf-8"
     )
     (workspace / ".ava" / "APPEND_SYSTEM.md").write_text("tmux project append prompt\n", encoding="utf-8")
+    footer_plugin = workspace / ".ava" / "plugins" / "com.example.footer"
+    (footer_plugin / "prompts").mkdir(parents=True, exist_ok=True)
+    (footer_plugin / "prompts" / "footer.md").write_text("tmux footer context refresh prompt\n", encoding="utf-8")
+    (footer_plugin / "plugin.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "com.example.footer",
+                "name": "Footer Context Smoke",
+                "version": "0.1.0",
+                "api_version": "ava.plugin.v1",
+                "entrypoint": {"command": "/bin/true", "args": []},
+                "capabilities": ["prompts"],
+                "permissions": {"file": [], "shell": [], "network": [], "session": []},
+                "contributes": {
+                    "tools": [],
+                    "commands": [],
+                    "prompts": [
+                        {
+                            "name": "footer-refresh",
+                            "description": "Exercise composer context-count refresh",
+                            "path": "prompts/footer.md",
+                        }
+                    ],
+                    "skills": [],
+                    "event_hooks": [],
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    plugin_state_dir = state / "ava"
+    plugin_state_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_state_dir / "plugin-enablement.json").write_text(
+        json.dumps(
+            {
+                "workspaces": {
+                    str(workspace.resolve()): {
+                        "project": {"com.example.footer": {"enabled": True}}
+                    }
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     (ava_config / "themes").mkdir(parents=True, exist_ok=True)
     (ava_config / "themes" / "ocean.json").write_text(
         "{\n"
@@ -352,7 +468,7 @@ def main() -> int:
         "NO_COLOR=1 "
         "COLORFGBG= "
         "VISUAL= "
-        f"EDITOR={shlex.quote(str(fake_editor))} "
+        f"EDITOR={shlex.quote(editor_command)} "
         f"AVA_CLIPBOARD_IMAGE_FILE={shlex.quote(str(workspace / 'screen.png'))} "
         f"exec {shlex.quote(str(ava_exe))}"
     )
@@ -364,7 +480,7 @@ def main() -> int:
         "NO_COLOR=1 "
         "COLORFGBG= "
         "VISUAL= "
-        f"EDITOR={shlex.quote(str(fake_editor))} "
+        f"EDITOR={shlex.quote(editor_command)} "
         f"{shlex.quote(str(ava_exe))}"
     )
     active_provider_port = root / "active-provider.port"
@@ -641,7 +757,7 @@ def main() -> int:
                 str(fake_provider_exe),
                 str(active_provider_port),
                 str(active_request_log),
-                "3500",
+                "8000",
                 "text-three",
                 "",
             ],
@@ -686,20 +802,80 @@ def main() -> int:
             active_env_prefix,
         )
         wait_for(tmux_exe, active_session, r"Type a message|live session", "active-run fake-provider initial frame")
+        send_literal(tmux_exe, active_session, "/help")
+        wait_for(tmux_exe, active_session, r"/help", "active-run scrollback seed draft")
+        send_keys(tmux_exe, active_session, "Enter")
+        wait_for(
+            tmux_exe,
+            active_session,
+            r"page_up PageUp|model_cycle_forward|details_toggle|tree_fold_or_up|tree_unfold_or_down",
+            "active-run scrollback seed output",
+        )
         send_literal(tmux_exe, active_session, "tmux active first prompt")
         wait_for(tmux_exe, active_session, r"tmux active first prompt", "active-run first prompt draft")
         send_keys(tmux_exe, active_session, "Enter")
         wait_for_request_count(active_request_log, 1, "active-run first provider request")
-        send_literal(tmux_exe, active_session, "tmux active follow-up")
-        wait_for(tmux_exe, active_session, r"tmux active follow-up", "active-run follow-up draft")
+        send_literal(tmux_exe, active_session, "/")
+        wait_for(tmux_exe, active_session, r"/help|Show commands", "active-run slash palette")
+        send_literal(tmux_exe, active_session, "\x1b[1;129B")
+        wait_for(tmux_exe, active_session, r"› /hotkeys|> /hotkeys", "active-run physical Ghostty arrow palette navigation")
+        send_keys(tmux_exe, active_session, "C-u")
+        wait_for_absent(tmux_exe, active_session, r"› /hotkeys|> /hotkeys", "active-run slash palette cleared")
+        send_literal(tmux_exe, active_session, "\x1b[200~tmux active follow-up\nsecond line\x1b[201~")
+        wait_for(tmux_exe, active_session, r"tmux active follow-up.*second line|second line", "active-run multiline follow-up draft")
+        send_literal(tmux_exe, active_session, "\x1b[1;129A")
+        active_arrow_scrolled = wait_for(
+            tmux_exe, active_session, r"scrollback detached", "active-run physical Ghostty arrow scrollback"
+        )
+        if "tmux active follow-up" not in active_arrow_scrolled or "second line" not in active_arrow_scrolled:
+            raise RuntimeError(
+                "active-run physical arrow changed the composer draft instead of scrolling only the transcript\n"
+                f"screen:\n{active_arrow_scrolled}"
+            )
+        send_literal(tmux_exe, active_session, "X")
+        active_multiline_cursor = wait_for(
+            tmux_exe, active_session, r"second lineX", "active-run multiline cursor preserved by arrow scroll"
+        )
+        if "follow-upX" in active_multiline_cursor:
+            raise RuntimeError(
+                "active-run arrow moved the multiline composer cursor instead of scrolling only the transcript\n"
+                f"screen:\n{active_multiline_cursor}"
+            )
+        send_literal(tmux_exe, active_session, "\x1b[1;129B")
+        active_arrow_tail = wait_for_absent(
+            tmux_exe, active_session, r"scrollback detached", "active-run physical Ghostty arrow return to live tail"
+        )
+        if "tmux active follow-up" not in active_arrow_tail or "second lineX" not in active_arrow_tail:
+            raise RuntimeError(
+                "active-run down arrow changed the composer draft while returning to the live tail\n"
+                f"screen:\n{active_arrow_tail}"
+            )
+        send_literal(tmux_exe, active_session, "\x1b[<64;4;6M")
+        active_wheel_scrolled = wait_for(
+            tmux_exe, active_session, r"scrollback detached", "active-run mouse wheel scrollback"
+        )
+        if "tmux active follow-up" not in active_wheel_scrolled or "second lineX" not in active_wheel_scrolled:
+            raise RuntimeError(
+                "active-run mouse wheel changed the composer draft instead of scrolling only the transcript\n"
+                f"screen:\n{active_wheel_scrolled}"
+            )
+        send_literal(tmux_exe, active_session, "\x1b[<65;4;6M")
+        active_wheel_tail = wait_for_absent(
+            tmux_exe, active_session, r"scrollback detached", "active-run mouse wheel return to live tail"
+        )
+        if "tmux active follow-up" not in active_wheel_tail or "second lineX" not in active_wheel_tail:
+            raise RuntimeError(
+                "active-run mouse wheel changed the composer draft while returning to the live tail\n"
+                f"screen:\n{active_wheel_tail}"
+            )
         send_literal(tmux_exe, active_session, "\x1b\r")
         queued_follow_up = wait_for(tmux_exe, active_session, r"follow-up queued", "active-run Alt+Enter follow-up queued")
         if "tmux active follow-up" not in queued_follow_up:
             raise RuntimeError(f"active-run Alt+Enter did not render the queued follow-up text\nscreen:\n{queued_follow_up}")
         save_evidence(root, "active-run-follow-up-queued", queued_follow_up)
         active_log = wait_for_request_count(active_request_log, 2, "active-run queued follow-up provider request", timeout=12.0)
-        if "tmux active first prompt" not in active_log or "tmux active follow-up" not in active_log:
-            raise RuntimeError(f"active-run follow-up did not reach the fake provider\nrequest log:\n{active_log}")
+        if "tmux active first prompt" not in active_log or "tmux active follow-up" not in active_log or "second lineX" not in active_log:
+            raise RuntimeError(f"active-run follow-up did not reach the fake provider intact\nrequest log:\n{active_log}")
         wait_for(tmux_exe, active_session, r"follow-up started|headless active prompt complete", "active-run follow-up delivery")
         send_keys(tmux_exe, active_session, "C-d")
         wait_for_session_exit(tmux_exe, active_session)
@@ -857,6 +1033,15 @@ def main() -> int:
             raise RuntimeError(f"initial frame did not show AVA branding\nscreen:\n{initial}")
         if "Provider auth is not configured for `openai`" not in initial or "Connect with /connect" not in initial:
             raise RuntimeError(f"first-run onboarding guidance did not render in fresh TUI\nscreen:\n{initial}")
+        footer_lines = [line for line in initial.splitlines() if "GPT-5.5" in line and "ctx " in line]
+        if not footer_lines or any(
+            marker in footer_lines[-1]
+            for marker in ("Build", "OpenAI", "cwd ", "git ", "entries ", "%")
+        ):
+            raise RuntimeError(
+                "composer footer did not contain only the model name and context count\n"
+                f"screen:\n{initial}"
+            )
         save_evidence(root, "startup-ready-composer", initial)
         styled_initial = capture_styled(tmux_exe, session)
         if "\x1b[" in styled_initial:
@@ -913,7 +1098,7 @@ def main() -> int:
         settings_trust_status = wait_for(
             tmux_exe,
             session,
-            r"(?s)Project trust:.*decision=unknown.*project_resources=skipped.*protected_resources=2",
+            r"(?s)Project trust:.*decision=unknown.*project_resources=skipped.*protected_resources=3",
             "settings trust status action output",
         )
         if "prompt_commands" not in settings_trust_status or "system_prompt" not in settings_trust_status:
@@ -926,6 +1111,7 @@ def main() -> int:
         send_keys(tmux_exe, session, "Enter")
         wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before keybinding rows")
         send_literal(tmux_exe, session, "Keybindings")
+        wait_for(tmux_exe, session, r"Search: Keybindings", "settings keybinding filter state")
         settings_keybinding_rows = wait_for(tmux_exe, session, r"Keybindings file", "settings keybinding filtered rows")
         keybindings_row = next(
             (
@@ -1070,17 +1256,19 @@ def main() -> int:
         context_freshness = wait_for(
             tmux_exe, session, r"(?s)Context freshness:.*context_sources=1", "context freshness command"
         )
+        context_freshness_section = context_freshness.rsplit("Context freshness:", 1)[-1]
         if (
-            "prompt=builtin" not in context_freshness
-            or "AGENTS.md" not in context_freshness
-            or "status=current" not in context_freshness
-            or "project_resources=skipped" not in context_freshness
-            or "system_prompt_sources=0" not in context_freshness
+            "prompt=builtin" not in context_freshness_section
+            or "context_sources=1" not in context_freshness_section
+            or "loaded_bytes=19" not in context_freshness_section
+            or "status=current" not in context_freshness_section
+            or "project_resources=skipped" not in context_freshness_section
+            or "system_prompt_sources=0" not in context_freshness_section
         ):
             raise RuntimeError(f"/context did not report prompt and context freshness visibly\nscreen:\n{context_freshness}")
-        if "trust-smoke" in context_freshness:
+        if "trust-smoke" in context_freshness_section:
             raise RuntimeError(f"/context listed an untrusted project prompt command\nscreen:\n{context_freshness}")
-        if "APPEND_SYSTEM" in context_freshness:
+        if "APPEND_SYSTEM" in context_freshness_section:
             raise RuntimeError(f"/context listed an untrusted project append-system prompt\nscreen:\n{context_freshness}")
 
         send_keys(tmux_exe, session, "C-u")
@@ -1090,7 +1278,12 @@ def main() -> int:
         trust_status = wait_for(
             tmux_exe, session, r"(?s)Project trust:.*decision=unknown.*project_resources=skipped", "trust status command"
         )
-        if "protected_resources=2" not in trust_status or "prompt_commands" not in trust_status or "system_prompt" not in trust_status:
+        if (
+            "protected_resources=3" not in trust_status
+            or "prompt_commands" not in trust_status
+            or "plugins" not in trust_status
+            or "system_prompt" not in trust_status
+        ):
             raise RuntimeError(f"/trust status did not list protected project resources\nscreen:\n{trust_status}")
 
         send_keys(tmux_exe, session, "C-u")
@@ -1102,10 +1295,17 @@ def main() -> int:
         )
         if "decision=trusted" not in trust_project:
             raise RuntimeError(f"/trust project did not persist a trusted decision\nscreen:\n{trust_project}")
+        trust_project = wait_for(
+            tmux_exe,
+            session,
+            r"GPT-5\.5\s+·\s+ctx 2",
+            "composer footer context count after project trust reload",
+        )
+        save_evidence(root, "footer-context-count-refreshed", trust_project)
 
         send_keys(tmux_exe, session, "C-u")
-        send_literal(tmux_exe, session, "/context trust-smoke")
-        wait_for(tmux_exe, session, r"/context trust-smoke", "trusted context query draft")
+        send_literal(tmux_exe, session, "/context trust-smoke ")
+        wait_for(tmux_exe, session, r"▎\s+❯\s+/context trust-smoke", "trusted context query draft")
         send_keys(tmux_exe, session, "Enter")
         trusted_context = wait_for(
             tmux_exe,
@@ -1117,8 +1317,8 @@ def main() -> int:
             raise RuntimeError(f"/context did not report trusted project prompt command freshness\nscreen:\n{trusted_context}")
 
         send_keys(tmux_exe, session, "C-u")
-        send_literal(tmux_exe, session, "/context APPEND_SYSTEM")
-        wait_for(tmux_exe, session, r"/context APPEND_SYSTEM", "trusted append-system context query draft")
+        send_literal(tmux_exe, session, "/context APPEND_SYSTEM ")
+        wait_for(tmux_exe, session, r"▎\s+❯\s+/context APPEND_SYSTEM", "trusted append-system context query draft")
         send_keys(tmux_exe, session, "Enter")
         trusted_prompt_context = wait_for(
             tmux_exe,
@@ -1273,9 +1473,84 @@ def main() -> int:
         if len(re.findall(r"thinking blocks are now hidden", thinking_visible_key)) < 2:
             raise RuntimeError(f"Ctrl+T did not show thinking blocks before /thinking hid them again\nscreen:\n{thinking_visible_key}")
         send_keys(tmux_exe, session, "C-p")
-        model_cycle = wait_for(tmux_exe, session, r"model cycled|GPT-4\.1 mini|gpt-4\.1-mini", "ctrl-p model cycle")
-        if "model cycled" not in model_cycle and "GPT-4.1 mini" not in model_cycle and "gpt-4.1-mini" not in model_cycle:
+        model_cycle = wait_for(
+            tmux_exe,
+            session,
+            r"model cycled|GPT-5\.6 Sol|gpt-5\.6-sol|GPT-4\.1 mini|gpt-4\.1-mini",
+            "ctrl-p model cycle",
+        )
+        if not any(value in model_cycle for value in ("model cycled", "GPT-5.6 Sol", "gpt-5.6-sol", "GPT-4.1 mini", "gpt-4.1-mini")):
             raise RuntimeError(f"Ctrl+P did not cycle the visible model state\nscreen:\n{model_cycle}")
+        tmux(tmux_exe, "resize-window", "-t", f"{session}:0", "-x", "82", "-y", "10")
+        wait_for(tmux_exe, session, r"Type a message|live session", "compact frame before selector navigation")
+        send_literal(tmux_exe, session, "/models")
+        wait_for(tmux_exe, session, r"/models", "exact models selector draft")
+        send_keys(tmux_exe, session, "Enter")
+        command_model_selector = wait_for(tmux_exe, session, r"Select model|Search models", "exact models selector")
+        if "Select model" not in command_model_selector and "Search models" not in command_model_selector:
+            raise RuntimeError(f"Exact /models did not bypass autocomplete and open the model selector\nscreen:\n{command_model_selector}")
+        selected_row = selected_modal_row(command_model_selector)
+        if not selected_row:
+            raise RuntimeError(f"Model selector did not expose a selected row before navigation\nscreen:\n{command_model_selector}")
+        selected_rows = {selected_modal_identity(selected_row)}
+        initial_model_selector = command_model_selector
+        tmux(tmux_exe, "resize-window", "-t", f"{session}:0", "-x", "82", "-y", "11")
+        resized_model_selector = wait_for(tmux_exe, session, r"Select model|Search models", "resized compact model selector")
+        resized_selected_row = selected_modal_row(resized_model_selector)
+        if not resized_selected_row or selected_modal_identity(resized_selected_row) != selected_modal_identity(selected_row):
+            raise RuntimeError(
+                "Model selector lost its selected row while resizing between compact terminal heights\n"
+                f"before:\n{command_model_selector}\nafter:\n{resized_model_selector}"
+            )
+        selected_row = resized_selected_row
+        send_keys(tmux_exe, session, "Down")
+        selected_row, _ = wait_for_selected_modal_change(
+            tmux_exe, session, selected_row, "tmux Down arrow model navigation"
+        )
+        selected_rows.add(selected_modal_identity(selected_row))
+        send_literal(tmux_exe, session, "\x1b[1;129B")
+        selected_row, _ = wait_for_selected_modal_change(
+            tmux_exe, session, selected_row, "physical Ghostty CSI arrow model navigation with Num Lock"
+        )
+        selected_rows.add(selected_modal_identity(selected_row))
+        for step in range(7):
+            send_keys(tmux_exe, session, "Down")
+            selected_row, _ = wait_for_selected_modal_change(
+                tmux_exe, session, selected_row, f"model selector navigation step {step + 3}"
+            )
+            selected_rows.add(selected_modal_identity(selected_row))
+        if len(selected_rows) < 9:
+            raise RuntimeError(
+                "Arrow navigation did not visit nine distinct model rows\n"
+                f"visited: {sorted(selected_rows)}\nscreen:\n{capture(tmux_exe, session)}"
+            )
+        if not any(identity and identity not in initial_model_selector for identity in selected_rows):
+            raise RuntimeError(
+                "Model selector selection never advanced beyond the initial compact viewport\n"
+                f"visited: {sorted(selected_rows)}\ninitial screen:\n{initial_model_selector}\n"
+                f"final screen:\n{capture(tmux_exe, session)}"
+            )
+        save_evidence(root, "model-selector-arrow-scroll", capture(tmux_exe, session))
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Select model|Search models", "exact models selector canceled")
+        tmux(tmux_exe, "resize-window", "-t", f"{session}:0", "-x", "82", "-y", "10")
+        wait_for(tmux_exe, session, r"Type a message|live session", "compact frame before provider modal navigation")
+        send_literal(tmux_exe, session, "/connect")
+        wait_for(tmux_exe, session, r"/connect", "provider modal command draft")
+        send_keys(tmux_exe, session, "Enter")
+        provider_modal = wait_for(tmux_exe, session, r"Connect a provider|Select provider", "provider question modal")
+        provider_selected_row = selected_modal_row(provider_modal)
+        if not provider_selected_row:
+            raise RuntimeError(f"Provider question modal did not expose a selected row\nscreen:\n{provider_modal}")
+        send_literal(tmux_exe, session, "\x1b[1;129B")
+        _, provider_modal_after_arrow = wait_for_selected_modal_change(
+            tmux_exe, session, provider_selected_row, "provider modal physical Ghostty arrow navigation with Num Lock"
+        )
+        save_evidence(root, "provider-modal-arrow-navigation", provider_modal_after_arrow)
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Connect a provider|Select provider", "provider question modal canceled")
+        tmux(tmux_exe, "resize-window", "-t", f"{session}:0", "-x", "120", "-y", "32")
+        wait_for(tmux_exe, session, r"Type a message|live session", "restored frame after compact modal navigation")
         send_keys(tmux_exe, session, "C-l")
         model_selector = wait_for(tmux_exe, session, r"Select model|Search models", "ctrl-l model selector")
         if "Select model" not in model_selector and "Search models" not in model_selector:
@@ -1303,14 +1578,18 @@ def main() -> int:
         send_literal(tmux_exe, session, "Diagnostic")
         wait_for(tmux_exe, session, r"Diagnostic Local", "scoped model reorder filtered row")
         send_keys(tmux_exe, session, "M-Up")
-        time.sleep(0.2)
+        send_keys(tmux_exe, session, *("BSpace" for _ in "Diagnostic"))
+        wait_for(tmux_exe, session, r"Search: Search models", "scoped model reorder filter clear acknowledgement")
         send_keys(tmux_exe, session, "C-s")
-        time.sleep(0.2)
-        saved_reordered_models = (ava_config / "models.json").read_text(encoding="utf-8")
-        try:
-            saved_reordered_cycle = json.loads(saved_reordered_models).get("scoped_model_cycle")
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"Ctrl+S after Alt+Up wrote invalid models.json: {exc}\ncontent:\n{saved_reordered_models}") from exc
+        saved_reordered_models = wait_for_json_file(
+            ava_config / "models.json",
+            lambda value: isinstance(value, dict)
+            and isinstance(value.get("scoped_model_cycle"), list)
+            and len(value["scoped_model_cycle"]) >= 2
+            and "openai/diagnostic-local" in value["scoped_model_cycle"],
+            "persisted reordered scoped model cycle",
+        )
+        saved_reordered_cycle = json.loads(saved_reordered_models).get("scoped_model_cycle")
         if (
             not isinstance(saved_reordered_cycle, list)
             or len(saved_reordered_cycle) < 2
@@ -1335,8 +1614,13 @@ def main() -> int:
                 f"Ctrl+X did not clear the visible scoped model cycle\nscreen:\n{scoped_model_cleared}"
             )
         send_keys(tmux_exe, session, "C-s")
-        time.sleep(0.2)
-        saved_empty_models = (ava_config / "models.json").read_text(encoding="utf-8")
+        saved_empty_models = wait_for_json_file(
+            ava_config / "models.json",
+            lambda value: isinstance(value, dict)
+            and value.get("scoped_model_cycle") == []
+            and any(model.get("name") == "Diagnostic Local" for model in value.get("models", []) if isinstance(model, dict)),
+            "persisted empty scoped model cycle",
+        )
         if '"scoped_model_cycle": []' not in saved_empty_models or "Diagnostic Local" not in saved_empty_models:
             raise RuntimeError(
                 f"Ctrl+S did not persist the empty scoped model cycle while preserving custom models\ncontent:\n{saved_empty_models}"
@@ -1396,8 +1680,13 @@ def main() -> int:
                 f"Ctrl+A did not restore the visible scoped model cycle\nscreen:\n{scoped_model_enabled}"
         )
         send_keys(tmux_exe, session, "C-s")
-        time.sleep(0.2)
-        saved_all_models = (ava_config / "models.json").read_text(encoding="utf-8")
+        saved_all_models = wait_for_json_file(
+            ava_config / "models.json",
+            lambda value: isinstance(value, dict)
+            and "scoped_model_cycle" not in value
+            and any(model.get("name") == "Diagnostic Local" for model in value.get("models", []) if isinstance(model, dict)),
+            "persisted all-model scoped cycle",
+        )
         if "scoped_model_cycle" in saved_all_models or "Diagnostic Local" not in saved_all_models:
             raise RuntimeError(
                 f"Ctrl+S did not remove the scoped model cycle field while preserving custom models\ncontent:\n{saved_all_models}"
@@ -1408,16 +1697,23 @@ def main() -> int:
         restored_model_cycle = wait_for(
             tmux_exe,
             session,
-            r"model cycled|GPT-4\.1 mini|gpt-4\.1-mini|Claude Sonnet 4\.5|claude-sonnet-4-5",
+            r"model cycled|GPT-5\.6 (?:Sol|Terra|Luna)|gpt-5\.6-(?:sol|terra|luna)|GPT-4\.1 mini|gpt-4\.1-mini|Claude Sonnet 4\.5|claude-sonnet-4-5",
             "restored scoped model cycle",
         )
-        if (
-            "model cycled" not in restored_model_cycle
-            and "GPT-4.1 mini" not in restored_model_cycle
-            and "gpt-4.1-mini" not in restored_model_cycle
-            and "Claude Sonnet 4.5" not in restored_model_cycle
-            and "claude-sonnet-4-5" not in restored_model_cycle
-        ):
+        restored_cycle_markers = (
+            "model cycled",
+            "GPT-5.6 Sol",
+            "GPT-5.6 Terra",
+            "GPT-5.6 Luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "GPT-4.1 mini",
+            "gpt-4.1-mini",
+            "Claude Sonnet 4.5",
+            "claude-sonnet-4-5",
+        )
+        if not any(value in restored_model_cycle for value in restored_cycle_markers):
             raise RuntimeError(f"Ctrl+P did not cycle after restoring scoped models\nscreen:\n{restored_model_cycle}")
         (ava_config / "keybinds.json").write_text(
             '{"tui.editor.cursorLineStart":["Home","Ctrl+A","Alt+Up","Insert"],'
@@ -1542,20 +1838,22 @@ def main() -> int:
         dragged_selection = wait_for(tmux_exe, session, r"drag TWO", "raw SGR composer drag selection replacement")
         if "drag TWO" not in dragged_selection or "drag oneTWO" in dragged_selection:
             raise RuntimeError(f"raw SGR drag/release did not select and replace draft text\nscreen:\n{dragged_selection}")
-        send_keys(tmux_exe, session, "C-e", "C-u")
-        send_literal(tmux_exe, session, "copy me")
-        send_literal(tmux_exe, session, "\x1b[1;2D")
-        send_literal(tmux_exe, session, "\x1b[1;2D")
         send_keys(tmux_exe, session, "C-c")
-        time.sleep(0.2)
-        copied_selection = capture(tmux_exe, session)
-        if "copy me" not in copied_selection:
-            raise RuntimeError(f"Ctrl+C on a keyboard selection interrupted or cleared the draft\nscreen:\n{copied_selection}")
+        send_literal(tmux_exe, session, "copy me")
+        wait_for(tmux_exe, session, r"copy me", "keyboard copy selection draft")
+        cursor_before_selection = pane_cursor_position(tmux_exe, session)
+        send_literal(tmux_exe, session, "\x1b[1;2D")
+        cursor_after_first_selection = wait_for_cursor_change(
+            tmux_exe, session, cursor_before_selection, "first Shift+Left selection"
+        )
+        send_literal(tmux_exe, session, "\x1b[1;2D")
+        wait_for_cursor_change(tmux_exe, session, cursor_after_first_selection, "second Shift+Left selection")
+        send_keys(tmux_exe, session, "C-c")
         send_literal(tmux_exe, session, "X")
         keyboard_selection = wait_for(tmux_exe, session, r"copy X", "keyboard selection replacement")
         if "copy X" not in keyboard_selection or "copy meX" in keyboard_selection:
             raise RuntimeError(f"Shift+Arrow selection did not stay replaceable after copy\nscreen:\n{keyboard_selection}")
-        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_keys(tmux_exe, session, "C-c")
         send_literal(tmux_exe, session, "before external")
         send_keys(tmux_exe, session, "C-g")
         external_editor = wait_for(
@@ -1566,65 +1864,78 @@ def main() -> int:
         )
         if "external editor draft" not in external_editor:
             raise RuntimeError(f"Ctrl+G external editor did not replace the visible draft\nscreen:\n{external_editor}")
-        send_keys(tmux_exe, session, "C-e", "C-u")
+        wait_for_pane_command(tmux_exe, session, r"^ava$", "external editor process return")
+        send_keys(tmux_exe, session, "C-c")
+        wait_for_absent(tmux_exe, session, r"external editor draft", "composer clear after external editor")
         send_literal(tmux_exe, session, "erase XY")
+        wait_for(tmux_exe, session, r"erase XY", "Backspace selection draft")
         send_literal(tmux_exe, session, "\x1b[1;2D")
         send_literal(tmux_exe, session, "\x1b[1;2D")
         send_keys(tmux_exe, session, "C-h")
-        time.sleep(0.2)
-        backspace_deleted_selection = capture(tmux_exe, session)
+        backspace_deleted_selection = wait_for_absent(
+            tmux_exe, session, r"erase XY", "Backspace selected composer text deletion"
+        )
         if "erase" not in backspace_deleted_selection or "erase XY" in backspace_deleted_selection:
             raise RuntimeError(
                 f"Backspace did not delete the selected composer text\nscreen:\n{backspace_deleted_selection}"
             )
-        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_keys(tmux_exe, session, "C-c")
+        wait_for_absent(tmux_exe, session, r"erase", "composer clear before Delete selection test")
         send_literal(tmux_exe, session, "trim UV")
+        wait_for(tmux_exe, session, r"trim UV", "Delete selection draft")
         send_literal(tmux_exe, session, "\x1b[1;2D")
         send_literal(tmux_exe, session, "\x1b[1;2D")
         send_keys(tmux_exe, session, "Delete")
-        time.sleep(0.2)
-        delete_removed_selection = capture(tmux_exe, session)
+        delete_removed_selection = wait_for_absent(
+            tmux_exe, session, r"trim UV", "Delete selected composer text deletion"
+        )
         if "trim" not in delete_removed_selection or "trim UV" in delete_removed_selection:
             raise RuntimeError(f"Delete did not delete the selected composer text\nscreen:\n{delete_removed_selection}")
-        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_keys(tmux_exe, session, "C-c")
         send_literal(tmux_exe, session, "shiftback")
+        wait_for(tmux_exe, session, r"shiftback", "Shift+Backspace draft")
         send_literal(tmux_exe, session, "\x1b[127;2u")
         send_literal(tmux_exe, session, "Z")
         shift_backspace = wait_for(tmux_exe, session, r"shiftbacZ", "Shift+Backspace delete-backward alias")
         if "shiftbacZ" not in shift_backspace or "shiftbackZ" in shift_backspace:
             raise RuntimeError(f"Shift+Backspace did not delete the previous composer character\nscreen:\n{shift_backspace}")
-        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_keys(tmux_exe, session, "C-c")
         send_literal(tmux_exe, session, "shiftdelete")
+        wait_for(tmux_exe, session, r"shiftdelete", "Shift+Delete draft")
         send_keys(tmux_exe, session, "C-a")
         send_literal(tmux_exe, session, "\x1b[3$")
         send_literal(tmux_exe, session, "Z")
         shift_delete = wait_for(tmux_exe, session, r"Zhiftdelete", "Shift+Delete delete-forward alias")
         if "Zhiftdelete" not in shift_delete or "Zshiftdelete" in shift_delete:
             raise RuntimeError(f"Shift+Delete did not delete the next composer character\nscreen:\n{shift_delete}")
-        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_keys(tmux_exe, session, "C-c")
         send_literal(tmux_exe, session, "one two three")
+        wait_for(tmux_exe, session, r"one two three", "word selection draft")
         send_literal(tmux_exe, session, "\x1b[1;6D")
         send_literal(tmux_exe, session, "THREE")
         word_selection = wait_for(tmux_exe, session, r"one two THREE", "Shift+Ctrl+Left word selection replacement")
         if "one two THREE" not in word_selection or "one two threeTHREE" in word_selection:
             raise RuntimeError(f"Shift+Ctrl+Left did not select and replace the previous word\nscreen:\n{word_selection}")
-        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_keys(tmux_exe, session, "C-c")
         send_literal(tmux_exe, session, "line start")
+        wait_for(tmux_exe, session, r"line start", "line-start selection draft")
         send_literal(tmux_exe, session, "\x1b[1;2H")
         send_literal(tmux_exe, session, "home")
         line_start_selection = wait_for(tmux_exe, session, r"home", "Shift+Home line-start selection replacement")
         if "home" not in line_start_selection or "line starthome" in line_start_selection:
             raise RuntimeError(f"Shift+Home did not select and replace to the line start\nscreen:\n{line_start_selection}")
-        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_keys(tmux_exe, session, "C-c")
         send_literal(tmux_exe, session, "end line")
+        wait_for(tmux_exe, session, r"end line", "line-end selection draft")
         send_keys(tmux_exe, session, "C-a")
         send_literal(tmux_exe, session, "\x1b[1;2F")
         send_literal(tmux_exe, session, "END")
         line_end_selection = wait_for(tmux_exe, session, r"END", "Shift+End line-end selection replacement")
         if "END" not in line_end_selection or "ENDend line" in line_end_selection or "end lineEND" in line_end_selection:
             raise RuntimeError(f"Shift+End did not select and replace to the line end\nscreen:\n{line_end_selection}")
-        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_keys(tmux_exe, session, "C-c")
         send_literal(tmux_exe, session, "\x1b[200~sxhome alpha\nsxhome beta\x1b[201~")
+        wait_for(tmux_exe, session, r"sxhome beta", "document-start selection draft")
         send_literal(tmux_exe, session, "\x1b[1;6H")
         send_literal(tmux_exe, session, "DOCSTART")
         document_start_selection = wait_for(
@@ -1635,8 +1946,9 @@ def main() -> int:
                 "Shift+Ctrl+Home did not select and replace to the document start\n"
                 f"screen:\n{document_start_selection}"
             )
-        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_keys(tmux_exe, session, "C-c")
         send_literal(tmux_exe, session, "\x1b[200~sxend alpha\nsxend beta\x1b[201~")
+        wait_for(tmux_exe, session, r"sxend beta", "document-end selection draft")
         send_literal(tmux_exe, session, "\x1b[1;5H")
         send_literal(tmux_exe, session, "\x1b[1;6F")
         send_literal(tmux_exe, session, "DOCEND")
@@ -1648,8 +1960,9 @@ def main() -> int:
                 "Ctrl+Home plus Shift+Ctrl+End did not select and replace to the document end\n"
                 f"screen:\n{document_end_selection}"
             )
-        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_keys(tmux_exe, session, "C-c")
         send_literal(tmux_exe, session, "\x1b[200~top\nbot\x1b[201~")
+        wait_for(tmux_exe, session, r"bot", "Shift+Up selection draft")
         send_literal(tmux_exe, session, "\x1b[1;2A")
         send_literal(tmux_exe, session, "UP")
         shift_up_selection = wait_for(tmux_exe, session, r"topUP", "Shift+Up vertical selection replacement")
@@ -1658,11 +1971,11 @@ def main() -> int:
         send_keys(tmux_exe, session, "C-c")
         wait_for_absent(tmux_exe, session, r"topUP", "Shift+Up selection draft clear")
         send_literal(tmux_exe, session, "\x1b[200~one\ntwo\x1b[201~")
-        send_keys(tmux_exe, session, "Up")
+        send_literal(tmux_exe, session, "\x1b[1;5H")
         send_literal(tmux_exe, session, "\x1b[1;2B")
         send_literal(tmux_exe, session, "DOWN")
-        shift_down_selection = wait_for(tmux_exe, session, r"oneDOWN", "Shift+Down vertical selection replacement")
-        if "oneDOWN" not in shift_down_selection or "twoDOWN" in shift_down_selection:
+        shift_down_selection = wait_for(tmux_exe, session, r"DOWNtwo", "Shift+Down vertical selection replacement")
+        if "DOWNtwo" not in shift_down_selection or "oneDOWN" in shift_down_selection:
             raise RuntimeError(f"Shift+Down did not select and replace the next line span\nscreen:\n{shift_down_selection}")
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "kitty ")
@@ -1864,7 +2177,7 @@ def main() -> int:
         cursor_scoped_slash_palette = wait_for(
             tmux_exe,
             session,
-            r"/models.*List configured models|List configured models.*models",
+            r"/models.*Open the model selector|Open the model selector.*models",
             "cursor-scoped slash command palette",
         )
         if "openai/gpt-5.5" in cursor_scoped_slash_palette:
@@ -2296,9 +2609,14 @@ def main() -> int:
         send_keys(tmux_exe, session, "Enter")
         wait_for(tmux_exe, session, r"session name set: \"TUI smoke\"", "session name command")
         send_keys(tmux_exe, session, "Up")
-        wait_for(tmux_exe, session, r"❯ /name TUI smoke", "composer input history recall")
-        send_keys(tmux_exe, session, "C-c")
-        wait_for_absent(tmux_exe, session, r"❯ /name TUI smoke", "composer recalled history clear")
+        arrow_scrollback = wait_for(tmux_exe, session, r"scrollback detached", "idle Up arrow transcript scrolling")
+        if "❯ /name TUI smoke" in arrow_scrollback:
+            raise RuntimeError(
+                "idle Up arrow recalled composer input history instead of only scrolling transcript history\n"
+                f"screen:\n{arrow_scrollback}"
+            )
+        send_keys(tmux_exe, session, "Down")
+        wait_for_absent(tmux_exe, session, r"scrollback detached", "idle Down arrow return to live tail")
 
         for index in range(1, 7):
             send_keys(tmux_exe, session, "C-u")
@@ -2651,25 +2969,34 @@ def main() -> int:
         send_keys(tmux_exe, session, "C-c")
         wait_for_absent(tmux_exe, session, r"undo word", "ctrl-minus undo draft clear")
 
+        send_literal(tmux_exe, session, "/help")
+        wait_for(tmux_exe, session, r"/help", "multiline scrollback seed draft")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(
+            tmux_exe,
+            session,
+            r"page_up PageUp|model_cycle_forward|details_toggle|tree_fold_or_up|tree_unfold_or_down",
+            "multiline scrollback seed output",
+        )
         send_literal(tmux_exe, session, "\x1b[200~first\nsecond\x1b[201~")
-        wait_for(tmux_exe, session, r"first.*second|first", "multiline draft before vertical cursor")
-        send_keys(tmux_exe, session, "Up")
+        wait_for(tmux_exe, session, r"first.*second|first", "multiline draft before transcript scroll")
+        send_literal(tmux_exe, session, "\x1b[1;129A")
+        multiline_scrolled = wait_for(
+            tmux_exe, session, r"scrollback detached", "multiline draft physical Ghostty arrow transcript scroll"
+        )
+        if "first" not in multiline_scrolled or "second" not in multiline_scrolled:
+            raise RuntimeError(
+                "arrow-up changed the multiline composer while scrolling the transcript\n"
+                f"screen:\n{multiline_scrolled}"
+            )
         send_literal(tmux_exe, session, "X")
-        moved = wait_for(tmux_exe, session, r"firstX", "multiline draft arrow-up cursor movement")
-        if "secondX" in moved:
-            raise RuntimeError(f"arrow-up edited the second line instead of the previous line\nscreen:\n{moved}")
+        moved = wait_for(tmux_exe, session, r"secondX", "multiline draft cursor preserved by arrow scroll")
+        if "firstX" in moved:
+            raise RuntimeError(f"arrow-up moved the multiline composer cursor instead of scrolling only the transcript\nscreen:\n{moved}")
+        send_literal(tmux_exe, session, "\x1b[1;129B")
+        wait_for_absent(tmux_exe, session, r"scrollback detached", "multiline draft return to live tail")
         send_keys(tmux_exe, session, "C-c")
-        wait_for_absent(tmux_exe, session, r"firstX|second", "multiline draft clear")
-
-        send_literal(tmux_exe, session, "\x1b[200~abcdef\nx\nabcdef\x1b[201~")
-        wait_for(tmux_exe, session, r"abcdef", "multiline sticky-column draft")
-        send_keys(tmux_exe, session, "Up", "Up")
-        send_literal(tmux_exe, session, "Z")
-        sticky = wait_for(tmux_exe, session, r"abcdefZ", "multiline sticky-column cursor movement")
-        if "xZ" in sticky:
-            raise RuntimeError(f"sticky-column movement collapsed to the short middle line\nscreen:\n{sticky}")
-        send_keys(tmux_exe, session, "C-c")
-        wait_for_absent(tmux_exe, session, r"abcdefZ", "sticky-column draft clear")
+        wait_for_absent(tmux_exe, session, r"secondX", "multiline transcript-scroll draft clear")
 
         send_literal(tmux_exe, session, "\x1b[200~home\nend\x1b[201~")
         wait_for(tmux_exe, session, r"home.*end|home", "multiline draft before home/end cursor movement")
@@ -2685,8 +3012,9 @@ def main() -> int:
 
         send_literal(tmux_exe, session, "\x1b[200~join\nline\x1b[201~")
         wait_for(tmux_exe, session, r"join.*line|join", "multiline draft before ctrl-k line join")
-        send_keys(tmux_exe, session, "Up", "C-k")
-        wait_for(tmux_exe, session, r"joinline", "ctrl-k line-end join")
+        send_literal(tmux_exe, session, "\x1b[1;133H")
+        send_keys(tmux_exe, session, "End", "C-k")
+        wait_for(tmux_exe, session, r"joinline", "ctrl-home/end ctrl-k line join")
         send_keys(tmux_exe, session, "C-c")
         wait_for_absent(tmux_exe, session, r"joinline", "ctrl-k line-join draft clear")
 
@@ -2717,12 +3045,36 @@ def main() -> int:
             r"page_up PageUp|model_cycle_forward|details_toggle|tree_fold_or_up|tree_unfold_or_down|models_clear_all|models_reorder_down",
             "long help output before mouse wheel scroll",
         )
+        send_literal(tmux_exe, session, "draft stays while scrolling")
+        wait_for(tmux_exe, session, r"draft stays while scrolling", "draft before transcript-only scrolling")
         send_literal(tmux_exe, session, "\x1b[<64;4;6M")
         wheel_scrolled = wait_for(tmux_exe, session, r"scrollback detached", "raw SGR mouse wheel scrollback")
-        if "scrollback detached" not in wheel_scrolled:
-            raise RuntimeError(f"raw SGR mouse wheel up did not detach transcript scrollback\nscreen:\n{wheel_scrolled}")
+        if "scrollback detached" not in wheel_scrolled or "draft stays while scrolling" not in wheel_scrolled:
+            raise RuntimeError(
+                "raw SGR mouse wheel changed the composer instead of only scrolling transcript history\n"
+                f"screen:\n{wheel_scrolled}"
+            )
         send_literal(tmux_exe, session, "\x1b[<65;4;6M")
-        wait_for_absent(tmux_exe, session, r"scrollback detached", "raw SGR mouse wheel return to live tail")
+        wheel_tail = wait_for_absent(tmux_exe, session, r"scrollback detached", "raw SGR mouse wheel return to live tail")
+        if "draft stays while scrolling" not in wheel_tail:
+            raise RuntimeError(f"mouse wheel return to live tail changed the composer draft\nscreen:\n{wheel_tail}")
+        send_literal(tmux_exe, session, "\x1b[1;129A")
+        arrow_scrolled = wait_for(
+            tmux_exe, session, r"scrollback detached", "physical Ghostty Up arrow transcript scrollback with Num Lock"
+        )
+        if "draft stays while scrolling" not in arrow_scrolled:
+            raise RuntimeError(
+                "physical Up arrow recalled composer history instead of only scrolling transcript history\n"
+                f"screen:\n{arrow_scrolled}"
+            )
+        send_literal(tmux_exe, session, "\x1b[1;129B")
+        arrow_tail = wait_for_absent(
+            tmux_exe, session, r"scrollback detached", "physical Ghostty Down arrow return to live tail with Num Lock"
+        )
+        if "draft stays while scrolling" not in arrow_tail:
+            raise RuntimeError(f"physical Down arrow changed the composer draft\nscreen:\n{arrow_tail}")
+        send_keys(tmux_exe, session, "C-c")
+        wait_for_absent(tmux_exe, session, r"draft stays while scrolling", "scrolling regression draft clear")
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/att")

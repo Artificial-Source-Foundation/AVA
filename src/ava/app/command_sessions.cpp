@@ -619,6 +619,29 @@ ava::core::Result<RuntimeSession> create_fresh_session(RuntimeSession const& cur
   return open_runtime_session(options);
 }
 
+RuntimeOpenOptions owned_replacement_options(RuntimeSession const& current)
+{
+  RuntimeOpenOptions options;
+  options.workspace_dir = current.workspace_dir;
+  options.current_dir = current.current_dir;
+  options.mode = current.mode;
+  options.tool_visibility = current.tool_visibility;
+  options.paths = current.paths;
+  options.prompt_overrides = current.prompt_overrides;
+  options.offline = current.offline;
+  return options;
+}
+
+void attach_created_session_cleanup_context(ava::session::SessionStore const& store, ava::session::SessionLease const& lease, ava::core::Error& error)
+{
+  auto removed = store.remove_created_file(lease);
+  if (!removed)
+  {
+    error.with_context("rollback_path", store.session_path().string());
+    error.with_context("rollback_cause", removed.error().format());
+  }
+}
+
 ava::core::Result<CommandResult> run_branch_command(RuntimeSession& session, std::string_view name, ava::session::SessionBranchMode mode)
 {
   CommandResult result;
@@ -631,6 +654,9 @@ ava::core::Result<CommandResult> run_branch_command(RuntimeSession& session, std
     return result;
   }
   auto const trimmed_name = trim_ascii(name);
+  auto recovered = session.store.recover_torn_tail(session.lease, ava::session::legacy_unbounded_session_read_limits());
+  if (!recovered)
+    return std::unexpected(std::move(recovered.error()));
   auto branched = ava::session::create_session_branch(
       ava::session::SessionBranchOptions{.workspace_dir = session.workspace_dir,
                                          .root_dir = session.paths.sessions_dir,
@@ -642,10 +668,10 @@ ava::core::Result<CommandResult> run_branch_command(RuntimeSession& session, std
                                          .actor = "tui"});
   if (!branched)
     return std::unexpected(std::move(branched.error()));
-
   auto const created_session_id = branched->store.session_id();
   auto const branch_from_entry_id = branched->branch_from_entry_id;
-  auto opened = reopen_session(session, created_session_id);
+  auto owned_options = owned_replacement_options(session);
+  auto opened = open_owned_runtime_session(owned_options, branched->store, branched->lease, true);
   if (!opened)
     return std::unexpected(std::move(opened.error()));
   opened->created = true;
@@ -1521,6 +1547,12 @@ ava::core::Result<CommandResult> run_import_command(RuntimeSession& session, std
     add_output(result, imported_store.error().format());
     return result;
   }
+  auto imported_lease = ava::session::SessionLease::create_and_acquire(imported_store->session_path());
+  if (!imported_lease)
+  {
+    add_output(result, imported_lease.error().format());
+    return result;
+  }
   for (auto const& entry : *entries)
   {
     auto entry_to_append = entry;
@@ -1528,20 +1560,20 @@ ava::core::Result<CommandResult> run_import_command(RuntimeSession& session, std
       entry_to_append.version = ava::session::kCurrentSessionEntryVersion;
     if (auto appended = imported_store->append(entry_to_append); !appended)
     {
-      std::error_code remove_error;
-      std::filesystem::remove(imported_store->session_path(), remove_error);
-      add_output(result, appended.error().format());
+      auto error = std::move(appended.error());
+      attach_created_session_cleanup_context(*imported_store, *imported_lease, error);
+      add_output(result, error.format());
       return result;
     }
   }
 
-  auto imported_session_id = imported_store->session_id();
-  auto opened = reopen_session(session, imported_session_id);
+  auto owned_options = owned_replacement_options(session);
+  auto opened = open_owned_runtime_session(owned_options, *imported_store, *imported_lease, true);
   if (!opened)
   {
-    std::error_code remove_error;
-    std::filesystem::remove(imported_store->session_path(), remove_error);
-    add_output(result, opened.error().format());
+    auto error = std::move(opened.error());
+    attach_created_session_cleanup_context(*imported_store, *imported_lease, error);
+    add_output(result, error.format());
     return result;
   }
   if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)

@@ -1,12 +1,10 @@
 #include "sys.h"
+#include "ava/tui/composer_editor.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/config/model_profiles.h"
-#include "ava/config/provider_profiles.h"
-#include "ava/tui/composer_editor.h"
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <optional>
 #include <string>
 #include <utility>
@@ -19,41 +17,9 @@ std::string composer_bar()
   return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(kSgrComposerBg) + "  ";
 }
 
-std::string composer_mode_badge(std::string_view mode)
-{
-  std::string mode_text = sanitize_terminal_text(mode);
-  if (!mode_text.empty())
-    mode_text.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(mode_text.front())));
-  auto const color = mode == "build" || mode == "code" ? kSgrWarning : kSgrAccent;
-  return std::string(color) + mode_text + std::string(kSgrReset) + std::string(kSgrComposerBg);
-}
-
-std::string provider_label(std::string_view provider)
-{
-  return sanitize_terminal_text(ava::config::provider_display_name(provider));
-}
-
 std::string model_label(std::string_view model)
 {
   return sanitize_terminal_text(ava::config::model_display_label(model));
-}
-
-std::string compact_path_leaf(std::string_view path)
-{
-  auto end = path.size();
-  while (end > 1 && (path[end - 1] == '/' || path[end - 1] == '\\')) --end;
-  auto const trimmed = path.substr(0, end);
-  auto const slash = trimmed.find_last_of("/\\");
-  if (slash == std::string_view::npos || slash + 1 >= trimmed.size())
-    return std::string(trimmed);
-  return std::string(trimmed.substr(slash + 1));
-}
-
-void append_muted_segment(std::string& line, std::string_view label, std::string_view value)
-{
-  if (value.empty())
-    return;
-  line += " " + std::string(kSgrMuted) + "· " + std::string(label) + " " + sanitize_terminal_text(value) + std::string(kSgrReset) + std::string(kSgrComposerBg);
 }
 
 std::vector<std::size_t> input_line_start_offsets(std::string_view input)
@@ -116,17 +82,14 @@ std::size_t input_content_width(std::size_t width, bool first_line)
   return std::max<std::size_t>(1, width - prefix_columns);
 }
 
-ComposerInputRenderLine make_input_render_line(std::string_view line, std::size_t logical_start,
-                                               std::size_t start, std::size_t end, bool first_line)
+ComposerInputRenderLine make_input_render_line(std::string_view line, std::size_t logical_start, std::size_t start, std::size_t end, bool first_line)
 {
-  return ComposerInputRenderLine{.text = std::string(line.substr(start, end - start)),
-                                 .start = logical_start + start,
-                                 .end = logical_start + end,
-                                 .first_line = first_line};
+  return ComposerInputRenderLine{
+      .text = std::string(line.substr(start, end - start)), .start = logical_start + start, .end = logical_start + end, .first_line = first_line};
 }
 
-void append_wrapped_input_line(std::vector<ComposerInputRenderLine>& output, std::string_view line,
-                               std::size_t logical_start, std::size_t width, bool prompt_line)
+void append_wrapped_input_line(std::vector<ComposerInputRenderLine>& output, std::string_view line, std::size_t logical_start, std::size_t width,
+                               bool prompt_line)
 {
   if (line.empty())
   {
@@ -185,8 +148,7 @@ void append_input_text_segment(std::string& line, std::string_view text, bool se
   line += sanitize_terminal_text(text) + std::string(kSgrReset) + std::string(kSgrComposerBg);
 }
 
-void append_input_text(std::string& line, ComposerSnapshot const& snapshot, std::string_view text,
-                       std::size_t line_start)
+void append_input_text(std::string& line, ComposerSnapshot const& snapshot, std::string_view text, std::size_t line_start)
 {
   auto const selection = input_selection_bounds(snapshot);
   if (!selection)
@@ -213,74 +175,89 @@ void append_input_text(std::string& line, ComposerSnapshot const& snapshot, std:
 
 std::string render_status_line(ComposerSnapshot const& snapshot, std::size_t width)
 {
-  auto const provider = provider_label(snapshot.provider);
   auto const model = model_label(snapshot.model);
+  auto context_source_count = snapshot.context_source_count;
+  if (!context_source_count && snapshot.sidebar)
+    context_source_count = snapshot.sidebar->context_source_count;
 
-  std::string line = composer_bar() + composer_mode_badge(snapshot.mode);
-  if (!model.empty() || !provider.empty())
-  {
-    line += " " + std::string(kSgrMuted) + "·" + std::string(kSgrReset) + std::string(kSgrComposerBg) + " ";
-    if (!model.empty())
+  auto const build_left_status = [&](std::size_t budget) {
+    if (budget == 0)
+      return std::string{};
+
+    auto line = composer_bar();
+    auto const bar_columns = terminal_text_columns(line);
+    if (budget <= bar_columns)
+      return fit_line_preserving_sgr(std::move(line), budget);
+    auto const content_budget = budget - bar_columns;
+
+    auto append_fitted_model = [&](std::size_t model_budget) {
+      if (model.empty() || model_budget == 0)
+        return;
+      auto styled_model = std::string(kSgrBold) + std::string(kSgrText) + model + std::string(kSgrReset);
+      line += fit_line_preserving_sgr(std::move(styled_model), model_budget);
+      line += std::string(kSgrComposerBg);
+    };
+
+    if (!context_source_count)
     {
-      line += std::string(kSgrBold) + std::string(kSgrText) + model + std::string(kSgrReset) + std::string(kSgrComposerBg);
+      append_fitted_model(content_budget);
+      return fit_line_preserving_sgr(std::move(line), budget);
     }
-    if (!provider.empty())
+
+    auto const context_label = "ctx " + std::to_string(*context_source_count);
+    auto const context_columns = terminal_text_columns(context_label);
+    constexpr auto kSeparatorColumns = std::size_t{3};
+    constexpr auto kCompactSeparatorColumns = std::size_t{1};
+    constexpr auto kPreferredMinimumModelColumns = std::size_t{8};
+    auto const separator_columns =
+        content_budget >= context_columns + kSeparatorColumns + kPreferredMinimumModelColumns ? kSeparatorColumns : kCompactSeparatorColumns;
+    if (!model.empty() && content_budget > context_columns + separator_columns)
     {
-      if (!model.empty())
-        line += " ";
-      line += std::string(kSgrMuted) + provider + std::string(kSgrReset) + std::string(kSgrComposerBg);
+      append_fitted_model(content_budget - context_columns - separator_columns);
+      if (separator_columns == kSeparatorColumns)
+        line += " " + std::string(kSgrMuted) + "·" + std::string(kSgrReset) + std::string(kSgrComposerBg) + " ";
+      else
+        line += ' ';
     }
-  }
-  if (snapshot.reasoning_status && !snapshot.reasoning_status->empty())
-  {
-    line += " " + std::string(kSgrMuted) + "·" + std::string(kSgrReset) + std::string(kSgrComposerBg) + " " + std::string(kSgrWarning) +
-            sanitize_terminal_text(*snapshot.reasoning_status) + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  }
-  if (snapshot.sidebar)
-  {
-    if (!snapshot.sidebar->workspace.empty())
-      append_muted_segment(line, "cwd", compact_path_leaf(snapshot.sidebar->workspace));
-    if (!snapshot.sidebar->git_branch.empty())
-      append_muted_segment(line, "git", snapshot.sidebar->git_branch);
-    if (snapshot.sidebar->context_source_count)
-    {
-      append_muted_segment(line, "ctx", std::to_string(*snapshot.sidebar->context_source_count));
-    }
-    if (snapshot.sidebar->session_entry_count)
-    {
-      append_muted_segment(line, "entries", std::to_string(*snapshot.sidebar->session_entry_count));
-    }
-  }
-  std::string right;
-  if (snapshot.token_status && !snapshot.token_status->empty())
-  {
-    if (!right.empty())
-      right += "  ";
-    right += std::string(kSgrMuted) + sanitize_terminal_text(*snapshot.token_status) + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  }
+    auto styled_context = std::string(kSgrMuted) + context_label + std::string(kSgrReset) + std::string(kSgrComposerBg);
+    line += fit_line_preserving_sgr(std::move(styled_context), std::min(content_budget, context_columns));
+    return fit_line_preserving_sgr(std::move(line), budget);
+  };
+
+  auto line = build_left_status(width);
   if (snapshot.processing)
   {
     static constexpr std::array<std::string_view, 10> kSpinner = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
-    if (!right.empty())
-      right += "  ";
-    right += std::string(kSgrWarning) + std::string(kSpinner[snapshot.spinner_frame % kSpinner.size()]) + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  }
-
-  if (!right.empty())
-  {
+    auto const spinner =
+        std::string(kSgrWarning) + std::string(kSpinner[snapshot.spinner_frame % kSpinner.size()]) + std::string(kSgrReset) + std::string(kSgrComposerBg);
     constexpr auto kRightGap = std::size_t{2};
     constexpr auto kRightMargin = std::size_t{2};
     auto const left_columns = terminal_text_columns(line);
-    auto const right_columns = terminal_text_columns(right);
-    if (left_columns + right_columns + kRightGap + kRightMargin <= width)
+    auto const spinner_columns = terminal_text_columns(spinner);
+    if (left_columns + spinner_columns + kRightGap + kRightMargin <= width)
     {
-      line += std::string(width - left_columns - right_columns - kRightMargin, ' ');
-      line += right;
+      line += std::string(width - left_columns - spinner_columns - kRightMargin, ' ');
+      line += spinner;
       line += std::string(kRightMargin, ' ');
     }
     else
     {
-      line += "  " + right;
+      constexpr auto kMinimumGap = std::size_t{1};
+      if (width > spinner_columns + kMinimumGap)
+      {
+        auto const left_budget = width - spinner_columns - kMinimumGap;
+        line = build_left_status(left_budget);
+        auto const fitted_columns = terminal_text_columns(line);
+        line += std::string(kSgrComposerBg);
+        if (fitted_columns < left_budget)
+          line.append(left_budget - fitted_columns, ' ');
+        line += ' ';
+        line += spinner;
+      }
+      else
+      {
+        line = fit_line_preserving_sgr(spinner, width);
+      }
     }
   }
 
@@ -302,8 +279,7 @@ std::string render_input_line(ComposerSnapshot const& snapshot, std::size_t widt
   return composer_surface_line(std::move(line), width);
 }
 
-std::string render_input_fragment_line(ComposerSnapshot const& snapshot, std::string_view text, bool first_line,
-                                       std::size_t width, std::size_t line_start)
+std::string render_input_fragment_line(ComposerSnapshot const& snapshot, std::string_view text, bool first_line, std::size_t width, std::size_t line_start)
 {
   std::string line = composer_bar();
   if (first_line)
@@ -436,8 +412,7 @@ std::vector<std::string> render_composer_block(ComposerSnapshot const& snapshot,
   for (std::size_t index = layout.first_visible; index < last_visible; ++index)
   {
     auto const& input_line = input_lines[index];
-    lines.push_back(
-        render_input_fragment_line(snapshot, input_line.text, input_line.first_line, width, input_line.start));
+    lines.push_back(render_input_fragment_line(snapshot, input_line.text, input_line.first_line, width, input_line.start));
   }
   if (max_lines > 1)
     lines.push_back(render_status_line(snapshot, width));
@@ -456,8 +431,7 @@ std::size_t input_cursor_column(ComposerSnapshot const& snapshot, std::size_t wi
   auto const& line = input_lines[std::min(visual_line, input_lines.size() - 1)];
   auto const line_cursor = std::clamp(cursor, line.start, line.end);
   auto const line_before_cursor = snapshot.input.substr(line.start, line_cursor - line.start);
-  auto column = composer_input_prefix_columns(line.first_line) +
-                terminal_text_columns(sanitize_terminal_text(line_before_cursor)) + 1;
+  auto column = composer_input_prefix_columns(line.first_line) + terminal_text_columns(sanitize_terminal_text(line_before_cursor)) + 1;
   if (column == 0)
     column = 1;
   return std::min(column, std::max<std::size_t>(width, 1));

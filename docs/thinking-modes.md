@@ -63,8 +63,10 @@ invalid request.
 Current built-in support:
 
 - **OpenAI Responses**: `gpt-5.5` declares `low`, `medium`, `high`, and `xhigh`.
-  AVA sends `reasoning.effort=<level>` with summary `auto`. Budget and display
-  fields are not accepted for this family.
+  `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` also expose `max` plus a
+  user-facing `minimal` alias mapped to provider effort `low` for API-key and
+  ChatGPT OAuth compatibility. AVA sends `reasoning.effort=<level>` with summary
+  `auto`. Budget and display fields are not accepted for this family.
 - **Anthropic Messages**: built-in Claude Sonnet 4.5 exposes `enabled`. AVA maps
   this to native `thinking` with a budget, defaulting to a safe budget below the
   model output limit. RPC callers must provide a valid Anthropic budget when

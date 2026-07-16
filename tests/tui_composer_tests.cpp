@@ -341,6 +341,16 @@ void test_tui_composer_rendering_and_input()
           ava::tui::terminal_escape_sequence_key("[1;3C") == ava::tui::Key::AltArrowRight &&
           ava::tui::terminal_escape_sequence_key("[3D") == ava::tui::Key::AltArrowLeft &&
           ava::tui::terminal_escape_sequence_key("[3C") == ava::tui::Key::AltArrowRight &&
+          ava::tui::terminal_escape_sequence_key("[A") == ava::tui::Key::ArrowUp && ava::tui::terminal_escape_sequence_key("[B") == ava::tui::Key::ArrowDown &&
+          ava::tui::terminal_escape_sequence_key("[C") == ava::tui::Key::ArrowRight &&
+          ava::tui::terminal_escape_sequence_key("[D") == ava::tui::Key::ArrowLeft && ava::tui::terminal_escape_sequence_key("OA") == ava::tui::Key::ArrowUp &&
+          ava::tui::terminal_escape_sequence_key("OB") == ava::tui::Key::ArrowDown &&
+          ava::tui::terminal_escape_sequence_key("OC") == ava::tui::Key::ArrowRight &&
+          ava::tui::terminal_escape_sequence_key("OD") == ava::tui::Key::ArrowLeft &&
+          ava::tui::terminal_escape_sequence_key("[1;1A") == ava::tui::Key::ArrowUp &&
+          ava::tui::terminal_escape_sequence_key("[1;1B") == ava::tui::Key::ArrowDown &&
+          ava::tui::terminal_escape_sequence_key("[1;1C") == ava::tui::Key::ArrowRight &&
+          ava::tui::terminal_escape_sequence_key("[1;1D") == ava::tui::Key::ArrowLeft &&
           ava::tui::terminal_escape_sequence_key("[57417u") == ava::tui::Key::ArrowLeft &&
           ava::tui::terminal_escape_sequence_key("[57418u") == ava::tui::Key::ArrowRight &&
           ava::tui::terminal_escape_sequence_key("[57419u") == ava::tui::Key::ArrowUp &&
@@ -422,6 +432,22 @@ void test_tui_composer_rendering_and_input()
           ava::tui::terminal_escape_sequence_key("[200~") == ava::tui::Key::Unknown,
       "terminal escape parser maps complete modified Enter CSI forms without treating partial keys or paste markers as "
       "text");
+  expect(ava::tui::terminal_escape_sequence_key("[1;129B") == ava::tui::Key::ArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[1;193A") == ava::tui::Key::ArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[1;130A") == ava::tui::Key::ShiftArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[1;133D") == ava::tui::Key::CtrlArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[1;17B") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[57420;129u") == ava::tui::Key::ArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[5;129~") == ava::tui::Key::PageUp &&
+             ava::tui::terminal_escape_sequence_key("[6;129~") == ava::tui::Key::PageDown &&
+             ava::tui::terminal_escape_sequence_key("[1;129H") == ava::tui::Key::Home &&
+             ava::tui::terminal_escape_sequence_key("[1;129F") == ava::tui::Key::End &&
+             ava::tui::terminal_escape_sequence_key("[1;130H") == ava::tui::Key::ShiftHome &&
+             ava::tui::terminal_escape_sequence_key("[1;133F") == ava::tui::Key::CtrlEnd &&
+             ava::tui::terminal_escape_sequence_key("[3;129~") == ava::tui::Key::Delete &&
+             ava::tui::terminal_escape_sequence_key("[3;130~") == ava::tui::Key::ShiftDelete &&
+             ava::tui::terminal_escape_sequence_key("[3;131~") == ava::tui::Key::AltDelete,
+         "terminal escape parser ignores Ghostty Kitty lock modifiers for physical navigation keys");
   auto const kitty_keypad_one = ava::tui::terminal_escape_sequence_event("[57400u");
   auto const kitty_keypad_plus = ava::tui::terminal_escape_sequence_event("[57413u");
   auto const kitty_shifted_letter = ava::tui::terminal_escape_sequence_event("[97:65:97;2u");
@@ -495,6 +521,12 @@ void test_tui_composer_rendering_and_input()
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Deny, ava::tui::InputEvent{.key = ava::tui::Key::ArrowRight});
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
          "permission prompt right arrow selects allow");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::ArrowUp});
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Deny,
+         "permission prompt up arrow selects the previous action consistently with list modals");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Deny, ava::tui::InputEvent{.key = ava::tui::Key::ArrowDown});
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
+         "permission prompt down arrow selects the next action consistently with list modals");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveAllow, "permission prompt enter confirms selected allow");
   prompt_input =
@@ -1094,9 +1126,39 @@ void test_tui_composer_rendering_and_input()
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
                                return visible.find("thinking...") == std::string::npos && visible.find("working") == std::string::npos &&
-                                      visible.find("⠙") != std::string::npos && visible.find("1.3k (0.7%)") != std::string::npos;
+                                      visible.find("⠙") != std::string::npos && visible.find("1.3k (0.7%)") == std::string::npos;
                              }),
-         "tui renders a spinner-only processing indicator and token-status slot");
+         "tui keeps only the model metadata and processing spinner in the compact footer");
+
+  auto narrow_footer_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.6-terra",
+                                                           .session_id = "session_test",
+                                                           .input = "",
+                                                           .status = "ready",
+                                                           .context_source_count = 12,
+                                                           .transcript = {},
+                                                           .width = 20,
+                                                           .height = 8};
+  auto const narrow_footer_lines = ava::tui::render_composer(narrow_footer_snapshot);
+  expect(std::ranges::any_of(narrow_footer_lines,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("GPT-") != std::string::npos && visible.find("ctx 12") != std::string::npos && visible_columns(line) == 20;
+                             }),
+         "tui shortens a long model label before dropping multi-digit context metadata at the supported minimum width");
+
+  narrow_footer_snapshot.status = "thinking...";
+  narrow_footer_snapshot.processing = true;
+  narrow_footer_snapshot.spinner_frame = 1;
+  auto const narrow_processing_lines = ava::tui::render_composer(narrow_footer_snapshot);
+  expect(std::ranges::any_of(narrow_processing_lines,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("GPT-") != std::string::npos && visible.find("ctx 12") != std::string::npos &&
+                                      visible.find("⠙") != std::string::npos && visible_columns(line) == 20;
+                             }),
+         "tui preserves multi-digit context metadata and the spinner beside a shortened model at the supported minimum width");
 
   auto const queued_lines = ava::tui::render_composer(
       ava::tui::ComposerSnapshot{.mode = "build",
@@ -1191,9 +1253,10 @@ void test_tui_composer_rendering_and_input()
   expect(std::ranges::any_of(reasoning_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("Build · GPT-5.5 OpenAI · low") != std::string::npos && visible.find("reasoning") == std::string::npos;
+                               return visible.find("GPT-5.5") != std::string::npos && visible.find("Build") == std::string::npos &&
+                                      visible.find("OpenAI") == std::string::npos && visible.find("low") == std::string::npos;
                              }),
-         "tui shows selected reasoning level in the composer metadata");
+         "tui keeps mode, provider, and reasoning level out of the composer footer");
 
   auto const default_reasoning_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                             .provider = "openai",
@@ -1207,9 +1270,10 @@ void test_tui_composer_rendering_and_input()
   expect(std::ranges::any_of(default_reasoning_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("Build · GPT-5.5 OpenAI") != std::string::npos && visible.find("default") == std::string::npos;
+                               return visible.find("GPT-5.5") != std::string::npos && visible.find("Build") == std::string::npos &&
+                                      visible.find("OpenAI") == std::string::npos && visible.find("default") == std::string::npos;
                              }),
-         "tui leaves reasoning metadata blank when the model uses default reasoning");
+         "tui renders only the model when context metadata is unavailable");
   expect(
       std::ranges::none_of(default_reasoning_lines, [](std::string const& line) { return strip_sgr(line).find("session session_test") != std::string::npos; }),
       "tui keeps the session id out of the composer footer");
@@ -1224,10 +1288,16 @@ void test_tui_composer_rendering_and_input()
                                                                                     .width = 80,
                                                                                     .height = 10});
   expect(std::ranges::any_of(default_reasoning_lines,
-                             [](std::string const& line) { return line.find(std::string("\x1b[38;2;251;191;36m") + "Build") != std::string::npos; }) &&
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("GPT-5.5") != std::string::npos && visible.find("Build") == std::string::npos;
+                             }) &&
              std::ranges::any_of(plan_mode_lines,
-                                 [](std::string const& line) { return line.find(std::string("\x1b[38;2;77;158;246m") + "Plan") != std::string::npos; }),
-         "tui colors build and plan composer modes differently");
+                                 [](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("GPT-5.5") != std::string::npos && visible.find("Plan") == std::string::npos;
+                                 }),
+         "tui keeps build and plan mode badges out of the composer footer");
 
   auto const token_margin_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                        .provider = "openai",
@@ -1239,14 +1309,8 @@ void test_tui_composer_rendering_and_input()
                                                                                        .transcript = {},
                                                                                        .width = 80,
                                                                                        .height = 10});
-  expect(std::ranges::any_of(token_margin_lines,
-                             [](std::string const& line) {
-                               auto const visible = strip_sgr(line);
-                               auto const token_text = std::string_view("1.3k (0.7%)");
-                               auto const token_pos = visible.find(token_text);
-                               return token_pos != std::string::npos && visible.substr(token_pos + token_text.size(), 2) == "  ";
-                             }),
-         "tui leaves right margin after token-status text");
+  expect(std::ranges::none_of(token_margin_lines, [](std::string const& line) { return strip_sgr(line).find("1.3k (0.7%)") != std::string::npos; }),
+         "tui keeps token-status text out of the composer footer");
 
   auto const compact_footer_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                          .provider = "openai",
@@ -1270,11 +1334,30 @@ void test_tui_composer_rendering_and_input()
   expect(std::ranges::any_of(compact_footer_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("cwd project") != std::string::npos && visible.find("git develop") != std::string::npos &&
-                                      visible.find("ctx 2") != std::string::npos && visible.find("entries 42") != std::string::npos &&
-                                      visible.find("1.3k (0.7%)") != std::string::npos;
+                               return visible.find("GPT-5.5 · ctx 2") != std::string::npos && visible.find("Build") == std::string::npos &&
+                                      visible.find("OpenAI") == std::string::npos && visible.find("cwd") == std::string::npos &&
+                                      visible.find("git") == std::string::npos && visible.find("entries") == std::string::npos &&
+                                      visible.find("1.3k (0.7%)") == std::string::npos;
                              }),
-         "tui compact footer persists cwd, git, context, session, model, mode, and token snapshot data without sidebar");
+         "tui compact footer shows only the model name and context source count");
+
+  auto const refreshed_context_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                            .provider = "openai",
+                                                                                            .model = "gpt-5.5",
+                                                                                            .session_id = "session_test",
+                                                                                            .input = "",
+                                                                                            .status = "ready",
+                                                                                            .context_source_count = 3,
+                                                                                            .transcript = {},
+                                                                                            .width = 110,
+                                                                                            .height = 10,
+                                                                                            .sidebar = ava::tui::SidebarSnapshot{.context_source_count = 2}});
+  expect(std::ranges::any_of(refreshed_context_lines,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("GPT-5.5 · ctx 3") != std::string::npos && visible.find("ctx 2") == std::string::npos;
+                             }),
+         "tui composer footer prefers refreshed runtime context count over stale sidebar metadata");
 
   auto const markdown_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -2898,7 +2981,8 @@ void test_tui_composer_rendering_and_input()
   expect(ctrl_digit_bindings && ava::tui::key_matches_action(*ctrl_digit_bindings, ava::tui::TuiAction::CursorLineEnd, ava::tui::Key::Ctrl1),
          "tui keybind parser accepts Pi-style Ctrl+digit special keys");
   auto const default_bindings = ava::tui::default_key_bindings();
-  expect(ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::HistoryPrev, ava::tui::Key::ArrowUp) &&
+  expect(!ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::HistoryPrev, ava::tui::Key::ArrowUp) &&
+             !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::HistoryNext, ava::tui::Key::ArrowDown) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::NewLine, ava::tui::Key::ShiftEnter) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::NewLine, ava::tui::Key::CtrlEnter) &&
              !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::NewLine, ava::tui::Key::AltEnter) &&
@@ -2924,8 +3008,8 @@ void test_tui_composer_rendering_and_input()
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TreeUnfoldOrDown, ava::tui::Key::AltArrowRight) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TreeEditLabel, ava::tui::Key::ShiftL) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TreeToggleLabelTimestamp, ava::tui::Key::ShiftT) &&
-             ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorUp, ava::tui::Key::ArrowUp) &&
-             ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorDown, ava::tui::Key::ArrowDown) &&
+             !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorUp, ava::tui::Key::ArrowUp) &&
+             !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorDown, ava::tui::Key::ArrowDown) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorWordLeft, ava::tui::Key::CtrlArrowLeft) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorWordLeft, ava::tui::Key::AltArrowLeft) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorWordLeft, ava::tui::Key::AltB) &&
@@ -4105,6 +4189,24 @@ void test_tui_composer_rendering_and_input()
           std::ranges::any_of(permission_frame, [](std::string const& line) { return strip_sgr(line).find("❯ do not focus composer") != std::string::npos; }) &&
           std::ranges::any_of(permission_frame, [](std::string const& line) { return strip_sgr(line).find("Permission required") != std::string::npos; }),
       "tui composer frame renders permission dock above composer while active");
+  for (std::size_t height = 8; height <= 11; ++height)
+  {
+    auto compact_permission = ava::tui::ComposerSnapshot{};
+    compact_permission.mode = "build";
+    compact_permission.provider = "openai";
+    compact_permission.model = "gpt-5.5";
+    compact_permission.session_id = "session_test";
+    compact_permission.input = "draft one\ndraft two\ndraft three\ndraft four\ndraft five\ndraft six";
+    compact_permission.status = "permission required";
+    compact_permission.permission_prompt =
+        ava::tui::PermissionPromptView{.tool_name = "bash", .operation = "bash", .target = "", .command = "true", .reason = ""};
+    compact_permission.width = 64;
+    compact_permission.height = height;
+    auto const frame = ava::tui::render_composer(compact_permission);
+    expect(std::ranges::any_of(frame, [](std::string const& line) { return strip_sgr(line).find("Permission required") != std::string::npos; }) &&
+               std::ranges::any_of(frame, [](std::string const& line) { return strip_sgr(line).find("[Allow once]") != std::string::npos; }),
+           "minimum-height permission dock remains visible above a wrapped composer draft");
+  }
 
   auto const question_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -4133,6 +4235,80 @@ void test_tui_composer_rendering_and_input()
           std::ranges::any_of(question_frame, [](std::string const& line) { return strip_sgr(line).find("2. [x] Search text") != std::string::npos; }) &&
           std::ranges::any_of(question_frame, [](std::string const& line) { return strip_sgr(line).find("Custom: explain") != std::string::npos; }),
       "tui composer frame renders multi-select question dock above composer while active");
+
+  std::vector<ava::tui::QuestionPromptOptionView> long_question_options;
+  for (std::size_t index = 0; index < 12; ++index)
+  {
+    long_question_options.push_back(ava::tui::QuestionPromptOptionView{.value = "option-" + std::to_string(index), .label = "Option " + std::to_string(index)});
+  }
+  auto question_navigation_prompt = ava::tui::QuestionPromptView{
+      .header = "Choose one", .question = "Pick an option", .options = long_question_options, .selected_option_index = 0, .custom_text = {}};
+  auto question_navigation = ava::tui::handle_question_prompt_input(question_navigation_prompt, ava::tui::InputEvent{.key = ava::tui::Key::ArrowDown});
+  expect(question_navigation.action == ava::tui::QuestionPromptInputAction::Redraw && question_navigation.selected_option_index == 1,
+         "question modal down arrow advances the selected option");
+  question_navigation_prompt.selected_option_index = question_navigation.selected_option_index;
+  question_navigation = ava::tui::handle_question_prompt_input(question_navigation_prompt, ava::tui::InputEvent{.key = ava::tui::Key::PageDown});
+  expect(question_navigation.action == ava::tui::QuestionPromptInputAction::Redraw && question_navigation.selected_option_index == 6,
+         "question modal PageDown advances by a viewport-sized page");
+  question_navigation_prompt.selected_option_index = question_navigation.selected_option_index;
+  question_navigation = ava::tui::handle_question_prompt_input(question_navigation_prompt, ava::tui::InputEvent{.key = ava::tui::Key::End});
+  expect(question_navigation.action == ava::tui::QuestionPromptInputAction::Redraw && question_navigation.selected_option_index == 11,
+         "question modal End moves to the final option");
+  question_navigation_prompt.selected_option_index = question_navigation.selected_option_index;
+  question_navigation = ava::tui::handle_question_prompt_input(question_navigation_prompt, ava::tui::InputEvent{.key = ava::tui::Key::MouseWheelUp});
+  expect(question_navigation.action == ava::tui::QuestionPromptInputAction::Redraw && question_navigation.selected_option_index == 10,
+         "question modal mouse wheel uses the same selection path as arrow navigation");
+
+  auto const long_question_dock = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "question required",
+      .transcript = {},
+      .question_prompt =
+          ava::tui::QuestionPromptView{
+              .header = "Choose one", .question = "Pick an option", .options = long_question_options, .selected_option_index = 9, .custom_text = {}},
+      .width = 64,
+      .height = 12});
+  expect(std::ranges::any_of(long_question_dock, [](std::string const& line) { return strip_sgr(line).find("10. Option 9") != std::string::npos; }),
+         "question dock scrolls its option window to keep the selected row visible");
+  bool every_question_dock_selection_visible = true;
+  for (std::size_t index = 0; index < long_question_options.size(); ++index)
+  {
+    auto dock_snapshot = ava::tui::ComposerSnapshot{};
+    dock_snapshot.mode = "build";
+    dock_snapshot.provider = "openai";
+    dock_snapshot.model = "gpt-5.5";
+    dock_snapshot.session_id = "session_test";
+    dock_snapshot.question_prompt = question_navigation_prompt;
+    dock_snapshot.question_prompt->selected_option_index = index;
+    dock_snapshot.width = 64;
+    dock_snapshot.height = 12;
+    auto const frame = ava::tui::render_composer(dock_snapshot);
+    auto const wanted = std::to_string(index + 1) + ". Option " + std::to_string(index);
+    every_question_dock_selection_visible &=
+        std::ranges::any_of(frame, [&](std::string const& line) { return strip_sgr(line).find(wanted) != std::string::npos; });
+  }
+  expect(every_question_dock_selection_visible, "question dock viewport follows every selected option beyond the initial screen");
+  for (std::size_t height = 8; height <= 11; ++height)
+  {
+    auto compact_dock = ava::tui::ComposerSnapshot{};
+    compact_dock.mode = "build";
+    compact_dock.provider = "openai";
+    compact_dock.model = "gpt-5.5";
+    compact_dock.session_id = "session_test";
+    compact_dock.input = "draft one\ndraft two\ndraft three\ndraft four\ndraft five\ndraft six";
+    compact_dock.status = "question required";
+    compact_dock.question_prompt = question_navigation_prompt;
+    compact_dock.question_prompt->selected_option_index = 9;
+    compact_dock.width = 64;
+    compact_dock.height = height;
+    auto const frame = ava::tui::render_composer(compact_dock);
+    expect(std::ranges::any_of(frame, [](std::string const& line) { return strip_sgr(line).find("10. Option 9") != std::string::npos; }),
+           "minimum-height question dock keeps the selected option visible above a wrapped composer draft");
+  }
 
   auto const secret_question_frame =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -4184,6 +4360,67 @@ void test_tui_composer_rendering_and_input()
           std::ranges::any_of(modal_question_frame, [](std::string const& line) { return strip_sgr(line).find("Anthropic") != std::string::npos; }) &&
           std::ranges::none_of(modal_question_frame, [](std::string const& line) { return strip_sgr(line).find("OpenAI") != std::string::npos; }),
       "tui renders searchable provider questions as centered filtered modals");
+
+  auto long_modal_prompt = ava::tui::QuestionPromptView{.header = "Choose a provider",
+                                                        .question = "Select provider",
+                                                        .options = long_question_options,
+                                                        .modal = true,
+                                                        .searchable = true,
+                                                        .selected_option_index = 9,
+                                                        .custom_text = {}};
+  auto const long_modal_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                     .provider = "openai",
+                                                                                     .model = "gpt-5.5",
+                                                                                     .session_id = "session_test",
+                                                                                     .input = "",
+                                                                                     .status = "question required",
+                                                                                     .transcript = {},
+                                                                                     .question_prompt = long_modal_prompt,
+                                                                                     .width = 64,
+                                                                                     .height = 12});
+  expect(std::ranges::any_of(long_modal_frame, [](std::string const& line) { return strip_sgr(line).find("Option 9") != std::string::npos; }),
+         "question modal scrolls its option window to keep the selected row visible");
+  bool every_question_modal_selection_visible = true;
+  for (std::size_t index = 0; index < long_question_options.size(); ++index)
+  {
+    auto modal_snapshot = ava::tui::ComposerSnapshot{};
+    modal_snapshot.mode = "build";
+    modal_snapshot.provider = "openai";
+    modal_snapshot.model = "gpt-5.5";
+    modal_snapshot.session_id = "session_test";
+    modal_snapshot.question_prompt = long_modal_prompt;
+    modal_snapshot.question_prompt->selected_option_index = index;
+    modal_snapshot.width = 64;
+    modal_snapshot.height = 12;
+    auto const frame = ava::tui::render_composer(modal_snapshot);
+    auto const wanted = "Option " + std::to_string(index);
+    every_question_modal_selection_visible &=
+        std::ranges::any_of(frame, [&](std::string const& line) { return strip_sgr(line).find(wanted) != std::string::npos; });
+  }
+  expect(every_question_modal_selection_visible, "question modal viewport follows every selected option beyond the initial screen");
+  for (std::size_t height = 8; height <= 12; ++height)
+  {
+    for (std::size_t selected = 0; selected < long_question_options.size(); ++selected)
+    {
+      auto compact_modal = ava::tui::ComposerSnapshot{};
+      compact_modal.mode = "build";
+      compact_modal.provider = "openai";
+      compact_modal.model = "gpt-5.5";
+      compact_modal.session_id = "session_test";
+      compact_modal.question_prompt = long_modal_prompt;
+      compact_modal.question_prompt->selected_option_index = selected;
+      compact_modal.width = 64;
+      compact_modal.height = height;
+      auto const frame = ava::tui::render_composer(compact_modal);
+      auto const selected_label = "Option " + std::to_string(selected);
+      expect(std::ranges::any_of(frame,
+                                 [&](std::string const& line) {
+                                   auto const text = strip_sgr(line);
+                                   return text.find("›") != std::string::npos && text.find(selected_label) != std::string::npos;
+                                 }),
+             "integrated question modal keeps every selected option visible at compact terminal heights");
+    }
+  }
 
   auto const oauth_modal_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -4326,6 +4563,147 @@ void test_tui_composer_rendering_and_input()
                                            .placeholder = "Search models",
                                            .empty_text = "No matches",
                                            .footer_hint = "Enter choose · Esc cancel"};
+  auto scrolling_selector = ava::tui::SelectListView{.title = "Pick model",
+                                                     .subtitle = "Current openai/gpt-5.6-sol · selection is validated by the backend before session mutation",
+                                                     .items = {},
+                                                     .selected_item_index = 0,
+                                                     .query = {},
+                                                     .placeholder = "Search models",
+                                                     .empty_text = "No matches",
+                                                     .footer_hint = {}};
+  for (std::size_t index = 0; index < 14; ++index)
+  {
+    scrolling_selector.items.push_back(ava::tui::SelectListItemView{.value = "model-" + std::to_string(index),
+                                                                    .label = "Model " + std::to_string(index),
+                                                                    .description = {},
+                                                                    .group = "provider-" + std::to_string(index / 3),
+                                                                    .detail = {},
+                                                                    .badge = {},
+                                                                    .current = false,
+                                                                    .enabled = true,
+                                                                    .disabled_reason = {}});
+  }
+  scrolling_selector.selected_item_index = 10;
+  auto const scrolling_selector_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                             .provider = "openai",
+                                                                                             .model = "gpt-5.5",
+                                                                                             .session_id = "session_test",
+                                                                                             .input = "",
+                                                                                             .status = "selecting",
+                                                                                             .transcript = {},
+                                                                                             .select_list = scrolling_selector,
+                                                                                             .width = 64,
+                                                                                             .height = 16});
+  expect(std::ranges::any_of(scrolling_selector_frame, [](std::string const& line) { return strip_sgr(line).find("Model 10") != std::string::npos; }),
+         "grouped select-list modals scroll far enough to keep the selected row visible");
+  auto const scrolling_selected_row =
+      std::ranges::find_if(scrolling_selector_frame, [](std::string const& line) { return strip_sgr(line).find("Model 10") != std::string::npos; });
+  auto scrolling_hit_snapshot = ava::tui::ComposerSnapshot{};
+  scrolling_hit_snapshot.mode = "build";
+  scrolling_hit_snapshot.provider = "openai";
+  scrolling_hit_snapshot.model = "gpt-5.5";
+  scrolling_hit_snapshot.session_id = "session_test";
+  scrolling_hit_snapshot.select_list = scrolling_selector;
+  scrolling_hit_snapshot.width = 64;
+  scrolling_hit_snapshot.height = 16;
+  auto const scrolling_hit = scrolling_selected_row == scrolling_selector_frame.end()
+                                 ? std::optional<std::size_t>{}
+                                 : ava::tui::select_list_selection_for_screen_position(
+                                       scrolling_hit_snapshot, static_cast<std::size_t>(scrolling_selected_row - scrolling_selector_frame.begin()) + 1, 8);
+  expect(scrolling_hit && *scrolling_hit == 10, "grouped select-list modal hit testing shares the rendered scrolling window");
+  bool every_select_list_selection_visible = true;
+  for (std::size_t index = 0; index < scrolling_selector.items.size(); ++index)
+  {
+    auto selected_view = scrolling_selector;
+    selected_view.selected_item_index = index;
+    auto selected_snapshot = ava::tui::ComposerSnapshot{};
+    selected_snapshot.mode = "build";
+    selected_snapshot.provider = "openai";
+    selected_snapshot.model = "gpt-5.5";
+    selected_snapshot.session_id = "session_test";
+    selected_snapshot.select_list = std::move(selected_view);
+    selected_snapshot.width = 64;
+    selected_snapshot.height = 16;
+    auto const frame = ava::tui::render_composer(selected_snapshot);
+    auto const wanted = "Model " + std::to_string(index);
+    every_select_list_selection_visible &=
+        std::ranges::any_of(frame, [&](std::string const& line) { return strip_sgr(line).find(wanted) != std::string::npos; });
+  }
+  expect(every_select_list_selection_visible, "grouped select-list viewport follows every selected item beyond the initial screen");
+  for (std::size_t height = 8; height <= 12; ++height)
+  {
+    for (std::size_t selected = 0; selected < scrolling_selector.items.size(); ++selected)
+    {
+      scrolling_selector.selected_item_index = selected;
+      auto compact_snapshot = ava::tui::ComposerSnapshot{};
+      compact_snapshot.mode = "build";
+      compact_snapshot.provider = "openai";
+      compact_snapshot.model = "gpt-5.5";
+      compact_snapshot.session_id = "session_test";
+      compact_snapshot.select_list = scrolling_selector;
+      compact_snapshot.width = 64;
+      compact_snapshot.height = height;
+      auto const frame = ava::tui::render_composer(compact_snapshot);
+      auto const selected_label = "Model " + std::to_string(selected);
+      auto const selected_line = std::ranges::find_if(frame, [&](std::string const& line) {
+        auto const text = strip_sgr(line);
+        return text.find("›") != std::string::npos && text.find(selected_label) != std::string::npos;
+      });
+      expect(selected_line != frame.end(), "integrated select-list modal keeps every selected item visible at compact terminal heights");
+      if (selected_line != frame.end())
+      {
+        auto const hit = ava::tui::select_list_selection_for_screen_position(compact_snapshot, static_cast<std::size_t>(selected_line - frame.begin()) + 1, 8);
+        expect(hit && *hit == selected, "integrated select-list modal hit testing matches every compact rendered selection");
+      }
+    }
+  }
+  for (std::size_t selected = 0; selected < scrolling_selector.items.size(); ++selected)
+  {
+    scrolling_selector.selected_item_index = selected;
+    auto const compact_lines = ava::tui::detail::render_select_list_modal(scrolling_selector, 64, 8);
+    auto const selected_label = "Model " + std::to_string(selected);
+    auto const selected_line = std::ranges::find_if(compact_lines, [&](std::string const& line) {
+      auto const text = strip_sgr(line);
+      return text.find("›") != std::string::npos && text.find(selected_label) != std::string::npos;
+    });
+    expect(selected_line != compact_lines.end(), "minimum-height select-list modal reserves a visible row for every selection despite a wrapped subtitle");
+    if (selected_line != compact_lines.end())
+    {
+      auto const hit =
+          ava::tui::detail::select_list_item_for_modal_row(scrolling_selector, static_cast<std::size_t>(selected_line - compact_lines.begin()), 64, 8);
+      expect(hit && *hit == selected, "minimum-height select-list modal hit testing matches every rendered selection");
+    }
+  }
+
+  auto boundary_selector = ava::tui::SelectListView{
+      .title = "Group boundary",
+      .subtitle = {},
+      .items = {ava::tui::SelectListItemView{
+                    .value = "a-0", .label = "A zero", .description = {}, .group = "provider-a", .detail = {}, .badge = {}, .disabled_reason = {}},
+                ava::tui::SelectListItemView{
+                    .value = "a-1", .label = "A one", .description = {}, .group = "provider-a", .detail = {}, .badge = {}, .disabled_reason = {}},
+                ava::tui::SelectListItemView{
+                    .value = "b-0", .label = "B zero", .description = {}, .group = "provider-b", .detail = {}, .badge = {}, .disabled_reason = {}}},
+      .selected_item_index = 2,
+      .query = {},
+      .placeholder = "Search",
+      .empty_text = "No matches",
+      .footer_hint = {}};
+  auto const boundary_lines = ava::tui::detail::render_select_list_modal(boundary_selector, 64, 10);
+  auto const boundary_selected = std::ranges::find_if(boundary_lines, [](std::string const& line) {
+    auto const text = strip_sgr(line);
+    return text.find("›") != std::string::npos && text.find("B zero") != std::string::npos;
+  });
+  expect(boundary_selected != boundary_lines.end() && boundary_selected != boundary_lines.begin() &&
+             strip_sgr(*(boundary_selected - 1)).find("provider-b") != std::string::npos,
+         "grouped select-list modal never renders the first item of a new group beneath the previous group's header");
+  if (boundary_selected != boundary_lines.end())
+  {
+    auto const hit =
+        ava::tui::detail::select_list_item_for_modal_row(boundary_selector, static_cast<std::size_t>(boundary_selected - boundary_lines.begin()), 64, 10);
+    expect(hit && *hit == 2, "group-boundary select-list hit testing matches the rendered selected item");
+  }
+
   selector.query = "sonnet";
   auto selector_matches = ava::tui::filter_select_list_items(selector);
   expect(selector_matches.size() == 1 && selector_matches.front() == 1,
@@ -6414,7 +6792,7 @@ void test_tui_composer_rendering_and_input()
                                                                                      .width = 20,
                                                                                      .height = 8});
   expect(std::ranges::all_of(exact_width_utf8, [](std::string const& line) { return visible_columns(line) <= 20; }) &&
-             std::ranges::any_of(exact_width_utf8, [](std::string const& line) { return strip_sgr(line).find("▎  Build") != std::string::npos; }),
+             std::ranges::any_of(exact_width_utf8, [](std::string const& line) { return strip_sgr(line).find("▎  GPT-5.5") != std::string::npos; }),
          "tui width fitting preserves the AVA composer surface at minimum width");
 
   auto const utf8 = ava::tui::render_composer(

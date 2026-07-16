@@ -186,6 +186,16 @@ void test_openai_provider_contract()
              reasoning_request->body.find("\"summary\":\"auto\"") != std::string::npos,
          "OpenAI request serializes reasoning effort with visible summary request");
 
+  auto const max_reasoning_request = provider.build_request(ava::provider::ProviderRequest{.provider_id = "openai",
+                                                                                           .model_id = "gpt-5.6-sol",
+                                                                                           .system_prompt = "system",
+                                                                                           .messages = {},
+                                                                                           .tools_json = {},
+                                                                                           .reasoning = ava::provider::ProviderReasoningOptions{.type = "max"}},
+                                                            "api-token");
+  expect(max_reasoning_request && max_reasoning_request->body.find("\"reasoning\":{\"effort\":\"max\"") != std::string::npos,
+         "OpenAI request serializes GPT-5.6 max reasoning effort");
+
   auto const invalid_reasoning_budget =
       provider.build_request(ava::provider::ProviderRequest{.provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -297,15 +307,28 @@ void test_openai_provider_contract()
   expect(!expired_credential_request && expired_credential_request.error().message().find("expired") != std::string::npos,
          "OpenAI provider rejects expired OAuth before building request");
 
-  auto const oauth_credential_request = provider.build_request(
-      ava::provider::ProviderRequest{.provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system", .messages = {}, .tools_json = {}},
-      ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
-                                    .access_token = "codex-token",
-                                    .refresh_token = "refresh",
-                                    .expires_at = 120,
-                                    .account_id = "acct_123",
-                                    .source_path = {}},
-      11);
+  ava::provider::ProviderRequest const delegated_provider_request{
+      .provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system", .messages = {}, .tools_json = {}, .max_output_tokens = 1234};
+  auto const api_key_auth_context_request = static_cast<ava::provider::Provider const&>(provider).build_request(
+      delegated_provider_request, ava::provider::ProviderAuthContext{.access_token = "api-token", .credential_type = "api_key", .account_id = {}});
+  expect(api_key_auth_context_request && api_key_auth_context_request->url == "https://api.example.test/v1/responses" &&
+             api_key_auth_context_request->body.find("\"max_output_tokens\":1234") != std::string::npos,
+         "OpenAI API-key auth-context request retains the public Responses output-token parameter");
+
+  auto const oauth_auth_context_request = static_cast<ava::provider::Provider const&>(provider).build_request(
+      delegated_provider_request, ava::provider::ProviderAuthContext{.access_token = "codex-token", .credential_type = "oauth", .account_id = "acct_123"});
+  expect(oauth_auth_context_request && oauth_auth_context_request->url == "https://chatgpt.com/backend-api/codex/responses" &&
+             oauth_auth_context_request->body.find("\"max_output_tokens\"") == std::string::npos,
+         "OpenAI delegated auth-context request omits the unsupported public Responses output-token parameter");
+
+  auto const oauth_credential_request = provider.build_request(delegated_provider_request,
+                                                               ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
+                                                                                             .access_token = "codex-token",
+                                                                                             .refresh_token = "refresh",
+                                                                                             .expires_at = 120,
+                                                                                             .account_id = "acct_123",
+                                                                                             .source_path = {}},
+                                                               11);
   expect(oauth_credential_request && oauth_credential_request->url == "https://chatgpt.com/backend-api/codex/responses",
          "OpenAI OAuth request targets delegated responses endpoint");
   if (oauth_credential_request)
@@ -313,7 +336,9 @@ void test_openai_provider_contract()
     expect(oauth_credential_request->headers.at("ChatGPT-Account-Id") == "acct_123" &&
                oauth_credential_request->headers.at("OpenAI-Beta") == "responses=experimental" && oauth_credential_request->headers.at("originator") == "ava",
            "OpenAI OAuth request carries delegated account and beta headers");
-    expect(oauth_credential_request->body.find("\"store\":false") != std::string::npos, "OpenAI OAuth request disables response storage");
+    expect(oauth_credential_request->body.find("\"store\":false") != std::string::npos &&
+               oauth_credential_request->body.find("\"max_output_tokens\"") == std::string::npos,
+           "OpenAI OAuth request disables response storage and omits the unsupported public output-token parameter");
   }
 
   auto const oauth_credential_request_without_now = provider.build_request(

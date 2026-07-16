@@ -166,7 +166,7 @@ The `task` operation covers model-visible subagent delegation through the built-
 
 ## Models
 
-Built-in default: `openai/gpt-5.5`.
+Built-in default: `openai/gpt-5.5`. Built-in OpenAI choices also include `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; select one with `/model` or set it as `default_model` below. The GPT-5.6 profiles intentionally use a 272K context boundary so AVA stays in OpenAI's short-context pricing tier; each retains the documented 128K maximum output and current short-context token prices.
 
 Optional model override file: `$XDG_CONFIG_HOME/ava/models.json`.
 

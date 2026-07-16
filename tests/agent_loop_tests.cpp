@@ -5,6 +5,7 @@
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
 #include "ava/config/model_config.h"
+#include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
 #include "ava/session/validation.h"
 #include "ava/permissions/permission.h"
@@ -573,6 +574,75 @@ void test_agent_loop_task_subagent_runs_child_session()
          "observed foreground task has separate parent/child lifecycles, fresh child session IDs, and typed parent correlation");
 }
 
+void test_agent_loop_task_subagent_recovers_torn_child_before_resume()
+{
+  auto const root = temp_root() / "agent-task-subagent-torn-resume";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const session_root = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto child = ava::session::SessionStore::create(workspace, session_root);
+  expect(child.has_value(), "torn child resume test creates a child session");
+  if (!child)
+    return;
+  auto metadata = ava::session::append_session_metadata(
+      *child, ava::session::SessionMetadataUpdate{.name = "resumable child", .parent_session_id = "parent-resume", .actor = "subagent"});
+  expect(metadata.has_value(), "torn child resume test seeds child metadata");
+  if (!metadata)
+    return;
+  auto const child_id = child->session_id();
+  auto const child_path = child->session_path();
+  auto const valid_child_bytes = [&] {
+    std::ifstream file(child_path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+  }();
+  {
+    std::ofstream file(child_path, std::ios::binary | std::ios::app);
+    file << "{\"version\":3,\"id\":\"torn-child";
+  }
+
+  ava::session::SessionStore parent(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-resume"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  auto const task_arguments = std::string("{\\\"description\\\":\\\"Resume child\\\",\\\"prompt\\\":\\\"Continue child.\\\",") +
+                              "\\\"subagent_type\\\":\\\"general\\\",\\\"task_id\\\":\\\"" + child_id + "\\\"}";
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_resume\",\"name\":\"task\"}\n\n"
+                                                    "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_resume\",\"delta\":\"" +
+                                                    task_arguments +
+                                                    "\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"resumed child answer\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent resumed child\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      }});
+
+  auto result = loop.run_turn("resume torn child", parent, provider, transport);
+  std::ifstream repaired_file(child_path, std::ios::binary);
+  std::string repaired_bytes{std::istreambuf_iterator<char>(repaired_file), std::istreambuf_iterator<char>()};
+  auto child_entries = child->load();
+  bool quarantine_found = false;
+  auto const quarantine_prefix = child_path.filename().string() + ".torn-tail.";
+  std::error_code iter_error;
+  for (std::filesystem::directory_iterator iterator(child_path.parent_path(), iter_error), end; !iter_error && iterator != end; iterator.increment(iter_error))
+  {
+    quarantine_found = quarantine_found || iterator->path().filename().string().starts_with(quarantine_prefix);
+  }
+  expect(result && result->final_text == "parent resumed child" && transport.requests().size() == 3 && child_entries && child_entries->size() >= 3 &&
+             repaired_bytes.starts_with(valid_child_bytes) && repaired_bytes.find("torn-child") == std::string::npos && quarantine_found,
+         "foreground task_id resume owns and recovers a torn child before loading and running it");
+}
+
 void test_subagent_config_loads_project_definitions()
 {
   auto const root = temp_root() / "subagent-config";
@@ -730,6 +800,38 @@ void test_agent_loop_background_task_starts_child_session()
   bool const saw_background_request_without_lsp = !background_requests.empty() &&
                                                   background_requests.front().body.find("\"name\":\"lsp_diagnostics\"") == std::string::npos &&
                                                   background_requests.front().body.find("\"name\":\"lsp_workspace_symbols\"") == std::string::npos;
+
+  bool foreground_resume_blocked = false;
+  if (!running_jobs.empty())
+  {
+    ava::session::SessionStore competing_parent(
+        ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-bg-contender"});
+    auto const resume_arguments = std::string("{\\\"description\\\":\\\"Resume running child\\\",\\\"prompt\\\":\\\"Compete.\\\",") +
+                                  "\\\"subagent_type\\\":\\\"general\\\",\\\"task_id\\\":\\\"" + running_jobs.front().child_session_id + "\\\"}";
+    ava::tests::FakeTransport competing_transport(
+        {sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_compete\",\"name\":\"task\"}\n\n"
+                      "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_compete\",\"delta\":\"" +
+                      resume_arguments +
+                      "\"}\n\n"
+                      "data: [DONE]\n\n"),
+         sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"resume was blocked\"}\n\n"
+                      "data: [DONE]\n\n")});
+    ava::agent::AgentLoop competing_loop(ava::agent::AgentLoopOptions{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .provider_id = "openai",
+        .model_id = "gpt-5.5",
+        .system_prompt = "system prompt",
+        .access_token = "token",
+        .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+          return ava::permissions::PermissionResolution::Allow;
+        }});
+    auto competing_result = competing_loop.run_turn("resume running child", competing_parent, provider, competing_transport);
+    foreground_resume_blocked = competing_result && competing_result->final_text == "resume was blocked" && competing_transport.requests().size() == 2 &&
+                                competing_transport.requests()[1].body.find("already owned") != std::string::npos;
+  }
+  expect(foreground_resume_blocked, "foreground task_id resume fails while the background child owns its session lease");
+
   background_state->release_success();
   ava::core::Result<ava::agent::BackgroundJobSnapshot> completed =
       std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing background job"));
@@ -2473,6 +2575,7 @@ void run_agent_loop_tests()
   test_agent_loop_usage_and_cost_persistence();
   test_agent_loop_tool_turn_and_continuation();
   test_agent_loop_task_subagent_runs_child_session();
+  test_agent_loop_task_subagent_recovers_torn_child_before_resume();
   test_subagent_config_loads_project_definitions();
   test_agent_loop_custom_subagent_definition_controls_prompt_and_tools();
   test_agent_loop_background_task_starts_child_session();

@@ -262,7 +262,7 @@ Follow-up ordering:
 < response(id=fu1)
 ```
 
-A standard-library-only client is in [`examples/rpc-client/`](../examples/rpc-client/).
+A source checkout also contains a standard-library-only client under `examples/rpc-client/`; examples and source trees are intentionally not installed in the host artifact.
 
 ## RPC v1 Contract-Delta Ledger
 

@@ -173,8 +173,9 @@ void test_app_compact_openai_oauth_streaming_summary_success()
   expect(generated && *generated == summary, "OAuth streaming compaction summary parses SSE text deltas");
   expect(transport.requests().size() == 1 && transport.requests()[0].url == "https://chatgpt.com/backend-api/codex/responses" &&
              transport.requests()[0].body.find("\"stream\":true") != std::string::npos &&
-             transport.requests()[0].body.find("\"store\":false") != std::string::npos,
-         "OAuth compaction summary request uses delegated streaming request shape");
+             transport.requests()[0].body.find("\"store\":false") != std::string::npos &&
+             transport.requests()[0].body.find("\"max_output_tokens\"") == std::string::npos,
+         "OAuth compaction summary request uses the delegated request shape without public-only output-token parameters");
 }
 
 void test_app_compact_provider_failure_leaves_session_untouched()

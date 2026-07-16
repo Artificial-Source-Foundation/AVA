@@ -18,6 +18,7 @@ class OpenAIProvider final : public Provider
 
   explicit OpenAIProvider(std::string base_url = "https://api.openai.com");
   [[nodiscard]] ava::core::Result<HttpRequest> build_request(ProviderRequest const& request, std::string_view access_token) const override;
+  [[nodiscard]] ava::core::Result<HttpRequest> build_request(ProviderRequest const& request, ProviderAuthContext const& auth) const override;
   [[nodiscard]] ava::core::VoidResult apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const override;
   [[nodiscard]] std::unique_ptr<StreamParser> create_stream_parser() const override;
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response, bool stream) const override;

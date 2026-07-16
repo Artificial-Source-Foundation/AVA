@@ -1,0 +1,289 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+if [[ $(uname -s) != Linux ]]; then
+  echo "error: scripts/package-linux.sh supports Linux hosts only" >&2
+  exit 2
+fi
+
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+binary=""
+fake_provider=""
+output_dir=""
+binary_supplied=false
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/package-linux.sh [--binary ABS] [--fake-provider ABS] [--output-dir ABS]
+
+Without --binary, configure the release preset and build ava plus the fake-provider helper.
+With --binary, snapshot that executable once and stage it only when its exact version matches this checkout.
+A supplied --fake-provider is likewise snapshotted once before model smoke.
+If --output-dir is omitted, a new private unpredictable directory is created.
+Python 3 is required only for packaging-time link verification and secure publication.
+EOF
+}
+
+require_absolute() {
+  local option=$1
+  local value=$2
+  if [[ $value != /* ]]; then
+    echo "error: $option requires an absolute path: $value" >&2
+    exit 2
+  fi
+}
+
+while (($# > 0)); do
+  case "$1" in
+    --binary|--fake-provider|--output-dir)
+      if (($# < 2)); then
+        echo "error: $1 requires a value" >&2
+        usage >&2
+        exit 2
+      fi
+      require_absolute "$1" "$2"
+      case "$1" in
+        --binary) binary=$2; binary_supplied=true ;;
+        --fake-provider) fake_provider=$2 ;;
+        --output-dir) output_dir=$2 ;;
+      esac
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+required_commands=(python3 tar sha256sum)
+if [[ $binary_supplied == false || -n $fake_provider ]]; then
+  required_commands+=(cmake)
+fi
+for command in "${required_commands[@]}"; do
+  if ! command -v "$command" >/dev/null 2>&1; then
+    echo "error: required packaging command is unavailable: $command" >&2
+    exit 2
+  fi
+done
+
+path_is_inside_repo() {
+  local normalized
+  normalized=$(realpath -m -- "$1")
+  [[ $normalized == "$repo_root" || $normalized == "$repo_root/"* ]]
+}
+
+choose_temp_base() {
+  local candidate normalized
+  for candidate in "${TMPDIR:-}" /var/tmp /tmp; do
+    [[ -n $candidate && -d $candidate && -w $candidate ]] || continue
+    normalized=$(realpath -e -- "$candidate")
+    if ! path_is_inside_repo "$normalized"; then
+      printf '%s\n' "$normalized"
+      return 0
+    fi
+  done
+  return 1
+}
+
+temp_base=$(choose_temp_base) || {
+  echo "error: no writable temporary directory outside the repository" >&2
+  exit 1
+}
+
+if [[ -z $output_dir ]]; then
+  output_dir=$(mktemp -d --tmpdir="$temp_base" ava-release-output.XXXXXXXX)
+  chmod 0700 -- "$output_dir"
+else
+  if path_is_inside_repo "$output_dir"; then
+    echo "error: output directory must be outside the repository: $output_dir" >&2
+    exit 2
+  fi
+  if [[ ! -e $output_dir && ! -L $output_dir ]]; then
+    mkdir -m 0700 -- "$output_dir"
+  fi
+fi
+output_identity=$(python3 "$repo_root/scripts/publish-linux-artifacts.py" --check "$output_dir")
+
+work_root=$(mktemp -d --tmpdir="$temp_base" ava-package-linux.XXXXXXXX)
+chmod 0700 -- "$work_root"
+cleanup() {
+  rm -rf -- "$work_root"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if path_is_inside_repo "$work_root"; then
+  echo "error: private packaging work directory unexpectedly resolved inside the repository: $work_root" >&2
+  exit 1
+fi
+
+if [[ -z $binary ]]; then
+  cmake --preset release -S "$repo_root"
+  cmake --build --preset release --target ava ava_fake_provider_server
+  binary="$repo_root/build-release/ava"
+  if [[ -z $fake_provider ]]; then
+    fake_provider="$repo_root/build-release/tests/ava_fake_provider_server"
+  fi
+fi
+
+input_root="$work_root/inputs"
+mkdir -m 0700 -- "$input_root"
+python3 "$repo_root/scripts/publish-linux-artifacts.py" \
+  --snapshot-executable "$binary" "$input_root/ava"
+binary="$input_root/ava"
+if [[ -n $fake_provider ]]; then
+  python3 "$repo_root/scripts/publish-linux-artifacts.py" \
+    --snapshot-executable "$fake_provider" "$input_root/fake-provider"
+  fake_provider="$input_root/fake-provider"
+fi
+
+version_output=$("$binary" --version)
+if [[ $version_output =~ ^ava\ ([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+  version=${BASH_REMATCH[1]}
+else
+  echo "error: expected exact version output 'ava X.Y.Z', got: $version_output" >&2
+  exit 1
+fi
+project_version=$(python3 - "$repo_root/CMakeLists.txt" <<'PY'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+match = re.search(r"project\s*\(\s*ava\b.*?\bVERSION\s+([0-9]+\.[0-9]+\.[0-9]+)\b", text, re.DOTALL | re.IGNORECASE)
+if not match:
+    raise SystemExit("unable to parse top-level project(ava VERSION X.Y.Z)")
+print(match.group(1))
+PY
+)
+if [[ $version != "$project_version" ]]; then
+  echo "error: binary version ava $version does not match current checkout project(ava VERSION $project_version)" >&2
+  exit 1
+fi
+
+case "$(uname -m)" in
+  x86_64|amd64) arch=x64 ;;
+  aarch64|arm64) arch=arm64 ;;
+  armv7l|armv7) arch=armv7 ;;
+  ppc64le) arch=ppc64le ;;
+  riscv64) arch=riscv64 ;;
+  *)
+    arch=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
+    if [[ -z $arch ]]; then
+      echo "error: unable to normalize host architecture" >&2
+      exit 1
+    fi
+    ;;
+esac
+
+package_name="ava-${version}-linux-${arch}"
+stage="$work_root/stage/$package_name"
+doc_root="$stage/share/doc/ava"
+doc_sources=(
+  docs/USAGE.md
+  docs/CONFIG.md
+  docs/TESTING.md
+  docs/headless-protocol.md
+  docs/rpc-protocol.md
+  docs/acp.md
+  docs/mcp.md
+  docs/session-format.md
+  docs/plugin-system.md
+  docs/plugin-compatibility-policy.md
+  docs/release-checklist.md
+  docs/engineering/session-versioning.md
+  docs/engineering/side-effect-safety-checklist.md
+  docs/interop/evidence/README.md
+  docs/interop/evidence/zed-1.9.0-2026-07-14.md
+  docs/product/mvp-coverage-ledger.md
+  docs/acp-support.json
+  docs/schema/theme.schema.json
+)
+
+if [[ $binary_supplied == false ]]; then
+  cmake --install "$repo_root/build-release" --prefix "$stage" --component ava
+else
+  install -D -m 0644 -- "$repo_root/docs/release-artifact-readme.md" "$doc_root/README.md"
+  install -D -m 0644 -- "$repo_root/LICENSE" "$doc_root/LICENSE"
+  for source in "${doc_sources[@]}"; do
+    install -D -m 0644 -- "$repo_root/$source" "$doc_root/$source"
+  done
+fi
+# cmake --install reads the build tree, so always replace its executable with
+# the exact private snapshot used for version validation and package smoke.
+install -D -m 0755 -- "$binary" "$stage/bin/ava"
+
+expected_files=(bin/ava share/doc/ava/README.md share/doc/ava/LICENSE)
+for source in "${doc_sources[@]}"; do
+  expected_files+=("share/doc/ava/$source")
+done
+mapfile -t staged_files < <(cd -- "$stage" && find . \( -type f -o -type l \) -printf '%P\n' | LC_ALL=C sort)
+mapfile -t sorted_expected < <(printf '%s\n' "${expected_files[@]}" | LC_ALL=C sort)
+if [[ ${staged_files[*]} != "${sorted_expected[*]}" ]]; then
+  printf 'error: staged package contents differ from the AVA allowlist\n' >&2
+  printf 'staged:\n%s\n' "${staged_files[*]}" >&2
+  printf 'expected:\n%s\n' "${sorted_expected[*]}" >&2
+  exit 1
+fi
+if find "$stage" -type l -print -quit | grep -q .; then
+  echo "error: staged package contains a symlink" >&2
+  exit 1
+fi
+python3 "$repo_root/scripts/verify-markdown-links.py" "$doc_root"
+
+archive_name="$package_name.tar.gz"
+checksum_name="$archive_name.sha256"
+artifact_work="$work_root/artifacts"
+mkdir -p -- "$artifact_work"
+tar -C "$work_root/stage" -czf "$artifact_work/$archive_name" "$package_name"
+(
+  cd -- "$artifact_work"
+  sha256sum "$archive_name" > "$checksum_name"
+  sha256sum -c "$checksum_name"
+)
+
+extract_root="$work_root/extracted"
+mkdir -p -- "$extract_root"
+tar -C "$extract_root" -xzf "$artifact_work/$archive_name"
+extracted="$extract_root/$package_name"
+[[ -x $extracted/bin/ava ]]
+smoke_home="$work_root/smoke-home"
+smoke_config="$work_root/smoke-config"
+smoke_state="$work_root/smoke-state"
+mkdir -p -- "$smoke_home" "$smoke_config" "$smoke_state"
+run_smoke() {
+  HOME=$smoke_home XDG_CONFIG_HOME=$smoke_config XDG_STATE_HOME=$smoke_state "$@"
+}
+[[ $(run_smoke "$extracted/bin/ava" --version) == "ava $version" ]]
+help_output=$(run_smoke "$extracted/bin/ava" --help)
+grep -q 'Usage' <<<"$help_output"
+packages_output=$(run_smoke "$extracted/bin/ava" packages list)
+grep -qi 'deferred' <<<"$packages_output"
+
+if [[ -n $fake_provider && -x $fake_provider ]]; then
+  cmake \
+    -DAVA_EXE="$extracted/bin/ava" \
+    -DAVA_FAKE_PROVIDER_EXE="$fake_provider" \
+    -DAVA_CLI_TEST_ROOT="$work_root/model-smoke" \
+    -P "$repo_root/tests/cli_headless_e2e_model_smoke.cmake"
+  echo "package model smoke: passed"
+else
+  echo "package model smoke: skipped (no executable --fake-provider supplied)"
+fi
+
+# Publish the checksum first and archive last; the archive is the pair's commit marker.
+python3 "$repo_root/scripts/publish-linux-artifacts.py" \
+  --output "$output_dir" \
+  --expected-directory-identity "$output_identity" \
+  --file "$artifact_work/$checksum_name" "$checksum_name" \
+  --file "$artifact_work/$archive_name" "$archive_name"
+
+printf 'artifact: %s\n' "$output_dir/$archive_name"
+printf 'checksum: %s\n' "$output_dir/$checksum_name"

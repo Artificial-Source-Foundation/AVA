@@ -416,6 +416,7 @@ struct ComposerSnapshot
   std::size_t spinner_frame = 0;
   std::optional<std::string> token_status = std::nullopt;
   std::optional<std::string> reasoning_status = std::nullopt;
+  std::optional<std::size_t> context_source_count = std::nullopt;
   std::vector<TranscriptItem> transcript;
   std::vector<SlashCommandItem> slash_commands = {};
   std::vector<FileReferenceItem> file_references = {};
@@ -445,19 +446,18 @@ struct ComposerSnapshot
 };
 
 [[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input, std::vector<SlashCommandItem> const& commands);
-[[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input, std::size_t cursor,
-                                                                  std::vector<SlashCommandItem> const& commands);
+[[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands);
 [[nodiscard]] bool slash_palette_visible(std::string_view input, std::vector<SlashCommandItem> const& commands);
 [[nodiscard]] bool slash_palette_visible(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands);
 [[nodiscard]] std::size_t clamp_slash_palette_selection(std::string_view input, std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
-[[nodiscard]] std::size_t clamp_slash_palette_selection(std::string_view input, std::size_t cursor,
-                                                        std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
+[[nodiscard]] std::size_t clamp_slash_palette_selection(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands,
+                                                        std::size_t selected_index);
 [[nodiscard]] std::size_t previous_slash_palette_selection(std::string_view input, std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
-[[nodiscard]] std::size_t previous_slash_palette_selection(std::string_view input, std::size_t cursor,
-                                                           std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
+[[nodiscard]] std::size_t previous_slash_palette_selection(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands,
+                                                           std::size_t selected_index);
 [[nodiscard]] std::size_t next_slash_palette_selection(std::string_view input, std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
-[[nodiscard]] std::size_t next_slash_palette_selection(std::string_view input, std::size_t cursor,
-                                                       std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
+[[nodiscard]] std::size_t next_slash_palette_selection(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands,
+                                                       std::size_t selected_index);
 struct SlashCommandSelectionText
 {
   std::string text;
@@ -466,24 +466,22 @@ struct SlashCommandSelectionText
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 [[nodiscard]] std::string slash_command_selection_text(std::string_view input, std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
-[[nodiscard]] SlashCommandSelectionText slash_command_selection_text(std::string_view input, std::size_t cursor,
-                                                                     std::vector<SlashCommandItem> const& commands,
+[[nodiscard]] SlashCommandSelectionText slash_command_selection_text(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands,
                                                                      std::size_t selected_index);
 [[nodiscard]] std::optional<std::string> slash_command_selection_disabled_reason(std::string_view input, std::vector<SlashCommandItem> const& commands,
                                                                                  std::size_t selected_index);
 [[nodiscard]] std::optional<std::string> slash_command_selection_disabled_reason(std::string_view input, std::size_t cursor,
-                                                                                 std::vector<SlashCommandItem> const& commands,
-                                                                                 std::size_t selected_index);
+                                                                                 std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
 [[nodiscard]] std::optional<std::size_t> slash_palette_selection_for_screen_row(ComposerSnapshot const& snapshot, std::size_t row);
 [[nodiscard]] std::vector<FileReferenceItem> filter_file_references(std::string_view input, std::size_t cursor,
                                                                     std::vector<FileReferenceItem> const& references);
 [[nodiscard]] bool file_reference_palette_visible(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references);
 [[nodiscard]] std::size_t clamp_file_reference_selection(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
-                                                        std::size_t selected_index);
-[[nodiscard]] std::size_t previous_file_reference_selection(std::string_view input, std::size_t cursor,
-                                                           std::vector<FileReferenceItem> const& references, std::size_t selected_index);
+                                                         std::size_t selected_index);
+[[nodiscard]] std::size_t previous_file_reference_selection(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
+                                                            std::size_t selected_index);
 [[nodiscard]] std::size_t next_file_reference_selection(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
-                                                       std::size_t selected_index);
+                                                        std::size_t selected_index);
 struct FileReferenceSelectionText
 {
   std::string text;
@@ -492,24 +490,18 @@ struct FileReferenceSelectionText
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 [[nodiscard]] FileReferenceSelectionText file_reference_selection_text(std::string_view input, std::size_t cursor,
-                                                                       std::vector<FileReferenceItem> const& references,
-                                                                       std::size_t selected_index);
-[[nodiscard]] std::optional<std::size_t> file_reference_palette_selection_for_screen_row(ComposerSnapshot const& snapshot,
-                                                                                        std::size_t row);
+                                                                       std::vector<FileReferenceItem> const& references, std::size_t selected_index);
+[[nodiscard]] std::optional<std::size_t> file_reference_palette_selection_for_screen_row(ComposerSnapshot const& snapshot, std::size_t row);
 [[nodiscard]] std::vector<FileReferenceItem> filter_path_completions(std::string_view input, std::size_t cursor,
-                                                                     std::vector<FileReferenceItem> const& references,
-                                                                     bool force = false);
-[[nodiscard]] bool path_completion_palette_visible(std::string_view input, std::size_t cursor,
-                                                   std::vector<FileReferenceItem> const& references, bool force = false);
-[[nodiscard]] std::size_t clamp_path_completion_selection(std::string_view input, std::size_t cursor,
-                                                         std::vector<FileReferenceItem> const& references,
+                                                                     std::vector<FileReferenceItem> const& references, bool force = false);
+[[nodiscard]] bool path_completion_palette_visible(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
+                                                   bool force = false);
+[[nodiscard]] std::size_t clamp_path_completion_selection(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
+                                                          std::size_t selected_index, bool force = false);
+[[nodiscard]] std::size_t previous_path_completion_selection(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
+                                                             std::size_t selected_index, bool force = false);
+[[nodiscard]] std::size_t next_path_completion_selection(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
                                                          std::size_t selected_index, bool force = false);
-[[nodiscard]] std::size_t previous_path_completion_selection(std::string_view input, std::size_t cursor,
-                                                            std::vector<FileReferenceItem> const& references,
-                                                            std::size_t selected_index, bool force = false);
-[[nodiscard]] std::size_t next_path_completion_selection(std::string_view input, std::size_t cursor,
-                                                        std::vector<FileReferenceItem> const& references,
-                                                        std::size_t selected_index, bool force = false);
 struct PathCompletionSelectionText
 {
   std::string text;
@@ -518,11 +510,9 @@ struct PathCompletionSelectionText
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 [[nodiscard]] PathCompletionSelectionText path_completion_selection_text(std::string_view input, std::size_t cursor,
-                                                                        std::vector<FileReferenceItem> const& references,
-                                                                        std::size_t selected_index,
-                                                                        bool force = false);
-[[nodiscard]] std::optional<std::size_t> path_completion_palette_selection_for_screen_row(ComposerSnapshot const& snapshot,
-                                                                                         std::size_t row);
+                                                                         std::vector<FileReferenceItem> const& references, std::size_t selected_index,
+                                                                         bool force = false);
+[[nodiscard]] std::optional<std::size_t> path_completion_palette_selection_for_screen_row(ComposerSnapshot const& snapshot, std::size_t row);
 [[nodiscard]] ComposerFrame render_composer_frame(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::vector<std::string> render_composer(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::size_t composer_main_width(ComposerSnapshot const& snapshot);
@@ -536,12 +526,8 @@ struct PathCompletionSelectionText
 [[nodiscard]] std::size_t clamp_select_list_selection(SelectListView const& view, std::size_t selected_index);
 [[nodiscard]] std::size_t previous_select_list_selection(SelectListView const& view, std::size_t selected_index);
 [[nodiscard]] std::size_t next_select_list_selection(SelectListView const& view, std::size_t selected_index);
-[[nodiscard]] std::optional<std::size_t> select_list_selection_for_screen_position(ComposerSnapshot const& snapshot,
-                                                                                  std::size_t row,
-                                                                                  std::size_t column);
-[[nodiscard]] std::optional<std::size_t> composer_input_cursor_for_screen_position(ComposerSnapshot const& snapshot,
-                                                                                  std::size_t row,
-                                                                                  std::size_t column);
+[[nodiscard]] std::optional<std::size_t> select_list_selection_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
+[[nodiscard]] std::optional<std::size_t> composer_input_cursor_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] SelectListInputResult handle_select_list_input(SelectListView const& view, InputEvent event);
 [[nodiscard]] SelectListInputResult handle_select_list_input(SelectListView const& view, InputEvent event, TuiKeyBindings const& bindings);
 [[nodiscard]] std::string to_string(ToolTimelineStatus status);

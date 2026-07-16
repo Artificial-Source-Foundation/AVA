@@ -1,6 +1,6 @@
 # AVA Session Format Reference
 
-This document describes AVA's public, append-only session JSONL format. It is intended for tools that need to inspect, archive, validate, or copy AVA sessions without depending on UI output. The implementation sources are [`src/ava/session/`](../src/ava/session/), the headless RPC/session contract in [`docs/headless-protocol.md`](headless-protocol.md), and the session regression tests in [`tests/session_tests.cpp`](../tests/session_tests.cpp).
+This document describes AVA's public, append-only session JSONL format. It is intended for tools that need to inspect, archive, validate, or copy AVA sessions without depending on UI output. The packaged protocol contract is [`headless-protocol.md`](headless-protocol.md). A source checkout additionally contains the implementation under `src/ava/session/` and regression coverage in `tests/session_tests.cpp`; source and test trees are intentionally not installed in the host artifact.
 
 AVA session JSONL is **not Pi-compatible**. AVA accepts some Pi-compatible CLI/RPC aliases, but persisted session files use AVA-native envelope fields, entry type names, payload schemas, attachment storage, and replay rules. Do not import Pi logs as AVA sessions, and do not assume AVA JSONL can be replayed by Pi.
 

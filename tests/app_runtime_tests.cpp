@@ -62,6 +62,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -112,6 +113,12 @@ std::string app_tiny_png_bytes()
   bytes.push_back(static_cast<char>(0x1A));
   bytes += "\nava-runtime-image";
   return bytes;
+}
+
+std::string app_read_binary_file(std::filesystem::path const& path)
+{
+  std::ifstream file(path, std::ios::binary);
+  return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
 }
 
 std::string shell_single_quoted(std::string_view value)
@@ -427,6 +434,7 @@ void test_app_runtime_session_startup_options()
   if (!named)
     return;
 
+  auto const named_session_id = named->store.session_id();
   auto named_metadata = ava::session::load_session_metadata(named->store);
   expect(named_metadata && named_metadata->name == "named startup" && named_metadata->actor == "cli", "runtime startup --name records session metadata");
   auto named_entries = named->store.load();
@@ -445,25 +453,35 @@ void test_app_runtime_session_startup_options()
          "runtime opens sessions under a custom session directory");
   auto default_sessions = ava::session::SessionStore::list_sessions(workspace, paths.sessions_dir);
   auto custom_sessions = ava::session::SessionStore::list_sessions(workspace, custom_paths.sessions_dir);
-  expect(default_sessions && default_sessions->size() == 1 && default_sessions->front().session_id == named->store.session_id(),
+  expect(default_sessions && default_sessions->size() == 1 && default_sessions->front().session_id == named_session_id,
          "runtime custom session directory leaves default session listing unchanged");
   expect(custom_sessions && custom_sessions->size() == 1 && custom_sessions->front().session_id == custom->store.session_id(),
          "runtime custom session directory has its own session listing");
+
+  ava::app::RuntimeOpenOptions active_source_fork_options;
+  active_source_fork_options.workspace_dir = workspace;
+  active_source_fork_options.current_dir = workspace;
+  active_source_fork_options.paths = paths;
+  active_source_fork_options.fork_session_id = named_session_id;
+  auto active_source_fork = ava::app::open_runtime_session(active_source_fork_options);
+  expect(!active_source_fork && active_source_fork.error().message().find("already owned") != std::string::npos,
+         "runtime --fork reports an actionable lease conflict while another runtime owns the source");
+
+  named = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release source runtime before startup fork"));
 
   ava::app::RuntimeOpenOptions fork_options;
   fork_options.workspace_dir = workspace;
   fork_options.current_dir = workspace;
   fork_options.paths = paths;
-  fork_options.fork_session_id = named->store.session_id().substr(0, 12);
+  fork_options.fork_session_id = named_session_id.substr(0, 12);
   fork_options.initial_session_name = "forked startup";
   auto forked = ava::app::open_runtime_session(fork_options);
-  expect(forked.has_value() && forked->created && forked->store.session_id() != named->store.session_id(),
-         "runtime --fork creates a new session from a source prefix");
+  expect(forked.has_value() && forked->created && forked->store.session_id() != named_session_id, "runtime --fork creates a new session from a source prefix");
   if (forked)
   {
     auto fork_metadata = ava::session::load_session_metadata(forked->store);
-    expect(fork_metadata && fork_metadata->name == "forked startup" && fork_metadata->parent_session_id == named->store.session_id() &&
-               fork_metadata->source_session_id == named->store.session_id() && fork_metadata->branch_origin == "fork" && fork_metadata->actor == "cli" &&
+    expect(fork_metadata && fork_metadata->name == "forked startup" && fork_metadata->parent_session_id == named_session_id &&
+               fork_metadata->source_session_id == named_session_id && fork_metadata->branch_origin == "fork" && fork_metadata->actor == "cli" &&
                !fork_metadata->branch_from_entry_id.empty(),
            "runtime --fork records branch metadata and startup name");
     auto fork_entries = forked->store.load();
@@ -478,7 +496,7 @@ void test_app_runtime_session_startup_options()
   }
 
   auto fork_requested_conflict = fork_options;
-  fork_requested_conflict.requested_session_id = named->store.session_id();
+  fork_requested_conflict.requested_session_id = named_session_id;
   auto fork_requested_result = ava::app::open_runtime_session(fork_requested_conflict);
   expect(!fork_requested_result && fork_requested_result.error().message().find("fork") != std::string::npos,
          "runtime rejects --fork with requested session resume");
@@ -492,6 +510,153 @@ void test_app_runtime_session_startup_options()
   fork_no_session_conflict.sessionless = true;
   auto fork_no_session_result = ava::app::open_runtime_session(fork_no_session_conflict);
   expect(!fork_no_session_result && fork_no_session_result.error().message().find("no-session") != std::string::npos, "runtime rejects --fork with no-session");
+}
+
+void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
+{
+  for (std::string const mode : {"exact", "prefix", "continue"})
+  {
+    auto const root = temp_root() / ("app-runtime-torn-resume-" + mode);
+    std::error_code remove_error;
+    std::filesystem::remove_all(root, remove_error);
+    auto const workspace = root / "workspace";
+    auto const paths = app_test_paths(root);
+    std::filesystem::create_directories(workspace);
+
+    ava::app::RuntimeOpenOptions seed_options;
+    seed_options.workspace_dir = workspace;
+    seed_options.current_dir = workspace;
+    seed_options.paths = paths;
+    auto seeded = ava::app::open_runtime_session(seed_options);
+    expect(seeded.has_value(), "runtime torn resume test creates source session for " + mode);
+    if (!seeded)
+      continue;
+    auto const session_id = seeded->store.session_id();
+    auto const session_path = seeded->store.session_path();
+    auto const valid_bytes = app_read_binary_file(session_path);
+    {
+      std::ofstream file(session_path, std::ios::binary | std::ios::app);
+      file << "{\"version\":3,\"id\":\"torn";
+    }
+    seeded = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release torn source before resume"));
+
+    ava::app::RuntimeOpenOptions resume_options = seed_options;
+    if (mode == "continue")
+      resume_options.continue_last_session = true;
+    else
+    {
+      resume_options.requested_session_id = mode == "exact" ? session_id : session_id.substr(0, 12);
+      resume_options.exact_session_id = mode == "exact";
+    }
+    auto resumed = ava::app::open_runtime_session(resume_options);
+    auto loaded = resumed ? resumed->store.load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(resumed.error()));
+    expect(resumed && resumed->store.session_id() == session_id && loaded && loaded->size() == 1 && app_read_binary_file(session_path) == valid_bytes,
+           "runtime " + mode + " resume acquires the lease, quarantines the torn tail, and then loads validated history");
+  }
+
+  auto const root = temp_root() / "app-runtime-torn-startup-fork";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  ava::app::RuntimeOpenOptions seed_options;
+  seed_options.workspace_dir = workspace;
+  seed_options.current_dir = workspace;
+  seed_options.paths = paths;
+  auto source = ava::app::open_runtime_session(seed_options);
+  expect(source.has_value(), "startup fork torn recovery test creates source session");
+  if (!source)
+    return;
+  auto const source_id = source->store.session_id();
+  auto const source_path = source->store.session_path();
+  auto const valid_source_bytes = app_read_binary_file(source_path);
+  {
+    std::ofstream file(source_path, std::ios::binary | std::ios::app);
+    file << "{\"version\":3,\"id\":\"fork-torn";
+  }
+  source = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release torn source before startup fork"));
+
+  auto fork_options = seed_options;
+  fork_options.fork_session_id = source_id.substr(0, 12);
+  auto forked = ava::app::open_runtime_session(fork_options);
+  auto fork_entries = forked ? forked->store.load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(forked.error()));
+  expect(forked && forked->created && fork_entries && fork_entries->size() == 2 && app_read_binary_file(source_path) == valid_source_bytes,
+         "startup --fork temporarily leases and recovers its source before holding the lease through branch creation");
+
+  auto no_recovery_artifacts = [](std::filesystem::path const& session_path) {
+    auto const final_prefix = session_path.filename().string() + ".torn-tail.";
+    auto const temporary_prefix = "." + session_path.filename().string() + ".torn-tail.tmp.";
+    std::error_code iter_error;
+    for (std::filesystem::directory_iterator iterator(session_path.parent_path(), iter_error), end; !iter_error && iterator != end;
+         iterator.increment(iter_error))
+    {
+      auto const name = iterator->path().filename().string();
+      if (name.starts_with(final_prefix) || name.starts_with(temporary_prefix))
+        return false;
+    }
+    return true;
+  };
+
+  auto const bounded_root = temp_root() / "app-runtime-bounded-torn-resume";
+  std::filesystem::remove_all(bounded_root, remove_error);
+  auto const bounded_workspace = bounded_root / "workspace";
+  auto const bounded_paths = app_test_paths(bounded_root);
+  std::filesystem::create_directories(bounded_workspace);
+  ava::app::RuntimeOpenOptions bounded_seed_options;
+  bounded_seed_options.workspace_dir = bounded_workspace;
+  bounded_seed_options.current_dir = bounded_workspace;
+  bounded_seed_options.paths = bounded_paths;
+  auto byte_limited_seed = ava::app::open_runtime_session(bounded_seed_options);
+  expect(byte_limited_seed.has_value(), "bounded runtime recovery test creates byte-limited source");
+  if (!byte_limited_seed)
+    return;
+  auto const byte_limited_id = byte_limited_seed->store.session_id();
+  auto const byte_limited_path = byte_limited_seed->store.session_path();
+  auto byte_limited_bytes = app_read_binary_file(byte_limited_path);
+  byte_limited_bytes += "{\"version\":3,\"id\":\"bounded-byte-torn";
+  {
+    std::ofstream file(byte_limited_path, std::ios::binary | std::ios::trunc);
+    file << byte_limited_bytes;
+  }
+  byte_limited_seed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release byte-limited runtime"));
+  auto byte_limited_options = bounded_seed_options;
+  byte_limited_options.requested_session_id = byte_limited_id;
+  byte_limited_options.exact_session_id = true;
+  byte_limited_options.session_read_limits =
+      ava::session::SessionReadLimits{.max_file_bytes = byte_limited_bytes.size() - 1, .max_line_bytes = byte_limited_bytes.size() - 1, .max_entries = 8};
+  auto byte_limited_resume = ava::app::open_runtime_session(byte_limited_options);
+  expect(!byte_limited_resume && byte_limited_resume.error().message().find("byte limit") != std::string::npos &&
+             app_read_binary_file(byte_limited_path) == byte_limited_bytes && no_recovery_artifacts(byte_limited_path),
+         "bounded runtime/ACP-style recovery rejects an oversized source unchanged without quarantine");
+
+  auto entry_limited_seed = ava::app::open_runtime_session(bounded_seed_options);
+  expect(entry_limited_seed.has_value(), "bounded runtime recovery test creates entry-limited source");
+  if (!entry_limited_seed)
+    return;
+  auto const entry_limited_id = entry_limited_seed->store.session_id();
+  auto const entry_limited_path = entry_limited_seed->store.session_path();
+  auto appended_entry = entry_limited_seed->store.append(ava::session::SessionEntry{.id = "bounded_second_entry",
+                                                                                    .parent_id = "",
+                                                                                    .type = ava::session::EntryType::UserMessage,
+                                                                                    .timestamp = "2026-07-14T00:00:00Z",
+                                                                                    .data_json = "{\"text\":\"second\"}"});
+  expect(appended_entry.has_value(), "bounded runtime recovery test appends a second complete entry");
+  auto entry_limited_bytes = app_read_binary_file(entry_limited_path);
+  entry_limited_bytes += "{\"version\":3,\"id\":\"bounded-entry-torn";
+  {
+    std::ofstream file(entry_limited_path, std::ios::binary | std::ios::trunc);
+    file << entry_limited_bytes;
+  }
+  entry_limited_seed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release entry-limited runtime"));
+  auto entry_limited_options = bounded_seed_options;
+  entry_limited_options.requested_session_id = entry_limited_id;
+  entry_limited_options.exact_session_id = true;
+  entry_limited_options.session_read_limits = ava::session::SessionReadLimits{.max_file_bytes = 4096, .max_line_bytes = 2048, .max_entries = 1};
+  auto entry_limited_resume = ava::app::open_runtime_session(entry_limited_options);
+  expect(!entry_limited_resume && entry_limited_resume.error().message().find("entry count") != std::string::npos &&
+             app_read_binary_file(entry_limited_path) == entry_limited_bytes && no_recovery_artifacts(entry_limited_path),
+         "bounded runtime/ACP-style recovery rejects an over-entry source unchanged without quarantine");
 }
 
 void test_app_runtime_cli_prompt_overrides()
@@ -2106,6 +2271,8 @@ void test_app_command_dispatcher()
          "slash catalog exposes Pi-style /copy clipboard command without blocking exact-submit behavior");
   expect(scoped_models_item != nullptr && scoped_models_item->description.find("Ctrl+P cycling") != std::string::npos,
          "slash catalog exposes Pi-style /scoped-models model cycle selector entry point");
+  expect(models_item != nullptr && models_item->hint == "[query]" && models_item->description.find("model selector") != std::string::npos,
+         "slash catalog explains that exact /models opens the selector while an argument filters configured models");
   expect(providers_item != nullptr && providers_item->hint == "[query]" && providers_item->description.find("credential status") != std::string::npos,
          "slash catalog exposes provider capability and credential status discovery");
   auto const* sessions_item = find_slash_item("/sessions");
@@ -2119,28 +2286,29 @@ void test_app_command_dispatcher()
   auto const* mcp_item = find_slash_item("/mcp");
   auto const* plugin_item = find_slash_item("/plugin");
   auto const* permissions_item = find_slash_item("/permissions");
-  expect(!has_completion(connect_item, 0, "openai") && !has_completion(connect_item, 1, "api-key") &&
-             !has_completion(connect_item, 1, "browser-oauth", {"openai"}) && !has_completion(connect_item, 1, "headless-oauth", {"openai"}) &&
-             has_completion(models_item, 0, "openai/gpt-5.5") && has_completion(sessions_item, 0, session->store.session_id()) &&
-             has_completion(context_item, 0, (workspace / "AGENTS.md").generic_string()) && has_completion(read_item, 0, "src/main.cpp") &&
-             has_completion(write_item, 0, "src/main.cpp") && has_completion(glob_item, 0, "src/**") && has_completion(find_item, 0, "src/**") &&
-             has_completion(ls_item, 0, "src/main.cpp") && has_completion(grep_item, 1, "src/**") && has_completion(export_item, 0, "markdown") &&
-             has_completion(export_item, 0, "html") && has_completion(export_item, 0, "jsonl") && has_completion(import_item, 1, "--confirm") &&
-             has_completion(hotkeys_item, 0, "init") && has_completion(hotkeys_item, 0, "import") && has_completion(hotkeys_item, 0, "set") &&
-             has_completion(hotkeys_item, 0, "reset") && has_completion(hotkeys_item, 1, "submit", {"set"}) &&
-             has_completion(hotkeys_item, 1, "variant_cycle", {"set"}) && has_completion(hotkeys_item, 1, "submit", {"reset"}) &&
-             has_completion(hotkeys_item, 0, "validate") && has_completion(hotkeys_item, 1, "--force", {"init"}) &&
-             has_completion(hotkeys_item, 2, "--force", {"import"}) && !has_completion(read_item, 0, "my folder/space file.txt") &&
-             !has_completion(read_item, 0, "docs/reference-code/pi/reference-only.md") && has_file_reference("src/main.cpp") &&
-             has_file_reference("my folder/space file.txt") && !has_file_reference("docs/reference-code/pi/reference-only.md") &&
-             has_completion(mcp_item, 1, "fs", {"inspect"}) && has_completion(plugin_item, 1, "com.example.project", {"run"}) &&
-             has_completion(plugin_item, 2, "todo", {"run", "com.example.project"}) && has_completion(permissions_item, 0, "list") &&
-             has_completion(permissions_item, 0, "audit") && has_completion(permissions_item, 0, "add") &&
-             has_completion(permissions_item, 1, "export", {"audit"}) && has_completion(permissions_item, 1, "summary", {"audit"}) &&
-             has_completion(permissions_item, 1, "show", {"audit"}) && has_completion(permissions_item, 1, "action=allow", {"add"}) &&
-             has_completion(permissions_item, 1, "operation=read", {"add"}) && has_completion(permissions_item, 1, "reason=", {"add"}),
-         "command catalog argument completions keep /connect provider and method choices in the modal while "
-         "populating model, session, context, export format, file path, file reference, MCP, plugin, and permission-rule metadata");
+  expect(
+      !has_completion(connect_item, 0, "openai") && !has_completion(connect_item, 1, "api-key") &&
+          !has_completion(connect_item, 1, "browser-oauth", {"openai"}) && !has_completion(connect_item, 1, "headless-oauth", {"openai"}) &&
+          has_completion(models_item, 0, "openai/gpt-5.5") && !has_completion(models_item, 0, "gpt-5.5") &&
+          has_completion(sessions_item, 0, session->store.session_id()) && has_completion(context_item, 0, (workspace / "AGENTS.md").generic_string()) &&
+          has_completion(read_item, 0, "src/main.cpp") && has_completion(write_item, 0, "src/main.cpp") && has_completion(glob_item, 0, "src/**") &&
+          has_completion(find_item, 0, "src/**") && has_completion(ls_item, 0, "src/main.cpp") && has_completion(grep_item, 1, "src/**") &&
+          has_completion(export_item, 0, "markdown") && has_completion(export_item, 0, "html") && has_completion(export_item, 0, "jsonl") &&
+          has_completion(import_item, 1, "--confirm") && has_completion(hotkeys_item, 0, "init") && has_completion(hotkeys_item, 0, "import") &&
+          has_completion(hotkeys_item, 0, "set") && has_completion(hotkeys_item, 0, "reset") && has_completion(hotkeys_item, 1, "submit", {"set"}) &&
+          has_completion(hotkeys_item, 1, "variant_cycle", {"set"}) && has_completion(hotkeys_item, 1, "submit", {"reset"}) &&
+          has_completion(hotkeys_item, 0, "validate") && has_completion(hotkeys_item, 1, "--force", {"init"}) &&
+          has_completion(hotkeys_item, 2, "--force", {"import"}) && !has_completion(read_item, 0, "my folder/space file.txt") &&
+          !has_completion(read_item, 0, "docs/reference-code/pi/reference-only.md") && has_file_reference("src/main.cpp") &&
+          has_file_reference("my folder/space file.txt") && !has_file_reference("docs/reference-code/pi/reference-only.md") &&
+          has_completion(mcp_item, 1, "fs", {"inspect"}) && has_completion(plugin_item, 1, "com.example.project", {"run"}) &&
+          has_completion(plugin_item, 2, "todo", {"run", "com.example.project"}) && has_completion(permissions_item, 0, "list") &&
+          has_completion(permissions_item, 0, "audit") && has_completion(permissions_item, 0, "add") &&
+          has_completion(permissions_item, 1, "export", {"audit"}) && has_completion(permissions_item, 1, "summary", {"audit"}) &&
+          has_completion(permissions_item, 1, "show", {"audit"}) && has_completion(permissions_item, 1, "action=allow", {"add"}) &&
+          has_completion(permissions_item, 1, "operation=read", {"add"}) && has_completion(permissions_item, 1, "reason=", {"add"}),
+      "command catalog argument completions keep /connect provider and method choices in the modal while "
+      "populating canonical provider-qualified model, session, context, export format, file path, file reference, MCP, plugin, and permission-rule metadata");
   auto disable_plugin = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins disable com.example.project"});
   expect(disable_plugin && disable_plugin->handled && !disable_plugin->output.empty() &&
              disable_plugin->output[0].find("Disabled project plugin com.example.project") != std::string::npos &&
@@ -2310,6 +2478,7 @@ void test_app_command_dispatcher()
          "command dispatcher /sessions exposes tree branch names, labels, provenance, and parent links");
   if (branch)
   {
+    branch->lease = ava::session::SessionLease{};
     auto const branch_session_id = branch->store.session_id();
     auto target_labels = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions labels " + branch_session_id + " triage selected"});
     auto branch_metadata_after_labels = ava::session::load_session_metadata(branch->store);
@@ -2874,6 +3043,9 @@ void test_app_command_dispatcher()
              imported_entries->size() >= 1 && session->store.session_id() != pre_import_session_id &&
              std::ranges::all_of(*imported_entries, [](auto const& entry) { return entry.version == ava::session::kCurrentSessionEntryVersion; }),
          "command dispatcher /import creates a new local session from validated JSONL and switches to it");
+  auto import_contender = ava::session::SessionLease::acquire(session->store.session_path());
+  expect(!import_contender && import_contender.error().message().find("already owned") != std::string::npos,
+         "confirmed /import retains its destination lease through append and runtime handoff");
 
   auto seeded_stats_usage =
       session->store.append(ava::session::SessionEntry{.id = "entry_slash_stats_usage",
@@ -3012,6 +3184,12 @@ void test_app_session_branch_commands()
                                                                .timestamp = "2026-05-07T00:00:00Z",
                                                                .data_json = "{\"text\":\"seed\"}"});
   expect(seed.has_value(), "slash branch command test seeds source entry");
+  auto const source_path = session->store.session_path();
+  auto const valid_source_bytes = app_read_binary_file(source_path);
+  {
+    std::ofstream torn_source(source_path, std::ios::binary | std::ios::app);
+    torn_source << "{\"version\":3,\"id\":\"command-fork-torn";
+  }
 
   auto forked = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/fork Review branch"});
   auto const fork_session_id = session->store.session_id();
@@ -3021,9 +3199,19 @@ void test_app_session_branch_commands()
              forked->output[0].find("from " + source_session_id) != std::string::npos &&
              forked->output[0].find("switched to " + fork_session_id) != std::string::npos && fork_metadata && fork_metadata->name == "Review branch" &&
              fork_metadata->parent_session_id == source_session_id && fork_metadata->source_session_id == source_session_id &&
-             fork_metadata->branch_from_entry_id == "entry_branch_seed" && fork_metadata->branch_origin == "fork" && fork_metadata->actor == "tui",
-         "slash /fork creates an append-only branch, persists provenance metadata, and switches runtime session");
+             fork_metadata->branch_from_entry_id == "entry_branch_seed" && fork_metadata->branch_origin == "fork" && fork_metadata->actor == "tui" &&
+             app_read_binary_file(source_path) == valid_source_bytes,
+         "slash /fork recovers its actively leased source, creates an append-only branch, persists provenance metadata, and switches runtime session");
+  auto fork_contender = ava::session::SessionLease::acquire(session->store.session_path());
+  expect(!fork_contender && fork_contender.error().message().find("already owned") != std::string::npos,
+         "slash /fork transfers the destination lease directly into the replacement runtime");
 
+  auto const fork_path = session->store.session_path();
+  auto const valid_fork_bytes = app_read_binary_file(fork_path);
+  {
+    std::ofstream torn_fork(fork_path, std::ios::binary | std::ios::app);
+    torn_fork << "{\"version\":3,\"id\":\"command-clone-torn";
+  }
   auto cloned = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/clone Full copy"});
   auto const clone_session_id = session->store.session_id();
   auto clone_metadata = ava::session::load_session_metadata(session->store);
@@ -3033,8 +3221,12 @@ void test_app_session_branch_commands()
              cloned->output[0].find("from " + fork_session_id) != std::string::npos &&
              cloned->output[0].find("switched to " + clone_session_id) != std::string::npos && clone_metadata && clone_metadata->name == "Full copy" &&
              clone_metadata->parent_session_id == fork_session_id && clone_metadata->source_session_id == fork_session_id &&
-             clone_metadata->branch_origin == "clone" && clone_metadata->actor == "tui" && clone_entries && clone_entries->size() >= 3,
-         "slash /clone copies the full current branch, persists clone provenance, and switches runtime session");
+             clone_metadata->branch_origin == "clone" && clone_metadata->actor == "tui" && clone_entries && clone_entries->size() >= 3 &&
+             app_read_binary_file(fork_path) == valid_fork_bytes,
+         "slash /clone recovers its actively leased source, copies the full branch, persists provenance, and switches runtime session");
+  auto clone_contender = ava::session::SessionLease::acquire(session->store.session_path());
+  expect(!clone_contender && clone_contender.error().message().find("already owned") != std::string::npos,
+         "slash /clone transfers the destination lease directly into the replacement runtime");
 
   auto sessions = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/tree Full copy"});
   expect(sessions && sessions->handled && !sessions->output.empty() && sessions->output[0].find("Full copy") != std::string::npos &&
@@ -3770,6 +3962,7 @@ void run_app_runtime_tests()
   test_app_runtime_open_session_and_context_prompt();
   test_app_runtime_no_session_mode();
   test_app_runtime_session_startup_options();
+  test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork();
   test_app_runtime_cli_prompt_overrides();
   test_app_runtime_project_trust_malformed_diagnostics();
   test_app_runtime_enabled_plugin_resources_autoload();

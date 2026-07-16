@@ -89,7 +89,8 @@ struct SessionSummary
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-// Exclusive advisory lease for one canonical session file. The descriptor is
+// Exclusive advisory lease for one regular session file. The originally
+// requested final path component is opened with O_NOFOLLOW; the descriptor is
 // CLOEXEC and the lock is released automatically on destruction.
 class SessionLease
 {
@@ -101,15 +102,19 @@ class SessionLease
   SessionLease& operator=(SessionLease&& other) noexcept;
   ~SessionLease();
 
+  [[nodiscard]] static ava::core::Result<SessionLease> create_and_acquire(std::filesystem::path const& session_path);
   [[nodiscard]] static ava::core::Result<SessionLease> acquire(std::filesystem::path const& session_path);
   [[nodiscard]] std::filesystem::path const& canonical_path() const noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
-  SessionLease(int fd, std::filesystem::path canonical_path);
+  friend class SessionStore;
+
+  SessionLease(int fd, std::filesystem::path canonical_path, bool created);
   int fd_ = -1;
   std::filesystem::path canonical_path_;
+  bool created_ = false;
 };
 
 class SessionStore
@@ -136,6 +141,20 @@ class SessionStore
   [[nodiscard]] SessionStore detached_copy_for_background_persistence() const;
 
   [[nodiscard]] ava::core::VoidResult append(SessionEntry const& entry);
+  // Removes a newly-created persistent session only when the supplied active
+  // lease still identifies its sole linked pathname. Intended for rollback
+  // before ownership is transferred into a RuntimeSession.
+  [[nodiscard]] ava::core::VoidResult remove_created_file(SessionLease const& lease) const;
+  // Test-only deterministic race seams. Production callers must not install them.
+  void set_before_append_identity_check_for_test(std::function<void()> hook);
+  void set_after_append_write_for_test(std::function<void()> hook);
+  void set_after_recovery_quarantine_publication_for_test(std::function<void()> hook);
+  // Repairs only a single incomplete final JSONL record while the matching
+  // exclusive lease is held. All scanning and mutation are subject to explicit
+  // read limits and cancellation. A returned path names the quarantined exact
+  // tail; no path means the file was already framed or only needed a final LF.
+  [[nodiscard]] ava::core::Result<std::optional<std::filesystem::path>> recover_torn_tail(SessionLease const& lease, SessionReadLimits limits,
+                                                                                          SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load() const;
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::VoidResult visit_entries(SessionReadLimits limits, SessionEntryVisitor const& visitor,
@@ -160,12 +179,21 @@ class SessionStore
   struct EphemeralState;
   struct ObservationAttachment;
 
+  [[nodiscard]] ava::core::Result<SessionSummary> inspect_bounded_for_listing(SessionReadLimits limits, bool inspect_metadata,
+                                                                              SessionCancelCallback cancel_requested = nullptr) const;
   explicit SessionStore(SessionStoreOptions options, std::shared_ptr<EphemeralState> ephemeral_state);
 
   SessionStoreOptions options_;
   std::shared_ptr<EphemeralState> ephemeral_state_;
   std::shared_ptr<ObservationAttachment> observation_attachment_;
+  std::function<void()> before_append_identity_check_for_test_;
+  std::function<void()> after_append_write_for_test_;
+  std::function<void()> after_recovery_quarantine_publication_for_test_;
 };
+
+// Legacy CLI/TUI/RPC reads retain their historical unbounded file/entry policy
+// while still enforcing the hard session-line and strict JSON nesting bounds.
+[[nodiscard]] SessionReadLimits legacy_unbounded_session_read_limits();
 
 [[nodiscard]] std::string to_string(EntryType type);
 [[nodiscard]] ava::core::Result<EntryType> parse_entry_type(std::string_view value);

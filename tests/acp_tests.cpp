@@ -1298,6 +1298,33 @@ void test_acp_exact_identity_persisted_cwd_and_restart()
       {});
   expect(resumed.has_value(), "ACP resumes exact id when requested cwd matches persisted cwd");
   second.shutdown();
+
+  auto const oversized_path = store->session_path();
+  std::string const oversized_bytes(kAcpSessionReadLimits.max_file_bytes + 1, 'x');
+  {
+    std::ofstream file(oversized_path, std::ios::binary | std::ios::trunc);
+    file.write(oversized_bytes.data(), static_cast<std::streamsize>(oversized_bytes.size()));
+  }
+  AgentService bounded(options);
+  static_cast<void>(bounded.handle_request(initialize_request(), {}));
+  auto oversized_resume = bounded.handle_request(
+      Request{
+          .id = std::int64_t(8), .method = "session/resume", .params_json = std::string("{\"sessionId\":\"") + *id + "\",\"cwd\":\"" + nested.string() + "\"}"},
+      {});
+  bounded.shutdown();
+  std::ifstream oversized_file(oversized_path, std::ios::binary);
+  std::string oversized_after((std::istreambuf_iterator<char>(oversized_file)), std::istreambuf_iterator<char>());
+  bool quarantine_exists = false;
+  auto const quarantine_prefix = oversized_path.filename().string() + ".torn-tail.";
+  std::error_code quarantine_iter_error;
+  for (std::filesystem::directory_iterator iterator(oversized_path.parent_path(), quarantine_iter_error), end; !quarantine_iter_error && iterator != end;
+       iterator.increment(quarantine_iter_error))
+  {
+    quarantine_exists = quarantine_exists || iterator->path().filename().string().starts_with(quarantine_prefix);
+  }
+  expect(!oversized_resume && oversized_after == oversized_bytes && !quarantine_exists,
+         "ACP session/resume passes bounded recovery limits and rejects an oversized file unchanged without quarantine");
+
   std::error_code cleanup;
   std::filesystem::remove_all(root, cleanup);
 }

@@ -42,12 +42,15 @@ ModelInfo text_model(std::string provider_id, std::string model_id, std::string 
 
 ModelInfo reasoning_model(std::string model_id, std::string display_name, std::string family, std::optional<long long> context_window_tokens,
                           std::optional<long long> max_output_tokens, ProviderProfile const& provider, std::vector<std::string> compatibility_quirks = {},
-                          std::optional<ModelPricing> pricing = std::nullopt, std::vector<ModelReasoningLevelMapping> reasoning_level_mappings = {})
+                          std::optional<ModelPricing> pricing = std::nullopt, std::vector<ModelReasoningLevelMapping> reasoning_level_mappings = {},
+                          std::vector<std::string> reasoning_levels = {})
 {
   if (compatibility_quirks.empty())
     compatibility_quirks = provider.default_compatibility_quirks;
+  if (reasoning_levels.empty())
+    reasoning_levels = provider.default_reasoning_levels;
   return text_model(provider.provider_id, std::move(model_id), std::move(display_name), std::move(family), context_window_tokens, max_output_tokens,
-                    std::move(pricing), provider, true, provider.default_reasoning_levels, provider.default_reasoning_format, std::move(compatibility_quirks),
+                    std::move(pricing), provider, true, std::move(reasoning_levels), provider.default_reasoning_format, std::move(compatibility_quirks),
                     std::move(reasoning_level_mappings));
 }
 
@@ -76,6 +79,13 @@ std::vector<ModelReasoningLevelMapping> gpt55_reasoning_level_mappings()
 {
   return {mapped_reasoning_level("off", "none"),      blocked_reasoning_level("minimal"),     mapped_reasoning_level("low", "low"),
           mapped_reasoning_level("medium", "medium"), mapped_reasoning_level("high", "high"), mapped_reasoning_level("xhigh", "xhigh")};
+}
+
+std::vector<ModelReasoningLevelMapping> gpt56_reasoning_level_mappings()
+{
+  return {mapped_reasoning_level("off", "none"),      mapped_reasoning_level("minimal", "low"), mapped_reasoning_level("low", "low"),
+          mapped_reasoning_level("medium", "medium"), mapped_reasoning_level("high", "high"),   mapped_reasoning_level("xhigh", "xhigh"),
+          mapped_reasoning_level("max", "max")};
 }
 
 std::vector<ModelReasoningLevelMapping> deepseek_v4_reasoning_level_mappings()
@@ -117,6 +127,27 @@ ModelRegistry builtin_model_profiles()
                                                             .cache_write_per_million = std::nullopt,
                                                             .reasoning_per_million = std::nullopt},
                                                gpt55_reasoning_level_mappings())),
+                 image_capable(reasoning_model("gpt-5.6-sol", "GPT-5.6 Sol", "gpt-5.6", 272'000, 128'000, openai, {},
+                                               ModelPricing{.input_per_million = 5.0L,
+                                                            .output_per_million = 30.0L,
+                                                            .cache_read_per_million = 0.50L,
+                                                            .cache_write_per_million = 6.25L,
+                                                            .reasoning_per_million = std::nullopt},
+                                               gpt56_reasoning_level_mappings(), {"minimal", "low", "medium", "high", "xhigh", "max"})),
+                 image_capable(reasoning_model("gpt-5.6-terra", "GPT-5.6 Terra", "gpt-5.6", 272'000, 128'000, openai, {},
+                                               ModelPricing{.input_per_million = 2.5L,
+                                                            .output_per_million = 15.0L,
+                                                            .cache_read_per_million = 0.25L,
+                                                            .cache_write_per_million = 3.125L,
+                                                            .reasoning_per_million = std::nullopt},
+                                               gpt56_reasoning_level_mappings(), {"minimal", "low", "medium", "high", "xhigh", "max"})),
+                 image_capable(reasoning_model("gpt-5.6-luna", "GPT-5.6 Luna", "gpt-5.6", 272'000, 128'000, openai, {},
+                                               ModelPricing{.input_per_million = 1.0L,
+                                                            .output_per_million = 6.0L,
+                                                            .cache_read_per_million = 0.10L,
+                                                            .cache_write_per_million = 1.25L,
+                                                            .reasoning_per_million = std::nullopt},
+                                               gpt56_reasoning_level_mappings(), {"minimal", "low", "medium", "high", "xhigh", "max"})),
                  image_capable(text_model(openai.provider_id, "gpt-4.1-mini", "GPT-4.1 mini", "gpt-4.1", 1'047'576, 32'768,
                                           ModelPricing{.input_per_million = 0.40L,
                                                        .output_per_million = 1.60L,

@@ -1,6 +1,6 @@
 # ACP Client Evidence Policy
 
-This directory contains only bounded, manually reviewed textual evidence derivatives. Raw GUI logs, ACP logs, provider request logs, environment dumps, and screenshots must never be committed here. Keep raw artifacts inside the private temporary root created by [`scripts/live-acp-dogfood.sh`](../../../scripts/live-acp-dogfood.sh).
+This directory contains only bounded, manually reviewed textual evidence derivatives. Raw GUI logs, ACP logs, provider request logs, environment dumps, and screenshots must never be committed here. In a source checkout, keep raw artifacts inside the private temporary root created by `scripts/live-acp-dogfood.sh`; that maintainer script is intentionally not packaged.
 
 ## Labels
 

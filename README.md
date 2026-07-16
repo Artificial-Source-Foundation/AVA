@@ -4,15 +4,30 @@
 
 AVA is a native C++23 agentic coding tool. The active default branch is `develop`; historical branches are kept under `archive/*`. The current backend baseline declares runtime version `1.0.0` and includes OpenAI and Kimi-for-coding live-verified provider paths, safe built-in tools, build/plan modes, permission prompts, tool visibility, append-only JSONL sessions, headless print/RPC modes, local plugin/MCP foundations, and an interactive TUI backed by wide-character ncurses (`ncursesw`). Backend release-position docs moved through the 0.60 platform catch-up, 0.65 provider-native hardening, bundled 0.70 reasoning/model lifecycle closeout, 0.75 extension foundation, 0.80 extension stabilization, and 0.90 release-candidate verification before this `1.0.0` runtime bump. A runtime version bump is not a published release by itself; tag, artifact, package, and external release publication steps remain separate manual operations.
 
-## Build
+## Clone and Build
 
-Dependencies:
+Clone all submodules before configuring:
+
+```sh
+git clone --branch develop --single-branch --recurse-submodules https://github.com/Artificial-Source/AVA.git
+cd AVA
+```
+
+If an existing clone was made without `--recurse-submodules`, recover it with:
+
+```sh
+git submodule update --init --checkout --recursive
+```
+
+`./autogen.sh` is an optional maintainer convenience. It initializes missing submodules at AVA's pinned commits, sets the repository's missing `push.recurseSubmodules` safety default, and prints CMake guidance; it does not update dependency branches, configure or build AVA, and is not needed after a recursive clone.
+
+Build-only requirements:
 
 - CMake 3.25+
 - C++23 compiler
 - Boost development headers and CMake package
 - `ncursesw` development headers/library
-- `curl` executable for provider HTTP transport
+- Git and configuration-time access to required dependency sources
 
 The optional Qt Quick desktop prototype additionally requires Qt 6.5+ with QML, Quick, and Quick Controls 2. See `docs/desktop-qml.md`.
 
@@ -49,6 +64,18 @@ ctest --preset sanitize
 GitHub Actions runs both the normal and sanitizer test jobs on pushes and pull requests targeting `develop`. Dependabot is enabled for GitHub Actions updates on `develop`.
 
 **For detailed cmake configuration options and build instructions see [CONTRIBUTING](docs/CONTRIBUTING.md).**
+
+### Linux host artifact
+
+Create the AVA-only host archive and checksum outside the checkout with:
+
+```sh
+scripts/package-linux.sh --output-dir /absolute/path/outside/AVA
+```
+
+The script builds Release `ava` plus the fake-provider smoke helper, stages only CMake component `ava`, extracts the archive fresh, verifies its checksum and CLI behavior, and runs the deterministic model smoke. `--binary /absolute/path/to/ava` accepts an existing binary; add `--fake-provider /absolute/path/to/ava_fake_provider_server` to run the model smoke in that mode. Without a fake helper the script prints an explicit skip.
+
+This is a dynamically linked **host** artifact, not a portable Linux bundle. The destination needs compatible glibc, libstdc++, and libgcc runtimes; ncursesw/tinfo libraries plus a usable terminfo database; and `curl` on `PATH`. Cross-distribution compatibility must be checked on the intended host.
 
 ## Run
 
@@ -97,7 +124,7 @@ OpenAI auth can be created with `ava connect openai`, which opens a login picker
 {"openai":{"type":"api_key","api_key":"sk-..."}}
 ```
 
-The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME/ava/models.json`, prompts with `$XDG_CONFIG_HOME/ava/prompts/<provider>/<family>/<mode>.txt`, replace the selected system prompt with `SYSTEM.md` or `--system-prompt`, or append with `APPEND_SYSTEM.md` or repeated `--append-system-prompt` flags. Global prompt resources live under `$XDG_CONFIG_HOME/ava`; project prompt resources live under `$WORKSPACE/.ava` and require `/trust project`. CLI prompt flags win over prompt resource files for the current process.
+The built-in default is `openai/gpt-5.5`; `/model` can also select `openai/gpt-5.6-sol`, `openai/gpt-5.6-terra`, or `openai/gpt-5.6-luna`. Override models with `$XDG_CONFIG_HOME/ava/models.json`, prompts with `$XDG_CONFIG_HOME/ava/prompts/<provider>/<family>/<mode>.txt`, replace the selected system prompt with `SYSTEM.md` or `--system-prompt`, or append with `APPEND_SYSTEM.md` or repeated `--append-system-prompt` flags. Global prompt resources live under `$XDG_CONFIG_HOME/ava`; project prompt resources live under `$WORKSPACE/.ava` and require `/trust project`. CLI prompt flags win over prompt resource files for the current process.
 
 ## Interactive Commands
 
@@ -156,4 +183,5 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 - Use [`docs/CONFIG.md`](docs/CONFIG.md) for XDG paths, auth, models, prompts, subagents, project trust, and local resource layout.
 - Use [`docs/TESTING.md`](docs/TESTING.md) for CTest, opt-in live smokes, terminal smokes, and release evidence.
 - Use [`docs/rpc-protocol.md`](docs/rpc-protocol.md) for proprietary AVA RPC v1; use [`docs/acp.md`](docs/acp.md) and [`docs/interop/evidence/README.md`](docs/interop/evidence/README.md) for ACP client setup and evidence; [`docs/headless-protocol.md`](docs/headless-protocol.md) summarizes shared print/RPC headless behavior.
+- Use [`docs/release-checklist.md`](docs/release-checklist.md) for the implemented local Linux host artifact and release-gate scope.
 - Product and parity status lives under [`docs/product/`](docs/product/), [`docs/roadmap/`](docs/roadmap/), and [`docs/goals/`](docs/goals/); historical release ledgers live under [`docs/versions/`](docs/versions/).

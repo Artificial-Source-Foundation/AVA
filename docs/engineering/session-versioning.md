@@ -1,6 +1,6 @@
 # Session Versioning Policy
 
-AVA sessions are append-only JSONL files. The storage format is intentionally inspectable and conservative: normal startup must not rewrite old session files, and migration work must be explicit, test-backed, and reversible by keeping the original file available.
+AVA sessions are append-only JSONL files. The storage format is intentionally inspectable and conservative: normal operation does not rewrite validated records. The sole startup mutation exception is the narrow, exclusively leased final-record framing recovery described below; migration work remains explicit, test-backed, and copy-forward.
 
 ## Current Contract
 
@@ -19,12 +19,29 @@ AVA sessions are append-only JSONL files. The storage format is intentionally in
 - Bump `kCurrentSessionEntryVersion` only when the common entry envelope, parent/id semantics, replay ordering, or provider-replay meaning changes for multiple entry types.
 - A version bump must update protocol/docs text, replay validation, session export if affected, and focused session tests before release.
 
+## Narrow Torn-Tail Recovery
+
+A resumed runtime acquires the session's existing exclusive `SessionLease` before loading. Startup `--fork` and an RPC branch from a different source acquire a temporary exclusive source lease and hold it through branch creation. With that lease held, `SessionStore::recover_torn_tail` verifies that the read-only lease descriptor and a separate read/write descriptor identify the same canonical regular file, then strictly scans the fixed initial size. Every newline-terminated record must be strict JSON with bounded nesting, unique object keys, a supported entry version, and a supported session-entry shape.
+
+Recovery never changes validated record bytes and never adds an entry or schema field:
+
+- A file already ending in LF is unchanged.
+- A complete, strict-valid, supported final record without LF receives exactly one LF followed by a data sync.
+- A strict-valid but semantically unsupported, unknown, or future-version final record fails unchanged. Duplicate-key, over-nested, oversized, newline-terminated malformed, and middle-corrupt records also fail unchanged.
+- Only a strict-JSON `Invalid` final unterminated suffix is treated as torn framing. Its exact bytes are first written to a unique sibling `<session>.torn-tail.<unique>.bin` with mode `0600`, data-synced, and made directory-durable. Only after that succeeds is the source truncated to the last validated LF and data-synced. A quarantine creation, write, or sync failure leaves the source untruncated.
+
+Session listing is read-only. Normal and bounded/ACP listing may summarize the validated complete-record prefix when the only bad bytes are an `Invalid` final unterminated suffix; a complete valid no-LF record is included. Listing never performs recovery and does not extend this tolerance to framed corruption, duplicate keys, excessive nesting, semantic errors, or future versions.
+
+The quarantine is an operator recovery aid, not an automatically replayed entry. To inspect or restore one, first stop AVA writers and preserve both the current session and quarantine. Do not append a quarantined suffix after newer records. Reconstruct the prior byte sequence only in a separate offline copy using the known pre-recovery validated prefix plus the exact quarantine bytes, repair the intended record there, and strictly validate the result before any deliberate replacement. Retain the original files until the reconstructed copy has been verified.
+
+Cooperating AVA writers share the existing per-path append mutex, and append refuses a nonempty file whose last byte is not LF. Advisory leases and the in-process mutex cannot stop an uncooperative external process from modifying bytes during recovery or between the append framing check and write. Closing that residual external-writer race requires future descriptor-pinned writer hardening; the current policy must not be described as a sandbox or as durability against arbitrary writers.
+
 ## Migration Expectations
 
-- Normal AVA startup opens old supported sessions in place and appends new entries with the current writer version.
-- AVA must not destructively rewrite session JSONL files during startup, resume, list, export, tree, fork, clone, or compact.
+- Normal AVA startup opens old supported sessions in place and appends new entries with the current writer version, subject only to the leased final-record recovery above.
+- Outside that narrow recovery, AVA does not destructively rewrite session JSONL during list, export, tree, fork, clone, compact, or migration.
 - If a future change needs migration, prefer a copy-forward flow: read the source session, validate it, write a new session or backup file with upgraded entries, and keep the original file untouched unless the user explicitly requests replacement.
-- Repair or migration tools must reject symlinked, oversized, malformed, or future-version input the same way normal session loading does.
+- Repair or migration tools must reject symlinked, oversized, malformed, duplicate-key, over-nested, semantic-invalid, or future-version input except for the one quarantined `Invalid` final suffix case above.
 - Partial migration output must not replace a usable source session. Write new output atomically or to a fresh session id, then validate the result before reporting success.
 
 ## Validation Requirements

@@ -16,12 +16,13 @@
 ```sh
 git clone --branch develop --single-branch --recurse-submodules https://github.com/Artificial-Source/AVA.git
 cd AVA
-./autogen.sh
 ```
+
+A recursive clone is ready for the CMake quick start below. For an older nonrecursive clone, run `git submodule update --init --checkout --recursive`. `./autogen.sh` is optional maintainer convenience: it initializes missing submodules at AVA's pinned commits, sets `push.recurseSubmodules` when missing, and prints build guidance. It does not configure or build AVA and is not required after the recursive clone command.
 
 If you want to compile with debug output then you need to have:
 
-* GITACHE_ROOT : full path to an existing (initially empty) directory where [gitache](https://github.com/CarloWood/gitache) packages are compiled. For example `$HOME/gitache` or `/opt/gitache`. Just make sure you can write to it. *Current* requirement is to have ~50MB of room. To be completely future proof you'll have enough with 2GB of disk space for this directory.
+* `GITACHE_ROOT`: full path to an existing (initially empty) directory where gitache packages are compiled. For example `$HOME/gitache` or `/opt/gitache`. Make sure you can write to it; the current requirement is approximately 50MB.
 
 ## Quick Start (build and test)
 
@@ -59,10 +60,10 @@ Tests currently build into one `ava_tests` CTest target from focused test source
 
 ## Configuration
 
-Lets assume that, next to GITACHE_ROOT (see above) the following environment variables are set:
+Lets assume that, next to `GITACHE_ROOT` (see above), the following environment variables are set:
 * `REPOROOT` : full path of the repository root of ava (i.e. the directory that you cloned ava into.
 * `BUILDDIR` : full path to the build directory; this can be inside or outside the repository root (e.g. `$REPOROOT/build` is fine) but should be an empty or non-existent directory.
-* `CMAKE_CONFIG` : the CMake build type. Possible options are `Release`, `RelWithDebInfo`, `Debug`, `BetaTest`, `RelWithDebug` explained [here](https://stackoverflow.com/a/59314670/1487069).
+* `CMAKE_CONFIG` : the CMake build type. Accepted values are `Release`, `Debug`, `RelWithDebInfo`, `BetaTest`, `RelWithDebug`, `Perf`, `Tracy`, and `None`, as enforced by `cmake/aicxx/cmake/CW_OPTIONS.cmake`.
 
 Then one can configure AVA with:
 

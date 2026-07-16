@@ -689,7 +689,18 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       return std::unexpected(std::move(child_store_result.error()));
     auto child_store = std::move(*child_store_result);
 
-    if (!request.task_id)
+    auto child_lease_result = request.task_id ? ava::session::SessionLease::acquire(child_store.session_path())
+                                              : ava::session::SessionLease::create_and_acquire(child_store.session_path());
+    if (!child_lease_result)
+      return std::unexpected(std::move(child_lease_result.error()));
+    auto child_lease = std::move(*child_lease_result);
+    if (request.task_id)
+    {
+      auto recovered = child_store.recover_torn_tail(child_lease, ava::session::SessionReadLimits{}, options_.cancel_requested);
+      if (!recovered)
+        return std::unexpected(std::move(recovered.error()));
+    }
+    else
     {
       auto name = request.description + " (@" + request.subagent_type + " subagent)";
       if (name.size() > ava::session::kMaxSessionNameBytes)
@@ -756,6 +767,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       struct BackgroundTaskRunState
       {
         ava::session::SessionStore child_store;
+        ava::session::SessionLease child_lease;
         AgentLoopOptions child_options;
         std::string prompt;
         SessionAppendSink parent_append;
@@ -766,6 +778,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
         std::unique_ptr<ava::provider::Transport> transport_instance;
       };
       auto run_state = std::make_shared<BackgroundTaskRunState>(BackgroundTaskRunState{.child_store = std::move(child_store),
+                                                                                       .child_lease = std::move(child_lease),
                                                                                        .child_options = std::move(child_options),
                                                                                        .prompt = request.prompt,
                                                                                        .parent_append = std::move(parent_append),

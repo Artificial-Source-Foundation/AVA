@@ -46,7 +46,7 @@ This is the navigation spine for AVA's user, automation, engineering, and produc
 - [`product/tooling-plan.md`](product/tooling-plan.md): built-in tool contract and design notes.
 - [`product/package-manager-plan.md`](product/package-manager-plan.md): package/resource install, trust, provenance, rollback, and offline design plan.
 - [`product/parallel-tools-plan.md`](product/parallel-tools-plan.md): ordinary parallel tool execution design risks and rollout plan.
-- [`release-checklist.md`](release-checklist.md): manual release-gate checklist, smokes, artifacts, checksums, and known blockers; it is not an implemented release pipeline.
+- [`release-checklist.md`](release-checklist.md): local Linux host-artifact component/script contract, smokes, checksums, portability boundary, and explicitly deferred publish-pipeline work.
 - [`roadmap/backend.md`](roadmap/backend.md): backend roadmap and historical phase rationale.
 - [`roadmap/backend-maturity-baseline.md`](roadmap/backend-maturity-baseline.md): maturity gates and acceptance criteria.
 - [`goals/README.md`](goals/README.md): goal package index, including Pi MVP parity area files.

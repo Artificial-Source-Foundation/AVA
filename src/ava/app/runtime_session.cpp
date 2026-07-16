@@ -113,33 +113,29 @@ ava::core::VoidResult apply_initial_reasoning_level(RuntimeSession& session, std
   return {};
 }
 
-}  // namespace
-
-ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const& options)
+ava::core::Result<std::pair<std::filesystem::path, std::filesystem::path>> resolve_runtime_directories(RuntimeOpenOptions const& options)
 {
-  if (options.requested_session_id && options.continue_last_session)
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either requested session id or continue, not both"));
-  }
-  if (options.fork_session_id && (options.requested_session_id || options.continue_last_session))
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either fork or session resume options, not both"));
-  }
-  if (options.sessionless && (options.requested_session_id || options.continue_last_session || options.fork_session_id))
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either no-session or session resume options, not both"));
-  }
-
   auto cwd = current_path_result();
   if (!cwd)
     return std::unexpected(std::move(cwd.error()));
-  auto const workspace_dir = options.workspace_dir.empty() ? *cwd : options.workspace_dir;
-  auto const current_dir = options.current_dir.empty() ? workspace_dir : options.current_dir;
+  auto workspace_dir = options.workspace_dir.empty() ? *cwd : options.workspace_dir;
+  auto current_dir = options.current_dir.empty() ? workspace_dir : options.current_dir;
+  return std::pair<std::filesystem::path, std::filesystem::path>{std::move(workspace_dir), std::move(current_dir)};
+}
+
+ava::core::Result<RuntimeSession> construct_runtime_session(RuntimeOpenOptions const& options, ava::session::SessionStore& store,
+                                                            ava::session::SessionLease& lease, bool created, bool load_existing_entries,
+                                                            bool append_session_start, bool append_initial_session_name)
+{
+  auto directories = resolve_runtime_directories(options);
+  if (!directories)
+    return std::unexpected(std::move(directories.error()));
+  auto const& workspace_dir = directories->first;
+  auto const& current_dir = directories->second;
+  auto const session_read_limits = options.session_read_limits.value_or(ava::session::legacy_unbounded_session_read_limits());
 
   if (options.pin_model_override && !options.default_model_override)
-  {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "pinned runtime model override is missing"));
-  }
 
   ava::config::ModelRegistry registry;
   if (options.pin_model_override)
@@ -158,88 +154,10 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   }
   auto model = options.default_model_override.value_or(ava::config::select_default_model(registry));
 
-  bool created = true;
-  bool append_session_start = true;
-  ava::core::Result<ava::session::SessionStore> store = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session was not initialized"));
-  if (options.sessionless)
-  {
-    store = ava::session::SessionStore::create_ephemeral(workspace_dir);
-  }
-  else if (options.fork_session_id)
-  {
-    auto resolved = resolve_session_id(workspace_dir, options.paths.sessions_dir, *options.fork_session_id);
-    if (!resolved)
-      return std::unexpected(resolved.error());
-    auto branch = ava::session::create_session_branch(ava::session::SessionBranchOptions{.workspace_dir = workspace_dir,
-                                                                                         .root_dir = options.paths.sessions_dir,
-                                                                                         .source_session_id = *resolved,
-                                                                                         .branch_from_entry_id = {},
-                                                                                         .name = options.initial_session_name,
-                                                                                         .labels = std::nullopt,
-                                                                                         .mode = ava::session::SessionBranchMode::Fork,
-                                                                                         .actor = "cli"});
-    if (!branch)
-      return std::unexpected(branch.error());
-    store = std::move(branch->store);
-    append_session_start = false;
-  }
-  else if (options.requested_session_id)
-  {
-    if (options.exact_session_id)
-    {
-      store = ava::session::SessionStore::open(workspace_dir, *options.requested_session_id, options.paths.sessions_dir);
-    }
-    else
-    {
-      auto resolved = resolve_session_id(workspace_dir, options.paths.sessions_dir, *options.requested_session_id);
-      if (!resolved)
-        return std::unexpected(resolved.error());
-      store = ava::session::SessionStore::open(workspace_dir, *resolved, options.paths.sessions_dir);
-    }
-    created = false;
-  }
-  else if (options.continue_last_session)
-  {
-    auto sessions = ava::session::SessionStore::list_sessions(workspace_dir, options.paths.sessions_dir);
-    if (!sessions)
-      return std::unexpected(sessions.error());
-    if (!sessions->empty())
-    {
-      store = ava::session::SessionStore::open(workspace_dir, sessions->front().session_id, options.paths.sessions_dir);
-      created = false;
-    }
-    else
-    {
-      store = ava::session::SessionStore::create(workspace_dir, options.paths.sessions_dir);
-    }
-  }
-  else
-  {
-    store = ava::session::SessionStore::create(workspace_dir, options.paths.sessions_dir);
-  }
-  if (!store)
-    return std::unexpected(store.error());
-
-  ava::session::SessionLease lease;
-  auto acquire_runtime_lease = [&]() -> ava::core::VoidResult {
-    if (options.sessionless || !lease.canonical_path().empty())
-      return {};
-    auto acquired = ava::session::SessionLease::acquire(store->session_path());
-    if (!acquired)
-      return std::unexpected(std::move(acquired.error()));
-    lease = std::move(*acquired);
-    return {};
-  };
-  if (!created || options.fork_session_id)
-  {
-    if (auto acquired = acquire_runtime_lease(); !acquired)
-      return std::unexpected(std::move(acquired.error()));
-  }
-
   std::optional<std::vector<ava::session::SessionEntry>> loaded_entries;
-  if (!created || options.fork_session_id)
+  if (load_existing_entries)
   {
-    auto entries = options.session_read_limits ? store->load_bounded(*options.session_read_limits) : store->load();
+    auto entries = store.load_bounded(session_read_limits);
     if (!entries)
       return std::unexpected(std::move(entries.error()));
     if (!options.pin_model_override)
@@ -250,7 +168,7 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
     loaded_entries = std::move(*entries);
     if (options.expected_original_cwd)
     {
-      auto summary = store->inspect_bounded(options.session_read_limits.value_or(ava::session::SessionReadLimits{}));
+      auto summary = store.inspect_bounded(session_read_limits);
       if (!summary)
         return std::unexpected(std::move(summary.error()));
       auto const persisted_cwd = summary->original_cwd.empty() ? workspace_dir : summary->original_cwd;
@@ -273,26 +191,29 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   if (!prompt_state)
     return std::unexpected(prompt_state.error());
 
-  if (created)
+  if (append_session_start)
   {
-    if (append_session_start)
+    if (!store.is_ephemeral() && lease.canonical_path().empty())
     {
-      auto appended = runtime::append_session_start(*store, options.mode, model, prompt_state->base_prompt, prompt_state->context_sources.size(), current_dir);
-      if (!appended)
-        return std::unexpected(appended.error());
+      auto acquired = ava::session::SessionLease::create_and_acquire(store.session_path());
+      if (!acquired)
+        return std::unexpected(std::move(acquired.error()));
+      lease = std::move(*acquired);
     }
-    if (auto acquired = acquire_runtime_lease(); !acquired)
-      return std::unexpected(std::move(acquired.error()));
+    auto appended = runtime::append_session_start(store, options.mode, model, prompt_state->base_prompt, prompt_state->context_sources.size(), current_dir);
+    if (!appended)
+      return std::unexpected(appended.error());
   }
 
-  if (options.initial_session_name && !options.fork_session_id)
+  if (append_initial_session_name && options.initial_session_name)
   {
-    auto metadata = ava::session::append_session_metadata(*store, ava::session::SessionMetadataUpdate{.name = options.initial_session_name, .actor = "cli"});
+    auto metadata = ava::session::append_session_metadata(store, ava::session::SessionMetadataUpdate{.name = options.initial_session_name, .actor = "cli"});
     if (!metadata)
       return std::unexpected(metadata.error());
   }
 
-  RuntimeSession session{.store = std::move(*store),
+  bool const sessionless = store.is_ephemeral();
+  RuntimeSession session{.store = std::move(store),
                          .lease = std::move(lease),
                          .mode = options.mode,
                          .model = std::move(model),
@@ -309,7 +230,7 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
                          .reasoning = std::move(reasoning),
                          .scoped_model_cycle = registry.scoped_model_cycle,
                          .created = created,
-                         .sessionless = options.sessionless,
+                         .sessionless = sessionless,
                          .run_controller = std::make_unique<SessionRunController>(),
                          .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>(),
                          .offline = options.offline};
@@ -319,8 +240,138 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
     if (auto applied = apply_initial_reasoning_level(session, *options.initial_reasoning_level); !applied)
       return std::unexpected(std::move(applied.error()));
   }
-
   return session;
+}
+
+}  // namespace
+
+ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const& options)
+{
+  if (options.requested_session_id && options.continue_last_session)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either requested session id or continue, not both"));
+  if (options.fork_session_id && (options.requested_session_id || options.continue_last_session))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either fork or session resume options, not both"));
+  if (options.sessionless && (options.requested_session_id || options.continue_last_session || options.fork_session_id))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either no-session or session resume options, not both"));
+
+  auto directories = resolve_runtime_directories(options);
+  if (!directories)
+    return std::unexpected(std::move(directories.error()));
+  auto const& workspace_dir = directories->first;
+  auto const session_read_limits = options.session_read_limits.value_or(ava::session::legacy_unbounded_session_read_limits());
+
+  bool created = true;
+  bool load_existing_entries = false;
+  bool append_session_start = true;
+  ava::session::SessionLease lease;
+  ava::core::Result<ava::session::SessionStore> store = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session was not initialized"));
+  if (options.sessionless)
+  {
+    store = ava::session::SessionStore::create_ephemeral(workspace_dir);
+  }
+  else if (options.fork_session_id)
+  {
+    auto resolved = resolve_session_id(workspace_dir, options.paths.sessions_dir, *options.fork_session_id);
+    if (!resolved)
+      return std::unexpected(resolved.error());
+    auto source = ava::session::SessionStore::open(workspace_dir, *resolved, options.paths.sessions_dir);
+    if (!source)
+      return std::unexpected(std::move(source.error()));
+    auto source_lease = ava::session::SessionLease::acquire(source->session_path());
+    if (!source_lease)
+      return std::unexpected(std::move(source_lease.error()));
+    auto recovered = source->recover_torn_tail(*source_lease, session_read_limits);
+    if (!recovered)
+      return std::unexpected(std::move(recovered.error()));
+    auto branch = ava::session::create_session_branch(ava::session::SessionBranchOptions{.workspace_dir = workspace_dir,
+                                                                                         .root_dir = options.paths.sessions_dir,
+                                                                                         .source_session_id = *resolved,
+                                                                                         .branch_from_entry_id = {},
+                                                                                         .name = options.initial_session_name,
+                                                                                         .labels = std::nullopt,
+                                                                                         .read_limits = options.session_read_limits,
+                                                                                         .mode = ava::session::SessionBranchMode::Fork,
+                                                                                         .actor = "cli"});
+    if (!branch)
+      return std::unexpected(std::move(branch.error()));
+    store = std::move(branch->store);
+    lease = std::move(branch->lease);
+    load_existing_entries = true;
+    append_session_start = false;
+  }
+  else if (options.requested_session_id)
+  {
+    if (options.exact_session_id)
+    {
+      store = ava::session::SessionStore::open(workspace_dir, *options.requested_session_id, options.paths.sessions_dir);
+    }
+    else
+    {
+      auto resolved = resolve_session_id(workspace_dir, options.paths.sessions_dir, *options.requested_session_id);
+      if (!resolved)
+        return std::unexpected(resolved.error());
+      store = ava::session::SessionStore::open(workspace_dir, *resolved, options.paths.sessions_dir);
+    }
+    created = false;
+    load_existing_entries = true;
+  }
+  else if (options.continue_last_session)
+  {
+    auto sessions = ava::session::SessionStore::list_sessions(workspace_dir, options.paths.sessions_dir);
+    if (!sessions)
+      return std::unexpected(sessions.error());
+    if (!sessions->empty())
+    {
+      store = ava::session::SessionStore::open(workspace_dir, sessions->front().session_id, options.paths.sessions_dir);
+      created = false;
+      load_existing_entries = true;
+    }
+    else
+    {
+      store = ava::session::SessionStore::create(workspace_dir, options.paths.sessions_dir);
+    }
+  }
+  else
+  {
+    store = ava::session::SessionStore::create(workspace_dir, options.paths.sessions_dir);
+  }
+  if (!store)
+    return std::unexpected(store.error());
+
+  if (!created)
+  {
+    auto acquired = ava::session::SessionLease::acquire(store->session_path());
+    if (!acquired)
+      return std::unexpected(std::move(acquired.error()));
+    lease = std::move(*acquired);
+    auto recovered = store->recover_torn_tail(lease, session_read_limits);
+    if (!recovered)
+      return std::unexpected(std::move(recovered.error()));
+  }
+
+  return construct_runtime_session(options, *store, lease, created, load_existing_entries, created && append_session_start,
+                                   options.initial_session_name.has_value() && !options.fork_session_id);
+}
+
+ava::core::Result<RuntimeSession> open_owned_runtime_session(RuntimeOpenOptions const& options, ava::session::SessionStore& store,
+                                                             ava::session::SessionLease& lease, bool created)
+{
+  if (options.requested_session_id || options.fork_session_id || options.continue_last_session || options.sessionless || options.initial_session_name ||
+      options.initial_reasoning_level)
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "owned runtime session options must not select or initialize another session"));
+  }
+  if (store.is_ephemeral())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "owned runtime session handoff requires a persistent session"));
+  if (lease.canonical_path().empty())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "owned runtime session handoff requires an active lease"));
+
+  auto const session_read_limits = options.session_read_limits.value_or(ava::session::legacy_unbounded_session_read_limits());
+  auto recovered = store.recover_torn_tail(lease, session_read_limits);
+  if (!recovered)
+    return std::unexpected(std::move(recovered.error()));
+  return construct_runtime_session(options, store, lease, created, true, false, false);
 }
 
 ava::core::VoidResult replace_runtime_session(RuntimeSession& destination, RuntimeSession replacement)

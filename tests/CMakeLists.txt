@@ -502,13 +502,26 @@ if(Python3_Interpreter_FOUND)
             --root ${CMAKE_BINARY_DIR}/rpc-python-client-e2e)
   set_tests_properties(ava_cli.rpc_python_client_e2e PROPERTIES TIMEOUT 45 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT OptionEnableLibcwd)
+    add_test(
+      NAME ava_release.package_linux
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/package_linux_tests.py
+              --script ${CMAKE_SOURCE_DIR}/scripts/package-linux.sh
+              --ava $<TARGET_FILE:ava>
+              --fake-provider $<TARGET_FILE:ava_fake_provider_server>
+              --repo ${CMAKE_SOURCE_DIR}
+              --root ${CMAKE_BINARY_DIR}/package-linux-tests)
+    set_tests_properties(ava_release.package_linux PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 240 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+  endif()
+
   add_test(
     NAME ava_tui.tmux_smoke
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tui_tmux_smoke.py
             --ava $<TARGET_FILE:ava>
             --root ${CMAKE_BINARY_DIR}/tui-tmux-smoke)
-  set_tests_properties(ava_tui.tmux_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
+  set_tests_properties(ava_tui.tmux_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
 
   add_test(
     NAME ava_tui.kitty_image_smoke

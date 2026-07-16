@@ -253,11 +253,7 @@ std::optional<KittyCsiUSequence> parse_kitty_csi_u_sequence(std::string_view seq
     return std::nullopt;
 
   return KittyCsiUSequence{
-      .codepoint = *codepoint,
-      .shifted_key = shifted_key,
-      .base_layout_key = base_layout_key,
-      .modifiers = modifier_value - 1,
-      .event_type = event_type};
+      .codepoint = *codepoint, .shifted_key = shifted_key, .base_layout_key = base_layout_key, .modifiers = modifier_value - 1, .event_type = event_type};
 }
 
 constexpr int kKittyModifierShift = 1;
@@ -269,6 +265,169 @@ constexpr int kKittyLockModifiers = 64 + 128;
 int effective_kitty_modifiers(int modifiers)
 {
   return modifiers & ~kKittyLockModifiers;
+}
+
+Key cursor_key_from_direction_and_modifiers(int direction, int modifiers)
+{
+  auto const effective_modifiers = effective_kitty_modifiers(modifiers);
+  if ((effective_modifiers & ~(kKittyModifierShift | kKittyModifierAlt | kKittyModifierCtrl)) != 0)
+    return Key::Unknown;
+
+  auto const has_shift = (effective_modifiers & kKittyModifierShift) != 0;
+  auto const has_alt = (effective_modifiers & kKittyModifierAlt) != 0;
+  auto const has_ctrl = (effective_modifiers & kKittyModifierCtrl) != 0;
+  switch (direction)
+  {
+    case -4:
+      if (has_ctrl && has_shift && !has_alt)
+        return Key::ShiftCtrlArrowLeft;
+      if (has_alt && has_shift && !has_ctrl)
+        return Key::ShiftAltArrowLeft;
+      if (has_ctrl && !has_alt && !has_shift)
+        return Key::CtrlArrowLeft;
+      if (has_alt && !has_ctrl && !has_shift)
+        return Key::AltArrowLeft;
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftArrowLeft;
+      return effective_modifiers == 0 ? Key::ArrowLeft : Key::Unknown;
+    case -3:
+      if (has_ctrl && has_shift && !has_alt)
+        return Key::ShiftCtrlArrowRight;
+      if (has_alt && has_shift && !has_ctrl)
+        return Key::ShiftAltArrowRight;
+      if (has_ctrl && !has_alt && !has_shift)
+        return Key::CtrlArrowRight;
+      if (has_alt && !has_ctrl && !has_shift)
+        return Key::AltArrowRight;
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftArrowRight;
+      return effective_modifiers == 0 ? Key::ArrowRight : Key::Unknown;
+    case -1:
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftArrowUp;
+      if (has_alt && !has_ctrl && !has_shift)
+        return Key::AltArrowUp;
+      return effective_modifiers == 0 ? Key::ArrowUp : Key::Unknown;
+    case -2:
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftArrowDown;
+      if (has_alt && !has_ctrl && !has_shift)
+        return Key::AltArrowDown;
+      return effective_modifiers == 0 ? Key::ArrowDown : Key::Unknown;
+    default:
+      return Key::Unknown;
+  }
+}
+
+Key home_end_key_from_modifiers(bool home, int modifiers)
+{
+  auto const effective_modifiers = effective_kitty_modifiers(modifiers);
+  if ((effective_modifiers & ~(kKittyModifierShift | kKittyModifierCtrl)) != 0)
+    return Key::Unknown;
+  auto const has_shift = (effective_modifiers & kKittyModifierShift) != 0;
+  auto const has_ctrl = (effective_modifiers & kKittyModifierCtrl) != 0;
+  if (has_shift && has_ctrl)
+    return home ? Key::ShiftCtrlHome : Key::ShiftCtrlEnd;
+  if (has_ctrl)
+    return home ? Key::CtrlHome : Key::CtrlEnd;
+  if (has_shift)
+    return home ? Key::ShiftHome : Key::ShiftEnd;
+  return home ? Key::Home : Key::End;
+}
+
+Key csi_home_end_key(std::string_view sequence)
+{
+  if (sequence == "OH")
+    return Key::Home;
+  if (sequence == "OF")
+    return Key::End;
+  if (!sequence.starts_with('[') || sequence.size() < 2 || (sequence.back() != 'H' && sequence.back() != 'F'))
+    return Key::Unknown;
+  auto const home = sequence.back() == 'H';
+  if (sequence.size() == 2)
+    return home_end_key_from_modifiers(home, 0);
+
+  auto index = std::size_t{1};
+  auto const first = parse_unsigned_int(sequence, index);
+  if (!first)
+    return Key::Unknown;
+  auto modifier_value = *first;
+  if (index < sequence.size() && sequence[index] == ';')
+  {
+    if (*first != 1)
+      return Key::Unknown;
+    ++index;
+    auto const parsed_modifier = parse_unsigned_int(sequence, index);
+    if (!parsed_modifier)
+      return Key::Unknown;
+    modifier_value = *parsed_modifier;
+  }
+  if (modifier_value <= 0 || index + 1 != sequence.size())
+    return Key::Unknown;
+  return home_end_key_from_modifiers(home, modifier_value - 1);
+}
+
+Key csi_cursor_key(std::string_view sequence)
+{
+  if (sequence.size() == 2 && sequence[0] == 'O')
+  {
+    switch (sequence[1])
+    {
+      case 'A':
+        return Key::ArrowUp;
+      case 'B':
+        return Key::ArrowDown;
+      case 'C':
+        return Key::ArrowRight;
+      case 'D':
+        return Key::ArrowLeft;
+      default:
+        return Key::Unknown;
+    }
+  }
+  if (!sequence.starts_with('[') || sequence.size() < 2)
+    return Key::Unknown;
+
+  auto const final = sequence.back();
+  auto direction = 0;
+  switch (final)
+  {
+    case 'A':
+      direction = -1;
+      break;
+    case 'B':
+      direction = -2;
+      break;
+    case 'C':
+      direction = -3;
+      break;
+    case 'D':
+      direction = -4;
+      break;
+    default:
+      return Key::Unknown;
+  }
+  if (sequence.size() == 2)
+    return cursor_key_from_direction_and_modifiers(direction, 0);
+
+  auto index = std::size_t{1};
+  auto first = parse_unsigned_int(sequence, index);
+  if (!first)
+    return Key::Unknown;
+  auto modifier_value = *first;
+  if (index < sequence.size() && sequence[index] == ';')
+  {
+    if (*first != 1)
+      return Key::Unknown;
+    ++index;
+    auto const parsed_modifier = parse_unsigned_int(sequence, index);
+    if (!parsed_modifier)
+      return Key::Unknown;
+    modifier_value = *parsed_modifier;
+  }
+  if (modifier_value <= 0 || index + 1 != sequence.size())
+    return Key::Unknown;
+  return cursor_key_from_direction_and_modifiers(direction, modifier_value - 1);
 }
 
 int normalize_kitty_functional_codepoint(int codepoint)
@@ -336,8 +495,7 @@ int normalize_kitty_functional_codepoint(int codepoint)
 
 bool is_ascii_letter_or_symbol(int codepoint)
 {
-  if ((codepoint >= 'a' && codepoint <= 'z') || (codepoint >= 'A' && codepoint <= 'Z') ||
-      (codepoint >= '0' && codepoint <= '9'))
+  if ((codepoint >= 'a' && codepoint <= 'z') || (codepoint >= 'A' && codepoint <= 'Z') || (codepoint >= '0' && codepoint <= '9'))
     return true;
   switch (codepoint)
   {
@@ -559,41 +717,10 @@ Key key_from_codepoint_and_modifiers(int codepoint, int modifiers)
         return Key::AltBackspace;
       return effective_modifiers == 0 ? Key::Backspace : Key::Unknown;
     case -4:
-      if (has_ctrl && has_shift && !has_alt)
-        return Key::ShiftCtrlArrowLeft;
-      if (has_alt && has_shift && !has_ctrl)
-        return Key::ShiftAltArrowLeft;
-      if (has_ctrl && !has_alt && !has_shift)
-        return Key::CtrlArrowLeft;
-      if (has_alt && !has_ctrl && !has_shift)
-        return Key::AltArrowLeft;
-      if (has_shift && !has_ctrl && !has_alt)
-        return Key::ShiftArrowLeft;
-      return (!has_ctrl && !has_alt) ? Key::ArrowLeft : Key::Unknown;
     case -3:
-      if (has_ctrl && has_shift && !has_alt)
-        return Key::ShiftCtrlArrowRight;
-      if (has_alt && has_shift && !has_ctrl)
-        return Key::ShiftAltArrowRight;
-      if (has_ctrl && !has_alt && !has_shift)
-        return Key::CtrlArrowRight;
-      if (has_alt && !has_ctrl && !has_shift)
-        return Key::AltArrowRight;
-      if (has_shift && !has_ctrl && !has_alt)
-        return Key::ShiftArrowRight;
-      return (!has_ctrl && !has_alt) ? Key::ArrowRight : Key::Unknown;
-    case -1:
-      if (has_shift && !has_ctrl && !has_alt)
-        return Key::ShiftArrowUp;
-      if (has_alt && !has_ctrl && !has_shift)
-        return Key::AltArrowUp;
-      return (!has_ctrl && !has_alt && !has_shift) ? Key::ArrowUp : Key::Unknown;
     case -2:
-      if (has_shift && !has_ctrl && !has_alt)
-        return Key::ShiftArrowDown;
-      if (has_alt && !has_ctrl && !has_shift)
-        return Key::AltArrowDown;
-      return (!has_ctrl && !has_alt && !has_shift) ? Key::ArrowDown : Key::Unknown;
+    case -1:
+      return cursor_key_from_direction_and_modifiers(normalized, effective_modifiers);
     case -10:
       if (has_shift && !has_ctrl && !has_alt)
         return Key::ShiftDelete;
@@ -691,11 +818,7 @@ std::optional<InputEvent> kitty_csi_u_printable_event(std::string_view sequence)
   append_utf8_codepoint(text, codepoint);
   if (text.empty())
     return std::nullopt;
-  return InputEvent{.key = Key::Character,
-                    .character = text.size() == 1 ? text.front() : '\0',
-                    .text = std::move(text),
-                    .mouse_column = 0,
-                    .mouse_row = 0};
+  return InputEvent{.key = Key::Character, .character = text.size() == 1 ? text.front() : '\0', .text = std::move(text), .mouse_column = 0, .mouse_row = 0};
 }
 
 std::optional<ModifyOtherKeysSequence> parse_modify_other_keys_sequence(std::string_view sequence)
@@ -773,11 +896,7 @@ std::optional<InputEvent> modify_other_keys_printable_event(std::string_view seq
   append_utf8_codepoint(text, codepoint);
   if (text.empty())
     return std::nullopt;
-  return InputEvent{.key = Key::Character,
-                    .character = text.size() == 1 ? text.front() : '\0',
-                    .text = std::move(text),
-                    .mouse_column = 0,
-                    .mouse_row = 0};
+  return InputEvent{.key = Key::Character, .character = text.size() == 1 ? text.front() : '\0', .text = std::move(text), .mouse_column = 0, .mouse_row = 0};
 }
 
 bool is_modified_enter_csi_u(std::string_view sequence, int expected_modifiers)
@@ -917,28 +1036,30 @@ Key page_key_from_csi_tilde(std::string_view sequence)
   if (index + 1 != sequence.size())
     return Key::Unknown;
 
-  if (modifier && *modifier == 6 && (*code == 1 || *code == 7))
-    return Key::ShiftCtrlHome;
-  if (modifier && *modifier == 6 && (*code == 4 || *code == 8))
-    return Key::ShiftCtrlEnd;
-  if (modifier && *modifier == 5 && (*code == 1 || *code == 7))
-    return Key::CtrlHome;
-  if (modifier && *modifier == 5 && (*code == 4 || *code == 8))
-    return Key::CtrlEnd;
-  if (modifier && *modifier == 2 && (*code == 1 || *code == 7))
-    return Key::ShiftHome;
-  if (modifier && *modifier == 2 && (*code == 4 || *code == 8))
-    return Key::ShiftEnd;
-  if (modifier && *modifier == 2 && *code == 3)
-    return Key::ShiftDelete;
+  auto effective_modifiers = 0;
+  if (modifier)
+  {
+    if (*modifier <= 0)
+      return Key::Unknown;
+    effective_modifiers = effective_kitty_modifiers(*modifier - 1);
+    if ((effective_modifiers & ~(kKittyModifierShift | kKittyModifierAlt | kKittyModifierCtrl)) != 0)
+      return Key::Unknown;
+  }
+
+  if (*code == 1 || *code == 7)
+    return home_end_key_from_modifiers(true, effective_modifiers);
+  if (*code == 4 || *code == 8)
+    return home_end_key_from_modifiers(false, effective_modifiers);
   if (*code == 3)
-    return Key::Delete;
+  {
+    if (effective_modifiers == kKittyModifierShift)
+      return Key::ShiftDelete;
+    if (effective_modifiers == kKittyModifierAlt)
+      return Key::AltDelete;
+    return effective_modifiers == 0 ? Key::Delete : Key::Unknown;
+  }
   if (*code == 2)
     return Key::Insert;
-  if (*code == 1 || *code == 7)
-    return Key::Home;
-  if (*code == 4 || *code == 8)
-    return Key::End;
   if (*code == 5)
     return Key::PageUp;
   if (*code == 6)
@@ -966,13 +1087,20 @@ std::optional<InputEvent> sgr_mouse_event(std::string_view sequence)
   auto const is_motion = (button_code & 32) != 0;
   auto const is_wheel = (button_code & 64) != 0;
   auto const base_button = button_code & 3;
-  if (is_wheel && final == 'M') {
+  if (is_wheel && final == 'M')
+  {
     key = (button_code & 1) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
-  } else if (final == 'm' && base_button == 0 && !is_wheel) {
+  }
+  else if (final == 'm' && base_button == 0 && !is_wheel)
+  {
     key = Key::MouseLeftRelease;
-  } else if (final == 'M' && is_motion && base_button == 0 && !is_wheel) {
+  }
+  else if (final == 'M' && is_motion && base_button == 0 && !is_wheel)
+  {
     key = Key::MouseLeftDrag;
-  } else if (final == 'M' && !is_motion && base_button == 0 && !is_wheel) {
+  }
+  else if (final == 'M' && !is_motion && base_button == 0 && !is_wheel)
+  {
     key = Key::MouseLeftClick;
   }
   return InputEvent{.key = key,
@@ -1008,13 +1136,20 @@ std::optional<InputEvent> legacy_mouse_event(std::string_view sequence)
   auto const is_motion = (button & 32U) != 0;
   auto const is_wheel = (button & 64U) != 0;
   auto const base_button = button & 3U;
-  if (is_wheel) {
+  if (is_wheel)
+  {
     key = (button & 1U) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
-  } else if (base_button == 3U) {
+  }
+  else if (base_button == 3U)
+  {
     key = Key::MouseLeftRelease;
-  } else if (is_motion && base_button == 0U) {
+  }
+  else if (is_motion && base_button == 0U)
+  {
     key = Key::MouseLeftDrag;
-  } else if (!is_motion && base_button == 0U) {
+  }
+  else if (!is_motion && base_button == 0U)
+  {
     key = Key::MouseLeftClick;
   }
   return InputEvent{.key = key,
@@ -1275,16 +1410,13 @@ bool terminal_device_attributes_response(std::string_view sequence)
   return index + 1 == sequence.size() && sequence[index] == 'c';
 }
 
-KeyboardProtocolResponseAction terminal_keyboard_protocol_response_action(
-    std::string_view sequence, bool kitty_response_seen, bool modify_other_keys_enabled)
+KeyboardProtocolResponseAction terminal_keyboard_protocol_response_action(std::string_view sequence, bool kitty_response_seen, bool modify_other_keys_enabled)
 {
   if (auto const flags = terminal_kitty_keyboard_flags_response(sequence))
   {
     if (*flags > 0)
-      return modify_other_keys_enabled ? KeyboardProtocolResponseAction::DisableModifyOtherKeys
-                                       : KeyboardProtocolResponseAction::None;
-    return modify_other_keys_enabled ? KeyboardProtocolResponseAction::None
-                                     : KeyboardProtocolResponseAction::EnableModifyOtherKeys;
+      return modify_other_keys_enabled ? KeyboardProtocolResponseAction::DisableModifyOtherKeys : KeyboardProtocolResponseAction::None;
+    return modify_other_keys_enabled ? KeyboardProtocolResponseAction::None : KeyboardProtocolResponseAction::EnableModifyOtherKeys;
   }
 
   if (terminal_device_attributes_response(sequence))
@@ -1300,8 +1432,7 @@ bool terminal_keyboard_protocol_handle_response(std::string_view sequence)
 {
   if (terminal_kitty_keyboard_flags_response(sequence))
   {
-    auto const action = terminal_keyboard_protocol_response_action(
-        sequence, g_keyboard_protocol_kitty_response_seen, g_modify_other_keys_enabled);
+    auto const action = terminal_keyboard_protocol_response_action(sequence, g_keyboard_protocol_kitty_response_seen, g_modify_other_keys_enabled);
     g_keyboard_protocol_kitty_response_seen = true;
     apply_keyboard_protocol_response_action(action);
     return true;
@@ -1309,8 +1440,8 @@ bool terminal_keyboard_protocol_handle_response(std::string_view sequence)
 
   if (terminal_device_attributes_response(sequence))
   {
-    apply_keyboard_protocol_response_action(terminal_keyboard_protocol_response_action(
-        sequence, g_keyboard_protocol_kitty_response_seen, g_modify_other_keys_enabled));
+    apply_keyboard_protocol_response_action(
+        terminal_keyboard_protocol_response_action(sequence, g_keyboard_protocol_kitty_response_seen, g_modify_other_keys_enabled));
     return true;
   }
 
@@ -1371,50 +1502,22 @@ Key terminal_escape_sequence_key(std::string_view sequence)
     return Key::AltW;
   if (sequence == "y" || sequence == "Y")
     return Key::AltY;
-  if (sequence == "[1;6D" || sequence == "[6D")
-    return Key::ShiftCtrlArrowLeft;
-  if (sequence == "[1;6C" || sequence == "[6C")
-    return Key::ShiftCtrlArrowRight;
-  if (sequence == "[1;4D" || sequence == "[4D")
-    return Key::ShiftAltArrowLeft;
-  if (sequence == "[1;4C" || sequence == "[4C")
-    return Key::ShiftAltArrowRight;
-  if (sequence == "[1;5D" || sequence == "[5D")
-    return Key::CtrlArrowLeft;
-  if (sequence == "[1;5C" || sequence == "[5C")
-    return Key::CtrlArrowRight;
-  if (sequence == "[1;2D" || sequence == "[2D" || sequence == "[d")
+  if (auto const key = csi_cursor_key(sequence); key != Key::Unknown)
+    return key;
+  if (sequence == "[d")
     return Key::ShiftArrowLeft;
-  if (sequence == "[1;2C" || sequence == "[2C" || sequence == "[c")
+  if (sequence == "[c")
     return Key::ShiftArrowRight;
-  if (sequence == "[1;2A" || sequence == "[2A" || sequence == "[a")
+  if (sequence == "[a")
     return Key::ShiftArrowUp;
-  if (sequence == "[1;2B" || sequence == "[2B" || sequence == "[b")
+  if (sequence == "[b")
     return Key::ShiftArrowDown;
-  if (sequence == "[1;3D" || sequence == "[3D")
-    return Key::AltArrowLeft;
-  if (sequence == "[1;3C" || sequence == "[3C")
-    return Key::AltArrowRight;
-  if (sequence == "[1;3A" || sequence == "[3A")
-    return Key::AltArrowUp;
-  if (sequence == "[1;3B" || sequence == "[3B")
-    return Key::AltArrowDown;
-  if (sequence == "[1;6H")
-    return Key::ShiftCtrlHome;
-  if (sequence == "[1;6F")
-    return Key::ShiftCtrlEnd;
-  if (sequence == "[1;5H")
-    return Key::CtrlHome;
-  if (sequence == "[1;5F")
-    return Key::CtrlEnd;
-  if (sequence == "[1;2H" || sequence == "[2H" || sequence == "[7$")
+  if (auto const key = csi_home_end_key(sequence); key != Key::Unknown)
+    return key;
+  if (sequence == "[7$")
     return Key::ShiftHome;
-  if (sequence == "[1;2F" || sequence == "[2F" || sequence == "[8$")
+  if (sequence == "[8$")
     return Key::ShiftEnd;
-  if (sequence == "[H" || sequence == "OH")
-    return Key::Home;
-  if (sequence == "[F" || sequence == "OF")
-    return Key::End;
   if (is_legacy_shift_enter_sequence(sequence) || is_shift_enter_csi_u(sequence))
     return Key::ShiftEnter;
   if (is_legacy_ctrl_enter_sequence(sequence) || is_ctrl_enter_csi_u(sequence))
@@ -1473,8 +1576,7 @@ bool terminal_escape_sequence_complete(std::string_view sequence)
   if (sequence.size() == 1)
   {
     auto const byte = static_cast<unsigned char>(sequence.front());
-    if (byte == 0x00U || byte == 0x08U || byte == 0x0AU || byte == 0x0DU || byte == 0x1DU || byte == 0x1FU ||
-        byte == 0x7FU)
+    if (byte == 0x00U || byte == 0x08U || byte == 0x0AU || byte == 0x0DU || byte == 0x1DU || byte == 0x1FU || byte == 0x7FU)
       return true;
     return byte >= 0x30U && byte <= 0x7EU;
   }

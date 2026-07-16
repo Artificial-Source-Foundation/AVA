@@ -6,6 +6,8 @@ project(ava
   DESCRIPTION "OpenAI-first C++23 terminal coding agent with an ncursesw TUI"
 )
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -165,6 +167,59 @@ set(AICXX_OBJECTS_LIST ${AICXX_OBJECTS_LIST} enchantum::enchantum CACHE INTERNAL
 
 add_subdirectory(src)
 add_subdirectory(enchantum)
+
+install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/release-artifact-readme.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+  RENAME README.md
+  COMPONENT ava
+)
+install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+  COMPONENT ava
+)
+install(
+  FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/USAGE.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/CONFIG.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/TESTING.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/headless-protocol.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/rpc-protocol.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/acp.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/mcp.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/session-format.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/plugin-system.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/plugin-compatibility-policy.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/release-checklist.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/acp-support.json"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs"
+  COMPONENT ava
+)
+install(
+  FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/engineering/session-versioning.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/engineering/side-effect-safety-checklist.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/engineering"
+  COMPONENT ava
+)
+install(
+  FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/interop/evidence/README.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/interop/evidence/zed-1.9.0-2026-07-14.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/interop/evidence"
+  COMPONENT ava
+)
+install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/product/mvp-coverage-ledger.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/product"
+  COMPONENT ava
+)
+install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/schema/theme.schema.json"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/schema"
+  COMPONENT ava
+)
 
 if(OptionEnableAvaBuildTests)
   enable_testing()

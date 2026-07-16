@@ -1,102 +1,96 @@
 # AVA Release Artifact Checklist
 
-This document is a concrete release-artifact plan and operator checklist. It is
-not an implemented release pipeline, and it intentionally does not require CI,
-tagging, pushing, publishing, or package-manager work unless that work is
-explicitly requested later.
+This is the operator checklist for AVA's implemented local Linux host artifact. It is not a publish pipeline. The workflow does **not** commit, tag, push, publish, upload CI artifacts, sign, notarize, generate an SBOM, or call a live provider.
 
-For detailed test coverage, provider-live classifications, TUI smoke gates, and
-performance thresholds, use [`docs/TESTING.md`](TESTING.md). This checklist only
-summarizes the artifact-specific sequence so the release steps do not duplicate
-the existing test evidence map.
+For the broader deterministic, sanitizer, terminal, and opt-in live-provider evidence map, see [`TESTING.md`](TESTING.md).
 
-## Pi Reference Gap
+## Artifact contract
 
-Pi has an artifact pipeline that AVA does not yet have:
+The version source is the top-level `project(ava VERSION X.Y.Z)` declaration. The packaged executable must report exactly `ava X.Y.Z` from `ava --version`.
 
-| Pi reference | What Pi does | AVA gap / local decision |
-| --- | --- | --- |
-| `docs/reference-code/pi/package.json` | Defines `build`, `check`, `test`, `release:local`, `release:*`, `publish`, and dry-run publish scripts. | AVA has CMake presets and CTest, but no release/package script surface. Keep this checklist manual until a pipeline is requested. |
-| `docs/reference-code/pi/test.sh` | Runs tests after hiding local auth and API keys. | AVA's default CTest skips credential-gated provider tests unless opted in. Preserve that model; do not make live credentials mandatory. |
-| `docs/reference-code/pi/scripts/build-binaries.sh` | Builds Bun binaries for darwin/linux/windows x64/arm64, copies runtime assets, archives, and re-extracts for smoke testing. | AVA currently builds a host C++ binary with CMake. Cross-platform archive production, runtime dependency manifests, and asset-copy rules are not defined. |
-| `docs/reference-code/pi/scripts/local-release.mjs` | Produces unpublished npm tarballs plus local Bun binary archives outside the repo, then asks for Node/Bun smoke tests from the isolated install. | AVA needs an equivalent isolated outside-repo smoke for the packaged `ava` binary before any artifact is called release-ready. |
-| `docs/reference-code/pi/scripts/release.mjs` | Enforces clean tree, bumps versions, updates changelogs, regenerates release artifacts, runs checks, commits, tags, and pushes. | AVA should not automate commit/tag/push here. Version, changelog, and release-note policy remain manual. |
-| `docs/reference-code/pi/scripts/publish.mjs` | Validates package contents and performs idempotent npm publish with provenance. | AVA has no package registry target, signing/provenance policy, or artifact publishing helper. |
+The archive pair is:
 
-## Current AVA Build Surfaces
+```text
+ava-X.Y.Z-linux-ARCH.tar.gz
+ava-X.Y.Z-linux-ARCH.tar.gz.sha256
+```
 
-- Version source: `project(ava VERSION ...)` in `CMakeLists.txt`; the binary
-  reports it with `ava --version`.
-- Primary release target: `ava` from `src/CMakeLists.txt`, emitted at the CMake
-  build directory root.
-- Test/support targets: `ava_tests`, `ava_fake_provider_server`,
-  `ava_fake_lsp_server`, and `ava_fake_mcp_server` from `tests/CMakeLists.txt`.
-- Optional prototype target: `ava-desktop` behind `AVA_BUILD_DESKTOP_QML=ON`;
-  do not include it in terminal release artifacts unless the desktop prototype
-  becomes a release goal.
-- CMake presets: `dev`, `sanitize`, `release`, and `desktop-qml` in
-  `CMakePresets.json`.
+`ARCH` is normalized by the packaging script (for example, `x64` or `arm64`). The archive has one top-level `ava-X.Y.Z-linux-ARCH/` directory with this exact allowlist:
 
-## Release Candidate Checklist
+```text
+bin/ava
+share/doc/ava/README.md
+share/doc/ava/LICENSE
+share/doc/ava/docs/USAGE.md
+share/doc/ava/docs/CONFIG.md
+share/doc/ava/docs/TESTING.md
+share/doc/ava/docs/headless-protocol.md
+share/doc/ava/docs/rpc-protocol.md
+share/doc/ava/docs/acp.md
+share/doc/ava/docs/mcp.md
+share/doc/ava/docs/session-format.md
+share/doc/ava/docs/plugin-system.md
+share/doc/ava/docs/plugin-compatibility-policy.md
+share/doc/ava/docs/release-checklist.md
+share/doc/ava/docs/engineering/session-versioning.md
+share/doc/ava/docs/engineering/side-effect-safety-checklist.md
+share/doc/ava/docs/interop/evidence/README.md
+share/doc/ava/docs/interop/evidence/zed-1.9.0-2026-07-14.md
+share/doc/ava/docs/product/mvp-coverage-ledger.md
+share/doc/ava/docs/acp-support.json
+share/doc/ava/docs/schema/theme.schema.json
+```
+
+The installed `README.md` comes from the artifact-specific `docs/release-artifact-readme.md`, not the repository README. Documentation remains in source-relative layout so included local links resolve. `scripts/verify-markdown-links.py` verifies every staged Markdown relative path before archive creation.
+
+The allowlist excludes reference repositories, source and test trees, build trees, examples, credentials, auth/config/session state, provider output, raw interoperability evidence, and the optional desktop prototype. CMake component `ava` must remain exact; always pass `--component ava` for a manual stage:
+
+```sh
+cmake --install build-release \
+  --prefix /absolute/private/stage/outside/the/checkout \
+  --component ava
+```
+
+## Portability boundary
+
+This is a dynamically linked **host artifact**, not a universal or manylinux-style bundle. The destination host needs compatible Linux glibc, libstdc++, and libgcc runtimes; compatible ncursesw/tinfo shared libraries and a usable terminfo database; and `curl` on `PATH` for provider HTTP transport.
+
+Build-only dependencies are not packaged. Building from this checkout needs CMake 3.25+, a C++23 compiler, Boost and ncurses development files, Git, and configured source dependencies. Packaging additionally needs Bash, Python 3, `tar`, `sha256sum`, and Linux `renameat2`. Python is used only for staged-link verification, negative tests, and descriptor-anchored no-replace publication; it is not a runtime dependency.
+
+## Release-candidate checks
 
 ### 1. Preflight
 
-- Confirm the release scope: terminal `ava` binary only unless explicitly
-  expanded.
-- Confirm no CI edits are part of this pass.
-- Confirm the version reported by the release binary will match the intended
-  release number.
-- Do not record provider keys, auth files, session contents, or local config in
-  release notes or artifacts.
+- Confirm the intended top-level CMake version and exact `ava --version` output.
+- Confirm scope remains terminal `ava` plus the documented allowlist.
+- Confirm no credentials, local configuration, session files, quarantines, or provider output can enter the stage.
+- Confirm commit/tag/push/publish/CI-artifact/signing/CPack/cross-build/desktop work remains out of scope unless separately approved.
 
-### 2. Build Targets
-
-Required developer/test build:
+### 2. Developer build and deterministic tests
 
 ```sh
 cmake --preset dev
-cmake --build --preset dev --target ava ava_tests ava_fake_provider_server ava_fake_lsp_server ava_fake_mcp_server
-```
-
-Required optimized binary build:
-
-```sh
-cmake --preset release
-cmake --build --preset release --target ava
-./build-release/ava --version
-./build-release/ava --help
-```
-
-Optional release-optimized test build when compiler/runtime risk is high:
-
-```sh
-cmake -S . -B build-release-tests -DCMAKE_BUILD_TYPE=Release -DAVA_BUILD_TESTS=ON
-cmake --build build-release-tests --target ava ava_tests
-ctest --test-dir build-release-tests --output-on-failure
-```
-
-### 3. CTest Gate
-
-Run the default deterministic suite from the dev build:
-
-```sh
+cmake --build --preset dev
 ctest --preset dev --output-on-failure
 ```
 
-The full-binary fake-provider smoke remains the default artifact gate for the
-agent loop and RPC/tool path:
+Focused release-closure coverage uses the registered CTest names. Python 3 and built `ava`, `ava_fake_provider_server`, and `ava_fake_mcp_server` executables are prerequisites for `ava_cli.acp_subprocess`.
+
+```sh
+ctest --test-dir build \
+  -R '^(ava_tests\.(session|app_runtime|app_rpc|agent_loop|agent_loop_resilience|acp)|ava_cli\.acp_subprocess|ava_release\.package_linux)$' \
+  --output-on-failure
+```
+
+The deterministic full-binary model/tool smoke is:
 
 ```sh
 ctest --test-dir build -R '^ava_cli\.headless_e2e_model_smoke$' --output-on-failure
 ```
 
-See [`docs/TESTING.md`](TESTING.md) for the complete suite map, focused plugin
-/ MCP commands, live-provider matrix, and performance thresholds.
+No command above opts into live-provider calls.
 
-### 4. Sanitizer Gate
-
-Run before a release candidate unless the environment cannot support ASan/UBSan;
-record any environment blocker in the release journal.
+### 3. Sanitizer gate
 
 ```sh
 cmake --preset sanitize
@@ -104,144 +98,82 @@ cmake --build --preset sanitize
 ctest --preset sanitize --output-on-failure
 ```
 
-### 5. Opt-in Live Provider Smokes
+If the host cannot run ASan/UBSan, record the exact environment blocker rather than claiming a pass.
 
-Live provider checks are evidence, not default gates. Run them only when the
-operator intentionally provides credentials:
+### 4. Optional terminal evidence
+
+On a host with tmux and terminal support:
 
 ```sh
-AVA_LIVE_PROVIDER_SMOKE=1 ctest --test-dir build -R provider_live_smoke --output-on-failure
-AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-model-dogfood.sh
-AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-coding-dogfood.sh
+AVA_TUI_TMUX_SMOKE=1 ctest --test-dir build -R '^ava_tui\.tmux_smoke$' --output-on-failure
 ```
 
-Classify each provider result using the vocabulary in
-[`docs/TESTING.md`](TESTING.md): passed, skipped/no credential,
-credential/auth-blocked, provider/rate-limited, network-blocked,
-provider-behavior/inconclusive, or AVA regression.
+Other terminal and intentionally credential-gated live-provider checks remain classified in [`TESTING.md`](TESTING.md). They are not package-script steps.
 
-### 6. Opt-in TUI / Terminal Smokes
+## Build and verify the Linux host artifact
 
-Run gated terminal smokes when the host has the required tools and terminal
-support:
+Build mode configures/builds the current checkout and publishes to a caller-supplied secure output directory:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 ctest --test-dir build -R ava_tui.tmux_smoke --output-on-failure
-AVA_TUI_KITTY_IMAGE_SMOKE=1 ctest --test-dir build -R ava_tui.kitty_image_smoke --output-on-failure
-AVA_TUI_OSC8_SMOKE=1 ctest --test-dir build -R ava_tui.osc8_smoke --output-on-failure
+scripts/package-linux.sh --output-dir /absolute/path/outside/AVA
 ```
 
-Skipped prerequisite-gated smokes are acceptable when documented. A failure with
-the gate enabled is a release-candidate blocker unless triaged to environment.
-
-### 7. Package Artifacts
-
-Until AVA has `install()`/CPack/package scripts, create only a host-platform
-manual archive for review. The archive should be built from `build-release/ava`
-and staged outside the repository.
-
-Minimum archive contents:
-
-- `ava` executable.
-- `README.md` and `LICENSE`.
-- User/operator docs needed offline: `docs/USAGE.md`, `docs/CONFIG.md`,
-  `docs/TESTING.md`, `docs/headless-protocol.md`, and this checklist.
-
-Do not include:
-
-- `build*/` directories.
-- `docs/reference-code/` repositories.
-- auth/config/session state from `$XDG_CONFIG_HOME` or `$XDG_STATE_HOME`.
-- temporary live-smoke evidence that may contain local paths or provider output.
-
-Manual host artifact sketch:
+Accepted-binary mode does not configure or build:
 
 ```sh
-version="$(./build-release/ava --version | awk '{print $2}')"
-platform="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
-stage="/tmp/ava-release/ava-${version}-${platform}"
-rm -rf "$stage" "$stage.tar.gz" "$stage.tar.gz.sha256"
-mkdir -p "$stage/docs"
-install -m 0755 build-release/ava "$stage/ava"
-install -m 0644 README.md LICENSE "$stage/"
-install -m 0644 docs/USAGE.md docs/CONFIG.md docs/TESTING.md docs/headless-protocol.md docs/release-checklist.md "$stage/docs/"
-tar -C "$(dirname "$stage")" -czf "$stage.tar.gz" "$(basename "$stage")"
-sha256sum "$stage.tar.gz" > "$stage.tar.gz.sha256"
+scripts/package-linux.sh \
+  --binary /absolute/path/to/ava \
+  --fake-provider /absolute/path/to/ava_fake_provider_server \
+  --output-dir /absolute/path/outside/AVA
 ```
 
-Package smoke from outside the repo:
+Accepted-binary mode rejects any executable whose exact `ava X.Y.Z` output differs from the current checkout's top-level CMake version before checkout documentation is staged. `--fake-provider` is optional in this mode; omitting it produces an explicit deterministic model-smoke skip.
+
+If `--output-dir` is omitted, the script creates and reports a new unpredictable mode-`0700` directory outside the checkout. A supplied output directory must be empty, outside the checkout, owned by the effective user, and have exact mode `0700`. The script rejects a symlink output directory and never overwrites existing archive/checksum destinations (including symlinks).
+
+All staging, allowlist/link checks, archive and checksum creation, checksum verification, extraction, CLI smoke, and fake-provider model smoke happen inside one private unpredictable work directory. The archive is never executed, extracted, or verified after publication. Publication is the final operation: unique temporary files are written and synced through one verified output-directory descriptor, moved with atomic no-replace `renameat2`, directory-synced, and the output namespace identity is revalidated. The script removes only its private work directory; it never recursively deletes caller output.
+
+The deterministic package harness covers secure accepted-binary packaging, default private output, staged allowlist, checksum/extraction, insecure and in-repository output rejection, version mismatch, and symlink no-clobber behavior:
 
 ```sh
-"$stage/ava" --version
-"$stage/ava" --help
-"$stage/ava" packages list
+ctest --test-dir build -R '^ava_release\.package_linux$' --output-on-failure
 ```
 
-For a stronger outside-repo smoke, reuse the checked-in CMake smoke script with
-the packaged binary and the dev fake-provider server:
+Build mode should also be run once for the release candidate because the CTest harness deliberately uses the already-built test binary.
+
+Independent inspection remains useful:
 
 ```sh
-cmake \
-  -DAVA_EXE="$stage/ava" \
-  -DAVA_FAKE_PROVIDER_EXE="$PWD/build/ava_fake_provider_server" \
-  -DAVA_CLI_TEST_ROOT=/tmp/ava-release-smoke \
-  -P tests/cli_headless_e2e_model_smoke.cmake
+tar -tzf /absolute/output/ava-X.Y.Z-linux-ARCH.tar.gz
+(
+  cd /absolute/output
+  sha256sum -c ava-X.Y.Z-linux-ARCH.tar.gz.sha256
+)
 ```
 
-Future artifact targets should be explicit per platform, for example
-`ava-<version>-linux-x64.tar.gz`, `ava-<version>-linux-arm64.tar.gz`,
-`ava-<version>-darwin-x64.tar.gz`, `ava-<version>-darwin-arm64.tar.gz`,
-`ava-<version>-windows-x64.zip`, and `ava-<version>-windows-arm64.zip`.
+## Session quarantine policy
 
-### 8. Checksums
+Leased recovery may create one sibling `<session>.jsonl.torn-tail.<unique>.bin` file with exact mode `0600`. It contains only the exact strict-JSON-invalid unterminated suffix. Recovery first writes and syncs a non-final temporary sibling, atomically publishes a unique final quarantine without overwrite, syncs the anchored session directory, and only then truncates the verified source inode. Prepublication failure cleans the temporary name and leaves the source byte-for-byte unchanged. A namespace change after publication aborts truncation and preserves the completed quarantine; the error reports its path.
 
-- Produce one checksum file per archive during manual packaging.
-- Before handoff, verify the checksum file from a different working directory:
+Quarantines are operator recovery aids and are never replayed or packaged automatically. Stop AVA writers and preserve both files before investigation. Never append a quarantine after newer records. Reconstruct the previous bytes only in a separate offline copy, repair and strictly validate that copy, and retain the originals until verification is complete. See [`engineering/session-versioning.md`](engineering/session-versioning.md) and [`session-format.md`](session-format.md).
+
+## Final local checks
 
 ```sh
-sha256sum -c "$stage.tar.gz.sha256"
-```
-
-- When multiple artifacts exist, also produce a top-level `SHA256SUMS` file and
-  verify all entries before uploading or attaching artifacts anywhere.
-
-### 9. Final Local Checks
-
-Always finish with:
-
-```sh
+shellcheck scripts/package-linux.sh  # when installed
+python3 -m py_compile scripts/verify-markdown-links.py scripts/publish-linux-artifacts.py tests/package_linux_tests.py
 git --no-pager diff --check
 ```
 
-If the release work touched C++ files, also run `clang-format` on changed C++ /
-header files and `clang-tidy <changed-cpp-files> -p build` when available, as
-described in [`docs/TESTING.md`](TESTING.md).
+Format changed C++ with the repository `clang-format`. Record exact commands, pass/skip results, and environment blockers; do not report checks that were not run.
 
-## Known Blockers Before a Real Pipeline
+## Explicitly deferred work
 
-- No CMake `install()` rules, CPack config, or packaging script exists for AVA.
-- No checked-in CI artifact workflow is present in this checkout, and this plan
-  intentionally avoids CI changes.
-- Cross-platform release builds are not defined; current commands only produce a
-  host-platform binary.
-- Runtime dependency bundling is not specified for Boost, `ncursesw`, Curses
-  terminfo expectations, `curl`, or platform-specific dynamic libraries.
-- Artifact signing, notarization, SBOM/provenance, and registry publishing are
-  not designed.
-- Source archive policy is undecided because `docs/reference-code/` contains
-  local behavior references that should not be swept into review/build/package
-  flows accidentally.
-- The optional Qt desktop prototype is not connected to the backend runtime and
-  should stay out of release artifacts unless separately scoped.
-- Remote package/resource install remains deferred pending source allowlists,
-  provenance/signing, compatibility, rollback, and trust UX; see
-  [`docs/CONFIG.md`](CONFIG.md) and [`docs/plugin-system.md`](plugin-system.md).
-
-## Next Implementation Slices If Approved Later
-
-1. Add CMake install rules for the terminal binary and selected docs only.
-2. Add a local packaging script that stages outside the repo, archives, extracts,
-   runs package smokes, and writes checksums.
-3. Define platform artifact names and runtime dependency policy.
-4. Add signing/provenance/SBOM decisions.
-5. Only after the local path is stable, add CI artifact jobs and publish gates.
+- CI artifact jobs and retention policy.
+- Commit/version-bump automation, tags, pushes, and release publication.
+- CPack or distribution package formats.
+- Cross-compilation and cross-distribution compatibility matrices.
+- Static/runtime dependency bundling.
+- Artifact signing, notarization, SBOM, and provenance attestations.
+- Registry/package-manager publishing.
+- Desktop artifacts.

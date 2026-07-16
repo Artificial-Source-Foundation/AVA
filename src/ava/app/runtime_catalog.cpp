@@ -21,7 +21,7 @@ ava::core::Result<std::unique_ptr<ava::provider::Provider>> create_runtime_provi
   return ava::provider::builtin_provider_registry().create(provider_id);
 }
 
-ava::core::Result<std::vector<ava::config::ModelInfo>> runtime_model_catalog(RuntimeSession const& session)
+ava::core::Result<std::vector<ava::config::ModelInfo>> runtime_model_catalog(runtime::Session const& session)
 {
   auto registry = ava::config::load_model_registry(session.paths);
   if (!registry)
@@ -45,7 +45,7 @@ ava::core::Result<std::vector<ava::config::ModelInfo>> runtime_model_catalog(Run
   return scoped;
 }
 
-ava::core::Result<ava::config::ModelInfo> select_runtime_model(RuntimeSession const& session, std::optional<std::string_view> provider_id,
+ava::core::Result<ava::config::ModelInfo> select_runtime_model(runtime::Session const& session, std::optional<std::string_view> provider_id,
                                                                std::string_view model_id)
 {
   if (model_id.empty())
@@ -78,7 +78,7 @@ ava::core::Result<ava::config::ModelInfo> select_runtime_model(RuntimeSession co
   return matches.front();
 }
 
-ava::core::Result<ava::config::ModelInfo> cycle_runtime_model(RuntimeSession const& session, int direction)
+ava::core::Result<ava::config::ModelInfo> cycle_runtime_model(runtime::Session const& session, int direction)
 {
   auto models = runtime_model_catalog(session);
   if (!models)

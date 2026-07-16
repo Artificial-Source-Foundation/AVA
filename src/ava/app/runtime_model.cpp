@@ -269,7 +269,7 @@ ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::Xdg
   return *model;
 }
 
-ava::core::Result<bool> switch_runtime_model(RuntimeSession& session, ava::config::ModelInfo model)
+ava::core::Result<bool> switch_runtime_model(runtime::Session& session, ava::config::ModelInfo model)
 {
   if (session.model.provider_id == model.provider_id && session.model.model_id == model.model_id)
     return false;

@@ -64,7 +64,7 @@ void test_app_compact_provider_summary_success()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -101,7 +101,7 @@ void test_app_compact_provider_summary_success()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"" + ava::core::json::escape(summary) + "\"}"}});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
   auto compact = ava::app::run_command(
@@ -144,7 +144,7 @@ void test_app_compact_openai_oauth_streaming_summary_success()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -159,7 +159,7 @@ void test_app_compact_openai_oauth_streaming_summary_success()
                                "data: [DONE]\n\n";
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = sse_body}});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
   run_options.openai_oauth = true;
   run_options.openai_account_id = "acct_test";
@@ -187,7 +187,7 @@ void test_app_compact_provider_failure_leaves_session_untouched()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -198,7 +198,7 @@ void test_app_compact_provider_failure_leaves_session_untouched()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"boom\"}}"}});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
   auto compact = ava::app::run_command(
@@ -223,7 +223,7 @@ void test_compaction_observation_preserves_cancellation_callback_contract()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -241,7 +241,7 @@ void test_compaction_observation_preserves_cancellation_callback_contract()
   auto run_summary = [&](std::shared_ptr<ava::observability::RunObservation> observation, bool throwing_callback) {
     ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"summary\"}"}});
     unsigned callback_calls = 0;
-    ava::app::RuntimeRunOptions options;
+    ava::app::runtime::RunOptions options;
     options.access_token = "token";
     options.observation = std::move(observation);
     options.cancel_requested = [&callback_calls, throwing_callback]() -> bool {
@@ -284,7 +284,7 @@ void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -301,7 +301,7 @@ void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   CancelAfterRequestTransport transport(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"CANCELED SUMMARY\"}"});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
   run_options.cancel_requested = [&transport] { return transport.canceled(); };
 
@@ -326,7 +326,7 @@ void test_app_compact_oversized_summary_leaves_session_untouched()
     file << "{\"max_summary_bytes\":8}";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -356,7 +356,7 @@ void test_app_compact_cancellation_before_append_leaves_session_untouched()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -413,7 +413,7 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -441,7 +441,7 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"AUTO SUMMARY\"}"},
                                        sse_response(final_text_sse("compacted answer"))});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
   auto result = ava::app::run_prompt(*session, "continue after compaction", provider, transport, run_options);
@@ -477,7 +477,7 @@ void test_app_auto_compaction_recent_context_respects_token_budget()
     file << "{\"auto_threshold_tokens\":1,\"keep_recent_tokens\":20,\"keep_recent_messages\":8}";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -499,7 +499,7 @@ void test_app_auto_compaction_recent_context_respects_token_budget()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"BUDGET SUMMARY\"}"},
                                        sse_response(final_text_sse("budget answer"))});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
   auto result = ava::app::run_prompt(*session, "after budget compaction", provider, transport, run_options);
@@ -525,7 +525,7 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely()
     file << "{\"auto_threshold_tokens\":1,\"keep_recent_tokens\":20,\"keep_recent_messages\":8}";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -546,7 +546,7 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"UTF8 SUMMARY\"}"},
                                        sse_response(final_text_sse("utf8 answer"))});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
   auto result = ava::app::run_prompt(*session, "after utf8 compaction", provider, transport, run_options);
@@ -575,7 +575,7 @@ void test_app_auto_compaction_explicit_zero_disables()
     file << "{\"auto_threshold_tokens\":0}";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -592,7 +592,7 @@ void test_app_auto_compaction_explicit_zero_disables()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(final_text_sse("no compact answer"))});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
   auto result = ava::app::run_prompt(*session, "do not compact", provider, transport, run_options);
@@ -611,7 +611,7 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -632,7 +632,7 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"DEFAULT SUMMARY\"}"},
                                        sse_response(final_text_sse("default compact answer"))});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
   auto result = ava::app::run_prompt(*session, "default threshold prompt", provider, transport, run_options);
@@ -653,7 +653,7 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -674,7 +674,7 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
                                      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE SUMMARY\"}"},
                                       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"RETRIED SUMMARY\"}"},
                                       sse_response(final_text_sse("retry after stale"))});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
   auto result = ava::app::run_prompt(*session, "retry stale summary", provider, transport, run_options);
@@ -699,7 +699,7 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -720,7 +720,7 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
                                      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE ONE\"}"},
                                       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE TWO\"}"}},
                                      2);
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
   auto result = ava::app::run_prompt(*session, "repeated stale", provider, transport, run_options);
@@ -740,7 +740,7 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -754,10 +754,10 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
       {ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":{\"message\":\"context length exceeded the token limit\"}}"},
        ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"OVERFLOW SUMMARY\"}"},
        sse_response(final_text_sse("retry answer"))});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
-  std::vector<ava::app::RuntimeEvent> events;
-  run_options.event_sink = [&events](ava::app::RuntimeEvent const& event) {
+  std::vector<ava::app::runtime::Event> events;
+  run_options.event_sink = [&events](ava::app::runtime::Event const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
@@ -771,18 +771,18 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
              compaction->data_json.find("OVERFLOW SUMMARY") != std::string::npos,
          "context overflow retry appends a context_overflow compaction summary");
   expect(std::ranges::any_of(events,
-                             [](ava::app::RuntimeEvent const& event) {
-                               return event.type == ava::app::RuntimeEventType::Retry && event.reason == "context_overflow" && event.attempt == 1 &&
+                             [](ava::app::runtime::Event const& event) {
+                               return event.type == ava::app::runtime::EventType::Retry && event.reason == "context_overflow" && event.attempt == 1 &&
                                       event.max_attempts == 1;
                              }) &&
              std::ranges::any_of(events,
-                                 [](ava::app::RuntimeEvent const& event) {
-                                   return event.type == ava::app::RuntimeEventType::CompactionStart && event.trigger == "context_overflow" &&
+                                 [](ava::app::runtime::Event const& event) {
+                                   return event.type == ava::app::runtime::EventType::CompactionStart && event.trigger == "context_overflow" &&
                                           event.attempt == 1 && event.max_attempts == 2;
                                  }) &&
              std::ranges::any_of(events,
-                                 [](ava::app::RuntimeEvent const& event) {
-                                   return event.type == ava::app::RuntimeEventType::CompactionEnd &&
+                                 [](ava::app::runtime::Event const& event) {
+                                   return event.type == ava::app::runtime::EventType::CompactionEnd &&
                                           event.summary_bytes == std::string("OVERFLOW SUMMARY").size() && event.attempt == 1 && event.max_attempts == 2;
                                  }),
          "context overflow retry emits backend lifecycle events for replaying TUI compaction and retry state");
@@ -810,7 +810,7 @@ void test_app_context_overflow_compaction_failure_leaves_no_partial_entry()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -823,7 +823,7 @@ void test_app_context_overflow_compaction_failure_leaves_no_partial_entry()
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":{\"message\":\"too many tokens for context window\"}}"},
        ava::provider::HttpResponse{.status_code = 429, .headers = {}, .body = "{\"error\":{\"message\":\"summary quota exhausted\"}}"}});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
   auto result = ava::app::run_prompt(*session, "overflow then summary fails", provider, transport, run_options);
@@ -844,7 +844,7 @@ void test_app_non_overflow_provider_error_does_not_compact_or_retry()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -855,7 +855,7 @@ void test_app_non_overflow_provider_error_does_not_compact_or_retry()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "server unavailable"}});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
   auto result = ava::app::run_prompt(*session, "server error", provider, transport, run_options);
@@ -879,7 +879,7 @@ void test_app_context_overflow_retry_is_bounded()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -893,7 +893,7 @@ void test_app_context_overflow_retry_is_bounded()
       {ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":{\"message\":\"context length exceeded token limit\"}}"},
        ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"BOUNDED SUMMARY\"}"},
        ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":{\"message\":\"context length exceeded token limit again\"}}"}});
-  ava::app::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
   auto result = ava::app::run_prompt(*session, "overflow twice", provider, transport, run_options);

@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
@@ -6965,16 +6966,16 @@ void test_tui_event_state_reduces_runtime_events()
 {
   ava::tui::TuiEventState state;
 
-  ava::app::RuntimeEvent user;
-  user.type = ava::app::RuntimeEventType::UserMessage;
+  ava::app::runtime::Event user;
+  user.type = ava::app::runtime::EventType::UserMessage;
   user.text = "hello";
   ava::tui::apply_runtime_event(state, user);
   expect(state.run_status == ava::tui::TuiEventRunStatus::Running && state.transcript.size() == 1 && state.transcript[0].label == "you" &&
              state.transcript[0].text == "hello" && ava::tui::to_plain_text(state.transcript[0].text_model) == "hello",
          "tui event state records user messages as completed transcript items");
 
-  ava::app::RuntimeEvent delta;
-  delta.type = ava::app::RuntimeEventType::MessageUpdate;
+  ava::app::runtime::Event delta;
+  delta.type = ava::app::runtime::EventType::MessageUpdate;
   delta.model_id = "gpt-5.5";
   delta.text = "hel";
   ava::tui::apply_runtime_event(state, delta);
@@ -6986,8 +6987,8 @@ void test_tui_event_state_reduces_runtime_events()
              ava::tui::to_plain_text(streaming_snapshot[1].text_model) == "hello",
          "tui event state exposes pending assistant deltas and mode/model metadata in snapshots");
 
-  ava::app::RuntimeEvent end;
-  end.type = ava::app::RuntimeEventType::MessageEnd;
+  ava::app::runtime::Event end;
+  end.type = ava::app::runtime::EventType::MessageEnd;
   ava::tui::apply_runtime_event(state, end);
   expect(state.run_status == ava::tui::TuiEventRunStatus::Completed && state.pending_assistant_text.empty() && state.transcript.size() == 2 &&
              state.transcript[1].label == "ava" && state.transcript[1].text == "hello" && state.transcript[1].meta == "Build · GPT-5.5" &&
@@ -6998,8 +6999,8 @@ void test_tui_event_state_reduces_runtime_events()
          "tui event state settles responding activity when assistant streaming ends");
 
   ava::tui::TuiEventState non_gpt_state;
-  ava::app::RuntimeEvent non_gpt_delta;
-  non_gpt_delta.type = ava::app::RuntimeEventType::MessageUpdate;
+  ava::app::runtime::Event non_gpt_delta;
+  non_gpt_delta.type = ava::app::runtime::EventType::MessageUpdate;
   non_gpt_delta.provider_id = "anthropic";
   non_gpt_delta.model_id = "claude-sonnet-4-5";
   non_gpt_delta.text = "hi";
@@ -7008,8 +7009,8 @@ void test_tui_event_state_reduces_runtime_events()
   expect(non_gpt_snapshot.size() == 1 && non_gpt_snapshot[0].meta == "Build · Claude Sonnet 4.5",
          "tui event state uses centralized model profile display labels for non-GPT assistant metadata");
 
-  ava::app::RuntimeEvent assistant_final;
-  assistant_final.type = ava::app::RuntimeEventType::AssistantMessage;
+  ava::app::runtime::Event assistant_final;
+  assistant_final.type = ava::app::runtime::EventType::AssistantMessage;
   assistant_final.text = "hello";
   ava::tui::apply_runtime_event(state, assistant_final);
   expect(state.transcript.size() == 2 && state.transcript[1].text == "hello", "tui event state avoids duplicating matching streamed assistant final events");
@@ -7020,12 +7021,12 @@ void test_tui_event_state_reduces_runtime_events()
          "tui event state treats trailing whitespace-only final changes as duplicate streamed assistant events");
 
   ava::tui::TuiEventState reasoning_state;
-  ava::app::RuntimeEvent reasoning_start;
-  reasoning_start.type = ava::app::RuntimeEventType::ReasoningStart;
+  ava::app::runtime::Event reasoning_start;
+  reasoning_start.type = ava::app::runtime::EventType::ReasoningStart;
   reasoning_start.reasoning_format = "summary";
   ava::tui::apply_runtime_event(reasoning_state, reasoning_start);
-  ava::app::RuntimeEvent reasoning_delta;
-  reasoning_delta.type = ava::app::RuntimeEventType::ReasoningDelta;
+  ava::app::runtime::Event reasoning_delta;
+  reasoning_delta.type = ava::app::runtime::EventType::ReasoningDelta;
   reasoning_delta.text = "checking";
   ava::tui::apply_runtime_event(reasoning_state, reasoning_delta);
   reasoning_delta.text = " options";
@@ -7035,20 +7036,20 @@ void test_tui_event_state_reduces_runtime_events()
              reasoning_snapshot[0].thinking == "checking options" && reasoning_snapshot[0].text.empty() &&
              ava::tui::to_plain_text(reasoning_snapshot[0].thinking_model) == "checking options",
          "tui event state exposes pending reasoning as part of the assistant turn");
-  ava::app::RuntimeEvent reasoning_end;
-  reasoning_end.type = ava::app::RuntimeEventType::ReasoningEnd;
+  ava::app::runtime::Event reasoning_end;
+  reasoning_end.type = ava::app::runtime::EventType::ReasoningEnd;
   ava::tui::apply_runtime_event(reasoning_state, reasoning_end);
   expect(reasoning_state.pending_reasoning_text == "checking options" && reasoning_state.transcript.empty() && reasoning_state.activity.size() == 1 &&
              reasoning_state.activity[0].label == "reasoning" && reasoning_state.activity[0].status == ava::tui::ToolTimelineStatus::Success,
          "tui event state keeps completed reasoning attached to the pending assistant turn");
 
-  ava::app::RuntimeEvent reasoning_answer;
-  reasoning_answer.type = ava::app::RuntimeEventType::MessageUpdate;
+  ava::app::runtime::Event reasoning_answer;
+  reasoning_answer.type = ava::app::runtime::EventType::MessageUpdate;
   reasoning_answer.model_id = "gpt-5.5";
   reasoning_answer.text = "answer";
   ava::tui::apply_runtime_event(reasoning_state, reasoning_answer);
-  ava::app::RuntimeEvent reasoning_answer_end;
-  reasoning_answer_end.type = ava::app::RuntimeEventType::MessageEnd;
+  ava::app::runtime::Event reasoning_answer_end;
+  reasoning_answer_end.type = ava::app::runtime::EventType::MessageEnd;
   reasoning_answer_end.model_id = "gpt-5.5";
   ava::tui::apply_runtime_event(reasoning_state, reasoning_answer_end);
   expect(reasoning_state.pending_reasoning_text.empty() && reasoning_state.transcript.size() == 1 && reasoning_state.transcript[0].label == "ava" &&
@@ -7098,8 +7099,8 @@ void test_tui_event_state_reduces_runtime_events()
          "tui thinking visibility hides inline thinking blocks without hiding assistant text");
 
   ava::tui::TuiEventState redacted_reasoning_state;
-  ava::app::RuntimeEvent redacted_reasoning;
-  redacted_reasoning.type = ava::app::RuntimeEventType::ReasoningDelta;
+  ava::app::runtime::Event redacted_reasoning;
+  redacted_reasoning.type = ava::app::runtime::EventType::ReasoningDelta;
   redacted_reasoning.reasoning_redacted = true;
   redacted_reasoning.text = "provider-private-secret";
   ava::tui::apply_runtime_event(redacted_reasoning_state, redacted_reasoning);
@@ -7119,13 +7120,13 @@ void test_tui_event_state_reduces_runtime_events()
       "tui event state never renders text from redacted reasoning deltas");
 
   ava::tui::TuiEventState audit_state;
-  ava::app::RuntimeEvent permission_audit;
-  permission_audit.type = ava::app::RuntimeEventType::ProviderEvent;
+  ava::app::runtime::Event permission_audit;
+  permission_audit.type = ava::app::runtime::EventType::ProviderEvent;
   permission_audit.status = "tui:permission_request";
   permission_audit.text = "permission requested: bash pwd";
   ava::tui::apply_runtime_event(audit_state, permission_audit);
-  ava::app::RuntimeEvent question_audit;
-  question_audit.type = ava::app::RuntimeEventType::ProviderEvent;
+  ava::app::runtime::Event question_audit;
+  question_audit.type = ava::app::runtime::EventType::ProviderEvent;
   question_audit.status = "tui:question_answer";
   question_audit.text = "question answered: yes";
   ava::tui::apply_runtime_event(audit_state, question_audit);
@@ -7139,8 +7140,8 @@ void test_tui_event_state_reduces_runtime_events()
   delta.text = "streamed";
   ava::tui::apply_runtime_event(reused_state, delta);
   ava::tui::apply_runtime_event(reused_state, end);
-  ava::app::RuntimeEvent next_user;
-  next_user.type = ava::app::RuntimeEventType::UserMessage;
+  ava::app::runtime::Event next_user;
+  next_user.type = ava::app::runtime::EventType::UserMessage;
   next_user.text = "next";
   ava::tui::apply_runtime_event(reused_state, next_user);
   assistant_final.text = "fresh final";
@@ -7160,8 +7161,8 @@ void test_tui_event_state_reduces_runtime_events()
          "tui event state stores assistant Markdown as frontend-owned semantic Text");
 
   ava::tui::TuiEventState provider_state;
-  ava::app::RuntimeEvent provider_start;
-  provider_start.type = ava::app::RuntimeEventType::ProviderEvent;
+  ava::app::runtime::Event provider_start;
+  provider_start.type = ava::app::runtime::EventType::ProviderEvent;
   provider_start.status = "tool_call_start";
   provider_start.call_id = "provider_call_1";
   provider_start.tool_name = "read_file";
@@ -7176,7 +7177,7 @@ void test_tui_event_state_reduces_runtime_events()
              provider_snapshot.back().tool->lifecycle == ava::tui::ToolLifecycleState::ProviderAnnounced,
          "tui event state shows provider tool-call starts as pending announced tool cards");
 
-  ava::app::RuntimeEvent provider_delta = provider_start;
+  ava::app::runtime::Event provider_delta = provider_start;
   provider_delta.status = "tool_call_delta";
   provider_delta.tool_name.clear();
   provider_delta.text = R"({"path": "README.md", "partial": true})";
@@ -7190,7 +7191,7 @@ void test_tui_event_state_reduces_runtime_events()
              provider_snapshot.back().tool,
          "tui event state keeps provider tool-call deltas on the pending tool card and preserves labels by call id");
 
-  ava::app::RuntimeEvent provider_end = provider_delta;
+  ava::app::runtime::Event provider_end = provider_delta;
   provider_end.status = "tool_call_end";
   provider_end.text = R"({"path": "README.md", "complete": true})";
   ava::tui::apply_runtime_event(provider_state, provider_end);
@@ -7202,8 +7203,8 @@ void test_tui_event_state_reduces_runtime_events()
              provider_snapshot.back().tool,
          "tui event state marks provider tool-call arguments complete without settling completed transcript history");
 
-  ava::app::RuntimeEvent provider_execution_start;
-  provider_execution_start.type = ava::app::RuntimeEventType::ToolStart;
+  ava::app::runtime::Event provider_execution_start;
+  provider_execution_start.type = ava::app::runtime::EventType::ToolStart;
   provider_execution_start.call_id = "provider_call_1";
   provider_execution_start.tool_name = "read_file";
   provider_execution_start.text = "path=README.md";
@@ -7212,8 +7213,8 @@ void test_tui_event_state_reduces_runtime_events()
              provider_state.pending_tools[0].item.argument_summary == "path=README.md",
          "tui event state advances an announced provider tool card into execution by call id");
 
-  ava::app::RuntimeEvent provider_execution_progress;
-  provider_execution_progress.type = ava::app::RuntimeEventType::ToolProgress;
+  ava::app::runtime::Event provider_execution_progress;
+  provider_execution_progress.type = ava::app::runtime::EventType::ToolProgress;
   provider_execution_progress.call_id = "provider_call_1";
   provider_execution_progress.tool_name = "read_file";
   provider_execution_progress.text = "reading file";
@@ -7222,8 +7223,8 @@ void test_tui_event_state_reduces_runtime_events()
              provider_state.pending_tools[0].item.result_summary == "reading file",
          "tui event state records partial tool progress on the pending card");
 
-  ava::app::RuntimeEvent provider_execution_result;
-  provider_execution_result.type = ava::app::RuntimeEventType::ToolResult;
+  ava::app::runtime::Event provider_execution_result;
+  provider_execution_result.type = ava::app::runtime::EventType::ToolResult;
   provider_execution_result.call_id = "provider_call_1";
   provider_execution_result.tool_name = "read_file";
   provider_execution_result.status = "success";
@@ -7235,8 +7236,8 @@ void test_tui_event_state_reduces_runtime_events()
          "tui event state settles completed tools into immutable transcript history");
 
   ava::tui::TuiEventState provider_without_id_state;
-  ava::app::RuntimeEvent provider_without_id;
-  provider_without_id.type = ava::app::RuntimeEventType::ProviderEvent;
+  ava::app::runtime::Event provider_without_id;
+  provider_without_id.type = ava::app::runtime::EventType::ProviderEvent;
   provider_without_id.status = "tool_call_start";
   provider_without_id.tool_name = "grep";
   ava::tui::apply_runtime_event(provider_without_id_state, provider_without_id);
@@ -7252,8 +7253,8 @@ void test_tui_event_state_reduces_runtime_events()
              provider_without_id_state.pending_tools[0].item.lifecycle == ava::tui::ToolLifecycleState::ArgumentsComplete,
          "tui event state coalesces provider tool-call activity and pending cards when provider events omit call ids");
 
-  ava::app::RuntimeEvent tool_start;
-  tool_start.type = ava::app::RuntimeEventType::ToolStart;
+  ava::app::runtime::Event tool_start;
+  tool_start.type = ava::app::runtime::EventType::ToolStart;
   tool_start.call_id = "call_1";
   tool_start.tool_name = "bash";
   tool_start.text = "pwd";
@@ -7264,8 +7265,8 @@ void test_tui_event_state_reduces_runtime_events()
              state.pending_tools[0].item.argument_summary == "pwd" && state.pending_tools[0].item.arguments_json == "{\"command\":\"pwd\"}",
          "tui event state tracks started tools by call id");
 
-  ava::app::RuntimeEvent tool_progress;
-  tool_progress.type = ava::app::RuntimeEventType::ToolProgress;
+  ava::app::runtime::Event tool_progress;
+  tool_progress.type = ava::app::runtime::EventType::ToolProgress;
   tool_progress.call_id = "call_1";
   tool_progress.tool_name = "bash";
   tool_progress.text = "running pwd";
@@ -7277,8 +7278,8 @@ void test_tui_event_state_reduces_runtime_events()
              tool_snapshot.back().tool->status == ava::tui::ToolTimelineStatus::Running,
          "tui event state updates pending tool progress and includes it in snapshots");
 
-  ava::app::RuntimeEvent tool_result;
-  tool_result.type = ava::app::RuntimeEventType::ToolResult;
+  ava::app::runtime::Event tool_result;
+  tool_result.type = ava::app::runtime::EventType::ToolResult;
   tool_result.call_id = "call_1";
   tool_result.tool_name = "bash";
   tool_result.status = "success";
@@ -7291,14 +7292,14 @@ void test_tui_event_state_reduces_runtime_events()
              state.transcript.back().tool->result_json == "{\"ok\":true}",
          "tui event state moves successful tool results into completed transcript items");
 
-  ava::app::RuntimeEvent write_start;
-  write_start.type = ava::app::RuntimeEventType::ToolStart;
+  ava::app::runtime::Event write_start;
+  write_start.type = ava::app::runtime::EventType::ToolStart;
   write_start.call_id = "call_write";
   write_start.tool_name = "write_file";
   write_start.text = "path=src/main.cpp, content=12 bytes";
   ava::tui::apply_runtime_event(state, write_start);
-  ava::app::RuntimeEvent write_result;
-  write_result.type = ava::app::RuntimeEventType::ToolResult;
+  ava::app::runtime::Event write_result;
+  write_result.type = ava::app::runtime::EventType::ToolResult;
   write_result.call_id = "call_write";
   write_result.tool_name = "write_file";
   write_result.status = "success";
@@ -7308,8 +7309,8 @@ void test_tui_event_state_reduces_runtime_events()
              state.modified_files.size() == 1 && state.modified_files[0].path == "src/main.cpp",
          "tui event state feeds sidebar activity and modified-file summaries from successful mutating tools");
 
-  ava::app::RuntimeEvent semantic_write;
-  semantic_write.type = ava::app::RuntimeEventType::ToolResult;
+  ava::app::runtime::Event semantic_write;
+  semantic_write.type = ava::app::runtime::EventType::ToolResult;
   semantic_write.call_id = "call_semantic_write";
   semantic_write.tool_name = "edit_file";
   semantic_write.status = "success";
@@ -7319,8 +7320,8 @@ void test_tui_event_state_reduces_runtime_events()
   expect(std::ranges::any_of(state.modified_files, [](ava::tui::SidebarModifiedFile const& file) { return file.path == "src/semantic.cpp"; }),
          "tui event state prefers semantic changed paths over parsing mutating tool summaries");
 
-  ava::app::RuntimeEvent tool_error;
-  tool_error.type = ava::app::RuntimeEventType::ToolResult;
+  ava::app::runtime::Event tool_error;
+  tool_error.type = ava::app::runtime::EventType::ToolResult;
   tool_error.call_id = "call_2";
   tool_error.tool_name = "read";
   tool_error.status = "error";
@@ -7330,15 +7331,15 @@ void test_tui_event_state_reduces_runtime_events()
              state.transcript.back().tool->lifecycle == ava::tui::ToolLifecycleState::Error && state.transcript.back().tool->result_summary == "denied",
          "tui event state records errored tool results as error tool cards");
 
-  ava::app::RuntimeEvent tool_canceled_start;
-  tool_canceled_start.type = ava::app::RuntimeEventType::ToolStart;
+  ava::app::runtime::Event tool_canceled_start;
+  tool_canceled_start.type = ava::app::runtime::EventType::ToolStart;
   tool_canceled_start.call_id = "call_canceled";
   tool_canceled_start.tool_name = "bash";
   tool_canceled_start.text = "sleep 30";
   tool_canceled_start.tool_arguments_json = "{\"command\":\"sleep 30\"}";
   ava::tui::apply_runtime_event(state, tool_canceled_start);
-  ava::app::RuntimeEvent tool_canceled;
-  tool_canceled.type = ava::app::RuntimeEventType::ToolResult;
+  ava::app::runtime::Event tool_canceled;
+  tool_canceled.type = ava::app::runtime::EventType::ToolResult;
   tool_canceled.call_id = "call_canceled";
   tool_canceled.tool_name = "bash";
   tool_canceled.status = "canceled";
@@ -7510,8 +7511,8 @@ void test_tui_event_state_reduces_runtime_events()
          "tui EventEnvelope reducer settles completed tools with backend-provided truncation, spill, diff, and per-tool "
          "detail metadata");
 
-  ava::app::RuntimeEvent error;
-  error.type = ava::app::RuntimeEventType::Error;
+  ava::app::runtime::Event error;
+  error.type = ava::app::runtime::EventType::Error;
   error.error_message = "provider failed";
   error.error_details = "Provider: provider failed";
   ava::tui::apply_runtime_event(state, error);
@@ -7521,13 +7522,13 @@ void test_tui_event_state_reduces_runtime_events()
          "tui event state records runtime errors and exposes error transcript text");
 
   ava::tui::TuiEventState streaming_error_state;
-  ava::app::RuntimeEvent streaming_delta;
-  streaming_delta.type = ava::app::RuntimeEventType::MessageUpdate;
+  ava::app::runtime::Event streaming_delta;
+  streaming_delta.type = ava::app::runtime::EventType::MessageUpdate;
   streaming_delta.model_id = "gpt-5.5";
   streaming_delta.text = "partial answer";
   ava::tui::apply_runtime_event(streaming_error_state, streaming_delta);
-  ava::app::RuntimeEvent streaming_error;
-  streaming_error.type = ava::app::RuntimeEventType::Error;
+  ava::app::runtime::Event streaming_error;
+  streaming_error.type = ava::app::runtime::EventType::Error;
   streaming_error.model_id = "gpt-5.5";
   streaming_error.error_message = "provider: curl transport failed";
   streaming_error.error_details = "provider: curl transport failed\noutput: event: response.created\ndata: {...}";
@@ -7571,8 +7572,8 @@ void test_tui_event_state_reduces_runtime_events()
          "tui renders concise collapsed errors while preserving partial assistant text and details-on-demand");
 
   ava::tui::TuiEventState canceled_state;
-  ava::app::RuntimeEvent canceled;
-  canceled.type = ava::app::RuntimeEventType::Error;
+  ava::app::runtime::Event canceled;
+  canceled.type = ava::app::runtime::EventType::Error;
   canceled.error_message = "agent loop canceled";
   canceled.error_details = "Unknown: agent loop canceled";
   ava::tui::apply_runtime_event(canceled_state, canceled);
@@ -7584,8 +7585,8 @@ void test_tui_event_state_reduces_runtime_events()
          "tui event state presents cooperative cancellation with continuation guidance");
 
   ava::tui::TuiEventState explicit_canceled_state;
-  ava::app::RuntimeEvent explicit_canceled;
-  explicit_canceled.type = ava::app::RuntimeEventType::Canceled;
+  ava::app::runtime::Event explicit_canceled;
+  explicit_canceled.type = ava::app::runtime::EventType::Canceled;
   explicit_canceled.text = "stopped by user";
   explicit_canceled.reason = "cancel_requested";
   ava::tui::apply_runtime_event(explicit_canceled_state, explicit_canceled);
@@ -7597,8 +7598,8 @@ void test_tui_event_state_reduces_runtime_events()
          "tui event state accepts explicit backend canceled lifecycle events");
 
   ava::tui::TuiEventState lifecycle_state;
-  ava::app::RuntimeEvent compaction_start;
-  compaction_start.type = ava::app::RuntimeEventType::CompactionStart;
+  ava::app::runtime::Event compaction_start;
+  compaction_start.type = ava::app::runtime::EventType::CompactionStart;
   compaction_start.trigger = "auto";
   compaction_start.estimated_tokens = 9000;
   compaction_start.threshold_tokens = 8000;
@@ -7606,8 +7607,8 @@ void test_tui_event_state_reduces_runtime_events()
   expect(lifecycle_state.transcript.empty() && lifecycle_state.activity.size() == 1 && lifecycle_state.activity[0].label == "compaction" &&
              lifecycle_state.activity[0].detail.find("tokens~9000/8000") != std::string::npos,
          "tui event state keeps compaction starts in status activity without inventing transcript content");
-  ava::app::RuntimeEvent retry;
-  retry.type = ava::app::RuntimeEventType::Retry;
+  ava::app::runtime::Event retry;
+  retry.type = ava::app::runtime::EventType::Retry;
   retry.reason = "context_overflow";
   retry.trigger = "context_overflow";
   retry.attempt = 1;
@@ -7618,8 +7619,8 @@ void test_tui_event_state_reduces_runtime_events()
   retry.snapshot_entries = 3;
   retry.current_entries = 4;
   ava::tui::apply_runtime_event(lifecycle_state, retry);
-  ava::app::RuntimeEvent retry_tick;
-  retry_tick.type = ava::app::RuntimeEventType::RetryTick;
+  ava::app::runtime::Event retry_tick;
+  retry_tick.type = ava::app::runtime::EventType::RetryTick;
   retry_tick.reason = "context_overflow";
   retry_tick.trigger = "context_overflow";
   retry_tick.attempt = 1;
@@ -7627,11 +7628,11 @@ void test_tui_event_state_reduces_runtime_events()
   retry_tick.delay_ms = 250;
   retry_tick.remaining_ms = 125;
   ava::tui::apply_runtime_event(lifecycle_state, retry_tick);
-  ava::app::RuntimeEvent retry_tick_update = retry_tick;
+  ava::app::runtime::Event retry_tick_update = retry_tick;
   retry_tick_update.remaining_ms = 25;
   ava::tui::apply_runtime_event(lifecycle_state, retry_tick_update);
-  ava::app::RuntimeEvent compaction_end;
-  compaction_end.type = ava::app::RuntimeEventType::CompactionEnd;
+  ava::app::runtime::Event compaction_end;
+  compaction_end.type = ava::app::runtime::EventType::CompactionEnd;
   compaction_end.trigger = "context_overflow";
   compaction_end.attempt = 1;
   compaction_end.max_attempts = 2;
@@ -7674,8 +7675,8 @@ void test_tui_event_state_reduces_runtime_events()
   ava::tui::TuiEventState done_state;
   delta.text = "done text";
   ava::tui::apply_runtime_event(done_state, delta);
-  ava::app::RuntimeEvent done;
-  done.type = ava::app::RuntimeEventType::Done;
+  ava::app::runtime::Event done;
+  done.type = ava::app::runtime::EventType::Done;
   done.stop_reason = "stop";
   done.provider_iterations = 2;
   done.tool_calls = 1;
@@ -7685,25 +7686,25 @@ void test_tui_event_state_reduces_runtime_events()
              done_state.transcript[0].text == "done text",
          "tui event state records done metadata and commits pending assistant text");
 
-  std::vector<ava::app::RuntimeEvent> live_events;
-  ava::app::RuntimeEvent parity_session;
-  parity_session.type = ava::app::RuntimeEventType::SessionStart;
+  std::vector<ava::app::runtime::Event> live_events;
+  ava::app::runtime::Event parity_session;
+  parity_session.type = ava::app::runtime::EventType::SessionStart;
   parity_session.provider_id = "openai";
   parity_session.model_id = "gpt-5.5";
   live_events.push_back(parity_session);
-  ava::app::RuntimeEvent parity_user;
-  parity_user.type = ava::app::RuntimeEventType::UserMessage;
+  ava::app::runtime::Event parity_user;
+  parity_user.type = ava::app::runtime::EventType::UserMessage;
   parity_user.text = "inspect";
   live_events.push_back(parity_user);
-  ava::app::RuntimeEvent parity_retry;
-  parity_retry.type = ava::app::RuntimeEventType::Retry;
+  ava::app::runtime::Event parity_retry;
+  parity_retry.type = ava::app::runtime::EventType::Retry;
   parity_retry.reason = "context_overflow";
   parity_retry.trigger = "context_overflow";
   parity_retry.attempt = 1;
   parity_retry.max_attempts = 1;
   live_events.push_back(parity_retry);
-  ava::app::RuntimeEvent parity_retry_tick;
-  parity_retry_tick.type = ava::app::RuntimeEventType::RetryTick;
+  ava::app::runtime::Event parity_retry_tick;
+  parity_retry_tick.type = ava::app::runtime::EventType::RetryTick;
   parity_retry_tick.reason = "context_overflow";
   parity_retry_tick.trigger = "context_overflow";
   parity_retry_tick.attempt = 1;
@@ -7711,59 +7712,59 @@ void test_tui_event_state_reduces_runtime_events()
   parity_retry_tick.delay_ms = 250;
   parity_retry_tick.remaining_ms = 0;
   live_events.push_back(parity_retry_tick);
-  ava::app::RuntimeEvent parity_compaction_start;
-  parity_compaction_start.type = ava::app::RuntimeEventType::CompactionStart;
+  ava::app::runtime::Event parity_compaction_start;
+  parity_compaction_start.type = ava::app::runtime::EventType::CompactionStart;
   parity_compaction_start.trigger = "context_overflow";
   parity_compaction_start.attempt = 1;
   parity_compaction_start.max_attempts = 2;
   live_events.push_back(parity_compaction_start);
-  ava::app::RuntimeEvent parity_compaction_end;
-  parity_compaction_end.type = ava::app::RuntimeEventType::CompactionEnd;
+  ava::app::runtime::Event parity_compaction_end;
+  parity_compaction_end.type = ava::app::runtime::EventType::CompactionEnd;
   parity_compaction_end.trigger = "context_overflow";
   parity_compaction_end.attempt = 1;
   parity_compaction_end.max_attempts = 2;
   parity_compaction_end.summary_bytes = 512;
   live_events.push_back(parity_compaction_end);
-  ava::app::RuntimeEvent parity_reasoning;
-  parity_reasoning.type = ava::app::RuntimeEventType::ReasoningDelta;
+  ava::app::runtime::Event parity_reasoning;
+  parity_reasoning.type = ava::app::runtime::EventType::ReasoningDelta;
   parity_reasoning.text = "checking";
   live_events.push_back(parity_reasoning);
-  ava::app::RuntimeEvent parity_delta;
-  parity_delta.type = ava::app::RuntimeEventType::MessageUpdate;
+  ava::app::runtime::Event parity_delta;
+  parity_delta.type = ava::app::runtime::EventType::MessageUpdate;
   parity_delta.model_id = "gpt-5.5";
   parity_delta.text = "answer";
   live_events.push_back(parity_delta);
-  ava::app::RuntimeEvent parity_end;
-  parity_end.type = ava::app::RuntimeEventType::MessageEnd;
+  ava::app::runtime::Event parity_end;
+  parity_end.type = ava::app::runtime::EventType::MessageEnd;
   parity_end.model_id = "gpt-5.5";
   live_events.push_back(parity_end);
-  ava::app::RuntimeEvent parity_tool_start;
-  parity_tool_start.type = ava::app::RuntimeEventType::ToolStart;
+  ava::app::runtime::Event parity_tool_start;
+  parity_tool_start.type = ava::app::runtime::EventType::ToolStart;
   parity_tool_start.call_id = "call_parity";
   parity_tool_start.tool_name = "read_file";
   parity_tool_start.text = "path=README.md";
   live_events.push_back(parity_tool_start);
-  ava::app::RuntimeEvent parity_tool_progress;
-  parity_tool_progress.type = ava::app::RuntimeEventType::ToolProgress;
+  ava::app::runtime::Event parity_tool_progress;
+  parity_tool_progress.type = ava::app::runtime::EventType::ToolProgress;
   parity_tool_progress.call_id = "call_parity";
   parity_tool_progress.tool_name = "read_file";
   parity_tool_progress.text = "reading";
   parity_tool_progress.status = "running";
   live_events.push_back(parity_tool_progress);
-  ava::app::RuntimeEvent parity_tool_result;
-  parity_tool_result.type = ava::app::RuntimeEventType::ToolResult;
+  ava::app::runtime::Event parity_tool_result;
+  parity_tool_result.type = ava::app::runtime::EventType::ToolResult;
   parity_tool_result.call_id = "call_parity";
   parity_tool_result.tool_name = "read_file";
   parity_tool_result.text = "12 bytes";
   parity_tool_result.status = "success";
   live_events.push_back(parity_tool_result);
-  ava::app::RuntimeEvent parity_audit;
-  parity_audit.type = ava::app::RuntimeEventType::ProviderEvent;
+  ava::app::runtime::Event parity_audit;
+  parity_audit.type = ava::app::runtime::EventType::ProviderEvent;
   parity_audit.status = "tui:question_answer";
   parity_audit.text = "question answered: yes";
   live_events.push_back(parity_audit);
-  ava::app::RuntimeEvent parity_done;
-  parity_done.type = ava::app::RuntimeEventType::Done;
+  ava::app::runtime::Event parity_done;
+  parity_done.type = ava::app::runtime::EventType::Done;
   parity_done.stop_reason = "stop";
   parity_done.provider_iterations = 1;
   parity_done.tool_calls = 1;
@@ -7811,7 +7812,7 @@ void test_tui_event_state_reduces_runtime_events()
   expect(live_render == replayed_render && replayed_state.active_run_id == "run_1" && replayed_state.active_turn_id == "turn_1" &&
              replayed_state.active_message_id == "message_1" && replayed_state.active_request_id == "request_1" &&
              replayed_state.active_correlation_id == "correlation_1",
-         "tui EventEnvelope replay renders the same visible transcript story as live RuntimeEvent reduction and tracks "
+         "tui EventEnvelope replay renders the same visible transcript story as live runtime::Event reduction and tracks "
          "backend ids");
 
   ava::tui::TuiEventState resolver_state;

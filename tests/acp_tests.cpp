@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/app/acp/client_tools.h"
 #include "ava/app/acp/codec.h"
 #include "ava/app/acp/content.h"
@@ -51,6 +52,7 @@ namespace {
 
 using namespace std::chrono_literals;
 using ava::app::acp::JsonRpcId;
+namespace runtime = ava::app::runtime;
 
 struct MemoryTransportState
 {
@@ -245,7 +247,7 @@ class RecordingTransport final : public ava::provider::Transport
 
 ava::app::RuntimeProviderRunBundleFactory recording_bundle_factory(std::string* body, std::atomic_bool* entered = nullptr, std::atomic_bool* release = nullptr)
 {
-  return [body, entered, release](ava::app::RuntimeSession const&, ava::app::RuntimeRunOptions options,
+  return [body, entered, release](ava::app::runtime::Session const&, ava::app::runtime::RunOptions options,
                                   std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
     auto provider = ava::provider::builtin_provider_registry().create("moonshot");
     if (!provider)
@@ -294,7 +296,7 @@ class CapturingSequenceTransport final : public ava::provider::Transport
 ava::app::RuntimeProviderRunBundleFactory sequence_bundle_factory(std::shared_ptr<CapturingSequenceState> state,
                                                                   std::vector<ava::provider::HttpResponse> responses)
 {
-  return [state = std::move(state), responses = std::move(responses)](ava::app::RuntimeSession const&, ava::app::RuntimeRunOptions options,
+  return [state = std::move(state), responses = std::move(responses)](ava::app::runtime::Session const&, ava::app::runtime::RunOptions options,
                                                                       std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
     auto provider = ava::provider::builtin_provider_registry().create("moonshot");
     if (!provider)
@@ -408,33 +410,33 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
 {
   using namespace ava::app::acp;
   using ava::app::EventEnvelope;
-  using ava::app::RuntimeEvent;
-  using ava::app::RuntimeEventType;
+  using ava::app::runtime::Event;
+  using ava::app::runtime::EventType;
   auto root = std::filesystem::path("/workspace");
   RuntimeSessionUpdateMapper mapper(RuntimeSessionUpdateMapperOptions{.workspace_root = root, .message_id = "message_1"});
-  RuntimeEvent text;
-  text.type = RuntimeEventType::MessageUpdate;
+  runtime::Event text;
+  text.type = runtime::EventType::MessageUpdate;
   text.text = "hello";
-  RuntimeEvent final;
-  final.type = RuntimeEventType::AssistantMessage;
+  runtime::Event final;
+  final.type = runtime::EventType::AssistantMessage;
   final.text = "hello";
-  RuntimeEvent thought;
-  thought.type = RuntimeEventType::ReasoningDelta;
+  runtime::Event thought;
+  thought.type = runtime::EventType::ReasoningDelta;
   thought.text = "considering";
-  RuntimeEvent start;
-  start.type = RuntimeEventType::ToolStart;
+  runtime::Event start;
+  start.type = runtime::EventType::ToolStart;
   start.call_id = "call_1";
   start.tool_name = "write_file";
   start.tool_arguments_json = R"({"path":"src/a.cpp"})";
   start.text = "src/a.cpp";
-  RuntimeEvent progress;
-  progress.type = RuntimeEventType::ToolProgress;
+  runtime::Event progress;
+  progress.type = runtime::EventType::ToolProgress;
   progress.text = "writing";
   progress.call_id = "call_1";
   progress.tool_name = "write_file";
   progress.status = "running";
-  RuntimeEvent result;
-  result.type = RuntimeEventType::ToolResult;
+  runtime::Event result;
+  result.type = runtime::EventType::ToolResult;
   result.call_id = "call_1";
   result.tool_name = "write_file";
   result.tool_result_json = R"({"ok":true})";
@@ -467,14 +469,14 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
 
   RuntimeSessionUpdateMapper bounded(
       RuntimeSessionUpdateMapperOptions{.workspace_root = root, .message_id = "bounded", .max_updates = 2, .max_encoded_bytes = 4096});
-  RuntimeEvent bounded_one;
-  bounded_one.type = RuntimeEventType::MessageUpdate;
+  runtime::Event bounded_one;
+  bounded_one.type = runtime::EventType::MessageUpdate;
   bounded_one.text = "1";
-  RuntimeEvent bounded_two;
-  bounded_two.type = RuntimeEventType::ReasoningDelta;
+  runtime::Event bounded_two;
+  bounded_two.type = runtime::EventType::ReasoningDelta;
   bounded_two.text = "2";
-  RuntimeEvent bounded_three;
-  bounded_three.type = RuntimeEventType::ToolProgress;
+  runtime::Event bounded_three;
+  bounded_three.type = runtime::EventType::ToolProgress;
   bounded_three.text = "3";
   bounded_three.call_id = "call";
   bounded_three.tool_name = "bash";
@@ -490,8 +492,8 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
   bool coalesce_failed = false;
   for (std::size_t index = 0; index < 5'000; ++index)
   {
-    RuntimeEvent delta;
-    delta.type = RuntimeEventType::MessageUpdate;
+    runtime::Event delta;
+    delta.type = runtime::EventType::MessageUpdate;
     delta.text = "x";
     auto batch = coalesced.map_coalesced_and_encode(delta);
     if (!batch)
@@ -499,8 +501,8 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
     else
       coalesced_updates.insert(coalesced_updates.end(), std::make_move_iterator(batch->begin()), std::make_move_iterator(batch->end()));
   }
-  RuntimeEvent done;
-  done.type = RuntimeEventType::Done;
+  runtime::Event done;
+  done.type = runtime::EventType::Done;
   auto flushed = coalesced.map_coalesced_and_encode(done);
   if (flushed)
     coalesced_updates.insert(coalesced_updates.end(), std::make_move_iterator(flushed->begin()), std::make_move_iterator(flushed->end()));
@@ -516,8 +518,8 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
 
   RuntimeSessionUpdateMapper unicode_mapper(
       RuntimeSessionUpdateMapperOptions{.workspace_root = root, .message_id = "unicode", .max_updates = 4, .max_encoded_bytes = 16 * 1024});
-  RuntimeEvent unicode_delta;
-  unicode_delta.type = RuntimeEventType::MessageUpdate;
+  runtime::Event unicode_delta;
+  unicode_delta.type = runtime::EventType::MessageUpdate;
   unicode_delta.text = std::string(kMaxStreamContentChunkBytes - 1, 'a') + "€x";
   auto unicode_batch = unicode_mapper.map_coalesced_and_encode(unicode_delta);
   auto unicode_flush = unicode_mapper.flush_coalesced();
@@ -1008,7 +1010,7 @@ void test_acp_startup_model_is_pinned_across_config_mutation()
   options.agent_version = "1";
   options.launch_root = std::filesystem::canonical(workspace);
   options.paths = paths;
-  options.provider_bundle_factory = [&observed_models, base_factory](ava::app::RuntimeSession const& session, ava::app::RuntimeRunOptions run_options,
+  options.provider_bundle_factory = [&observed_models, base_factory](ava::app::runtime::Session const& session, ava::app::runtime::RunOptions run_options,
                                                                      std::string_view label) mutable {
     observed_models.push_back(session.model);
     return base_factory(session, std::move(run_options), label);
@@ -1167,7 +1169,7 @@ void test_acp_session_lifecycle_real_prompt_and_provider_ownership()
   std::mutex ownership_mutex;
   std::set<void const*> transport_instances;
   std::size_t bundle_count = 0;
-  ava::app::RuntimeProviderRunBundleFactory factory = [&](ava::app::RuntimeSession const&, ava::app::RuntimeRunOptions options,
+  ava::app::RuntimeProviderRunBundleFactory factory = [&](ava::app::runtime::Session const&, ava::app::runtime::RunOptions options,
                                                           std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
     auto transport = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::provider::HttpResponse>{ava::provider::HttpResponse{
         .status_code = 200, .headers = {}, .body = R"({"choices":[{"message":{"content":"owned response"},"finish_reason":"stop"}]})"}});
@@ -1618,7 +1620,7 @@ void test_acp_cancel_terminal_arbitration_and_provider_setup_paths()
     options.launch_root = std::filesystem::canonical(workspace);
     options.paths = paths;
     options.provider_bundle_factory = [gate, transport_state, fail_setup, failure_category](
-                                          ava::app::RuntimeSession const&, ava::app::RuntimeRunOptions run_options,
+                                          ava::app::runtime::Session const&, ava::app::runtime::RunOptions run_options,
                                           std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
       {
         std::unique_lock lock(gate->mutex);
@@ -2282,7 +2284,7 @@ void test_acp_session_grant_cannot_follow_retargeted_parent_symlink()
   options.agent_version = "1";
   options.launch_root = std::filesystem::canonical(workspace);
   options.paths = paths;
-  options.provider_bundle_factory = [&, provider_state](ava::app::RuntimeSession const& session, ava::app::RuntimeRunOptions run_options,
+  options.provider_bundle_factory = [&, provider_state](ava::app::runtime::Session const& session, ava::app::runtime::RunOptions run_options,
                                                         std::string_view label) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
     auto const current = bundle_number.fetch_add(1);
     auto responses = current == 0 ? std::vector<ava::provider::HttpResponse>{tool_response("grant_first", first_args), acp_text_response("first complete")}

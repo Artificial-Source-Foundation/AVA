@@ -7,11 +7,11 @@
 namespace ava::app::runtime {
 namespace {
 
-RuntimeEvent base_retry_event(RuntimeSession const& session, RuntimeRunOptions const& options)
+Event base_retry_event(Session const& session, RunOptions const& options)
 {
   auto build = [&] {
-    RuntimeEvent event;
-    event.type = RuntimeEventType::Retry;
+    Event event;
+    event.type = EventType::Retry;
     event.timestamp = ava::session::now_timestamp();
     event.session_id = session.store.session_id();
     event.mode = session.mode;
@@ -28,14 +28,14 @@ RuntimeEvent base_retry_event(RuntimeSession const& session, RuntimeRunOptions c
 
 }  // namespace
 
-ava::provider::RetryOptions runtime_retry_options(RuntimeSession const& session, RuntimeRunOptions const& options)
+ava::provider::RetryOptions runtime_retry_options(Session const& session, RunOptions const& options)
 {
   ava::provider::RetryOptions retry_options;
   retry_options.cancel_requested = options.cancel_requested;
   retry_options.observation = {.observation = options.observation, .context = options.trace_context};
   retry_options.on_retry = [&session, &options](ava::provider::RetryOptions::Event const& retry) {
     auto event = base_retry_event(session, options);
-    event.type = retry.countdown_tick ? RuntimeEventType::RetryTick : RuntimeEventType::Retry;
+    event.type = retry.countdown_tick ? EventType::RetryTick : EventType::Retry;
     event.reason = retry.reason;
     event.status = retry.streaming ? "streaming" : "request";
     event.attempt = retry.attempt;

@@ -66,24 +66,24 @@ struct OpenedInstallSourceFile
   mode_t mode = 0;
 };
 
-std::string plugin_display_path(std::filesystem::path const& path, RuntimeSession const& session)
+std::string plugin_display_path(std::filesystem::path const& path, runtime::Session const& session)
 {
   return sanitize_inline_text(display_path(path, session.current_dir));
 }
 
-ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session)
+ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::Session const& session)
 {
   return ava::plugin::PluginDiscoveryOptions{
       .global_plugins_dir = session.paths.ava_config_dir / "plugins",
       .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{}};
 }
 
-std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
+std::filesystem::path plugin_enablement_file(runtime::Session const& session)
 {
   return session.paths.ava_state_dir / "plugin-enablement.json";
 }
 
-ava::plugin::PluginDiagnostics plugin_diagnostics(RuntimeSession const& session)
+ava::plugin::PluginDiagnostics plugin_diagnostics(runtime::Session const& session)
 {
   return ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir);
 }
@@ -243,7 +243,7 @@ ava::core::Result<std::string> read_plugin_resource(ava::plugin::PluginManifest 
   return contents;
 }
 
-std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& status, RuntimeSession const& session, std::string_view label,
+std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& status, runtime::Session const& session, std::string_view label,
                                              std::vector<ava::plugin::PluginResourceContribution> const& resources)
 {
   std::ostringstream output;
@@ -269,7 +269,7 @@ std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& st
 }
 
 std::string format_plugin_resource_text(ava::plugin::PluginManifest const& manifest, ava::plugin::PluginResourceContribution const& resource,
-                                        std::string_view label, RuntimeSession const& session, std::string content)
+                                        std::string_view label, runtime::Session const& session, std::string content)
 {
   std::ostringstream output;
   output << "Plugin " << label << " " << sanitize_inline_text(manifest.id) << "/" << sanitize_inline_text(resource.name) << "\n";
@@ -366,7 +366,7 @@ std::string format_dynamic_resource_text(ava::plugin::PluginManifest const& mani
   return output.str();
 }
 
-ava::core::VoidResult record_dynamic_resource_result(RuntimeSession const& session, RuntimeEventSink const& sink, CommandResult& result,
+ava::core::VoidResult record_dynamic_resource_result(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result,
                                                      std::string const& call_id, ava::agent::ToolTimelineStatus status, std::string result_summary,
                                                      std::string result_content, ava::tools::ToolContext const& context)
 {
@@ -411,7 +411,7 @@ bool plugin_command_error_is_canceled(ava::core::Error const& error)
   return error.message().find("canceled") != std::string::npos;
 }
 
-std::string format_plugin_list_text(ava::plugin::PluginDiagnostics const& diagnostics, RuntimeSession const& session)
+std::string format_plugin_list_text(ava::plugin::PluginDiagnostics const& diagnostics, runtime::Session const& session)
 {
   std::ostringstream output;
   output << "Plugins:\n";
@@ -439,7 +439,7 @@ std::string format_plugin_list_text(ava::plugin::PluginDiagnostics const& diagno
   return output.str();
 }
 
-std::string format_plugin_failure_text(ava::plugin::PluginFailure const& failure, RuntimeSession const& session)
+std::string format_plugin_failure_text(ava::plugin::PluginFailure const& failure, runtime::Session const& session)
 {
   std::string text =
       "  " + plugin_scope_text(failure.scope) + "  " + plugin_display_path(failure.path, session) + "\n    " + sanitize_inline_text(failure.message);
@@ -448,7 +448,7 @@ std::string format_plugin_failure_text(ava::plugin::PluginFailure const& failure
   return text;
 }
 
-std::string format_plugin_failures_text(ava::plugin::PluginDiagnostics const& diagnostics, RuntimeSession const& session)
+std::string format_plugin_failures_text(ava::plugin::PluginDiagnostics const& diagnostics, runtime::Session const& session)
 {
   if (diagnostics.failures.empty())
     return "No plugin discovery or enablement failures.";
@@ -459,7 +459,7 @@ std::string format_plugin_failures_text(ava::plugin::PluginDiagnostics const& di
   return output;
 }
 
-std::string format_plugin_inspect_text(ava::plugin::PluginStatus const& status, RuntimeSession const& session)
+std::string format_plugin_inspect_text(ava::plugin::PluginStatus const& status, runtime::Session const& session)
 {
   auto const& manifest = status.plugin.manifest;
   std::ostringstream output;
@@ -508,7 +508,7 @@ std::string format_plugin_inspect_text(ava::plugin::PluginStatus const& status, 
   return output.str();
 }
 
-std::string format_valid_plugin_manifest_text(ava::plugin::PluginManifest const& manifest, RuntimeSession const& session)
+std::string format_valid_plugin_manifest_text(ava::plugin::PluginManifest const& manifest, runtime::Session const& session)
 {
   std::ostringstream output;
   output << "Valid plugin manifest\n";
@@ -528,7 +528,7 @@ std::string format_valid_plugin_manifest_text(ava::plugin::PluginManifest const&
 }
 
 std::string format_plugin_installed_text(ava::plugin::PluginManifest const& manifest, std::filesystem::path const& source_dir,
-                                         std::filesystem::path const& destination_dir, RuntimeSession const& session)
+                                         std::filesystem::path const& destination_dir, runtime::Session const& session)
 {
   std::ostringstream output;
   output << "Installed global plugin " << sanitize_inline_text(manifest.id) << "\n";
@@ -539,7 +539,7 @@ std::string format_plugin_installed_text(ava::plugin::PluginManifest const& mani
   return output.str();
 }
 
-std::string format_plugin_removed_text(ava::plugin::PluginManifest const& manifest, std::filesystem::path const& removed_dir, RuntimeSession const& session)
+std::string format_plugin_removed_text(ava::plugin::PluginManifest const& manifest, std::filesystem::path const& removed_dir, runtime::Session const& session)
 {
   std::ostringstream output;
   output << "Removed global plugin " << sanitize_inline_text(manifest.id) << "\n";
@@ -548,7 +548,7 @@ std::string format_plugin_removed_text(ava::plugin::PluginManifest const& manife
   return output.str();
 }
 
-std::filesystem::path plugin_validate_path(RuntimeSession const& session, std::string_view path_text)
+std::filesystem::path plugin_validate_path(runtime::Session const& session, std::string_view path_text)
 {
   auto path = std::filesystem::path(std::string(path_text));
   if (path.is_relative())
@@ -743,7 +743,7 @@ ava::core::VoidResult ensure_global_plugin_install_root(std::filesystem::path co
   return set_safe_directory_permissions(root);
 }
 
-ava::core::Result<std::filesystem::path> plugin_install_source_dir(RuntimeSession const& session, std::string_view path_text)
+ava::core::Result<std::filesystem::path> plugin_install_source_dir(runtime::Session const& session, std::string_view path_text)
 {
   auto const source_path = plugin_validate_path(session, path_text);
   std::error_code status_error;
@@ -935,7 +935,7 @@ void cleanup_install_temp_dir(std::filesystem::path const& temp_dir)
   std::filesystem::remove_all(temp_dir, remove_error);
 }
 
-ava::core::Result<std::string> install_plugin_from_path(RuntimeSession const& session, std::string_view path_text)
+ava::core::Result<std::string> install_plugin_from_path(runtime::Session const& session, std::string_view path_text)
 {
   auto source_dir = plugin_install_source_dir(session, path_text);
   if (!source_dir)
@@ -1042,7 +1042,7 @@ ava::core::VoidResult ensure_removable_global_plugin(ava::plugin::PluginStatus c
   return {};
 }
 
-ava::core::Result<std::string> remove_plugin_by_id(RuntimeSession const& session, ava::plugin::PluginStatus const& status)
+ava::core::Result<std::string> remove_plugin_by_id(runtime::Session const& session, ava::plugin::PluginStatus const& status)
 {
   auto const global_root = plugin_discovery_options(session).global_plugins_dir;
   if (auto root = ensure_global_plugin_install_root(global_root); !root)
@@ -1102,7 +1102,7 @@ ava::core::Result<PluginRunArguments> parse_plugin_run_arguments(std::string_vie
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_plugins_command(RuntimeSession& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;
@@ -1482,7 +1482,7 @@ ava::core::Result<CommandResult> run_plugins_command(RuntimeSession& session, Co
   return usage();
 }
 
-ava::core::Result<CommandResult> run_plugin_command(RuntimeSession& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_plugin_command(runtime::Session& session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;

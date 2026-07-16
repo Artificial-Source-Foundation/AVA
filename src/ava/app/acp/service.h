@@ -19,8 +19,8 @@ struct AgentServiceOptions
   std::string agent_version;
   std::filesystem::path launch_root;
   ava::config::XdgPaths paths = ava::config::xdg_paths();
-  RuntimeOpenOptions open_options;
-  RuntimeRunOptions run_options;
+  runtime::OpenOptions open_options;
+  runtime::RunOptions run_options;
   RuntimeProviderRunBundleFactory provider_bundle_factory;
   std::chrono::milliseconds permission_timeout = kDefaultCallTimeout;
   std::chrono::milliseconds close_grace = kSessionCloseGrace;

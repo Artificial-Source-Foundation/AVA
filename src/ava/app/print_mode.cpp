@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/app/print_mode.h"
 #include "ava/tui/composer.h"
 #include "ava/config/auth.h"
@@ -58,9 +59,9 @@ std::string terminal_output_text(std::string_view text, bool sanitize)
   return sanitize ? sanitize_terminal_output_text(text) : std::string(text);
 }
 
-void write_text_event_diagnostic(RuntimeEvent const& event, std::ostream& err, bool sanitize)
+void write_text_event_diagnostic(runtime::Event const& event, std::ostream& err, bool sanitize)
 {
-  if (event.type == RuntimeEventType::ToolStart)
+  if (event.type == runtime::EventType::ToolStart)
   {
     err << "tool_start";
     if (!event.tool_name.empty())
@@ -70,7 +71,7 @@ void write_text_event_diagnostic(RuntimeEvent const& event, std::ostream& err, b
     err << '\n';
     return;
   }
-  if (event.type == RuntimeEventType::ToolResult)
+  if (event.type == runtime::EventType::ToolResult)
   {
     err << "tool_result";
     if (!event.tool_name.empty())
@@ -86,13 +87,13 @@ void write_text_event_diagnostic(RuntimeEvent const& event, std::ostream& err, b
     }
     return;
   }
-  if (event.type == RuntimeEventType::Error)
+  if (event.type == runtime::EventType::Error)
   {
     err << terminal_output_text(event.error_details.empty() ? event.error_message : event.error_details, sanitize) << '\n';
   }
 }
 
-RuntimeRunOptions print_runtime_options(RuntimeRunOptions options)
+runtime::RunOptions print_runtime_options(runtime::RunOptions options)
 {
   if (!options.permission_resolver)
   {
@@ -102,7 +103,7 @@ RuntimeRunOptions print_runtime_options(RuntimeRunOptions options)
   return options;
 }
 
-ava::permissions::PermissionRuleStore permission_rule_store_for_print_session(RuntimeSession const& session)
+ava::permissions::PermissionRuleStore permission_rule_store_for_print_session(runtime::Session const& session)
 {
   return ava::permissions::PermissionRuleStore{
       .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
@@ -111,10 +112,10 @@ ava::permissions::PermissionRuleStore permission_rule_store_for_print_session(Ru
   };
 }
 
-RuntimeEvent runtime_error_event(RuntimeSession const& session, ava::core::Error const& error)
+runtime::Event runtime_error_event(runtime::Session const& session, ava::core::Error const& error)
 {
-  RuntimeEvent event;
-  event.type = RuntimeEventType::Error;
+  runtime::Event event;
+  event.type = runtime::EventType::Error;
   event.timestamp = ava::session::now_timestamp();
   event.session_id = session.store.session_id();
   event.mode = session.mode;
@@ -141,7 +142,7 @@ ava::core::Result<std::string> merge_print_prompt(PrintPromptInputs const& input
   return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "print mode requires a prompt argument or stdin"));
 }
 
-ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& session, std::string const& prompt, ava::provider::Provider const& provider,
+ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session& session, std::string const& prompt, ava::provider::Provider const& provider,
                                                                 ava::provider::Transport& transport, PrintModeRunOptions const& options, std::ostream& out,
                                                                 std::ostream& err)
 {
@@ -153,7 +154,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
   if (options.output_format == PrintOutputFormat::Json)
   {
     event_bus.subscribe([&out, &emitted_error](EventEnvelope const& envelope) {
-      if (envelope.name == to_string(RuntimeEventType::Error))
+      if (envelope.name == to_string(runtime::EventType::Error))
         emitted_error = true;
       out << serialize_event_envelope_jsonl(envelope);
       if (!out)
@@ -166,8 +167,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
   }
   else
   {
-    runtime_options.event_sink = [&err, &emitted_error, sanitize = options.sanitize_terminal_diagnostics](RuntimeEvent const& event) {
-      if (event.type == RuntimeEventType::Error)
+    runtime_options.event_sink = [&err, &emitted_error, sanitize = options.sanitize_terminal_diagnostics](runtime::Event const& event) {
+      if (event.type == runtime::EventType::Error)
         emitted_error = true;
       write_text_event_diagnostic(event, err, sanitize);
       if (!err)
@@ -243,7 +244,7 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   }
   ava::provider::Provider const& provider =
       options.provider_override ? options.provider_override->get() : static_cast<ava::provider::Provider const&>(**default_provider);
-  RuntimeRunOptions runtime_options;
+  runtime::RunOptions runtime_options;
   runtime_options.offline = session->offline || options.open_options.offline;
   if (!runtime_options.offline)
   {

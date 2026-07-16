@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/app/acp/protocol.h"
 #include "ava/app/acp/session_update.h"
 
@@ -90,7 +91,7 @@ std::string title_for_tool(std::string_view tool_name)
   return title.empty() ? std::string("Tool call") : title;
 }
 
-std::vector<AcpToolCallLocation> event_locations(RuntimeEvent const& event, std::filesystem::path const& root)
+std::vector<AcpToolCallLocation> event_locations(runtime::Event const& event, std::filesystem::path const& root)
 {
   std::vector<AcpToolCallLocation> locations;
   auto add = [&](std::string_view value, std::optional<std::size_t> line = std::nullopt) {
@@ -151,31 +152,31 @@ std::string_view content_chunk_discriminator(AcpContentChunkKind kind)
   return "agent_message_chunk";
 }
 
-RuntimeEvent event_from_envelope(EventEnvelope const& envelope)
+runtime::Event event_from_envelope(EventEnvelope const& envelope)
 {
-  RuntimeEvent event;
+  runtime::Event event;
   event.timestamp = envelope.timestamp;
   event.session_id = envelope.session_id;
   if (envelope.name == "user_message")
-    event.type = RuntimeEventType::UserMessage;
+    event.type = runtime::EventType::UserMessage;
   else if (envelope.name == "assistant_message")
-    event.type = RuntimeEventType::AssistantMessage;
+    event.type = runtime::EventType::AssistantMessage;
   else if (envelope.name == "message_update")
-    event.type = RuntimeEventType::MessageUpdate;
+    event.type = runtime::EventType::MessageUpdate;
   else if (envelope.name == "reasoning_start")
-    event.type = RuntimeEventType::ReasoningStart;
+    event.type = runtime::EventType::ReasoningStart;
   else if (envelope.name == "reasoning_delta")
-    event.type = RuntimeEventType::ReasoningDelta;
+    event.type = runtime::EventType::ReasoningDelta;
   else if (envelope.name == "reasoning_end")
-    event.type = RuntimeEventType::ReasoningEnd;
+    event.type = runtime::EventType::ReasoningEnd;
   else if (envelope.name == "tool_start")
-    event.type = RuntimeEventType::ToolStart;
+    event.type = runtime::EventType::ToolStart;
   else if (envelope.name == "tool_progress")
-    event.type = RuntimeEventType::ToolProgress;
+    event.type = runtime::EventType::ToolProgress;
   else if (envelope.name == "tool_result")
-    event.type = RuntimeEventType::ToolResult;
+    event.type = runtime::EventType::ToolResult;
   else
-    event.type = RuntimeEventType::ProviderEvent;
+    event.type = runtime::EventType::ProviderEvent;
 
   auto payload = Json::parse(envelope.payload_json, nullptr, false, true);
   if (!payload.is_object())
@@ -224,11 +225,11 @@ RuntimeSessionUpdateMapper::RuntimeSessionUpdateMapper(RuntimeSessionUpdateMappe
   options_.max_encoded_bytes = std::max<std::size_t>(1, options_.max_encoded_bytes);
 }
 
-ava::core::Result<std::optional<SessionUpdate>> RuntimeSessionUpdateMapper::map(RuntimeEvent const& event)
+ava::core::Result<std::optional<SessionUpdate>> RuntimeSessionUpdateMapper::map(runtime::Event const& event)
 {
   switch (event.type)
   {
-    case RuntimeEventType::MessageUpdate:
+    case runtime::EventType::MessageUpdate:
       if (event.text.empty())
         return std::optional<SessionUpdate>{};
       streamed_agent_text_ = true;
@@ -236,7 +237,7 @@ ava::core::Result<std::optional<SessionUpdate>> RuntimeSessionUpdateMapper::map(
           AcpContentChunkUpdate{.kind = AcpContentChunkKind::AgentMessage,
                                 .content = AcpTextContent{.text = event.text},
                                 .message_id = options_.message_id.empty() ? std::nullopt : std::optional<std::string>(options_.message_id)});
-    case RuntimeEventType::AssistantMessage:
+    case runtime::EventType::AssistantMessage:
       if (event.text.empty() || streamed_agent_text_)
         return std::optional<SessionUpdate>{};
       streamed_agent_text_ = true;
@@ -244,16 +245,16 @@ ava::core::Result<std::optional<SessionUpdate>> RuntimeSessionUpdateMapper::map(
           AcpContentChunkUpdate{.kind = AcpContentChunkKind::AgentMessage,
                                 .content = AcpTextContent{.text = event.text},
                                 .message_id = options_.message_id.empty() ? std::nullopt : std::optional<std::string>(options_.message_id)});
-    case RuntimeEventType::ReasoningStart:
-    case RuntimeEventType::ReasoningDelta:
-    case RuntimeEventType::ReasoningEnd:
+    case runtime::EventType::ReasoningStart:
+    case runtime::EventType::ReasoningDelta:
+    case runtime::EventType::ReasoningEnd:
       if (event.text.empty() || event.reasoning_redacted)
         return std::optional<SessionUpdate>{};
       return std::optional<SessionUpdate>(
           AcpContentChunkUpdate{.kind = AcpContentChunkKind::AgentThought,
                                 .content = AcpTextContent{.text = event.text},
                                 .message_id = options_.message_id.empty() ? std::nullopt : std::optional<std::string>(options_.message_id)});
-    case RuntimeEventType::ToolStart: {
+    case runtime::EventType::ToolStart: {
       if (event.call_id.empty() || event.call_id.size() > kMaxStringBytes || has_control_byte(event.call_id))
         return std::optional<SessionUpdate>{};
       auto locations = event_locations(event, options_.workspace_root);
@@ -266,7 +267,7 @@ ava::core::Result<std::optional<SessionUpdate>> RuntimeSessionUpdateMapper::map(
                             .content = text_tool_content(event.text),
                             .locations = locations.empty() ? std::nullopt : std::optional<std::vector<AcpToolCallLocation>>(std::move(locations))});
     }
-    case RuntimeEventType::ToolProgress:
+    case runtime::EventType::ToolProgress:
       if (event.call_id.empty() || event.call_id.size() > kMaxStringBytes || has_control_byte(event.call_id))
         return std::optional<SessionUpdate>{};
       return std::optional<SessionUpdate>(AcpToolCallUpdate{.initial = false,
@@ -276,7 +277,7 @@ ava::core::Result<std::optional<SessionUpdate>> RuntimeSessionUpdateMapper::map(
                                                             .status = "in_progress",
                                                             .content = text_tool_content(event.text),
                                                             .locations = std::nullopt});
-    case RuntimeEventType::ToolResult: {
+    case runtime::EventType::ToolResult: {
       if (event.call_id.empty() || event.call_id.size() > kMaxStringBytes || has_control_byte(event.call_id))
         return std::optional<SessionUpdate>{};
       auto locations = event_locations(event, options_.workspace_root);
@@ -291,17 +292,17 @@ ava::core::Result<std::optional<SessionUpdate>> RuntimeSessionUpdateMapper::map(
                             .content = text_tool_content(content),
                             .locations = locations.empty() ? std::nullopt : std::optional<std::vector<AcpToolCallLocation>>(std::move(locations))});
     }
-    case RuntimeEventType::SessionStart:
-    case RuntimeEventType::UserMessage:
-    case RuntimeEventType::MessageEnd:
-    case RuntimeEventType::ProviderEvent:
-    case RuntimeEventType::CompactionStart:
-    case RuntimeEventType::CompactionEnd:
-    case RuntimeEventType::Retry:
-    case RuntimeEventType::RetryTick:
-    case RuntimeEventType::Canceled:
-    case RuntimeEventType::Error:
-    case RuntimeEventType::Done:
+    case runtime::EventType::SessionStart:
+    case runtime::EventType::UserMessage:
+    case runtime::EventType::MessageEnd:
+    case runtime::EventType::ProviderEvent:
+    case runtime::EventType::CompactionStart:
+    case runtime::EventType::CompactionEnd:
+    case runtime::EventType::Retry:
+    case runtime::EventType::RetryTick:
+    case runtime::EventType::Canceled:
+    case runtime::EventType::Error:
+    case runtime::EventType::Done:
       return std::optional<SessionUpdate>{};
   }
   return std::optional<SessionUpdate>{};
@@ -331,7 +332,7 @@ ava::core::Result<std::optional<std::string>> RuntimeSessionUpdateMapper::accoun
   return std::optional<std::string>(std::move(*encoded));
 }
 
-ava::core::Result<std::optional<std::string>> RuntimeSessionUpdateMapper::map_and_encode(RuntimeEvent const& event)
+ava::core::Result<std::optional<std::string>> RuntimeSessionUpdateMapper::map_and_encode(runtime::Event const& event)
 {
   auto update = map(event);
   if (!update)
@@ -367,7 +368,7 @@ ava::core::Result<std::vector<std::string>> RuntimeSessionUpdateMapper::flush_co
   return encoded;
 }
 
-ava::core::Result<std::vector<std::string>> RuntimeSessionUpdateMapper::map_coalesced_and_encode(RuntimeEvent const& event)
+ava::core::Result<std::vector<std::string>> RuntimeSessionUpdateMapper::map_coalesced_and_encode(runtime::Event const& event)
 {
   std::vector<std::string> encoded;
   auto append_flushed = [&]() -> ava::core::VoidResult {

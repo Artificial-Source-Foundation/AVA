@@ -5,6 +5,7 @@
 #include "serialization_json.h"
 #include "session_commands.h"
 #include "session_operators.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 
@@ -45,7 +46,7 @@ void reset_cancel_after_session_switch(RpcRunState& run_state)
   run_state.cancel_requested.store(false, std::memory_order_relaxed);
 }
 
-ava::core::Result<std::string> resolve_branch_source_session_id(RuntimeSession const& current, RuntimeOpenOptions const& open_options,
+ava::core::Result<std::string> resolve_branch_source_session_id(runtime::Session const& current, runtime::OpenOptions const& open_options,
                                                                 RpcCommand const& command)
 {
   if (command.session_id && command.session_id->empty())
@@ -77,7 +78,7 @@ ava::core::Result<std::string> resolve_branch_source_session_id(RuntimeSession c
   return matches.front();
 }
 
-ava::core::VoidResult recover_source_session_for_mutation(RuntimeSession& current, std::string const& source_session_id,
+ava::core::VoidResult recover_source_session_for_mutation(runtime::Session& current, std::string const& source_session_id,
                                                           std::optional<ava::session::SessionLease>& temporary_source_lease)
 {
   if (source_session_id == current.store.session_id())
@@ -101,7 +102,7 @@ ava::core::VoidResult recover_source_session_for_mutation(RuntimeSession& curren
   return {};
 }
 
-RuntimeOpenOptions owned_replacement_options(RuntimeSession const& current, RuntimeOpenOptions const& base_options)
+runtime::OpenOptions owned_replacement_options(runtime::Session const& current, runtime::OpenOptions const& base_options)
 {
   auto options = base_options;
   options.workspace_dir = current.workspace_dir;
@@ -393,7 +394,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, added.error()));
     auto const json = permission_rule_added_json(*added);
     auto envelope = resolver_event_envelope("permission_rule_added", command.id, command.id, session_id, json);
-    if (auto written = write_record(context.output, serialize_event_envelope_jsonl(envelope)); !written)
+    if (auto written = Output::write_record(context.output, serialize_event_envelope_jsonl(envelope)); !written)
     {
       return std::unexpected(std::move(written.error()));
     }
@@ -422,7 +423,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, removed.error()));
     auto const json = permission_rule_removed_json(*removed);
     auto envelope = resolver_event_envelope("permission_rule_removed", command.id, command.id, session_id, json);
-    if (auto written = write_record(context.output, serialize_event_envelope_jsonl(envelope)); !written)
+    if (auto written = Output::write_record(context.output, serialize_event_envelope_jsonl(envelope)); !written)
     {
       return std::unexpected(std::move(written.error()));
     }
@@ -453,7 +454,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    std::optional<RuntimeReasoningSelection> selection = std::nullopt;
+    std::optional<runtime::ReasoningSelection> selection = std::nullopt;
     if (command.type == "set_reasoning")
     {
       if (!command.reasoning_level || command.reasoning_level->empty())
@@ -467,7 +468,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       }
       if (level != "off")
       {
-        selection = RuntimeReasoningSelection{
+        selection = runtime::ReasoningSelection{
             .level = std::string(level), .budget_tokens = command.reasoning_budget_tokens, .display = command.reasoning_display.value_or("")};
       }
     }

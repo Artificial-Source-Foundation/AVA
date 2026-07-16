@@ -1,5 +1,11 @@
 #include "sys.h"
-#include "ava/app/events.h"
+#include "EventEnvelope.h"
+#include "events.h"
+#include "runtime/CancellationPayload.h"
+#include "runtime/CompletionPayload.h"
+#include "runtime/ErrorPayload.h"
+#include "runtime/RetryPayload.h"
+#include "runtime/ToolPayload.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
@@ -171,11 +177,11 @@ void append_payload_string_array_field(std::string& out, bool& has_field, std::s
   has_field = true;
 }
 
-std::string generic_payload_json_for_runtime_event(RuntimeEvent const& event)
+std::string generic_payload_json_for_runtime_event(runtime::Event const& event)
 {
   std::string out = "{";
   bool has_field = false;
-  if (event.type == RuntimeEventType::SessionStart)
+  if (event.type == runtime::EventType::SessionStart)
   {
     append_payload_string_field(out, has_field, "mode", ava::agent::to_string(event.mode));
     append_payload_string_field(out, has_field, "provider", event.provider_id);
@@ -234,34 +240,36 @@ std::string generic_payload_json_for_runtime_event(RuntimeEvent const& event)
   return out;
 }
 
-std::string payload_json_for_runtime_event(RuntimeEvent const& event)
+std::string payload_json_for_runtime_event(runtime::Event const& event)
 {
+  using runtime::EventType;
+
   switch (event.type)
   {
-    case RuntimeEventType::ToolStart:
-    case RuntimeEventType::ToolProgress:
-    case RuntimeEventType::ToolResult:
+    case runtime::EventType::ToolStart:
+    case runtime::EventType::ToolProgress:
+    case runtime::EventType::ToolResult:
       return serialize_payload_json(tool_payload_from_event(event));
-    case RuntimeEventType::Retry:
-    case RuntimeEventType::RetryTick:
+    case runtime::EventType::Retry:
+    case runtime::EventType::RetryTick:
       return serialize_payload_json(retry_payload_from_event(event));
-    case RuntimeEventType::Canceled:
+    case runtime::EventType::Canceled:
       return serialize_payload_json(cancellation_payload_from_event(event));
-    case RuntimeEventType::Error:
+    case runtime::EventType::Error:
       return serialize_payload_json(error_payload_from_event(event));
-    case RuntimeEventType::Done:
+    case runtime::EventType::Done:
       return serialize_payload_json(completion_payload_from_event(event));
-    case RuntimeEventType::SessionStart:
-    case RuntimeEventType::UserMessage:
-    case RuntimeEventType::AssistantMessage:
-    case RuntimeEventType::MessageUpdate:
-    case RuntimeEventType::MessageEnd:
-    case RuntimeEventType::ReasoningStart:
-    case RuntimeEventType::ReasoningDelta:
-    case RuntimeEventType::ReasoningEnd:
-    case RuntimeEventType::ProviderEvent:
-    case RuntimeEventType::CompactionStart:
-    case RuntimeEventType::CompactionEnd:
+    case runtime::EventType::SessionStart:
+    case runtime::EventType::UserMessage:
+    case runtime::EventType::AssistantMessage:
+    case runtime::EventType::MessageUpdate:
+    case runtime::EventType::MessageEnd:
+    case runtime::EventType::ReasoningStart:
+    case runtime::EventType::ReasoningDelta:
+    case runtime::EventType::ReasoningEnd:
+    case runtime::EventType::ProviderEvent:
+    case runtime::EventType::CompactionStart:
+    case runtime::EventType::CompactionEnd:
       return generic_payload_json_for_runtime_event(event);
   }
   return generic_payload_json_for_runtime_event(event);
@@ -294,210 +302,214 @@ void append_payload_aliases(std::string& out, std::string_view payload_json)
 
 }  // namespace
 
-std::string to_string(RuntimeEventType type)
+std::string to_string(runtime::EventType type)
 {
+  using runtime::EventType;
+
   switch (type)
   {
-    case RuntimeEventType::SessionStart:
+    case runtime::EventType::SessionStart:
       return "session_start";
-    case RuntimeEventType::UserMessage:
+    case runtime::EventType::UserMessage:
       return "user_message";
-    case RuntimeEventType::AssistantMessage:
+    case runtime::EventType::AssistantMessage:
       return "assistant_message";
-    case RuntimeEventType::MessageUpdate:
+    case runtime::EventType::MessageUpdate:
       return "message_update";
-    case RuntimeEventType::MessageEnd:
+    case runtime::EventType::MessageEnd:
       return "message_end";
-    case RuntimeEventType::ReasoningStart:
+    case runtime::EventType::ReasoningStart:
       return "reasoning_start";
-    case RuntimeEventType::ReasoningDelta:
+    case runtime::EventType::ReasoningDelta:
       return "reasoning_delta";
-    case RuntimeEventType::ReasoningEnd:
+    case runtime::EventType::ReasoningEnd:
       return "reasoning_end";
-    case RuntimeEventType::ProviderEvent:
+    case runtime::EventType::ProviderEvent:
       return "provider_event";
-    case RuntimeEventType::ToolStart:
+    case runtime::EventType::ToolStart:
       return "tool_start";
-    case RuntimeEventType::ToolProgress:
+    case runtime::EventType::ToolProgress:
       return "tool_progress";
-    case RuntimeEventType::ToolResult:
+    case runtime::EventType::ToolResult:
       return "tool_result";
-    case RuntimeEventType::CompactionStart:
+    case runtime::EventType::CompactionStart:
       return "compaction_start";
-    case RuntimeEventType::CompactionEnd:
+    case runtime::EventType::CompactionEnd:
       return "compaction_end";
-    case RuntimeEventType::Retry:
+    case runtime::EventType::Retry:
       return "retry";
-    case RuntimeEventType::RetryTick:
+    case runtime::EventType::RetryTick:
       return "retry_tick";
-    case RuntimeEventType::Canceled:
+    case runtime::EventType::Canceled:
       return "canceled";
-    case RuntimeEventType::Error:
+    case runtime::EventType::Error:
       return "error";
-    case RuntimeEventType::Done:
+    case runtime::EventType::Done:
       return "done";
   }
   return "error";
 }
 
-std::string_view to_string(RuntimePayloadType type) noexcept
+std::string_view to_string(runtime::PayloadType type) noexcept
 {
   switch (type)
   {
-    case RuntimePayloadType::Session:
+    case runtime::PayloadType::Session:
       return "session";
-    case RuntimePayloadType::Message:
+    case runtime::PayloadType::Message:
       return "message";
-    case RuntimePayloadType::Reasoning:
+    case runtime::PayloadType::Reasoning:
       return "reasoning";
-    case RuntimePayloadType::Provider:
+    case runtime::PayloadType::Provider:
       return "provider";
-    case RuntimePayloadType::Tool:
+    case runtime::PayloadType::Tool:
       return "tool";
-    case RuntimePayloadType::Compaction:
+    case runtime::PayloadType::Compaction:
       return "compaction";
-    case RuntimePayloadType::Retry:
+    case runtime::PayloadType::Retry:
       return "retry";
-    case RuntimePayloadType::Cancellation:
+    case runtime::PayloadType::Cancellation:
       return "cancellation";
-    case RuntimePayloadType::Error:
+    case runtime::PayloadType::Error:
       return "error";
-    case RuntimePayloadType::Completion:
+    case runtime::PayloadType::Completion:
       return "completion";
-    case RuntimePayloadType::Permission:
+    case runtime::PayloadType::Permission:
       return "permission";
-    case RuntimePayloadType::Question:
+    case runtime::PayloadType::Question:
       return "question";
-    case RuntimePayloadType::Queue:
+    case runtime::PayloadType::Queue:
       return "queue";
   }
   return "error";
 }
 
-RuntimePayloadType payload_type_for_event(RuntimeEventType type) noexcept
+runtime::PayloadType payload_type_for_event(runtime::EventType type) noexcept
 {
+  using runtime::EventType;
+
   switch (type)
   {
-    case RuntimeEventType::SessionStart:
-      return RuntimePayloadType::Session;
-    case RuntimeEventType::UserMessage:
-    case RuntimeEventType::AssistantMessage:
-    case RuntimeEventType::MessageUpdate:
-    case RuntimeEventType::MessageEnd:
-      return RuntimePayloadType::Message;
-    case RuntimeEventType::ReasoningStart:
-    case RuntimeEventType::ReasoningDelta:
-    case RuntimeEventType::ReasoningEnd:
-      return RuntimePayloadType::Reasoning;
-    case RuntimeEventType::ProviderEvent:
-      return RuntimePayloadType::Provider;
-    case RuntimeEventType::ToolStart:
-    case RuntimeEventType::ToolProgress:
-    case RuntimeEventType::ToolResult:
-      return RuntimePayloadType::Tool;
-    case RuntimeEventType::CompactionStart:
-    case RuntimeEventType::CompactionEnd:
-      return RuntimePayloadType::Compaction;
-    case RuntimeEventType::Retry:
-    case RuntimeEventType::RetryTick:
-      return RuntimePayloadType::Retry;
-    case RuntimeEventType::Canceled:
-      return RuntimePayloadType::Cancellation;
-    case RuntimeEventType::Error:
-      return RuntimePayloadType::Error;
-    case RuntimeEventType::Done:
-      return RuntimePayloadType::Completion;
+    case runtime::EventType::SessionStart:
+      return runtime::PayloadType::Session;
+    case runtime::EventType::UserMessage:
+    case runtime::EventType::AssistantMessage:
+    case runtime::EventType::MessageUpdate:
+    case runtime::EventType::MessageEnd:
+      return runtime::PayloadType::Message;
+    case runtime::EventType::ReasoningStart:
+    case runtime::EventType::ReasoningDelta:
+    case runtime::EventType::ReasoningEnd:
+      return runtime::PayloadType::Reasoning;
+    case runtime::EventType::ProviderEvent:
+      return runtime::PayloadType::Provider;
+    case runtime::EventType::ToolStart:
+    case runtime::EventType::ToolProgress:
+    case runtime::EventType::ToolResult:
+      return runtime::PayloadType::Tool;
+    case runtime::EventType::CompactionStart:
+    case runtime::EventType::CompactionEnd:
+      return runtime::PayloadType::Compaction;
+    case runtime::EventType::Retry:
+    case runtime::EventType::RetryTick:
+      return runtime::PayloadType::Retry;
+    case runtime::EventType::Canceled:
+      return runtime::PayloadType::Cancellation;
+    case runtime::EventType::Error:
+      return runtime::PayloadType::Error;
+    case runtime::EventType::Done:
+      return runtime::PayloadType::Completion;
   }
-  return RuntimePayloadType::Error;
+  return runtime::PayloadType::Error;
 }
 
-RuntimeToolPayload tool_payload_from_event(RuntimeEvent const& event)
+runtime::ToolPayload tool_payload_from_event(runtime::Event const& event)
 {
-  return RuntimeToolPayload{.text = event.text,
-                            .call_id = event.call_id,
-                            .tool = event.tool_name,
-                            .args_json = event.tool_arguments_json,
-                            .result_json = event.tool_result_json,
-                            .structured_result_json = event.tool_structured_result_json,
-                            .status = event.status,
-                            .error_category = event.error_category,
-                            .error_code = event.error_code,
-                            .error_message = event.error_message,
-                            .error_details = event.error_details,
-                            .content_type = event.content_type,
-                            .diff = event.diff,
-                            .changed_paths = event.changed_paths,
-                            .permission_request_ids = event.permission_request_ids,
-                            .spill_path = event.spill_path,
-                            .diff_truncated = event.diff_truncated,
-                            .truncated = event.truncated,
-                            .byte_limited = event.byte_limited,
-                            .line_limited = event.line_limited,
-                            .spill_truncated = event.spill_truncated,
-                            .output_bytes = event.output_bytes,
-                            .total_bytes = event.total_bytes,
-                            .output_lines = event.output_lines,
-                            .total_lines = event.total_lines,
-                            .start_line = event.start_line,
-                            .end_line = event.end_line,
-                            .next_offset_line = event.next_offset_line,
-                            .omitted_bytes = event.omitted_bytes,
-                            .omitted_lines = event.omitted_lines,
-                            .visible_matches = event.visible_matches,
-                            .total_matches = event.total_matches};
+  return runtime::ToolPayload{.text = event.text,
+                              .call_id = event.call_id,
+                              .tool = event.tool_name,
+                              .args_json = event.tool_arguments_json,
+                              .result_json = event.tool_result_json,
+                              .structured_result_json = event.tool_structured_result_json,
+                              .status = event.status,
+                              .error_category = event.error_category,
+                              .error_code = event.error_code,
+                              .error_message = event.error_message,
+                              .error_details = event.error_details,
+                              .content_type = event.content_type,
+                              .diff = event.diff,
+                              .changed_paths = event.changed_paths,
+                              .permission_request_ids = event.permission_request_ids,
+                              .spill_path = event.spill_path,
+                              .diff_truncated = event.diff_truncated,
+                              .truncated = event.truncated,
+                              .byte_limited = event.byte_limited,
+                              .line_limited = event.line_limited,
+                              .spill_truncated = event.spill_truncated,
+                              .output_bytes = event.output_bytes,
+                              .total_bytes = event.total_bytes,
+                              .output_lines = event.output_lines,
+                              .total_lines = event.total_lines,
+                              .start_line = event.start_line,
+                              .end_line = event.end_line,
+                              .next_offset_line = event.next_offset_line,
+                              .omitted_bytes = event.omitted_bytes,
+                              .omitted_lines = event.omitted_lines,
+                              .visible_matches = event.visible_matches,
+                              .total_matches = event.total_matches};
 }
 
-RuntimeRetryPayload retry_payload_from_event(RuntimeEvent const& event)
+runtime::RetryPayload retry_payload_from_event(runtime::Event const& event)
 {
-  return RuntimeRetryPayload{.text = event.text,
-                             .status = event.status,
-                             .error_category = event.error_category,
-                             .error_code = event.error_code,
-                             .error_message = event.error_message,
-                             .error_details = event.error_details,
-                             .trigger = event.trigger,
-                             .reason = event.reason,
-                             .attempt = event.attempt,
-                             .max_attempts = event.max_attempts,
-                             .delay_ms = event.delay_ms,
-                             .remaining_ms = event.remaining_ms};
+  return runtime::RetryPayload{.text = event.text,
+                               .status = event.status,
+                               .error_category = event.error_category,
+                               .error_code = event.error_code,
+                               .error_message = event.error_message,
+                               .error_details = event.error_details,
+                               .trigger = event.trigger,
+                               .reason = event.reason,
+                               .attempt = event.attempt,
+                               .max_attempts = event.max_attempts,
+                               .delay_ms = event.delay_ms,
+                               .remaining_ms = event.remaining_ms};
 }
 
-RuntimeCancellationPayload cancellation_payload_from_event(RuntimeEvent const& event)
+runtime::CancellationPayload cancellation_payload_from_event(runtime::Event const& event)
 {
-  return RuntimeCancellationPayload{.text = event.text,
-                                    .status = event.status,
-                                    .error_category = event.error_category,
-                                    .error_code = event.error_code,
-                                    .error_message = event.error_message,
-                                    .error_details = event.error_details,
-                                    .trigger = event.trigger,
-                                    .reason = event.reason};
+  return runtime::CancellationPayload{.text = event.text,
+                                      .status = event.status,
+                                      .error_category = event.error_category,
+                                      .error_code = event.error_code,
+                                      .error_message = event.error_message,
+                                      .error_details = event.error_details,
+                                      .trigger = event.trigger,
+                                      .reason = event.reason};
 }
 
-RuntimeErrorPayload error_payload_from_event(RuntimeEvent const& event)
+runtime::ErrorPayload error_payload_from_event(runtime::Event const& event)
 {
-  return RuntimeErrorPayload{.text = event.text,
-                             .status = event.status,
-                             .error_category = event.error_category,
-                             .error_code = event.error_code,
-                             .error_message = event.error_message,
-                             .error_details = event.error_details,
-                             .content_type = event.content_type,
-                             .trigger = event.trigger,
-                             .reason = event.reason};
+  return runtime::ErrorPayload{.text = event.text,
+                               .status = event.status,
+                               .error_category = event.error_category,
+                               .error_code = event.error_code,
+                               .error_message = event.error_message,
+                               .error_details = event.error_details,
+                               .content_type = event.content_type,
+                               .trigger = event.trigger,
+                               .reason = event.reason};
 }
 
-RuntimeCompletionPayload completion_payload_from_event(RuntimeEvent const& event)
+runtime::CompletionPayload completion_payload_from_event(runtime::Event const& event)
 {
-  return RuntimeCompletionPayload{.status = event.status,
-                                  .stop_reason = event.stop_reason,
-                                  .reason = event.reason,
-                                  .provider_iterations = event.provider_iterations,
-                                  .tool_calls = event.tool_calls};
+  return runtime::CompletionPayload{.status = event.status,
+                                    .stop_reason = event.stop_reason,
+                                    .reason = event.reason,
+                                    .provider_iterations = event.provider_iterations,
+                                    .tool_calls = event.tool_calls};
 }
 
-std::string serialize_payload_json(RuntimeToolPayload const& payload)
+std::string serialize_payload_json(runtime::ToolPayload const& payload)
 {
   std::string out = "{";
   bool has_field = false;
@@ -537,7 +549,7 @@ std::string serialize_payload_json(RuntimeToolPayload const& payload)
   return out;
 }
 
-std::string serialize_payload_json(RuntimeRetryPayload const& payload)
+std::string serialize_payload_json(runtime::RetryPayload const& payload)
 {
   std::string out = "{";
   bool has_field = false;
@@ -557,7 +569,7 @@ std::string serialize_payload_json(RuntimeRetryPayload const& payload)
   return out;
 }
 
-std::string serialize_payload_json(RuntimeCancellationPayload const& payload)
+std::string serialize_payload_json(runtime::CancellationPayload const& payload)
 {
   std::string out = "{";
   bool has_field = false;
@@ -573,7 +585,7 @@ std::string serialize_payload_json(RuntimeCancellationPayload const& payload)
   return out;
 }
 
-std::string serialize_payload_json(RuntimeErrorPayload const& payload)
+std::string serialize_payload_json(runtime::ErrorPayload const& payload)
 {
   std::string out = "{";
   bool has_field = false;
@@ -590,7 +602,7 @@ std::string serialize_payload_json(RuntimeErrorPayload const& payload)
   return out;
 }
 
-std::string serialize_payload_json(RuntimeCompletionPayload const& payload)
+std::string serialize_payload_json(runtime::CompletionPayload const& payload)
 {
   std::string out = "{";
   bool has_field = false;
@@ -603,12 +615,12 @@ std::string serialize_payload_json(RuntimeCompletionPayload const& payload)
   return out;
 }
 
-std::string serialize_event_json(RuntimeEvent const& event)
+std::string serialize_event_json(runtime::Event const& event)
 {
   std::string out = "{\"type\":\"" + to_string(event.type) + "\"";
   append_string_field(out, "timestamp", event.timestamp);
   append_string_field(out, "session_id", event.session_id);
-  if (event.type == RuntimeEventType::SessionStart)
+  if (event.type == runtime::EventType::SessionStart)
   {
     append_string_field(out, "mode", ava::agent::to_string(event.mode));
     append_string_field(out, "provider", event.provider_id);
@@ -667,12 +679,12 @@ std::string serialize_event_json(RuntimeEvent const& event)
   return out;
 }
 
-std::string serialize_event_jsonl(RuntimeEvent const& event)
+std::string serialize_event_jsonl(runtime::Event const& event)
 {
   return serialize_event_json(event) + '\n';
 }
 
-ava::core::VoidResult emit_event(RuntimeEventSink const& sink, RuntimeEvent const& event)
+ava::core::VoidResult emit_event(runtime::EventSink const& sink, runtime::Event const& event)
 {
   if (!sink)
     return {};
@@ -695,7 +707,7 @@ ava::core::VoidResult EventBus::publish(EventEnvelope const& envelope) const
   return {};
 }
 
-EventEnvelope to_event_envelope(RuntimeEvent const& event, EventEnvelopeContext const& context)
+EventEnvelope to_event_envelope(runtime::Event const& event, EventEnvelopeContext const& context)
 {
   return EventEnvelope{.schema_version = 1,
                        .event_id = context.event_id ? *context.event_id : ava::core::make_id("event"),
@@ -737,9 +749,9 @@ std::string serialize_event_envelope_jsonl(EventEnvelope const& envelope)
   return serialize_event_envelope_json(envelope) + '\n';
 }
 
-RuntimeEventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context, RuntimeEventSink legacy_sink)
+runtime::EventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context, runtime::EventSink legacy_sink)
 {
-  return [&bus, context = std::move(context), legacy_sink = std::move(legacy_sink)](RuntimeEvent const& event) -> ava::core::VoidResult {
+  return [&bus, context = std::move(context), legacy_sink = std::move(legacy_sink)](runtime::Event const& event) -> ava::core::VoidResult {
     auto envelope = to_event_envelope(event, context);
     if (auto published = bus.publish(envelope); !published)
       return std::unexpected(std::move(published.error()));

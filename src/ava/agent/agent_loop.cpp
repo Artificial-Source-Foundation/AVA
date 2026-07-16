@@ -754,8 +754,8 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       auto provider_instance = std::move(*background_provider);
       auto transport_instance = std::move(*background_transport);
       auto parent_append = options_.parent_notification_sink;
-      // A standalone AgentLoop has no RuntimeSession owner. Its detached copy
-      // is proven inactive; RuntimeSession runs always carry the stable owner
+      // A standalone AgentLoop has no runtime::Session owner. Its detached copy
+      // is proven inactive; runtime::Session runs always carry the stable owner
       // sink, never the generation-bound active append route.
       std::optional<ava::session::SessionStore> parent_store;
       if (!parent_append)

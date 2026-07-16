@@ -238,7 +238,7 @@ std::string dynamic_resource_manifest_json(std::string id, std::string script_na
          "}";
 }
 
-ava::app::RuntimeSession plugin_command_test_session(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace)
+ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace)
 {
   auto store = ava::session::SessionStore::create_ephemeral(workspace);
   expect(store.has_value(), store ? "plugin command test session store opens" : "plugin command test session store opens: " + store.error().format());
@@ -249,7 +249,7 @@ ava::app::RuntimeSession plugin_command_test_session(ava::config::XdgPaths const
   trust.workspace_dir = workspace;
   trust.trust_file = paths.ava_state_dir / "trusted-projects.json";
   trust.decision = ava::app::ProjectTrustDecision::Trusted;
-  return ava::app::RuntimeSession{.store = std::move(*store),
+  return ava::app::runtime::Session{.store = std::move(*store),
                                   .lease = {},
                                   .mode = ava::agent::Mode::Build,
                                   .model = std::move(model),
@@ -1490,13 +1490,13 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
                                            .provider_id = "openai",
                                            .model_id = "gpt-test",
                                            .current_dir = workspace},
-      [&forwarded](ava::app::RuntimeEvent const&) -> ava::core::VoidResult {
+      [&forwarded](ava::app::runtime::Event const&) -> ava::core::VoidResult {
         forwarded = true;
         return {};
       });
 
-  ava::app::RuntimeEvent event;
-  event.type = ava::app::RuntimeEventType::ToolResult;
+  ava::app::runtime::Event event;
+  event.type = ava::app::runtime::EventType::ToolResult;
   event.call_id = "call_hook";
   event.tool_name = "demo";
   event.status = "success";
@@ -1570,13 +1570,13 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
           .provider_id = "openai",
           .model_id = "gpt-test",
           .current_dir = workspace},
-      [&forwarded](ava::app::RuntimeEvent const&) -> ava::core::VoidResult {
+      [&forwarded](ava::app::runtime::Event const&) -> ava::core::VoidResult {
         forwarded = true;
         return {};
       });
 
-  ava::app::RuntimeEvent event;
-  event.type = ava::app::RuntimeEventType::ToolResult;
+  ava::app::runtime::Event event;
+  event.type = ava::app::runtime::EventType::ToolResult;
   event.call_id = "call_diag";
   event.tool_name = "demo";
   event.status = "success";

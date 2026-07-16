@@ -413,7 +413,7 @@ CommandResult handled_prompt(std::string command, std::string source, std::strin
   return result;
 }
 
-CommandResult run_keybindings_command(RuntimeSession& session, std::string_view argument, std::vector<CommandHotkey> const& hotkeys)
+CommandResult run_keybindings_command(runtime::Session& session, std::string_view argument, std::vector<CommandHotkey> const& hotkeys)
 {
   auto const args = split_command_arguments(argument);
   if (args.empty())
@@ -772,7 +772,7 @@ std::string active_theme_summary()
   return active.name + " (" + active.badge + ")";
 }
 
-ava::core::Result<CommandResult> run_theme_command(RuntimeSession& session, std::string_view argument)
+ava::core::Result<CommandResult> run_theme_command(runtime::Session& session, std::string_view argument)
 {
   auto const args = split_command_arguments(argument);
   if (args.size() > 1)
@@ -884,7 +884,7 @@ std::string normalize_reload_target(std::string_view target)
   return {};
 }
 
-ReloadReportRow reload_display_settings(RuntimeSession& session)
+ReloadReportRow reload_display_settings(runtime::Session& session)
 {
   auto settings = apply_tui_display_settings(session.paths);
   if (!settings)
@@ -896,7 +896,7 @@ ReloadReportRow reload_display_settings(RuntimeSession& session)
   return row;
 }
 
-ReloadReportRow reload_model_settings(RuntimeSession& session)
+ReloadReportRow reload_model_settings(runtime::Session& session)
 {
   auto registry = ava::config::load_model_registry(session.paths);
   if (!registry)
@@ -910,7 +910,7 @@ ReloadReportRow reload_model_settings(RuntimeSession& session)
   return row;
 }
 
-ReloadReportRow reload_prompt_settings(RuntimeSession& session)
+ReloadReportRow reload_prompt_settings(runtime::Session& session)
 {
   auto prompt_state = runtime::load_runtime_prompt_state(session.paths, session.model, session.mode, session.workspace_dir, session.current_dir,
                                                          project_resources_trusted(session.project_trust), session.prompt_overrides);
@@ -928,7 +928,7 @@ ReloadReportRow reload_prompt_settings(RuntimeSession& session)
   return row;
 }
 
-ReloadReportRow reload_trust_settings(RuntimeSession& session)
+ReloadReportRow reload_trust_settings(runtime::Session& session)
 {
   auto next_trust = load_project_trust_state(session.paths, session.workspace_dir);
   auto prompt_state = runtime::load_runtime_prompt_state(session.paths, session.model, session.mode, session.workspace_dir, session.current_dir,
@@ -950,7 +950,7 @@ ReloadReportRow reload_trust_settings(RuntimeSession& session)
   return row;
 }
 
-ReloadReportRow reload_compaction_settings(RuntimeSession& session)
+ReloadReportRow reload_compaction_settings(runtime::Session& session)
 {
   auto config = ava::session::load_compaction_config(session.paths);
   if (!config)
@@ -965,7 +965,7 @@ ReloadReportRow reload_compaction_settings(RuntimeSession& session)
   return row;
 }
 
-ReloadReportRow keybindings_reload_row(RuntimeSession const& session)
+ReloadReportRow keybindings_reload_row(runtime::Session const& session)
 {
   ReloadReportRow row{.name = "keybindings", .status = "tui-runtime", .details = {}};
   append_reload_detail(row, "config", (session.paths.ava_config_dir / "keybinds.json").string());
@@ -981,7 +981,7 @@ ReloadReportRow restart_required_reload_row(std::string name, std::string reason
   return row;
 }
 
-std::vector<ReloadReportRow> reload_report_rows_for_target(RuntimeSession& session, std::string const& target)
+std::vector<ReloadReportRow> reload_report_rows_for_target(runtime::Session& session, std::string const& target)
 {
   auto one = [&](std::string const& normalized) -> ReloadReportRow {
     if (normalized == "display")
@@ -1028,7 +1028,7 @@ std::vector<ReloadReportRow> reload_report_rows_for_target(RuntimeSession& sessi
           one("auth"),    one("permissions"), one("lsp"),   one("mcp"),     one("plugins")};
 }
 
-ava::core::Result<CommandResult> run_reload_command(RuntimeSession& session, std::string_view argument)
+ava::core::Result<CommandResult> run_reload_command(runtime::Session& session, std::string_view argument)
 {
   auto const args = split_command_arguments(argument);
   if (args.size() > 1)
@@ -1067,7 +1067,7 @@ std::string project_trust_summary(ProjectTrustState const& state)
   return output;
 }
 
-ava::core::Result<CommandResult> reload_project_trust_state(RuntimeSession& session, std::string prefix)
+ava::core::Result<CommandResult> reload_project_trust_state(runtime::Session& session, std::string prefix)
 {
   auto next_trust = load_project_trust_state(session.paths, session.workspace_dir);
   auto prompt_state = runtime::load_runtime_prompt_state(session.paths, session.model, session.mode, session.workspace_dir, session.current_dir,
@@ -1079,7 +1079,7 @@ ava::core::Result<CommandResult> reload_project_trust_state(RuntimeSession& sess
   return handled_text(std::move(prefix) + "\n" + project_trust_summary(session.project_trust));
 }
 
-ava::core::Result<CommandResult> run_trust_command(RuntimeSession& session, std::string_view argument)
+ava::core::Result<CommandResult> run_trust_command(runtime::Session& session, std::string_view argument)
 {
   auto const args = split_command_arguments(argument);
   auto const action = args.empty() ? std::string("status") : args.front();
@@ -1119,7 +1119,7 @@ std::string dynamic_command_argument(std::string_view line)
   return std::string(rest);
 }
 
-ava::plugin::PluginDiscoveryOptions skill_plugin_discovery_options(RuntimeSession const& session)
+ava::plugin::PluginDiscoveryOptions skill_plugin_discovery_options(runtime::Session const& session)
 {
   return ava::plugin::PluginDiscoveryOptions{
       .global_plugins_dir = session.paths.ava_config_dir / "plugins",
@@ -1137,7 +1137,7 @@ std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(
   return files;
 }
 
-ava::core::Result<std::string> skill_prompt_message(RuntimeSession& session, CommandRequest const& request, CommandRegistryEntry const& entry)
+ava::core::Result<std::string> skill_prompt_message(runtime::Session& session, CommandRequest const& request, CommandRegistryEntry const& entry)
 {
   auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(skill_plugin_discovery_options(session),
                                                                     session.paths.ava_state_dir / "plugin-enablement.json", session.workspace_dir);
@@ -1199,7 +1199,7 @@ ava::core::VoidResult ensure_mcp_prompt_permissions(ava::tools::ToolContext cons
   return {};
 }
 
-ava::core::Result<std::string> mcp_prompt_message(RuntimeSession& session, CommandRequest const& request, CommandRegistryEntry const& entry,
+ava::core::Result<std::string> mcp_prompt_message(runtime::Session& session, CommandRequest const& request, CommandRegistryEntry const& entry,
                                                   std::string_view argument_text)
 {
   auto config_options = ava::mcp::default_mcp_config_options(session.workspace_dir);
@@ -1248,7 +1248,7 @@ ava::core::Result<std::string> mcp_prompt_message(RuntimeSession& session, Comma
   return std::move(prompt->content);
 }
 
-ava::core::Result<CommandResult> run_registry_command(RuntimeSession& session, CommandRequest request, CommandRegistryEntry const& entry)
+ava::core::Result<CommandResult> run_registry_command(runtime::Session& session, CommandRequest request, CommandRegistryEntry const& entry)
 {
   if (!entry.enabled)
     return handled_text(entry.command + " is disabled: " + entry.disabled_reason);
@@ -1294,14 +1294,14 @@ bool is_backend_command(std::string_view line) noexcept
   return find_command_catalog_entry(line) != nullptr;
 }
 
-bool is_backend_command(std::string_view line, RuntimeSession& session)
+bool is_backend_command(std::string_view line, runtime::Session& session)
 {
   if (is_backend_command(line))
     return true;
   return command_registry_contains(session, line);
 }
 
-ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandRequest request)
+ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandRequest request)
 {
   CommandResult result;
   if (request.command.empty())

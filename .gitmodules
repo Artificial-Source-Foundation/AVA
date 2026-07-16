@@ -14,3 +14,11 @@
 	path = enchantum
 	url = https://github.com/ZXShady/enchantum.git
 	update = checkout
+[submodule "src/json"]
+	path = src/json
+	url = https://github.com/nlohmann/json.git
+	update = checkout
+[submodule "threadsafe"]
+	path = threadsafe
+	url = https://github.com/CarloWood/threadsafe.git
+	update = checkout

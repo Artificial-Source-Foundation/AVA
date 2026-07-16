@@ -11,7 +11,7 @@
 
 namespace ava::app {
 
-ava::core::Result<RuntimeRunOptions> prepare_runtime_credentials(ava::config::XdgPaths const& paths, std::string_view provider_id, RuntimeRunOptions options,
+ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::XdgPaths const& paths, std::string_view provider_id, runtime::RunOptions options,
                                                                  ava::provider::Transport& auth_transport, std::string_view purpose)
 {
   if (options.offline)
@@ -41,7 +41,7 @@ ava::core::Result<RuntimeRunOptions> prepare_runtime_credentials(ava::config::Xd
   return options;
 }
 
-ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(RuntimeSession const& session, RuntimeRunOptions options,
+ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(runtime::Session const& session, runtime::RunOptions options,
                                                                                std::string_view purpose)
 {
   auto auth_transport = std::make_unique<ava::provider::CurlCliTransport>();

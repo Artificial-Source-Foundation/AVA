@@ -156,7 +156,7 @@ void test_runtime_session_destroys_background_before_owner_route()
   std::atomic<bool> worker_started = false;
   std::atomic<bool> owner_append_succeeded = false;
   {
-    ava::app::RuntimeSession session{.store = std::move(*store),
+    ava::app::runtime::Session session{.store = std::move(*store),
                                      .lease = {},
                                      .mode = ava::agent::Mode::Build,
                                      .model = {},

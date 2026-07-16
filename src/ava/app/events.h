@@ -1,42 +1,29 @@
 #pragma once
 
-#include "ava/agent/mode.h"
-
+#include "EventEnvelopeContext.h"
+#include "runtime/Event.h"       // runtime::EventType
 #include "ava/core/result.h"
 
-#include <cstddef>
 #include <functional>
-#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
-#include "debug.h"
 
 namespace ava::app {
 
-enum class RuntimeEventType
-{
-  SessionStart,
-  UserMessage,
-  AssistantMessage,
-  MessageUpdate,
-  MessageEnd,
-  ReasoningStart,
-  ReasoningDelta,
-  ReasoningEnd,
-  ProviderEvent,
-  ToolStart,
-  ToolProgress,
-  ToolResult,
-  CompactionStart,
-  CompactionEnd,
-  Retry,
-  RetryTick,
-  Canceled,
-  Error,
-  Done,
-};
+struct EventEnvelope;
 
-enum class RuntimePayloadType
+namespace runtime {
+struct ToolPayload;
+struct RetryPayload;
+struct CancellationPayload;
+struct ErrorPayload;
+struct CompletionPayload;
+struct Event;
+
+using EventSink = std::function<ava::core::VoidResult(runtime::Event const&)>;
+
+enum class PayloadType
 {
   Session,
   Message,
@@ -53,194 +40,7 @@ enum class RuntimePayloadType
   Queue,
 };
 
-struct RuntimeEvent
-{
-  RuntimeEventType type = RuntimeEventType::Done;
-  std::string timestamp;
-  std::string session_id;
-  ava::agent::Mode mode = ava::agent::Mode::Build;
-  std::string provider_id;
-  std::string model_id;
-  std::string text;
-  std::string call_id;
-  std::string tool_name;
-  std::string tool_arguments_json;
-  std::string tool_result_json;
-  std::string tool_structured_result_json;
-  std::string status;
-  std::string error_category;
-  std::string error_code;
-  std::string error_message;
-  std::string error_details;
-  std::string content_type;
-  std::string stop_reason;
-  std::string trigger;
-  std::string reason;
-  std::string reasoning_format;
-  std::string diff;
-  std::vector<std::string> changed_paths;
-  std::vector<std::string> permission_request_ids;
-  std::string spill_path;
-  bool reasoning_redacted = false;
-  bool reasoning_signature_present = false;
-  bool diff_truncated = false;
-  bool truncated = false;
-  bool byte_limited = false;
-  bool line_limited = false;
-  bool spill_truncated = false;
-  std::size_t provider_iterations = 0;
-  std::size_t tool_calls = 0;
-  std::size_t attempt = 0;
-  std::size_t max_attempts = 0;
-  std::size_t delay_ms = 0;
-  std::size_t remaining_ms = 0;
-  std::size_t estimated_tokens = 0;
-  std::size_t threshold_tokens = 0;
-  std::size_t summary_bytes = 0;
-  std::size_t snapshot_entries = 0;
-  std::size_t current_entries = 0;
-  std::size_t output_bytes = 0;
-  std::size_t total_bytes = 0;
-  std::size_t output_lines = 0;
-  std::size_t total_lines = 0;
-  std::size_t start_line = 0;
-  std::size_t end_line = 0;
-  std::size_t next_offset_line = 0;
-  std::size_t omitted_bytes = 0;
-  std::size_t omitted_lines = 0;
-  std::size_t visible_matches = 0;
-  std::size_t total_matches = 0;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct RuntimeToolPayload
-{
-  std::string text;
-  std::string call_id;
-  std::string tool;
-  std::string args_json;
-  std::string result_json;
-  std::string structured_result_json;
-  std::string status;
-  std::string error_category;
-  std::string error_code;
-  std::string error_message;
-  std::string error_details;
-  std::string content_type;
-  std::string diff;
-  std::vector<std::string> changed_paths;
-  std::vector<std::string> permission_request_ids;
-  std::string spill_path;
-  bool diff_truncated = false;
-  bool truncated = false;
-  bool byte_limited = false;
-  bool line_limited = false;
-  bool spill_truncated = false;
-  std::size_t output_bytes = 0;
-  std::size_t total_bytes = 0;
-  std::size_t output_lines = 0;
-  std::size_t total_lines = 0;
-  std::size_t start_line = 0;
-  std::size_t end_line = 0;
-  std::size_t next_offset_line = 0;
-  std::size_t omitted_bytes = 0;
-  std::size_t omitted_lines = 0;
-  std::size_t visible_matches = 0;
-  std::size_t total_matches = 0;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct RuntimeRetryPayload
-{
-  std::string text;
-  std::string status;
-  std::string error_category;
-  std::string error_code;
-  std::string error_message;
-  std::string error_details;
-  std::string trigger;
-  std::string reason;
-  std::size_t attempt = 0;
-  std::size_t max_attempts = 0;
-  std::size_t delay_ms = 0;
-  std::size_t remaining_ms = 0;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct RuntimeCancellationPayload
-{
-  std::string text;
-  std::string status;
-  std::string error_category;
-  std::string error_code;
-  std::string error_message;
-  std::string error_details;
-  std::string trigger;
-  std::string reason;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct RuntimeErrorPayload
-{
-  std::string text;
-  std::string status;
-  std::string error_category;
-  std::string error_code;
-  std::string error_message;
-  std::string error_details;
-  std::string content_type;
-  std::string trigger;
-  std::string reason;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct RuntimeCompletionPayload
-{
-  std::string status;
-  std::string stop_reason;
-  std::string reason;
-  std::size_t provider_iterations = 0;
-  std::size_t tool_calls = 0;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-using RuntimeEventSink = std::function<ava::core::VoidResult(RuntimeEvent const&)>;
-
-struct EventEnvelope
-{
-  int schema_version = 1;
-  std::string event_id;
-  std::string timestamp;
-  std::string session_id;
-  std::optional<std::string> run_id;
-  std::optional<std::string> turn_id;
-  std::optional<std::string> message_id;
-  std::optional<std::string> request_id;
-  std::optional<std::string> correlation_id;
-  std::string name;
-  std::string payload_json = "{}";
-  std::string payload_type = "";
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct EventEnvelopeContext
-{
-  std::optional<std::string> event_id;
-  std::optional<std::string> run_id;
-  std::optional<std::string> turn_id;
-  std::optional<std::string> message_id;
-  std::optional<std::string> request_id;
-  std::optional<std::string> correlation_id;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
+} // namespace runtime
 
 using EventEnvelopeSink = std::function<ava::core::VoidResult(EventEnvelope const&)>;
 
@@ -257,27 +57,27 @@ class EventBus
   std::vector<EventEnvelopeSink> sinks_;
 };
 
-[[nodiscard]] std::string to_string(RuntimeEventType type);
-[[nodiscard]] std::string_view to_string(RuntimePayloadType type) noexcept;
-[[nodiscard]] RuntimePayloadType payload_type_for_event(RuntimeEventType type) noexcept;
-[[nodiscard]] RuntimeToolPayload tool_payload_from_event(RuntimeEvent const& event);
-[[nodiscard]] RuntimeRetryPayload retry_payload_from_event(RuntimeEvent const& event);
-[[nodiscard]] RuntimeCancellationPayload cancellation_payload_from_event(RuntimeEvent const& event);
-[[nodiscard]] RuntimeErrorPayload error_payload_from_event(RuntimeEvent const& event);
-[[nodiscard]] RuntimeCompletionPayload completion_payload_from_event(RuntimeEvent const& event);
-[[nodiscard]] std::string serialize_payload_json(RuntimeToolPayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(RuntimeRetryPayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(RuntimeCancellationPayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(RuntimeErrorPayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(RuntimeCompletionPayload const& payload);
-[[nodiscard]] std::string serialize_event_json(RuntimeEvent const& event);
-[[nodiscard]] std::string serialize_event_jsonl(RuntimeEvent const& event);
-[[nodiscard]] ava::core::VoidResult emit_event(RuntimeEventSink const& sink, RuntimeEvent const& event);
+[[nodiscard]] std::string to_string(runtime::EventType type);
+[[nodiscard]] std::string_view to_string(runtime::PayloadType type) noexcept;
+[[nodiscard]] runtime::PayloadType payload_type_for_event(runtime::EventType type) noexcept;
+[[nodiscard]] runtime::ToolPayload tool_payload_from_event(runtime::Event const& event);
+[[nodiscard]] runtime::RetryPayload retry_payload_from_event(runtime::Event const& event);
+[[nodiscard]] runtime::CancellationPayload cancellation_payload_from_event(runtime::Event const& event);
+[[nodiscard]] runtime::ErrorPayload error_payload_from_event(runtime::Event const& event);
+[[nodiscard]] runtime::CompletionPayload completion_payload_from_event(runtime::Event const& event);
+[[nodiscard]] std::string serialize_payload_json(runtime::ToolPayload const& payload);
+[[nodiscard]] std::string serialize_payload_json(runtime::RetryPayload const& payload);
+[[nodiscard]] std::string serialize_payload_json(runtime::CancellationPayload const& payload);
+[[nodiscard]] std::string serialize_payload_json(runtime::ErrorPayload const& payload);
+[[nodiscard]] std::string serialize_payload_json(runtime::CompletionPayload const& payload);
+[[nodiscard]] std::string serialize_event_json(runtime::Event const& event);
+[[nodiscard]] std::string serialize_event_jsonl(runtime::Event const& event);
+[[nodiscard]] ava::core::VoidResult emit_event(runtime::EventSink const& sink, runtime::Event const& event);
 
-[[nodiscard]] EventEnvelope to_event_envelope(RuntimeEvent const& event, EventEnvelopeContext const& context = {});
+[[nodiscard]] EventEnvelope to_event_envelope(runtime::Event const& event, EventEnvelopeContext const& context = {});
 [[nodiscard]] std::string serialize_event_envelope_json(EventEnvelope const& envelope);
 [[nodiscard]] std::string serialize_event_envelope_jsonl(EventEnvelope const& envelope);
 // The returned sink captures `bus` by reference and must not outlive it.
-[[nodiscard]] RuntimeEventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context = {}, RuntimeEventSink legacy_sink = nullptr);
+[[nodiscard]] runtime::EventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context = {}, runtime::EventSink legacy_sink = nullptr);
 
 }  // namespace ava::app

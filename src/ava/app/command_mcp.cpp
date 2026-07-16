@@ -13,13 +13,11 @@
 namespace ava::app {
 namespace {
 
-ava::mcp::McpConfigLoadOptions mcp_config_options(RuntimeSession const& session)
+ava::mcp::McpConfigLoadOptions mcp_config_options(runtime::Session const& session)
 {
   auto options = ava::mcp::default_mcp_config_options(session.workspace_dir);
   options.global_config_file = session.paths.ava_config_dir / "mcp.json";
-  options.project_config_file = project_resources_trusted(session.project_trust)
-                                    ? session.workspace_dir / ".ava" / "mcp.json"
-                                    : std::filesystem::path{};
+  options.project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{};
   return options;
 }
 
@@ -50,12 +48,12 @@ std::string mcp_command_text(ava::mcp::McpServerConfig const& server)
   return text;
 }
 
-std::string mcp_display_path(std::filesystem::path const& path, RuntimeSession const& session)
+std::string mcp_display_path(std::filesystem::path const& path, runtime::Session const& session)
 {
   return sanitize_inline_text(display_path(path, session.current_dir));
 }
 
-std::string mcp_config_path_text(std::filesystem::path const& path, RuntimeSession const& session)
+std::string mcp_config_path_text(std::filesystem::path const& path, runtime::Session const& session)
 {
   if (path.empty())
     return "none";
@@ -73,7 +71,7 @@ std::string format_mcp_server_not_found_text(ava::mcp::McpConfig const& config, 
   return output;
 }
 
-std::string format_mcp_list_text(ava::mcp::McpConfig const& config, RuntimeSession const& session)
+std::string format_mcp_list_text(ava::mcp::McpConfig const& config, runtime::Session const& session)
 {
   std::ostringstream output;
   output << "MCP servers:\n";
@@ -95,7 +93,7 @@ std::string format_mcp_list_text(ava::mcp::McpConfig const& config, RuntimeSessi
   return text;
 }
 
-std::string format_mcp_inspect_text(ava::mcp::McpServerConfig const& server, RuntimeSession const& session)
+std::string format_mcp_inspect_text(ava::mcp::McpServerConfig const& server, runtime::Session const& session)
 {
   std::ostringstream output;
   output << "MCP server " << sanitize_inline_text(server.id) << "\n";
@@ -137,7 +135,7 @@ std::string format_mcp_tools_text(ava::mcp::McpServerConfig const& server, ava::
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_mcp_command(RuntimeSession& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_mcp_command(runtime::Session& session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
@@ -152,27 +153,27 @@ bool is_direct_run_command_type(std::string_view type)
 
 struct RpcDirectCommandWorkerOptions
 {
-  RuntimeSession& session;
+  runtime::Session& session;
   std::mutex& session_mutex;
-  rpc::RpcOutput& output;
+  rpc::output_ts& output;
   rpc::RpcRunState& run_state;
   rpc::PendingResolverState& pending_state;
-  RuntimeRunOptions runtime_options;
+  runtime::RunOptions runtime_options;
   std::string request_id;
   std::string command;
 };
 
 struct RpcCompactionWorkerOptions
 {
-  RuntimeSession& session;
+  runtime::Session& session;
   std::mutex& session_mutex;
-  rpc::RpcOutput& output;
+  rpc::output_ts& output;
   rpc::RpcRunState& run_state;
   ava::provider::Provider const& injected_provider;
   std::string injected_provider_id;
   ava::provider::Transport& transport;
   ava::provider::Transport& auth_transport;
-  RuntimeRunOptions runtime_options;
+  runtime::RunOptions runtime_options;
   std::string request_id;
   std::optional<std::string> instructions;
 };
@@ -306,8 +307,8 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
 
 }  // namespace
 
-ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options, ava::provider::Provider const& provider,
-                                   ava::provider::Transport& transport, ava::provider::Transport& auth_transport, RuntimeRunOptions runtime_options,
+ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
+                                   ava::provider::Transport& transport, ava::provider::Transport& auth_transport, runtime::RunOptions runtime_options,
                                    rpc::RpcLineReader& input, std::ostream& out)
 {
   // This function is called first-thing after creating a thread.
@@ -316,9 +317,13 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
   DoutEntering(dc::rpc, "run_rpc_loop(" << session << ", " << open_options << ", " << provider << ", " << auth_transport << ", runtime_options=<redacted>, "
                                         << print_reference(input) << ", " << print_reference(out) << ")");
 
-  rpc::RpcOutput output(out);
   rpc::RpcRunState run_state;
   rpc::PendingResolverState pending_state;
+  rpc::output_ts output(out, [&] {
+    static_cast<void>(rpc::close_input_and_cancel(run_state));
+    static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
+    input.cancel();
+  });
   std::mutex session_mutex;
   std::optional<std::jthread> prompt_worker;
   runtime_options.offline = runtime_options.offline || session.offline || open_options.offline;
@@ -333,12 +338,6 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
   auto reap_finished_prompt = [&] {
     if (prompt_worker && rpc::async_worker_reap_ready(run_state))
       prompt_worker.reset();
-  };
-
-  output.on_write_failure = [&] {
-    static_cast<void>(rpc::close_input_and_cancel(run_state));
-    static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
-    input.cancel();
   };
 
   std::string line;
@@ -439,7 +438,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       }
       auto envelope =
           rpc::resolver_event_envelope("permission_grant_revoked", command->id, command->id, rpc::session_id_snapshot(session, session_mutex), *revoked);
-      if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
+      if (auto written = rpc::Output::write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
         return written;
       if (auto written = rpc::write_success(output, command->id, *revoked); !written)
         return written;
@@ -451,7 +450,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       auto const cleared = rpc::permission_session_grants_clear_result_json(pending_state);
       auto envelope =
           rpc::resolver_event_envelope("permission_grants_cleared", command->id, command->id, rpc::session_id_snapshot(session, session_mutex), cleared);
-      if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
+      if (auto written = rpc::Output::write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
         return written;
       if (auto written = rpc::write_success(output, command->id, cleared); !written)
         return written;
@@ -636,7 +635,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       auto envelope = rpc::resolver_event_envelope("permission_replied", *command->correlation_id, *command->correlation_id,
                                                    rpc::session_id_snapshot(session, session_mutex),
                                                    rpc::permission_reply_payload_json(*command->request_id, *command->decision, command->reason));
-      if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
+      if (auto written = rpc::Output::write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
         return written;
       if (auto written = rpc::write_success(output, command->id, "{}"); !written)
         return written;
@@ -672,7 +671,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       auto envelope =
           rpc::resolver_event_envelope("question_replied", *command->correlation_id, *command->correlation_id, rpc::session_id_snapshot(session, session_mutex),
                                        rpc::question_reply_payload_json(*command->request_id, command->answer, command->selected, command->selected_options));
-      if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
+      if (auto written = rpc::Output::write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
         return written;
       if (auto written = rpc::write_success(output, command->id, "{}"); !written)
         return written;
@@ -756,7 +755,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
           "cancel_requested", command->id, cancellation.active_request_id.empty() ? command->id : cancellation.active_request_id,
           rpc::session_id_snapshot(session, session_mutex),
           rpc::cancel_requested_payload_json(cancellation.active_run, cleared_steering_count, cleared_follow_up_count, cancellation.active_request_id));
-      if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(cancel_event)); !written)
+      if (auto written = rpc::Output::write_record(output, serialize_event_envelope_jsonl(cancel_event)); !written)
         return written;
       std::string json = "{";
       json += rpc::bool_field_json("cancel_requested", true);
@@ -1010,16 +1009,16 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
   return {};
 }
 
-ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options, ava::provider::Provider const& provider,
-                                   ava::provider::Transport& transport, ava::provider::Transport& auth_transport, RuntimeRunOptions runtime_options,
+ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
+                                   ava::provider::Transport& transport, ava::provider::Transport& auth_transport, runtime::RunOptions runtime_options,
                                    std::istream& in, std::ostream& out)
 {
   rpc::StreamRpcLineReader input(in);
   return run_rpc_loop(session, open_options, provider, transport, auth_transport, std::move(runtime_options), input, out);
 }
 
-ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options, ava::provider::Provider const& provider,
-                                   ava::provider::Transport& transport, RuntimeRunOptions runtime_options, std::istream& in, std::ostream& out)
+ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
+                                   ava::provider::Transport& transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out)
 {
   return run_rpc_loop(session, open_options, provider, transport, transport, std::move(runtime_options), in, out);
 }
@@ -1042,7 +1041,7 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
     return 1;
   }
 
-  RuntimeRunOptions runtime_options;
+  runtime::RunOptions runtime_options;
   runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
   runtime_options.question_resolver = nullptr;
   runtime_options.enable_transport_retries = true;

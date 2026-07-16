@@ -3,6 +3,7 @@
 #include "resolvers.h"
 #include "serialization.h"
 #include "serialization_json.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/core/ids.h"
 
 #include <utility>
@@ -165,8 +166,8 @@ std::string permission_session_grants_clear_result_json(PendingResolverState& pe
   return json;
 }
 
-ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state,
-                                                                  RuntimeSession const& session, std::mutex& session_mutex,
+ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolverState& pending_state, output_ts& output, RpcRunState& run_state,
+                                                                  runtime::Session const& session, std::mutex& session_mutex,
                                                                   ava::permissions::PermissionResolver policy_resolver, std::string prompt_request_id)
 {
   return [&pending_state, &output, &run_state, &session, &session_mutex, policy_resolver = std::move(policy_resolver),
@@ -228,7 +229,7 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolve
 
     auto envelope = resolver_event_envelope("permission_requested", prompt_request_id, prompt_request_id, session_id_snapshot(session, session_mutex),
                                             permission_request_payload_json(request_id, prompt));
-    if (auto written = write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
+    if (auto written = Output::write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
     {
       std::lock_guard lock(pending_state.mutex);
       pending_state.permission_requests.erase(request_id);
@@ -245,8 +246,8 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolve
   };
 }
 
-ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state,
-                                                        RuntimeSession const& session, std::mutex& session_mutex, std::string prompt_request_id)
+ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pending_state, output_ts& output, RpcRunState& run_state,
+                                                        runtime::Session const& session, std::mutex& session_mutex, std::string prompt_request_id)
 {
   return [&pending_state, &output, &run_state, &session, &session_mutex,
           prompt_request_id = std::move(prompt_request_id)](ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
@@ -276,7 +277,7 @@ ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pe
 
     auto envelope = resolver_event_envelope("question_requested", prompt_request_id, prompt_request_id, session_id_snapshot(session, session_mutex),
                                             question_request_payload_json(request_id, prompt));
-    if (auto written = write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
+    if (auto written = Output::write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
     {
       std::lock_guard lock(pending_state.mutex);
       pending_state.question_requests.erase(request_id);

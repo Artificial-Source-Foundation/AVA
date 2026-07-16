@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "maxlen.h"
 #include "NAMESPACE_DEBUG.h"
+#include <libcwd/buf2str.h>
 #include <string>      // std::string, std::to_string
 
 NAMESPACE_DEBUG_START
@@ -75,11 +76,9 @@ std::string render_maxlen_string(std::string const& str, long max_length)
   return out;
 }
 
-NAMESPACE_DEBUG_END
+namespace {
 
-namespace debug::ostream_operators {
-
-std::ostream& operator<<(std::ostream& os, std::string const& str)
+[[gnu::always_inline]] inline void write_maxlen_string(std::ostream& os, std::string const& str)
 {
   // Put double quotes around strings, cutting the middle out of overly long
   // strings when a maxlen() limit is active on the stream.
@@ -91,10 +90,21 @@ std::ostream& operator<<(std::ostream& os, std::string const& str)
   else
   {
     std::string const rendered = debug::render_maxlen_string(str, max_length);
-    os.write(rendered.data(), rendered.size());
+    os << libcwd::buf2str(rendered.data(), rendered.size());
   }
   os << '"';
+}
+
+} // namespace
+
+namespace ostream_operators {
+
+std::ostream& operator<<(std::ostream& os, std::string const& str)
+{
+  write_maxlen_string(os, str);
   return os;
 }
 
-} // namespace debug::ostream_operators
+} // namespace ostream_operators
+
+NAMESPACE_DEBUG_END

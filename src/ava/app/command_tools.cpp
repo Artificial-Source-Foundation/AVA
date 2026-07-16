@@ -45,9 +45,9 @@ std::string read_line_summary(ava::tools::TextOutput const& output)
   return "lines " + std::to_string(output.start_line) + "-" + std::to_string(output.end_line) + "/" + std::to_string(output.total_lines);
 }
 
-RuntimeEvent command_event(RuntimeSession const& session, RuntimeEventType type)
+runtime::Event command_event(runtime::Session const& session, runtime::EventType type)
 {
-  RuntimeEvent event;
+  runtime::Event event;
   event.type = type;
   event.timestamp = ava::session::now_timestamp();
   event.session_id = session.store.session_id();
@@ -57,9 +57,9 @@ RuntimeEvent command_event(RuntimeSession const& session, RuntimeEventType type)
   return event;
 }
 
-ava::core::VoidResult emit_tool_event(RuntimeSession const& session, RuntimeEventSink const& sink, ava::agent::ToolTimelineEntry const& entry)
+ava::core::VoidResult emit_tool_event(runtime::Session const& session, runtime::EventSink const& sink, ava::agent::ToolTimelineEntry const& entry)
 {
-  auto event = command_event(session, entry.status == ava::agent::ToolTimelineStatus::Running ? RuntimeEventType::ToolStart : RuntimeEventType::ToolResult);
+  auto event = command_event(session, entry.status == ava::agent::ToolTimelineStatus::Running ? runtime::EventType::ToolStart : runtime::EventType::ToolResult);
   event.call_id = entry.call_id;
   event.tool_name = entry.name;
   event.status = ava::agent::to_string(entry.status);
@@ -168,7 +168,7 @@ ava::agent::ToolTimelineEntry command_result_entry(std::string const& call_id, s
   };
 }
 
-ava::core::VoidResult record_tool_event(RuntimeSession const& session, RuntimeEventSink const& sink, CommandResult& result, ava::agent::ToolTimelineEntry entry)
+ava::core::VoidResult record_tool_event(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result, ava::agent::ToolTimelineEntry entry)
 {
   if (auto emitted = emit_tool_event(session, sink, entry); !emitted)
     return std::unexpected(std::move(emitted.error()));
@@ -191,7 +191,7 @@ void add_permission_request_ids(ava::agent::ToolTimelineEntry& entry, std::vecto
 
 }  // namespace
 
-ava::tools::ToolContext make_tool_context(RuntimeSession& session, ava::permissions::PermissionResolver permission_resolver)
+ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permissions::PermissionResolver permission_resolver)
 {
   auto const include_project_resources = project_resources_trusted(session.project_trust);
   auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
@@ -228,7 +228,7 @@ ava::tools::ToolContext make_tool_context(RuntimeSession& session, ava::permissi
                                  .current_dir = session.current_dir};
 }
 
-ava::core::VoidResult record_tool_start(RuntimeSession const& session, RuntimeEventSink const& sink, CommandResult& result, std::string const& call_id,
+ava::core::VoidResult record_tool_start(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result, std::string const& call_id,
                                         std::string name, std::string argument_summary)
 {
   return record_tool_event(
@@ -237,7 +237,7 @@ ava::core::VoidResult record_tool_start(RuntimeSession const& session, RuntimeEv
           .status = ava::agent::ToolTimelineStatus::Running, .call_id = call_id, .name = std::move(name), .argument_summary = std::move(argument_summary)});
 }
 
-ava::core::VoidResult record_tool_result(RuntimeSession const& session, RuntimeEventSink const& sink, CommandResult& result, std::string const& call_id,
+ava::core::VoidResult record_tool_result(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result, std::string const& call_id,
                                          std::string name, ava::agent::ToolTimelineStatus status, std::string result_summary, std::string result_content,
                                          std::vector<std::string> permission_request_ids)
 {
@@ -246,7 +246,7 @@ ava::core::VoidResult record_tool_result(RuntimeSession const& session, RuntimeE
   return record_tool_event(session, sink, result, std::move(entry));
 }
 
-ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, CommandRequest& request)
+ava::core::Result<CommandResult> run_tool_command(runtime::Session& session, CommandRequest& request)
 {
   CommandResult result;
   result.handled = true;

@@ -1,11 +1,9 @@
 #include "sys.h"
-#include "ava/app/command_permissions.h"
-
 #include "ava/app/command_format.h"
-
-#include "ava/core/json.h"
-#include "ava/permissions/permission_rules.h"
+#include "ava/app/command_permissions.h"
 #include "ava/session/session_store.h"
+#include "ava/permissions/permission_rules.h"
+#include "ava/core/json.h"
 
 #include <algorithm>
 #include <cctype>
@@ -46,7 +44,7 @@ struct PermissionAuditRow
   std::string rule_id;
 };
 
-ava::permissions::PermissionRuleStore permission_rule_store_for_session(RuntimeSession const& session)
+ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session)
 {
   return ava::permissions::PermissionRuleStore{
       .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
@@ -83,33 +81,33 @@ std::string trim_ascii(std::string_view text)
 std::string lower_ascii(std::string_view text)
 {
   std::string lowered(text);
-  std::ranges::transform(lowered, lowered.begin(),
-                         [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  std::ranges::transform(lowered, lowered.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   return lowered;
 }
 
 bool contains_ascii_case_insensitive(std::string_view text, std::string_view query)
 {
-  if (query.empty()) return true;
+  if (query.empty())
+    return true;
   return lower_ascii(text).find(lower_ascii(query)) != std::string::npos;
 }
 
 std::string display_permission_path(std::filesystem::path const& path, std::filesystem::path const& workspace)
 {
-  if (path.empty()) return "";
+  if (path.empty())
+    return "";
   auto text = display_path(path, workspace);
   if (text == ".." || text.starts_with("../"))
     return path.generic_string();
   return text;
 }
 
-std::string permission_rule_storage_path(ava::permissions::PermissionRuleStore const& store,
-                                         ava::permissions::PersistentPermissionRule const& rule)
+std::string permission_rule_storage_path(ava::permissions::PermissionRuleStore const& store, ava::permissions::PersistentPermissionRule const& rule)
 {
   return ava::permissions::enforceable_permission_rules_file(store, rule.scope).generic_string();
 }
 
-std::string rule_target_text(ava::permissions::PersistentPermissionRule const& rule, RuntimeSession const& session)
+std::string rule_target_text(ava::permissions::PersistentPermissionRule const& rule, runtime::Session const& session)
 {
   std::string text;
   if (!rule.target_path.empty())
@@ -121,7 +119,7 @@ std::string rule_target_text(ava::permissions::PersistentPermissionRule const& r
   return text;
 }
 
-std::string format_rule_line(ava::permissions::PersistentPermissionRule const& rule, RuntimeSession const& session)
+std::string format_rule_line(ava::permissions::PersistentPermissionRule const& rule, runtime::Session const& session)
 {
   std::string line = "- " + sanitize_inline_text(rule.rule_id);
   line += "  " + ava::permissions::to_string(rule.action);
@@ -133,21 +131,17 @@ std::string format_rule_line(ava::permissions::PersistentPermissionRule const& r
   return line;
 }
 
-bool rule_matches_query(ava::permissions::PersistentPermissionRule const& rule, RuntimeSession const& session,
-                        std::string_view query)
+bool rule_matches_query(ava::permissions::PersistentPermissionRule const& rule, runtime::Session const& session, std::string_view query)
 {
-  if (query.empty()) return true;
-  return contains_ascii_case_insensitive(rule.rule_id, query) ||
-         contains_ascii_case_insensitive(ava::permissions::to_string(rule.scope), query) ||
+  if (query.empty())
+    return true;
+  return contains_ascii_case_insensitive(rule.rule_id, query) || contains_ascii_case_insensitive(ava::permissions::to_string(rule.scope), query) ||
          contains_ascii_case_insensitive(ava::permissions::to_string(rule.action), query) ||
          contains_ascii_case_insensitive(ava::permissions::to_string(rule.operation), query) ||
-         contains_ascii_case_insensitive(ava::permissions::to_string(rule.mode), query) ||
-         contains_ascii_case_insensitive(rule.tool_name, query) ||
+         contains_ascii_case_insensitive(ava::permissions::to_string(rule.mode), query) || contains_ascii_case_insensitive(rule.tool_name, query) ||
          contains_ascii_case_insensitive(display_permission_path(rule.target_path, session.workspace_dir), query) ||
-         contains_ascii_case_insensitive(rule.command, query) ||
-         contains_ascii_case_insensitive(rule.reason, query) ||
-         contains_ascii_case_insensitive(rule.actor, query) ||
-         contains_ascii_case_insensitive(rule.created_at, query);
+         contains_ascii_case_insensitive(rule.command, query) || contains_ascii_case_insensitive(rule.reason, query) ||
+         contains_ascii_case_insensitive(rule.actor, query) || contains_ascii_case_insensitive(rule.created_at, query);
 }
 
 std::string audit_field(std::string_view data_json, std::string_view key)
@@ -155,7 +149,7 @@ std::string audit_field(std::string_view data_json, std::string_view key)
   return ava::core::json::string_field(data_json, key).value_or("");
 }
 
-PermissionAuditRow permission_audit_row(ava::session::SessionEntry const& entry, RuntimeSession const& session)
+PermissionAuditRow permission_audit_row(ava::session::SessionEntry const& entry, runtime::Session const& session)
 {
   auto target_path = audit_field(entry.data_json, "target_path");
   if (!target_path.empty())
@@ -237,12 +231,12 @@ std::string markdown_table_cell(std::string_view text)
 
 bool audit_line_matches_query(std::string const& line, std::string_view data_json, std::string_view query)
 {
-  if (query.empty()) return true;
+  if (query.empty())
+    return true;
   return contains_ascii_case_insensitive(line, query) || contains_ascii_case_insensitive(data_json, query);
 }
 
-std::string format_permission_audit(std::vector<ava::session::SessionEntry> const& entries, RuntimeSession const& session,
-                                    std::string_view query)
+std::string format_permission_audit(std::vector<ava::session::SessionEntry> const& entries, runtime::Session const& session, std::string_view query)
 {
   static constexpr std::size_t kMaxDisplayedAuditRows = 50;
 
@@ -297,8 +291,7 @@ std::string format_permission_audit(std::vector<ava::session::SessionEntry> cons
   return output.str();
 }
 
-std::string format_permission_audit_export(std::vector<ava::session::SessionEntry> const& entries,
-                                           RuntimeSession const& session, std::string_view query)
+std::string format_permission_audit_export(std::vector<ava::session::SessionEntry> const& entries, runtime::Session const& session, std::string_view query)
 {
   static constexpr std::size_t kMaxDisplayedAuditRows = 50;
 
@@ -353,14 +346,12 @@ std::string format_permission_audit_export(std::vector<ava::session::SessionEntr
   output << "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n";
   for (auto const& row : rows)
   {
-    output << "| " << markdown_table_cell(row.timestamp) << " | " << markdown_table_cell(row.entry_id) << " | "
-           << markdown_table_cell(row.request_id) << " | " << markdown_table_cell(row.action) << " | "
-           << markdown_table_cell(row.resolution) << " | " << markdown_table_cell(row.resolution_source) << " | "
-           << markdown_table_cell(row.operation) << " | " << markdown_table_cell(row.mode) << " | "
-           << markdown_table_cell(row.risk) << " | " << markdown_table_cell(row.tool_name) << " | "
-           << markdown_table_cell(row.target_path) << " | " << markdown_table_cell(row.command) << " | "
-           << markdown_table_cell(row.reason) << " | " << markdown_table_cell(row.resolution_reason) << " | "
-           << markdown_table_cell(row.rule_id) << " | " << markdown_table_cell(row.actor) << " |\n";
+    output << "| " << markdown_table_cell(row.timestamp) << " | " << markdown_table_cell(row.entry_id) << " | " << markdown_table_cell(row.request_id) << " | "
+           << markdown_table_cell(row.action) << " | " << markdown_table_cell(row.resolution) << " | " << markdown_table_cell(row.resolution_source) << " | "
+           << markdown_table_cell(row.operation) << " | " << markdown_table_cell(row.mode) << " | " << markdown_table_cell(row.risk) << " | "
+           << markdown_table_cell(row.tool_name) << " | " << markdown_table_cell(row.target_path) << " | " << markdown_table_cell(row.command) << " | "
+           << markdown_table_cell(row.reason) << " | " << markdown_table_cell(row.resolution_reason) << " | " << markdown_table_cell(row.rule_id) << " | "
+           << markdown_table_cell(row.actor) << " |\n";
   }
   output << "```";
   return output.str();
@@ -404,8 +395,7 @@ std::string format_summary_counts(std::string_view label, std::unordered_map<std
   return output.str();
 }
 
-std::string format_permission_audit_summary(std::vector<ava::session::SessionEntry> const& entries,
-                                            RuntimeSession const& session, std::string_view query)
+std::string format_permission_audit_summary(std::vector<ava::session::SessionEntry> const& entries, runtime::Session const& session, std::string_view query)
 {
   std::ostringstream output;
   output << "Permission audit summary:\n";
@@ -499,8 +489,7 @@ bool audit_row_matches_selector(PermissionAuditRow const& row, std::string_view 
 {
   if (selector.empty())
     return false;
-  return row.entry_id == selector || row.request_id == selector || row.entry_id.starts_with(selector) ||
-         row.request_id.starts_with(selector);
+  return row.entry_id == selector || row.request_id == selector || row.entry_id.starts_with(selector) || row.request_id.starts_with(selector);
 }
 
 void append_audit_detail_field(std::ostringstream& output, std::string_view label, std::string_view value)
@@ -510,8 +499,7 @@ void append_audit_detail_field(std::ostringstream& output, std::string_view labe
   output << "  " << label << ": " << sanitize_inline_text(std::string(value)) << "\n";
 }
 
-std::string format_permission_audit_detail(std::vector<ava::session::SessionEntry> const& entries,
-                                           RuntimeSession const& session, std::string_view selector)
+std::string format_permission_audit_detail(std::vector<ava::session::SessionEntry> const& entries, runtime::Session const& session, std::string_view selector)
 {
   std::ostringstream output;
   output << "Permission audit detail:\n";
@@ -595,9 +583,8 @@ std::string permission_audit_row_decision(PermissionAuditRow const& row)
   return row.action;
 }
 
-std::string format_permission_denial_diagnostics(
-    std::vector<ava::session::SessionEntry> const& entries, RuntimeSession const& session,
-    std::vector<ava::permissions::PersistentPermissionRule> const& rules, std::string_view query)
+std::string format_permission_denial_diagnostics(std::vector<ava::session::SessionEntry> const& entries, runtime::Session const& session,
+                                                 std::vector<ava::permissions::PersistentPermissionRule> const& rules, std::string_view query)
 {
   static constexpr std::size_t kMaxDisplayedDenials = 10;
 
@@ -685,10 +672,8 @@ std::string format_permission_denial_diagnostics(
       output << "  rule: " << sanitize_inline_text(row.rule_id);
       if (rule)
       {
-        output << " (" << ava::permissions::to_string(rule->action) << " "
-               << ava::permissions::to_string(rule->operation) << " scope="
-               << ava::permissions::to_string(rule->scope) << " mode=" << ava::permissions::to_string(rule->mode)
-               << ")";
+        output << " (" << ava::permissions::to_string(rule->action) << " " << ava::permissions::to_string(rule->operation)
+               << " scope=" << ava::permissions::to_string(rule->scope) << " mode=" << ava::permissions::to_string(rule->mode) << ")";
       }
       output << "\n";
       output << "  next: /permissions explain " << sanitize_inline_text(row.rule_id) << "\n";
@@ -707,16 +692,14 @@ std::string format_permission_denial_diagnostics(
 }
 
 std::string format_permission_rules_list(ava::permissions::PermissionRuleStore const& store,
-                                         std::vector<ava::permissions::PersistentPermissionRule> const& rules,
-                                         RuntimeSession const& session, std::string_view query)
+                                         std::vector<ava::permissions::PersistentPermissionRule> const& rules, runtime::Session const& session,
+                                         std::string_view query)
 {
   std::ostringstream output;
   output << "Permission rules:\n";
   output << "  global file: " << sanitize_inline_text(store.global_rules_file.generic_string()) << "\n";
   output << "  workspace file: "
-         << sanitize_inline_text(
-                ava::permissions::enforceable_permission_rules_file(store, ava::permissions::PermissionRuleScope::Workspace)
-                    .generic_string())
+         << sanitize_inline_text(ava::permissions::enforceable_permission_rules_file(store, ava::permissions::PermissionRuleScope::Workspace).generic_string())
          << "\n";
   output << "  behavior: built-in hard denies run first; matching deny rules override allow rules\n";
 
@@ -748,9 +731,8 @@ std::string format_permission_rules_list(ava::permissions::PermissionRuleStore c
   return output.str();
 }
 
-std::string format_permission_rule_explain(ava::permissions::PermissionRuleStore const& store,
-                                           ava::permissions::PersistentPermissionRule const& rule,
-                                           RuntimeSession const& session)
+std::string format_permission_rule_explain(ava::permissions::PermissionRuleStore const& store, ava::permissions::PersistentPermissionRule const& rule,
+                                           runtime::Session const& session)
 {
   std::ostringstream output;
   output << "Permission rule " << sanitize_inline_text(rule.rule_id) << "\n";
@@ -852,8 +834,7 @@ ava::core::Result<ParsedAddRule> parse_permission_add_rule(std::vector<std::stri
 
     auto key = normalize_field_key(std::string_view(tokens[index]).substr(0, separator));
     auto value = tokens[index].substr(separator + 1);
-    if (key != "action" && key != "operation" && key != "scope" && key != "mode" && key != "path" &&
-        key != "command" && key != "tool" && key != "reason")
+    if (key != "action" && key != "operation" && key != "scope" && key != "mode" && key != "path" && key != "command" && key != "tool" && key != "reason")
     {
       auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "permission rule add argument is unsupported");
       error.with_context("argument", key);
@@ -948,8 +929,7 @@ ava::core::Result<ParsedAddRule> parse_permission_add_rule(std::vector<std::stri
                                                                       .actor = "tui"}};
 }
 
-ava::permissions::PersistentPermissionRule const* find_rule(
-    std::vector<ava::permissions::PersistentPermissionRule> const& rules, std::string_view rule_id)
+ava::permissions::PersistentPermissionRule const* find_rule(std::vector<ava::permissions::PersistentPermissionRule> const& rules, std::string_view rule_id)
 {
   auto const found = std::ranges::find_if(rules, [&](auto const& rule) { return rule.rule_id == rule_id; });
   if (found == rules.end())
@@ -959,7 +939,7 @@ ava::permissions::PersistentPermissionRule const* find_rule(
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_permissions_command(RuntimeSession& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_permissions_command(runtime::Session& session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;
@@ -1028,8 +1008,7 @@ ava::core::Result<CommandResult> run_permissions_command(RuntimeSession& session
     if (summarize)
       add_output(result, format_permission_audit_summary(*entries, session, query));
     else
-      add_output(result, export_markdown ? format_permission_audit_export(*entries, session, query)
-                                         : format_permission_audit(*entries, session, query));
+      add_output(result, export_markdown ? format_permission_audit_export(*entries, session, query) : format_permission_audit(*entries, session, query));
     return result;
   }
 
@@ -1058,8 +1037,7 @@ ava::core::Result<CommandResult> run_permissions_command(RuntimeSession& session
     output << "  global file: " << sanitize_inline_text(store.global_rules_file.generic_string()) << "\n";
     output << "  workspace file: "
            << sanitize_inline_text(
-                  ava::permissions::enforceable_permission_rules_file(store, ava::permissions::PermissionRuleScope::Workspace)
-                      .generic_string())
+                  ava::permissions::enforceable_permission_rules_file(store, ava::permissions::PermissionRuleScope::Workspace).generic_string())
            << "\n";
     output << "  loaded rules: " << rules->size() << "\n";
     output << "  hard-deny policy: evaluated before persistent rules\n";
@@ -1112,8 +1090,7 @@ ava::core::Result<CommandResult> run_permissions_command(RuntimeSession& session
       add_output(result, added.error().format());
       return result;
     }
-    add_output(result, "added permission rule " + sanitize_inline_text(added->rule_id) + "\n" +
-                           format_rule_line(*added, session));
+    add_output(result, "added permission rule " + sanitize_inline_text(added->rule_id) + "\n" + format_rule_line(*added, session));
     return result;
   }
 
@@ -1130,8 +1107,7 @@ ava::core::Result<CommandResult> run_permissions_command(RuntimeSession& session
       add_output(result, removed.error().format());
       return result;
     }
-    add_output(result, "removed permission rule " + sanitize_inline_text(removed->rule_id) + "\n" +
-                           format_rule_line(*removed, session));
+    add_output(result, "removed permission rule " + sanitize_inline_text(removed->rule_id) + "\n" + format_rule_line(*removed, session));
     return result;
   }
 

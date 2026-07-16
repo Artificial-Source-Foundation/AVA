@@ -113,7 +113,7 @@ class ActiveRunGuard
   [[nodiscard]] ava::core::Result<RunOutcome> complete(RunOutcome outcome);
   [[nodiscard]] bool active() const noexcept;
   // Immutable-generation route.  Copies remain safe after session teardown
-  // because they only retain controller state, never RuntimeSession.
+  // because they only retain controller state, never runtime::Session.
   [[nodiscard]] std::function<ava::core::VoidResult(ava::session::SessionEntry)> append_route(ava::session::SessionStore& store) const;
 
  private:

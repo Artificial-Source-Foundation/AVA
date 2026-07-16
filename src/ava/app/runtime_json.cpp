@@ -135,7 +135,7 @@ void append_json_escaped_char(std::string& output, std::string_view object, std:
   }
 }
 
-std::string session_start_data_json(ava::agent::Mode mode, ava::config::ModelInfo const& model, RuntimeBasePromptMetadata const& base_prompt,
+std::string session_start_data_json(ava::agent::Mode mode, ava::config::ModelInfo const& model, BasePromptMetadata const& base_prompt,
                                     std::size_t context_source_count, std::filesystem::path const& original_cwd)
 {
   std::string json = "{\"mode\":\"" + ava::agent::to_string(mode) + "\",\"provider\":\"" + ava::core::json::escape(model.provider_id) + "\",\"model\":\"" +
@@ -203,7 +203,7 @@ std::string model_change_data_json(ava::config::ModelInfo const& previous, ava::
   return json;
 }
 
-std::string reasoning_change_data_json(ava::config::ModelInfo const& model, std::optional<RuntimeReasoningSelection> const& selection)
+std::string reasoning_change_data_json(ava::config::ModelInfo const& model, std::optional<ReasoningSelection> const& selection)
 {
   std::string json = "{\"provider\":\"" + ava::core::json::escape(model.provider_id) + "\",\"model\":\"" + ava::core::json::escape(model.model_id) + "\"";
   if (!model.reasoning_format.empty())
@@ -372,7 +372,7 @@ std::optional<bool> bool_json_field(std::string_view object, std::string_view ke
 }
 
 ava::core::VoidResult append_session_start(ava::session::SessionStore& store, ava::agent::Mode mode, ava::config::ModelInfo const& model,
-                                           RuntimeBasePromptMetadata const& base_prompt, std::size_t context_source_count,
+                                           BasePromptMetadata const& base_prompt, std::size_t context_source_count,
                                            std::filesystem::path const& original_cwd)
 {
   return store.append(ava::session::SessionEntry{
@@ -398,7 +398,7 @@ ava::core::VoidResult append_model_change(ava::session::SessionStore& store, ava
   return store.append(make_model_change_entry(previous, current));
 }
 
-ava::session::SessionEntry make_reasoning_change_entry(ava::config::ModelInfo const& model, std::optional<RuntimeReasoningSelection> const& selection)
+ava::session::SessionEntry make_reasoning_change_entry(ava::config::ModelInfo const& model, std::optional<ReasoningSelection> const& selection)
 {
   return ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                     .parent_id = "",
@@ -408,7 +408,7 @@ ava::session::SessionEntry make_reasoning_change_entry(ava::config::ModelInfo co
 }
 
 ava::core::VoidResult append_reasoning_change(ava::session::SessionStore& store, ava::config::ModelInfo const& model,
-                                              std::optional<RuntimeReasoningSelection> const& selection)
+                                              std::optional<ReasoningSelection> const& selection)
 {
   return store.append(make_reasoning_change_entry(model, selection));
 }

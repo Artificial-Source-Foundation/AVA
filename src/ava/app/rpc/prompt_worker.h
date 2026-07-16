@@ -16,16 +16,16 @@ namespace ava::app::rpc {
 
 struct RpcPromptWorkerOptions
 {
-  RuntimeSession& session;
+  runtime::Session& session;
   std::mutex& session_mutex;
-  RpcOutput& output;
+  output_ts& output;                                    // Reference to threadsafe output stream.
   RpcRunState& run_state;
   PendingResolverState& pending_state;
   ava::provider::Provider const& injected_provider;
   std::string injected_provider_id;
   ava::provider::Transport& transport;
   ava::provider::Transport& auth_transport;
-  RuntimeRunOptions runtime_options;
+  runtime::RunOptions runtime_options;
   ava::config::XdgPaths paths;
   std::string request_id;
   std::string message;

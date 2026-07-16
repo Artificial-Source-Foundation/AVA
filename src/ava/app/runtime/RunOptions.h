@@ -1,0 +1,64 @@
+#pragma once
+
+#include "ava/debug/print_members_on.h"
+#include "ava/observability/run_observer.h"
+#include "ava/app/events.h"
+#include "ava/agent/agent_loop.h"
+#include "ava/agent/question.h"
+#include "ava/agent/run_phase.h"
+#include "ava/tools/tool_io.h"
+#include "ava/session/attachments.h"
+#include "ava/permissions/permission.h"
+#include "ava/core/result.h"
+
+#include <functional>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace ava::app::runtime {
+
+// Carry per-invocation run controls for run_prompt and compaction summary generation: credentials, streaming/retry toggles, callbacks for events, permissions,
+// questions, cancellation and steering, plus an optional session lock and image attachments.
+//
+// All callback members default to null; run_prompt treats a null permission or question resolver as an error and a null event sink as a no-op.
+struct RunOptions
+{
+  // Caller-supplied correlation ID. run_prompt generates one when absent.
+  std::optional<std::string> request_id = std::nullopt;
+  std::string access_token;
+  std::string credential_type = "bearer";
+  bool openai_oauth = false;
+  std::string openai_account_id;
+  bool stream = true;
+  bool enable_transport_retries = false;
+  std::optional<std::vector<std::string>> exact_builtin_tool_names = std::nullopt;
+  bool isolate_project_resources = false;
+  bool require_descriptor_secure_workspace = false;
+  bool announce_execution_after_permission = false;
+  bool redact_permission_audit_arguments = false;
+  bool require_explicit_file_permissions = false;
+  std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
+  std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
+  EventSink event_sink = nullptr;
+  ava::permissions::PermissionResolver permission_resolver = nullptr;
+  ava::agent::QuestionResolver question_resolver = nullptr;
+  std::function<bool()> cancel_requested = nullptr;
+  std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
+  ava::agent::SessionAppendSink active_append_route = nullptr;
+  std::mutex* session_mutex = nullptr;
+  std::vector<ava::session::ImageAttachmentRef> image_attachments;
+  // Disabled by default; observation data never enters events, sessions, or RPC output.
+  std::shared_ptr<ava::observability::RunObservation> observation = nullptr;
+  ava::observability::TraceContext trace_context = {};
+  // Strict adapters use this callback to arbitrate immediately before committing terminal output.
+  std::function<ava::core::VoidResult()> on_terminal_commit = nullptr;
+  std::function<ava::core::VoidResult(ava::agent::RunPhase)> on_phase = nullptr;
+  bool offline = false;
+  bool expand_prompt_file_references = true;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+}  // namespace ava::app::runtime

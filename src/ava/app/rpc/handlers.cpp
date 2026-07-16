@@ -14,24 +14,24 @@
 
 namespace ava::app::rpc {
 
-ava::core::Result<RuntimeRunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id, RuntimeRunOptions options,
+ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id, runtime::RunOptions options,
                                                                    ava::provider::Transport& auth_transport, std::string_view purpose)
 {
   return prepare_runtime_credentials(paths, provider_id, std::move(options), auth_transport, std::string("RPC ") + std::string(purpose));
 }
 
-ava::core::Result<RuntimeSession> create_new_session(RuntimeSession const& current, RuntimeOpenOptions const& base_options)
+ava::core::Result<runtime::Session> create_new_session(runtime::Session const& current, runtime::OpenOptions const& base_options)
 {
   return create_runtime_session_like(current, base_options);
 }
 
-ava::core::Result<RuntimeSession> open_requested_session(RuntimeSession const& current, RuntimeOpenOptions const& base_options,
+ava::core::Result<runtime::Session> open_requested_session(runtime::Session const& current, runtime::OpenOptions const& base_options,
                                                          std::string_view requested_session_id)
 {
   return open_runtime_session_like(current, base_options, requested_session_id);
 }
 
-ava::core::Result<ava::config::ModelInfo> resolve_requested_model(RuntimeSession const& session, RpcCommand const& command)
+ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::Session const& session, RpcCommand const& command)
 {
   if (!command.model || command.model->empty())
     return std::unexpected(invalid_rpc("set_model requires model"));
@@ -43,17 +43,17 @@ ava::core::Result<ava::config::ModelInfo> resolve_requested_model(RuntimeSession
   return select_runtime_model(session, std::nullopt, *command.model);
 }
 
-ava::core::Result<ava::config::ModelInfo> next_runtime_model(RuntimeSession const& session)
+ava::core::Result<ava::config::ModelInfo> next_runtime_model(runtime::Session const& session)
 {
   return cycle_runtime_model(session, 1);
 }
 
-ava::core::Result<ava::config::ModelInfo> previous_runtime_model(RuntimeSession const& session)
+ava::core::Result<ava::config::ModelInfo> previous_runtime_model(runtime::Session const& session)
 {
   return cycle_runtime_model(session, -1);
 }
 
-ava::core::Result<ProviderHandle> provider_for_session_model(RuntimeSession const& session, std::string_view injected_provider_id,
+ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session const& session, std::string_view injected_provider_id,
                                                              ava::provider::Provider const& injected_provider)
 {
   if (session.model.provider_id == injected_provider_id)
@@ -66,7 +66,7 @@ ava::core::Result<ProviderHandle> provider_for_session_model(RuntimeSession cons
   return ProviderHandle{.provider = nullptr, .owned = std::move(*provider)};
 }
 
-ava::permissions::PermissionRuleStore permission_rule_store_for_session(RuntimeSession const& session)
+ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session)
 {
   return ava::permissions::PermissionRuleStore{
       .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",

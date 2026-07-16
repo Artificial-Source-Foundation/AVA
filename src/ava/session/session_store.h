@@ -3,6 +3,7 @@
 #include "ava/debug/print_members_on.h"
 #include "ava/observability/run_observer.h"
 #include "ava/agent/mode.h"
+#include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
 #include <filesystem>
@@ -12,7 +13,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include "debug.h"
 
 namespace ava::session {
 
@@ -143,7 +143,7 @@ class SessionStore
   [[nodiscard]] ava::core::VoidResult append(SessionEntry const& entry);
   // Removes a newly-created persistent session only when the supplied active
   // lease still identifies its sole linked pathname. Intended for rollback
-  // before ownership is transferred into a RuntimeSession.
+  // before ownership is transferred into a runtime::Session.
   [[nodiscard]] ava::core::VoidResult remove_created_file(SessionLease const& lease) const;
   // Test-only deterministic race seams. Production callers must not install them.
   void set_before_append_identity_check_for_test(std::function<void()> hook);

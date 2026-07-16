@@ -6,6 +6,7 @@
 #include <deque>
 #include <exception>
 #include <utility>
+#include "debug.h"
 
 namespace ava::app {
 namespace {

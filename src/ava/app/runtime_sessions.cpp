@@ -6,7 +6,7 @@
 namespace ava::app {
 namespace {
 
-RuntimeOpenOptions lifecycle_options(RuntimeOpenOptions options, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir)
+runtime::OpenOptions lifecycle_options(runtime::OpenOptions options, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir)
 {
   options.workspace_dir = workspace_root;
   options.current_dir = current_dir;
@@ -20,13 +20,13 @@ RuntimeOpenOptions lifecycle_options(RuntimeOpenOptions options, std::filesystem
 
 }  // namespace
 
-ava::core::Result<RuntimeSession> create_runtime_session_at(RuntimeOpenOptions base_options, std::filesystem::path const& workspace_root,
+ava::core::Result<runtime::Session> create_runtime_session_at(runtime::OpenOptions base_options, std::filesystem::path const& workspace_root,
                                                             std::filesystem::path const& current_dir)
 {
   return open_runtime_session(lifecycle_options(std::move(base_options), workspace_root, current_dir));
 }
 
-ava::core::Result<RuntimeSession> open_runtime_session_at(RuntimeOpenOptions base_options, std::filesystem::path const& workspace_root,
+ava::core::Result<runtime::Session> open_runtime_session_at(runtime::OpenOptions base_options, std::filesystem::path const& workspace_root,
                                                           std::filesystem::path const& current_dir, std::string_view requested_session_id)
 {
   auto options = lifecycle_options(std::move(base_options), workspace_root, current_dir);
@@ -34,7 +34,7 @@ ava::core::Result<RuntimeSession> open_runtime_session_at(RuntimeOpenOptions bas
   return open_runtime_session(options);
 }
 
-ava::core::Result<RuntimeSession> create_runtime_session_like(RuntimeSession const& current, RuntimeOpenOptions const& base_options)
+ava::core::Result<runtime::Session> create_runtime_session_like(runtime::Session const& current, runtime::OpenOptions const& base_options)
 {
   auto options = base_options;
   options.mode = current.mode;
@@ -42,7 +42,7 @@ ava::core::Result<RuntimeSession> create_runtime_session_like(RuntimeSession con
   return create_runtime_session_at(std::move(options), current.workspace_dir, current.current_dir);
 }
 
-ava::core::Result<RuntimeSession> open_runtime_session_like(RuntimeSession const& current, RuntimeOpenOptions const& base_options,
+ava::core::Result<runtime::Session> open_runtime_session_like(runtime::Session const& current, runtime::OpenOptions const& base_options,
                                                             std::string_view requested_session_id)
 {
   auto options = base_options;

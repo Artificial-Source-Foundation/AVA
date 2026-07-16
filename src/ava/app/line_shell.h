@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 
 namespace ava::app {
 
-[[nodiscard]] int run_interactive(RuntimeSession& session);
+[[nodiscard]] int run_interactive(runtime::Session& session);
 
 }  // namespace ava::app

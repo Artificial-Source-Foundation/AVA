@@ -84,12 +84,13 @@ struct PendingResolverState
 [[nodiscard]] ava::core::Result<std::string> permission_session_grant_revoke_result_json(PendingResolverState& pending_state, std::string_view grant_id);
 [[nodiscard]] std::string permission_session_grants_clear_result_json(PendingResolverState& pending_state);
 
-[[nodiscard]] ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state,
-                                                                                RuntimeSession const& session, std::mutex& session_mutex,
+[[nodiscard]] ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolverState& pending_state, output_ts& output, RpcRunState& run_state,
+                                                                                runtime::Session const& session, std::mutex& session_mutex,
                                                                                 ava::permissions::PermissionResolver policy_resolver,
                                                                                 std::string prompt_request_id);
-[[nodiscard]] ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state,
-                                                                      RuntimeSession const& session, std::mutex& session_mutex, std::string prompt_request_id);
+[[nodiscard]] ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pending_state, output_ts& output, RpcRunState& run_state,
+                                                                      runtime::Session const& session, std::mutex& session_mutex,
+                                                                      std::string prompt_request_id);
 
 [[nodiscard]] ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_state, std::string_view request_id, std::string_view correlation_id,
                                                              std::string_view decision, std::optional<std::string> const& reason = std::nullopt);

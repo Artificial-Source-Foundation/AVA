@@ -56,8 +56,8 @@ struct AcpSessionOptions
 {
   std::filesystem::path launch_root;
   ava::config::XdgPaths paths = ava::config::xdg_paths();
-  RuntimeOpenOptions open_options;
-  RuntimeRunOptions run_options;
+  runtime::OpenOptions open_options;
+  runtime::RunOptions run_options;
   RuntimeProviderRunBundleFactory provider_bundle_factory;
   // Shared because every host on one connection must retain the same immutable
   // initialize-time capability snapshot.
@@ -72,7 +72,7 @@ struct AcpSessionOptions
 class AcpSessionHost
 {
  public:
-  AcpSessionHost(RuntimeSession session, AcpSessionOptions options);
+  AcpSessionHost(runtime::Session session, AcpSessionOptions options);
   AcpSessionHost(AcpSessionHost const&) = delete;
   AcpSessionHost& operator=(AcpSessionHost const&) = delete;
   ~AcpSessionHost();
@@ -116,7 +116,7 @@ class AcpSessionHost
                                                                                                      std::uint64_t reservation, std::stop_token stop_token);
   [[nodiscard]] PermissionGrantKey permission_grant_key(ava::permissions::PermissionPrompt const& prompt) const;
 
-  RuntimeSession session_;
+  runtime::Session session_;
   AcpSessionOptions options_;
   std::string session_id_;
   mutable std::mutex mutex_;
@@ -159,7 +159,7 @@ class AcpSessionRegistry
  private:
   [[nodiscard]] ava::core::VoidResult reserve_insertion(std::optional<std::string_view> session_id = std::nullopt);
   void release_insertion() noexcept;
-  [[nodiscard]] ava::core::Result<std::shared_ptr<AcpSessionHost>> insert_reserved(RuntimeSession session);
+  [[nodiscard]] ava::core::Result<std::shared_ptr<AcpSessionHost>> insert_reserved(runtime::Session session);
 
   struct ListRecord
   {

@@ -77,7 +77,7 @@ void test_app_rpc_cancel_affects_subsequent_prompt()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -88,7 +88,7 @@ void test_app_rpc_cancel_affects_subsequent_prompt()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(final_text_sse("prompt after cancel"))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -132,7 +132,7 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission()
     file << "outside cancel note";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -143,7 +143,7 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string()))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -183,7 +183,7 @@ void test_app_rpc_steer_applies_before_next_provider_request()
     file << "outside steer note";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -194,7 +194,7 @@ void test_app_rpc_steer_applies_before_next_provider_request()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("after steer"))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -238,7 +238,7 @@ void test_app_rpc_follow_up_runs_after_active_prompt()
     file << "outside follow note";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -250,7 +250,7 @@ void test_app_rpc_follow_up_runs_after_active_prompt()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("first done")),
                                        sse_response(final_text_sse("follow done"))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -298,7 +298,7 @@ void test_app_rpc_prompt_start_failure_cleans_queued_messages()
                                                                                           .source_path = {}});
   expect(stored.has_value(), "RPC prompt start failure test stores expired credential");
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -351,7 +351,7 @@ void test_app_rpc_steer_after_follow_up_started_targets_follow_up()
     file << "outside follow steer note";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -364,7 +364,7 @@ void test_app_rpc_steer_after_follow_up_started_targets_follow_up()
   ava::tests::FakeTransport transport(
       {sse_response(read_file_call_sse(outside_path.generic_string(), "call_read_parent")), sse_response(final_text_sse("first done")),
        sse_response(read_file_call_sse(outside_path.generic_string(), "call_read_follow_up")), sse_response(final_text_sse("follow steered done"))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -415,7 +415,7 @@ void test_app_rpc_queue_limit_rejects_new_items()
     file << "outside queue limit note";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -426,7 +426,7 @@ void test_app_rpc_queue_limit_rejects_new_items()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string()))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -469,7 +469,7 @@ void test_app_rpc_eof_clears_queued_follow_up_without_running()
     file << "outside eof note";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -481,7 +481,7 @@ void test_app_rpc_eof_clears_queued_follow_up_without_running()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("would only run if not canceled"))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -521,7 +521,7 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up()
     file << "outside cancel queue note";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -532,7 +532,7 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string()))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -583,7 +583,7 @@ void test_app_rpc_direct_command_rejects_prompt_only_queue_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -594,7 +594,7 @@ void test_app_rpc_direct_command_rejects_prompt_only_queue_commands()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
   ThreadSafeStringBuf output_buffer;
@@ -632,7 +632,7 @@ void test_app_rpc_duplicate_outstanding_id_does_not_replace_original()
   auto const outside_path = root / "outside.txt";
   write_app_test_file(outside_path, "duplicate id note");
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -643,7 +643,7 @@ void test_app_rpc_duplicate_outstanding_id_does_not_replace_original()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("original done"))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
@@ -687,7 +687,7 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
     file << "outside reject note";
   }
 
-  ava::app::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -699,7 +699,7 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string()))});
-  ava::app::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);

@@ -95,7 +95,7 @@ struct TuiSubmitContext
 {
   ava::permissions::PermissionResolver permission_resolver;
   ava::agent::QuestionResolver question_resolver;
-  ava::app::RuntimeEventSink event_sink;
+  ava::app::runtime::EventSink event_sink;
   std::function<bool()> cancel_requested;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages;
   std::function<ava::core::VoidResult(std::string_view)> skip_active_steering;

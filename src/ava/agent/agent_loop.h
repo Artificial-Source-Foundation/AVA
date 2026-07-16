@@ -159,7 +159,7 @@ struct AgentLoopOptions
   std::optional<ava::config::ModelPricing> model_pricing = std::nullopt;
   bool parallel_read_search_tools = false;
   std::size_t parallel_read_search_max_workers = 4;
-  // Disabled by default. This is independent from RuntimeEvent/RPC output.
+  // Disabled by default. This is independent from runtime::Event/RPC output.
   std::shared_ptr<ava::observability::RunObservation> observation = nullptr;
   // Runtime may pre-establish this so retries, compaction, and the agent share
   // one run/turn identity.

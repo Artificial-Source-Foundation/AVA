@@ -8,9 +8,8 @@
 
 namespace ava::app {
 
-[[nodiscard]] std::vector<std::string> model_configuration_diagnostics(ava::config::ModelInfo const& model,
-                                                                        bool provider_registered);
-[[nodiscard]] ava::core::Result<CommandResult> run_models_command(RuntimeSession& session, std::string_view query = {});
-[[nodiscard]] ava::core::Result<CommandResult> run_providers_command(RuntimeSession& session, std::string_view query = {});
+[[nodiscard]] std::vector<std::string> model_configuration_diagnostics(ava::config::ModelInfo const& model, bool provider_registered);
+[[nodiscard]] ava::core::Result<CommandResult> run_models_command(runtime::Session& session, std::string_view query = {});
+[[nodiscard]] ava::core::Result<CommandResult> run_providers_command(runtime::Session& session, std::string_view query = {});
 
 }  // namespace ava::app

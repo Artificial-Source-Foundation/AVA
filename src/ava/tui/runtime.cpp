@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_editor.h"
 #include "ava/tui/composer_internal.h"
@@ -1409,8 +1410,7 @@ SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::str
   SelectListView view{
       .title = "Keybindings",
       .subtitle =
-          "Active TUI bindings · Enter drafts /keybindings set · config "
-          "$XDG_CONFIG_HOME/ava/keybinds.json · init /keybindings init · reload /reload "
+          "Active TUI bindings · Enter drafts /keybindings set · config $XDG_CONFIG_HOME/ava/keybinds.json · init /keybindings init · reload /reload "
           "keybindings",
       .items = {},
       .selected_item_index = 0,
@@ -1650,19 +1650,19 @@ int run_interactive_composer(TuiRuntimeOptions options)
   std::deque<std::shared_ptr<PendingQuestionRequest>> pending_question_requests;
   std::atomic_bool accept_prompt_requests{true};
   std::mutex prompt_audit_mutex;
-  ava::app::RuntimeEventSink prompt_audit_sink;
+  ava::app::runtime::EventSink prompt_audit_sink;
 
   auto emit_prompt_audit = [&](std::string status, std::string text, std::string permission_request_id = {}, std::string tool_name = {},
                                std::string reason = {}, std::string resolution_reason = {}) {
-    ava::app::RuntimeEventSink sink;
+    ava::app::runtime::EventSink sink;
     {
       std::lock_guard<std::mutex> lock(prompt_audit_mutex);
       sink = prompt_audit_sink;
     }
     if (!sink)
       return;
-    ava::app::RuntimeEvent event;
-    event.type = ava::app::RuntimeEventType::ProviderEvent;
+    ava::app::runtime::Event event;
+    event.type = ava::app::runtime::EventType::ProviderEvent;
     event.status = std::move(status);
     event.text = std::move(text);
     event.tool_name = std::move(tool_name);
@@ -3270,8 +3270,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
           };
         }
       }
-      auto runtime_event_to_bus_sink = [&]() -> ava::app::RuntimeEventSink {
-        return [&](ava::app::RuntimeEvent const& event) {
+      auto runtime_event_to_bus_sink = [&]() -> ava::app::runtime::EventSink {
+        return [&](ava::app::runtime::Event const& event) {
           ava::app::EventEnvelopeContext event_context;
           {
             std::lock_guard lock(event_context_mutex);
@@ -3284,7 +3284,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           return event_bus.publish(ava::app::to_event_envelope(event, event_context));
         };
       };
-      auto event_sink = supports_active_queue ? runtime_event_to_bus_sink() : ava::app::RuntimeEventSink{};
+      auto event_sink = supports_active_queue ? runtime_event_to_bus_sink() : ava::app::runtime::EventSink{};
       {
         std::lock_guard<std::mutex> lock(prompt_audit_mutex);
         prompt_audit_sink = event_sink;

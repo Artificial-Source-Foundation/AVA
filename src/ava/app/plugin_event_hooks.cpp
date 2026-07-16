@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/runtime.h"
 #include "ava/agent/agent_loop_session.h"
@@ -62,7 +63,7 @@ class PluginEventObserverState final
  public:
   explicit PluginEventObserverState(PluginEventObserverOptions options) : options_(std::move(options)) { }
 
-  void observe(RuntimeEvent const& event)
+  void observe(runtime::Event const& event)
   {
     ensure_loaded();
     if (hooks_.empty())
@@ -216,7 +217,7 @@ class PluginEventObserverState final
 
 }  // namespace
 
-PluginEventObserverOptions plugin_event_observer_options(RuntimeSession& session, ava::permissions::PermissionResolver permission_resolver,
+PluginEventObserverOptions plugin_event_observer_options(runtime::Session& session, ava::permissions::PermissionResolver permission_resolver,
                                                          std::mutex* /*session_mutex*/)
 {
   return PluginEventObserverOptions{
@@ -239,10 +240,10 @@ PluginEventObserverOptions plugin_event_observer_options(RuntimeSession& session
       .current_dir = session.current_dir};
 }
 
-RuntimeEventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, RuntimeEventSink next)
+runtime::EventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, runtime::EventSink next)
 {
   auto state = std::make_shared<PluginEventObserverState>(std::move(options));
-  return [state = std::move(state), next = std::move(next)](RuntimeEvent const& event) -> ava::core::VoidResult {
+  return [state = std::move(state), next = std::move(next)](runtime::Event const& event) -> ava::core::VoidResult {
     state->observe(event);
     return emit_event(next, event);
   };

@@ -93,13 +93,13 @@ bool path_is_under(std::filesystem::path const& path, std::filesystem::path cons
   return !relative.empty() && relative.native().find("..") != 0 && !relative.is_absolute();
 }
 
-bool is_reference_code_path(RuntimeSession const& session, std::filesystem::path const& path)
+bool is_reference_code_path(runtime::Session const& session, std::filesystem::path const& path)
 {
   return path_is_under(path, session.workspace_dir / "docs" / "reference-code") ||
          path.lexically_normal() == (session.workspace_dir / "docs" / "reference-code").lexically_normal();
 }
 
-bool should_skip_path_completion_entry(RuntimeSession const& session, std::filesystem::directory_entry const& entry)
+bool should_skip_path_completion_entry(runtime::Session const& session, std::filesystem::directory_entry const& entry)
 {
   auto const name = entry.path().filename().generic_string();
   if (name == ".git" || name == "node_modules" || name == ".cache" || name == ".ccache")
@@ -139,7 +139,7 @@ std::string path_completion_description(std::filesystem::directory_entry const& 
   return "file " + std::to_string(size) + " bytes";
 }
 
-std::vector<PathCompletionCandidate> workspace_path_completions(RuntimeSession const& session, bool allow_spaces = false)
+std::vector<PathCompletionCandidate> workspace_path_completions(runtime::Session const& session, bool allow_spaces = false)
 {
   std::vector<PathCompletionCandidate> candidates;
   std::error_code error;
@@ -572,7 +572,7 @@ void append_session_tree_items(tui::SelectListView& view, std::vector<ava::sessi
   }
 }
 
-ava::mcp::McpConfigLoadOptions mcp_config_options(RuntimeSession const& session)
+ava::mcp::McpConfigLoadOptions mcp_config_options(runtime::Session const& session)
 {
   auto options = ava::mcp::default_mcp_config_options(session.workspace_dir);
   options.global_config_file = session.paths.ava_config_dir / "mcp.json";
@@ -580,19 +580,19 @@ ava::mcp::McpConfigLoadOptions mcp_config_options(RuntimeSession const& session)
   return options;
 }
 
-ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session)
+ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::Session const& session)
 {
   return ava::plugin::PluginDiscoveryOptions{
       .global_plugins_dir = session.paths.ava_config_dir / "plugins",
       .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{}};
 }
 
-std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
+std::filesystem::path plugin_enablement_file(runtime::Session const& session)
 {
   return session.paths.ava_state_dir / "plugin-enablement.json";
 }
 
-void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, RuntimeSession const& session, std::vector<CommandHotkey> const& hotkeys)
+void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys)
 {
   auto const path_completions = workspace_path_completions(session);
   if (!path_completions.empty())
@@ -901,14 +901,14 @@ std::vector<tui::SlashCommandItem> command_catalog_slash_items(std::vector<Comma
   return items;
 }
 
-std::vector<tui::SlashCommandItem> command_catalog_slash_items(RuntimeSession const& session, std::vector<CommandHotkey> const& hotkeys)
+std::vector<tui::SlashCommandItem> command_catalog_slash_items(runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys)
 {
   auto items = command_catalog_slash_items(hotkeys);
   add_backend_argument_completions(items, session, hotkeys);
   return items;
 }
 
-std::vector<tui::FileReferenceItem> file_reference_items(RuntimeSession const& session)
+std::vector<tui::FileReferenceItem> file_reference_items(runtime::Session const& session)
 {
   std::vector<tui::FileReferenceItem> items;
   auto const candidates = workspace_path_completions(session, true);
@@ -960,7 +960,7 @@ tui::SelectListView model_selector_view(ava::config::ModelRegistry const& regist
   return view;
 }
 
-tui::SelectListView model_selector_view(RuntimeSession const& session, std::string footer_hint)
+tui::SelectListView model_selector_view(runtime::Session const& session, std::string footer_hint)
 {
   auto registry = ava::config::load_model_registry(session.paths);
   if (registry)
@@ -1022,7 +1022,7 @@ tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const&
   return view;
 }
 
-tui::SelectListView scoped_model_selector_view(RuntimeSession const& session, std::string footer_hint)
+tui::SelectListView scoped_model_selector_view(runtime::Session const& session, std::string footer_hint)
 {
   auto registry = ava::config::load_model_registry(session.paths);
   if (registry)
@@ -1155,7 +1155,7 @@ tui::SelectListView session_selector_view(ava::session::SessionTreeIndex tree, S
   return view;
 }
 
-tui::SelectListView session_selector_view(RuntimeSession const& session, SessionSelectorSort sort, std::string footer_hint, bool named_only, bool show_paths,
+tui::SelectListView session_selector_view(runtime::Session const& session, SessionSelectorSort sort, std::string footer_hint, bool named_only, bool show_paths,
                                           bool show_archived, bool show_label_time)
 {
   auto tree = ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id());

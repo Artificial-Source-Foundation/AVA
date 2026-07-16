@@ -12,6 +12,11 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "debug.h"
+#ifdef CWDEBUG
+#include "ava/debug/print_reference.h"
+#include <libcwd/buf2str.h>
+#endif
 
 namespace ava::app::rpc {
 namespace {
@@ -627,6 +632,8 @@ std::string parse_error_response_id(std::string_view line)
 
 ava::core::Result<bool> read_rpc_line_bounded(std::istream& in, std::string& line)
 {
+  DoutEntering(dc::rpc, "read_rpc_line_bounded(" << print_reference(in) << ", " << print_reference(line) << ")");
+
   line.clear();
   bool oversized = false;
   while (true)
@@ -653,6 +660,8 @@ ava::core::Result<bool> read_rpc_line_bounded(std::istream& in, std::string& lin
   }
   if (oversized)
     return std::unexpected(invalid_rpc("RPC request line is too large"));
+
+  Dout(dc::rpc, "Read: JSON-record:[" << buf2str(line.data(), line.length()) << ']');
   return true;
 }
 

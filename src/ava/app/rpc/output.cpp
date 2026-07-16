@@ -8,9 +8,6 @@
 
 #include <utility>
 #include "debug.h"
-#ifdef CWDEBUG
-#include <libcwd/buf2str.h>
-#endif
 
 namespace ava::app::rpc {
 namespace {
@@ -58,7 +55,7 @@ ResolverEventPayload resolver_queue_payload(std::string payload_json)
 // static
 ava::core::VoidResult Output::write_record(output_ts& output, std::string_view record)
 {
-  DoutEntering(dc::rpc, "Output::write_record(output [" << (void*)&output << "], JSON-record:[" << libcwd::buf2str(record.data(), record.length()) << "])");
+  DoutEntering(dc::rpc, "Output::write_record(output [" << (void*)&output << "], bytes=" << record.size() << ")");
 
   auto safe_record = ava::core::json::is_valid_utf8(record) ? std::string(record) : ava::core::json::replace_invalid_utf8(record);
   if (!ava::core::json::is_valid_utf8(safe_record))

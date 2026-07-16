@@ -1,12 +1,13 @@
 #include "sys.h"
-#include <nlohmann/json.hpp>
-#include <iostream>
-#include <sstream>
-#include <iomanip>
+
 #include <array>
+#include <iomanip>
+#include <iostream>
 #include <list>
-#include <vector>
 #include <set>
+#include <sstream>
+#include <vector>
+#include <nlohmann/json.hpp>
 #include "debug.h"
 #if CWDEBUG
 #include <libcwd/buf2str.h>
@@ -31,6 +32,7 @@ class Response
 
  public:
   Response() = default;
+  virtual ~Response() = default;
   Response(Response&&) = default;
   Response& operator=(Response&&) = default;
 

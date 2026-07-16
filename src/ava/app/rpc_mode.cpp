@@ -314,8 +314,9 @@ ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptio
   // This function is called first-thing after creating a thread.
   Debug(NAMESPACE_DEBUG::init_thread("run_rpc_loop"));
 
-  DoutEntering(dc::rpc, "run_rpc_loop(" << session << ", " << open_options << ", " << provider << ", " << auth_transport << ", runtime_options=<redacted>, "
-                                        << print_reference(input) << ", " << print_reference(out) << ")");
+  DoutEntering(dc::rpc, "run_rpc_loop(session_id=" << session.store.session_id() << ", provider_id=" << session.model.provider_id
+                                                   << ", model_id=" << session.model.model_id << ", input=" << static_cast<void*>(&input)
+                                                   << ", output=" << static_cast<void*>(&out) << ")");
 
   rpc::RpcRunState run_state;
   rpc::PendingResolverState pending_state;

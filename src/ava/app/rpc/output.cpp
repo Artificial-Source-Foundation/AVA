@@ -2,6 +2,7 @@
 #include "output.h"
 #include "protocol.h"
 #include "serialization.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/core/ids.h"
 
 #include <utility>

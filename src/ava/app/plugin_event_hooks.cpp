@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/app/plugin_event_hooks.h"
 
 #include "ava/app/runtime.h"

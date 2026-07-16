@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc_mode.h"

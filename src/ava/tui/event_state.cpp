@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/tui/event_state.h"
 
 #include "ava/config/model_profiles.h"

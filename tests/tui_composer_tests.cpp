@@ -2,6 +2,7 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/app/command_palette.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"

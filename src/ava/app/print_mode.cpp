@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/app/print_mode.h"
 
 #include "ava/config/auth.h"

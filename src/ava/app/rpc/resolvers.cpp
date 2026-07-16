@@ -3,6 +3,7 @@
 #include "resolvers.h"
 #include "serialization.h"
 #include "serialization_json.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/core/ids.h"
 
 #include <utility>

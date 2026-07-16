@@ -5,6 +5,7 @@
 #include "serialization_json.h"
 #include "session_commands.h"
 #include "session_operators.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 

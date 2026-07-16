@@ -4,8 +4,8 @@
 #include "ava/config/auth.h"
 #include "ava/config/auth_record.h"
 #include "ava/config/model_config.h"
-#include "ava/config/reasoning_profiles.h"
 #include "ava/config/provider_profiles.h"
+#include "ava/config/reasoning_profiles.h"
 #include "ava/provider/registry.h"
 
 #include <algorithm>
@@ -167,7 +167,7 @@ std::vector<std::string> model_diagnostics(ava::config::ModelInfo const& model, 
   return diagnostics;
 }
 
-std::string format_models_text(runtime::RuntimeSession const& session, ava::config::ModelRegistry const& registry, std::string_view query)
+std::string format_models_text(runtime::Session const& session, ava::config::ModelRegistry const& registry, std::string_view query)
 {
   auto const providers = ava::provider::builtin_provider_registry();
   auto models = effective_models(registry);
@@ -237,10 +237,8 @@ bool provider_matches_query(ava::config::ProviderProfile const& profile, std::st
 {
   if (query.empty())
     return true;
-  return contains_ascii_case_insensitive(profile.provider_id, query) ||
-         contains_ascii_case_insensitive(profile.display_name, query) ||
-         contains_ascii_case_insensitive(profile.api_family, query) ||
-         contains_ascii_case_insensitive(profile.connect_detail, query);
+  return contains_ascii_case_insensitive(profile.provider_id, query) || contains_ascii_case_insensitive(profile.display_name, query) ||
+         contains_ascii_case_insensitive(profile.api_family, query) || contains_ascii_case_insensitive(profile.connect_detail, query);
 }
 
 std::size_t model_count_for_provider(ava::config::ModelRegistry const& registry, std::string_view provider_id)
@@ -265,8 +263,7 @@ std::string provider_oauth_status(ava::config::ProviderProfile const& profile)
   return "stored/env bearer";
 }
 
-std::string provider_credential_status(ava::config::XdgPaths const& paths,
-                                       ava::config::ProviderProfile const& profile)
+std::string provider_credential_status(ava::config::XdgPaths const& paths, ava::config::ProviderProfile const& profile)
 {
   auto credential = ava::config::provider_credential_for_startup(paths, profile.provider_id);
   if (!credential)
@@ -281,8 +278,7 @@ std::string provider_credential_status(ava::config::XdgPaths const& paths,
   return sanitize_inline_text(type) + " source=" + sanitize_inline_text(source);
 }
 
-std::string format_providers_text(runtime::RuntimeSession const& session, ava::config::ModelRegistry const& registry,
-                                  std::string_view query)
+std::string format_providers_text(runtime::Session const& session, ava::config::ModelRegistry const& registry, std::string_view query)
 {
   auto const provider_registry = ava::provider::builtin_provider_registry();
   std::string output = "Providers:\n";
@@ -321,19 +317,20 @@ std::string format_providers_text(runtime::RuntimeSession const& session, ava::c
   }
   if (shown == 0 && !query.empty())
     output += "  no providers match the filter\n";
-  output += "\nUse /connect <provider> to store API keys. OpenAI supports interactive OAuth; Anthropic interactive OAuth is deferred until Anthropic documents a third-party flow.";
+  output +=
+      "\nUse /connect <provider> to store API keys. OpenAI supports interactive OAuth; Anthropic interactive OAuth is deferred until Anthropic documents a "
+      "third-party flow.";
   return output;
 }
 
 }  // namespace
 
-std::vector<std::string> model_configuration_diagnostics(ava::config::ModelInfo const& model,
-                                                         bool provider_registered)
+std::vector<std::string> model_configuration_diagnostics(ava::config::ModelInfo const& model, bool provider_registered)
 {
   return model_diagnostics(model, provider_registered);
 }
 
-ava::core::Result<CommandResult> run_models_command(runtime::RuntimeSession& session, std::string_view query)
+ava::core::Result<CommandResult> run_models_command(runtime::Session& session, std::string_view query)
 {
   CommandResult result;
   result.handled = true;
@@ -345,7 +342,7 @@ ava::core::Result<CommandResult> run_models_command(runtime::RuntimeSession& ses
   return result;
 }
 
-ava::core::Result<CommandResult> run_providers_command(runtime::RuntimeSession& session, std::string_view query)
+ava::core::Result<CommandResult> run_providers_command(runtime::Session& session, std::string_view query)
 {
   CommandResult result;
   result.handled = true;

@@ -1,6 +1,6 @@
 #include "sys.h"
-#include "ava/app/command_palette.h"
 #include "ava/app/clipboard_image.h"
+#include "ava/app/command_palette.h"
 #include "ava/app/commands.h"
 #include "ava/app/display_settings.h"
 #include "ava/app/interactive_run_queue.h"
@@ -17,9 +17,9 @@
 #include "ava/config/auth.h"
 #include "ava/config/model_config.h"
 #include "ava/config/model_profiles.h"
-#include "ava/permissions/permission_rules.h"
-#include "ava/session/stats.h"
 #include "ava/session/session_tree.h"
+#include "ava/session/stats.h"
+#include "ava/permissions/permission_rules.h"
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
 #include "ava/core/ids.h"
@@ -44,7 +44,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -102,8 +101,7 @@ std::string display_theme_status(std::string_view prefix)
 ava::tui::ProjectTrustSnapshot project_trust_snapshot(ava::app::ProjectTrustState const& state)
 {
   return ava::tui::ProjectTrustSnapshot{.decision = std::string(ava::app::to_string(state.decision)),
-                                        .project_resources = ava::app::project_resources_trusted(state) ? std::string("enabled")
-                                                                                                        : std::string("skipped"),
+                                        .project_resources = ava::app::project_resources_trusted(state) ? std::string("enabled") : std::string("skipped"),
                                         .workspace = state.workspace_dir.string(),
                                         .matched_path = state.matched_path.string(),
                                         .trust_file = state.trust_file.string(),
@@ -126,7 +124,8 @@ std::optional<std::string> env_value(std::string_view name)
   return std::string(value);
 }
 
-class ScopedEnvVar {
+class ScopedEnvVar
+{
  public:
   ScopedEnvVar(std::string name, std::string value) : name_(std::move(name))
   {
@@ -156,9 +155,10 @@ class ScopedEnvVar {
   bool set_ = false;
 };
 
-class ScopedTempFile {
+class ScopedTempFile
+{
  public:
-  explicit ScopedTempFile(std::filesystem::path path, int fd) : path_(std::move(path)), fd_(fd) {}
+  explicit ScopedTempFile(std::filesystem::path path, int fd) : path_(std::move(path)), fd_(fd) { }
   ScopedTempFile(ScopedTempFile const&) = delete;
   ScopedTempFile& operator=(ScopedTempFile const&) = delete;
 
@@ -217,8 +217,7 @@ ava::core::Result<std::optional<std::string>> edit_text_with_external_editor(std
     editor = env_value("EDITOR");
   if (!editor)
   {
-    return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "external editor requires VISUAL or EDITOR"));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "external editor requires VISUAL or EDITOR"));
   }
 
   std::error_code temp_error;
@@ -300,7 +299,8 @@ std::string permission_summary_field(std::string_view summary, std::string_view 
   {
     std::string_view view(line);
     while (!view.empty() && (view.front() == ' ' || view.front() == '\t')) view.remove_prefix(1);
-    if (!view.starts_with(label)) continue;
+    if (!view.starts_with(label))
+      continue;
     view.remove_prefix(label.size());
     while (!view.empty() && (view.front() == ' ' || view.front() == '\t')) view.remove_prefix(1);
     return std::string(view);
@@ -313,19 +313,14 @@ std::vector<ava::tui::ToolPermissionAuditItem> tui_permission_audits(ava::agent:
   std::vector<ava::tui::ToolPermissionAuditItem> audits;
   audits.reserve(entry.permission_request_ids.size());
   auto const resolution = permission_summary_field(entry.result_summary, "resolution:");
-  auto const decision = resolution == "deny" || entry.result_summary.find("permission_denied:") != std::string::npos ? std::string("deny")
-                                                                                                                     : std::string{};
+  auto const decision = resolution == "deny" || entry.result_summary.find("permission_denied:") != std::string::npos ? std::string("deny") : std::string{};
   auto const reason = permission_summary_field(entry.result_summary, "reason:");
   auto const risk = permission_summary_field(entry.result_summary, "risk:");
   auto const command = permission_summary_field(entry.result_summary, "command:");
   for (auto const& id : entry.permission_request_ids)
   {
-    audits.push_back(ava::tui::ToolPermissionAuditItem{.permission_request_id = id,
-                                                       .decision = decision,
-                                                       .risk = risk,
-                                                       .reason = reason,
-                                                       .command = command,
-                                                       .resolution_reason = resolution});
+    audits.push_back(ava::tui::ToolPermissionAuditItem{
+        .permission_request_id = id, .decision = decision, .risk = risk, .reason = reason, .command = command, .resolution_reason = resolution});
   }
   return audits;
 }
@@ -394,8 +389,8 @@ bool is_display_settings_command(std::string_view line) noexcept
 {
   while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.remove_prefix(1);
   while (!line.empty() && (line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
-  return line == "/theme" || (line.starts_with("/theme") && line.size() > 6 && line[6] == ' ') ||
-         line == "/reload theme" || line == "/reload themes" || line == "/reload display";
+  return line == "/theme" || (line.starts_with("/theme") && line.size() > 6 && line[6] == ' ') || line == "/reload theme" || line == "/reload themes" ||
+         line == "/reload display";
 }
 
 void add_token_component(std::optional<long long>& total, std::optional<long long> value)
@@ -471,7 +466,7 @@ std::optional<std::string> compact_token_status(ava::session::SessionStats const
   return output.str();
 }
 
-std::optional<std::string> token_status_for_session(ava::app::runtime::RuntimeSession const& session)
+std::optional<std::string> token_status_for_session(ava::app::runtime::Session const& session)
 {
   auto entries = session.store.load();
   if (!entries)
@@ -479,14 +474,13 @@ std::optional<std::string> token_status_for_session(ava::app::runtime::RuntimeSe
   return compact_token_status(ava::session::compute_session_stats(*entries), session.model.context_window_tokens);
 }
 
-std::string session_selector_footer_hint(ava::app::SessionSelectorSort sort, bool named_only, bool show_paths, bool show_archived,
-                                         bool show_label_time)
+std::string session_selector_footer_hint(ava::app::SessionSelectorSort sort, bool named_only, bool show_paths, bool show_archived, bool show_label_time)
 {
   return "Enter open session · Ctrl+S/Ctrl+T sort (" + ava::app::session_selector_sort_label(sort) + ") · Ctrl+N " +
          (named_only ? std::string("show all") : std::string("named only")) + " · Ctrl+P " +
          (show_paths ? std::string("hide paths") : std::string("show paths")) + " · Ctrl+A " +
-         (show_archived ? std::string("hide archived") : std::string("show archived")) +
-         " · Shift+T " + (show_label_time ? std::string("hide label time") : std::string("show label time")) +
+         (show_archived ? std::string("hide archived") : std::string("show archived")) + " · Shift+T " +
+         (show_label_time ? std::string("hide label time") : std::string("show label time")) +
          " · Alt+Left/Right branch · PgUp/PgDn page · Ctrl+R rename · Ctrl+L labels · Ctrl+D archive/restore · type to filter · Esc cancel";
 }
 
@@ -500,7 +494,7 @@ bool contains_value(std::vector<std::string> const& values, std::string_view val
   return std::ranges::find_if(values, [&](auto const& existing) { return existing == value; }) != values.end();
 }
 
-std::vector<std::string> registered_model_cycle_values(ava::app::runtime::RuntimeSession const& session)
+std::vector<std::string> registered_model_cycle_values(ava::app::runtime::Session const& session)
 {
   auto view = ava::app::scoped_model_selector_view(session, {});
   std::vector<std::string> values;
@@ -512,8 +506,7 @@ std::vector<std::string> registered_model_cycle_values(ava::app::runtime::Runtim
   return values;
 }
 
-std::vector<std::string> normalized_model_scope(std::vector<std::string> const& candidate,
-                                                std::vector<std::string> const& all_values)
+std::vector<std::string> normalized_model_scope(std::vector<std::string> const& candidate, std::vector<std::string> const& all_values)
 {
   std::vector<std::string> normalized;
   normalized.reserve(candidate.size());
@@ -525,9 +518,7 @@ std::vector<std::string> normalized_model_scope(std::vector<std::string> const& 
   return normalized;
 }
 
-void store_model_scope(ava::app::runtime::RuntimeSession& session,
-                       std::vector<std::string> candidate,
-                       std::vector<std::string> const& all_values,
+void store_model_scope(ava::app::runtime::Session& session, std::vector<std::string> candidate, std::vector<std::string> const& all_values,
                        bool reset_full_scope_to_all)
 {
   auto normalized = normalized_model_scope(candidate, all_values);
@@ -539,8 +530,7 @@ void store_model_scope(ava::app::runtime::RuntimeSession& session,
   session.scoped_model_cycle = std::move(normalized);
 }
 
-std::vector<std::string> active_model_scope_or_all(ava::app::runtime::RuntimeSession const& session,
-                                                   std::vector<std::string> const& all_values)
+std::vector<std::string> active_model_scope_or_all(ava::app::runtime::Session const& session, std::vector<std::string> const& all_values)
 {
   if (session.scoped_model_cycle)
     return normalized_model_scope(*session.scoped_model_cycle, all_values);
@@ -555,8 +545,7 @@ std::string provider_from_model_value(std::string_view value)
   return std::string(value.substr(0, slash));
 }
 
-ava::tui::SelectListView preserve_scoped_model_selector_state(ava::tui::SelectListView view,
-                                                              ava::tui::SelectListView const& previous)
+ava::tui::SelectListView preserve_scoped_model_selector_state(ava::tui::SelectListView view, ava::tui::SelectListView const& previous)
 {
   view.query = previous.query;
   std::string selected_value;
@@ -577,15 +566,12 @@ ava::tui::SelectListView preserve_scoped_model_selector_state(ava::tui::SelectLi
   return view;
 }
 
-ava::tui::SelectListView refreshed_scoped_model_selector(ava::app::runtime::RuntimeSession const& session,
-                                                         ava::tui::SelectListView const& previous)
+ava::tui::SelectListView refreshed_scoped_model_selector(ava::app::runtime::Session const& session, ava::tui::SelectListView const& previous)
 {
-  return preserve_scoped_model_selector_state(
-      ava::app::scoped_model_selector_view(session, scoped_model_selector_footer_hint()), previous);
+  return preserve_scoped_model_selector_state(ava::app::scoped_model_selector_view(session, scoped_model_selector_footer_hint()), previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::runtime::RuntimeSession& session,
-                                                                ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::runtime::Session& session, ava::tui::SelectListView const& previous,
                                                                 std::string_view value)
 {
   auto const all_values = registered_model_cycle_values(session);
@@ -605,8 +591,7 @@ ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::runtim
   return refreshed_scoped_model_selector(session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> enable_scoped_models(ava::app::runtime::RuntimeSession& session,
-                                                                 ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> enable_scoped_models(ava::app::runtime::Session& session, ava::tui::SelectListView const& previous,
                                                                  std::vector<std::string> targets)
 {
   auto const all_values = registered_model_cycle_values(session);
@@ -620,8 +605,7 @@ ava::core::Result<ava::tui::SelectListView> enable_scoped_models(ava::app::runti
   return refreshed_scoped_model_selector(session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> clear_scoped_models(ava::app::runtime::RuntimeSession& session,
-                                                                ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> clear_scoped_models(ava::app::runtime::Session& session, ava::tui::SelectListView const& previous,
                                                                 std::vector<std::string> targets)
 {
   auto const all_values = registered_model_cycle_values(session);
@@ -634,8 +618,7 @@ ava::core::Result<ava::tui::SelectListView> clear_scoped_models(ava::app::runtim
   return refreshed_scoped_model_selector(session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(ava::app::runtime::RuntimeSession& session,
-                                                                         ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(ava::app::runtime::Session& session, ava::tui::SelectListView const& previous,
                                                                          std::string_view selected_value)
 {
   auto const provider = provider_from_model_value(selected_value);
@@ -649,9 +632,8 @@ ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(ava::ap
       provider_values.push_back(value);
   }
   auto next = active_model_scope_or_all(session, all_values);
-  bool const provider_enabled = !provider_values.empty() && std::ranges::all_of(provider_values, [&](auto const& value) {
-    return contains_value(next, value);
-  });
+  bool const provider_enabled =
+      !provider_values.empty() && std::ranges::all_of(provider_values, [&](auto const& value) { return contains_value(next, value); });
   if (provider_enabled)
   {
     for (auto const& value : provider_values) std::erase(next, value);
@@ -668,10 +650,8 @@ ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(ava::ap
   return refreshed_scoped_model_selector(session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(ava::app::runtime::RuntimeSession& session,
-                                                                 ava::tui::SelectListView const& previous,
-                                                                 std::string_view selected_value,
-                                                                 bool up)
+ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(ava::app::runtime::Session& session, ava::tui::SelectListView const& previous,
+                                                                 std::string_view selected_value, bool up)
 {
   auto const all_values = registered_model_cycle_values(session);
   auto next = active_model_scope_or_all(session, all_values);
@@ -688,7 +668,7 @@ ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(ava::app::runti
   return refreshed_scoped_model_selector(session, previous);
 }
 
-ava::core::Result<std::string> save_scoped_model_cycle(ava::app::runtime::RuntimeSession& session)
+ava::core::Result<std::string> save_scoped_model_cycle(ava::app::runtime::Session& session)
 {
   std::optional<std::vector<std::string>> scope_to_save = std::nullopt;
   if (session.scoped_model_cycle)
@@ -709,7 +689,7 @@ ava::core::Result<std::string> save_scoped_model_cycle(ava::app::runtime::Runtim
   return std::string("scoped model cycle saved: ") + std::to_string(scope_to_save->size()) + " models enabled";
 }
 
-ava::permissions::PermissionRuleStore permission_rule_store_for_session(ava::app::runtime::RuntimeSession const& session)
+ava::permissions::PermissionRuleStore permission_rule_store_for_session(ava::app::runtime::Session const& session)
 {
   return ava::permissions::PermissionRuleStore{
       .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
@@ -730,22 +710,21 @@ ava::permissions::PermissionRuleMode permission_rule_mode_for_agent_mode(ava::ag
   return ava::permissions::PermissionRuleMode::Any;
 }
 
-ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rule_for_prompt(
-    ava::app::runtime::RuntimeSession const& session, ava::permissions::PermissionPrompt const& prompt,
-    ava::permissions::PermissionAction action)
+ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rule_for_prompt(ava::app::runtime::Session const& session,
+                                                                                             ava::permissions::PermissionPrompt const& prompt,
+                                                                                             ava::permissions::PermissionAction action)
 {
   auto reason = prompt.reason.empty() ? std::string("remembered from TUI permission prompt") : prompt.reason;
-  auto added = ava::permissions::add_persistent_permission_rule(
-      permission_rule_store_for_session(session),
-      ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
-                                            .action = action,
-                                            .operation = prompt.operation,
-                                            .mode = permission_rule_mode_for_agent_mode(prompt.mode),
-                                            .tool_name = prompt.tool_name,
-                                            .target_path = prompt.target_path,
-                                            .command = prompt.command,
-                                            .reason = std::move(reason),
-                                            .actor = "tui_prompt"});
+  auto added = ava::permissions::add_persistent_permission_rule(permission_rule_store_for_session(session),
+                                                                ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                      .action = action,
+                                                                                                      .operation = prompt.operation,
+                                                                                                      .mode = permission_rule_mode_for_agent_mode(prompt.mode),
+                                                                                                      .tool_name = prompt.tool_name,
+                                                                                                      .target_path = prompt.target_path,
+                                                                                                      .command = prompt.command,
+                                                                                                      .reason = std::move(reason),
+                                                                                                      .actor = "tui_prompt"});
   if (!added)
     return std::unexpected(std::move(added.error()));
   return ava::tui::TuiRememberedPermissionRule{.rule_id = added->rule_id};
@@ -754,7 +733,7 @@ ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rul
 struct ShellState
 {
   // Lifetime contract: references are stack-scoped and must outlive each run loop invocation.
-  ava::app::runtime::RuntimeSession& session;
+  ava::app::runtime::Session& session;
 };
 
 struct LineResult
@@ -792,7 +771,7 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
     add_output(line_result, provider.error().format() + std::string(offline_suffix));
     return line_result;
   }
-  ava::app::runtime::RuntimeRunOptions run_options;
+  ava::app::runtime::RunOptions run_options;
   run_options.access_token = (*credential)->access_token;
   run_options.credential_type = (*credential)->credential_type;
   run_options.openai_oauth = (*credential)->provider_id == "openai" && (*credential)->credential_type == "oauth";
@@ -803,7 +782,7 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
 
 LineResult handle_line(ShellState& state, std::string const& line, ava::permissions::PermissionResolver permission_resolver = nullptr,
                        ava::agent::QuestionResolver question_resolver = nullptr, std::vector<ava::app::CommandHotkey> const& hotkeys = {},
-                       ava::app::runtime::RuntimeEventSink event_sink = nullptr, std::function<bool()> cancel_requested = nullptr,
+                       ava::app::runtime::EventSink event_sink = nullptr, std::function<bool()> cancel_requested = nullptr,
                        std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr,
                        std::vector<ava::session::ImageAttachmentRef> image_attachments = {})
 {
@@ -816,7 +795,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
     {
       return with_provider_runtime(
           state, "\nother slash tool commands still work offline.",
-          [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RuntimeRunOptions run_options) {
+          [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
             run_options.cancel_requested = cancel_requested;
             run_options.event_sink = event_sink;
             auto command_result = ava::app::run_command(
@@ -858,31 +837,32 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
     line_result.tool_timeline = std::move(command_result->tool_timeline);
     if (command_result->prompt_message)
     {
-      return with_provider_runtime(state, "\nthis command expands to a prompt and needs provider auth.",
-                                   [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RuntimeRunOptions run_options) {
-                                     run_options.permission_resolver = permission_resolver;
-                                     run_options.question_resolver = question_resolver;
-                                     run_options.event_sink = std::move(event_sink);
-                                     run_options.cancel_requested = std::move(cancel_requested);
-                                     run_options.take_steering_messages = std::move(take_steering_messages);
-                                     auto result = ava::app::run_prompt(state.session, *command_result->prompt_message, provider, transport, run_options);
-                                     LineResult prompt_result;
-                                     if (!result)
-                                     {
-                                       add_output(prompt_result, result.error().format());
-                                       return prompt_result;
-                                     }
-                                     prompt_result.tool_timeline = std::move(result->tool_timeline);
-                                     if (!result->final_text.empty())
-                                     {
-                                       add_output(prompt_result, result->final_text);
-                                     }
-                                     else
-                                     {
-                                       add_output(prompt_result, "done");
-                                     }
-                                     return prompt_result;
-                                   });
+      return with_provider_runtime(
+          state, "\nthis command expands to a prompt and needs provider auth.",
+          [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
+            run_options.permission_resolver = permission_resolver;
+            run_options.question_resolver = question_resolver;
+            run_options.event_sink = std::move(event_sink);
+            run_options.cancel_requested = std::move(cancel_requested);
+            run_options.take_steering_messages = std::move(take_steering_messages);
+            auto result = ava::app::run_prompt(state.session, *command_result->prompt_message, provider, transport, run_options);
+            LineResult prompt_result;
+            if (!result)
+            {
+              add_output(prompt_result, result.error().format());
+              return prompt_result;
+            }
+            prompt_result.tool_timeline = std::move(result->tool_timeline);
+            if (!result->final_text.empty())
+            {
+              add_output(prompt_result, result->final_text);
+            }
+            else
+            {
+              add_output(prompt_result, "done");
+            }
+            return prompt_result;
+          });
     }
     return line_result;
   }
@@ -895,7 +875,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
   }
 
   return with_provider_runtime(state, "\nslash tool commands still work offline.",
-                               [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RuntimeRunOptions run_options) {
+                               [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
                                  run_options.permission_resolver = permission_resolver;
                                  run_options.question_resolver = question_resolver;
                                  run_options.event_sink = std::move(event_sink);
@@ -940,8 +920,7 @@ int run_line_shell(ShellState state)
       return 0;
     }
 
-    auto permission_resolver =
-        ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(state.session), nullptr);
+    auto permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(state.session), nullptr);
     auto const result = handle_line(state, line, permission_resolver);
     for (auto const& output : result.output)
     {
@@ -1001,7 +980,7 @@ int run_tui(ShellState state)
     return themes;
   };
   auto runtime_open_options = [&state]() {
-    ava::app::runtime::RuntimeOpenOptions options;
+    ava::app::runtime::OpenOptions options;
     options.workspace_dir = state.session.workspace_dir;
     options.current_dir = state.session.current_dir;
     options.mode = state.session.mode;
@@ -1031,9 +1010,8 @@ int run_tui(ShellState state)
   auto session_selector_show_paths = std::make_shared<bool>(true);
   auto session_selector_show_archived = std::make_shared<bool>(false);
   auto session_selector_show_label_time = std::make_shared<bool>(false);
-  auto open_session_selector_target =
-      [&state, &runtime_open_options, &state_snapshot](
-          std::string target_session_id, std::string status_prefix) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+  auto open_session_selector_target = [&state, &runtime_open_options, &state_snapshot](
+                                          std::string target_session_id, std::string status_prefix) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
     if (target_session_id.empty())
     {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session branch target is missing session id"));
@@ -1046,30 +1024,25 @@ int run_tui(ShellState state)
     state.session = std::move(*opened);
     return state_snapshot(status_prefix + target_session_id);
   };
-  auto open_selector_branch =
-      [&state, &open_session_selector_target, session_selector_sort, session_selector_show_archived](
-          std::string_view selected_session_id, bool parent) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+  auto open_selector_branch = [&state, &open_session_selector_target, session_selector_sort, session_selector_show_archived](
+                                  std::string_view selected_session_id, bool parent) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
     if (selected_session_id.empty())
     {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session branch navigation is missing session id"));
     }
-    auto tree = ava::session::build_session_tree(state.session.workspace_dir, state.session.paths.sessions_dir,
-                                                state.session.store.session_id());
+    auto tree = ava::session::build_session_tree(state.session.workspace_dir, state.session.paths.sessions_dir, state.session.store.session_id());
     if (!tree)
       return std::unexpected(std::move(tree.error()));
     auto target = parent ? ava::app::session_selector_parent_target(*tree, selected_session_id)
-                         : ava::app::session_selector_child_target(*tree, selected_session_id, *session_selector_sort,
-                                                                   *session_selector_show_archived);
+                         : ava::app::session_selector_child_target(*tree, selected_session_id, *session_selector_sort, *session_selector_show_archived);
     if (!target)
     {
-      auto error = ava::core::Error(ava::core::ErrorCategory::NotFound,
-                                    parent ? "selected session has no parent branch"
-                                           : "selected session has no child branch");
+      auto error =
+          ava::core::Error(ava::core::ErrorCategory::NotFound, parent ? "selected session has no parent branch" : "selected session has no child branch");
       error.with_context("session_id", std::string(selected_session_id));
       return std::unexpected(std::move(error));
     }
-    return open_session_selector_target(std::move(*target), parent ? std::string("opened parent branch ")
-                                                                   : std::string("opened child branch "));
+    return open_session_selector_target(std::move(*target), parent ? std::string("opened parent branch ") : std::string("opened child branch "));
   };
   std::vector<ava::tui::TranscriptItem> initial_transcript;
   if (auto onboarding = ava::app::first_run_auth_onboarding_message(state.session))
@@ -1123,11 +1096,11 @@ int run_tui(ShellState state)
                   return ava::tui::TuiRestoredQueuedMessage{.message = restored->message, .steering = restored->steering};
                 },
                 .finish = [queue](bool canceled) { return queue->finish(canceled); }};
-      },
+          },
       .on_submit =
           [&state, &hotkeys, &refresh_display_watch_state](std::string const& submitted, ava::tui::TuiSubmitContext context) {
-            auto permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(
-                permission_rule_store_for_session(state.session), context.permission_resolver);
+            auto permission_resolver =
+                ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(state.session), context.permission_resolver);
             auto line_result = handle_line(state, submitted, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
                                            context.cancel_requested, context.take_steering_messages, std::move(context.image_attachments));
             if (is_display_settings_command(submitted))
@@ -1166,38 +1139,34 @@ int run_tui(ShellState state)
                   break;
                 }
               }
-              append_result(line_result, handle_line(state, follow_up->message, permission_resolver, context.question_resolver, hotkeys,
-                                                     context.event_sink, context.cancel_requested, context.take_steering_messages));
+              append_result(line_result, handle_line(state, follow_up->message, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
+                                                     context.cancel_requested, context.take_steering_messages));
             }
             return ava::tui::TuiSubmitResult{
                 .quit = line_result.quit, .output = line_result.output, .tool_timeline = tui_tool_timeline(line_result.tool_timeline)};
           },
-      .on_attach_image =
-          [&state](std::string const& path) -> ava::core::Result<ava::session::ImageAttachmentRef> {
-            auto source = std::filesystem::path(path);
-            if (source.empty()) {
-              return std::unexpected(
-                  ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "usage: /attach <image-path>"));
-            }
-            if (!source.is_absolute()) {
-              auto const base = state.session.current_dir.empty() ? state.session.workspace_dir : state.session.current_dir;
-              source = base / source;
-            }
-            return ava::session::import_image_attachment(state.session.store, source);
-          },
-      .on_paste_clipboard_image =
-          [&state]() -> ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> {
-            return ava::app::import_clipboard_image_attachment(state.session.store);
-          },
-      .on_external_editor =
-          [](std::string_view initial_text) -> ava::core::Result<std::optional<std::string>> {
-            return edit_text_with_external_editor(initial_text);
-          },
-      .on_load_image_attachment =
-          [&state](ava::session::ImageAttachmentRef const& attachment)
-              -> ava::core::Result<ava::session::LoadedImageAttachment> {
-            return ava::session::load_image_attachment(state.session.store, attachment);
-          },
+      .on_attach_image = [&state](std::string const& path) -> ava::core::Result<ava::session::ImageAttachmentRef> {
+        auto source = std::filesystem::path(path);
+        if (source.empty())
+        {
+          return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "usage: /attach <image-path>"));
+        }
+        if (!source.is_absolute())
+        {
+          auto const base = state.session.current_dir.empty() ? state.session.workspace_dir : state.session.current_dir;
+          source = base / source;
+        }
+        return ava::session::import_image_attachment(state.session.store, source);
+      },
+      .on_paste_clipboard_image = [&state]() -> ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> {
+        return ava::app::import_clipboard_image_attachment(state.session.store);
+      },
+      .on_external_editor = [](std::string_view initial_text) -> ava::core::Result<std::optional<std::string>> {
+        return edit_text_with_external_editor(initial_text);
+      },
+      .on_load_image_attachment = [&state](ava::session::ImageAttachmentRef const& attachment) -> ava::core::Result<ava::session::LoadedImageAttachment> {
+        return ava::session::load_image_attachment(state.session.store, attachment);
+      },
       .on_toggle_mode = [&state]() -> ava::core::Result<std::string> {
         auto result = ava::app::run_command(state.session, ava::app::CommandRequest{.command = "/mode"});
         if (!result)
@@ -1206,8 +1175,7 @@ int run_tui(ShellState state)
       },
       .on_cycle_reasoning = [&state]() -> ava::core::Result<std::string> { return ava::app::cycle_runtime_reasoning(state.session); },
       .on_cycle_model = [&state, &state_snapshot](bool forward) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
-        auto model = forward ? ava::app::rpc::next_runtime_model(state.session)
-                             : ava::app::rpc::previous_runtime_model(state.session);
+        auto model = forward ? ava::app::rpc::next_runtime_model(state.session) : ava::app::rpc::previous_runtime_model(state.session);
         if (!model)
           return std::unexpected(std::move(model.error()));
         auto switched = ava::app::switch_runtime_model(state.session, std::move(*model));
@@ -1215,18 +1183,15 @@ int run_tui(ShellState state)
           return std::unexpected(std::move(switched.error()));
         return state_snapshot(*switched ? "model cycled" : "model already selected");
       },
-      .on_reload_key_bindings =
-          [&state, &key_bindings, &hotkeys, &state_snapshot]() -> ava::core::Result<ava::tui::TuiKeyBindingReloadResult> {
+      .on_reload_key_bindings = [&state, &key_bindings, &hotkeys, &state_snapshot]() -> ava::core::Result<ava::tui::TuiKeyBindingReloadResult> {
         auto loaded = ava::tui::load_key_bindings(state.session.paths.ava_config_dir / "keybinds.json");
         if (!loaded)
           return std::unexpected(std::move(loaded.error()));
         key_bindings = std::move(*loaded);
         hotkeys = command_hotkeys_from_key_bindings(key_bindings);
-        return ava::tui::TuiKeyBindingReloadResult{.key_bindings = key_bindings,
-                                                   .state = state_snapshot("keybindings reloaded")};
+        return ava::tui::TuiKeyBindingReloadResult{.key_bindings = key_bindings, .state = state_snapshot("keybindings reloaded")};
       },
-      .on_reload_display_settings =
-          [&state, &state_snapshot, &refresh_display_watch_state]() -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+      .on_reload_display_settings = [&state, &state_snapshot, &refresh_display_watch_state]() -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         auto loaded = ava::app::apply_tui_display_settings(state.session.paths);
         if (!loaded)
           return std::unexpected(std::move(loaded.error()));
@@ -1234,15 +1199,13 @@ int run_tui(ShellState state)
           return std::unexpected(std::move(watched.error()));
         return state_snapshot(display_theme_status("display theme reloaded"));
       },
-      .on_maybe_reload_display_settings =
-          [&state, &state_snapshot, display_watch_state, display_watch_mutex]()
-              -> ava::core::Result<std::optional<ava::tui::TuiRuntimeStateSnapshot>> {
+      .on_maybe_reload_display_settings = [&state, &state_snapshot, display_watch_state,
+                                           display_watch_mutex]() -> ava::core::Result<std::optional<ava::tui::TuiRuntimeStateSnapshot>> {
         auto watched = ava::app::load_tui_display_settings_watch_state(state.session.paths);
         if (!watched)
           return std::unexpected(std::move(watched.error()));
         std::lock_guard lock(*display_watch_mutex);
-        if (*display_watch_state &&
-            !ava::app::tui_display_settings_watch_state_changed(**display_watch_state, *watched))
+        if (*display_watch_state && !ava::app::tui_display_settings_watch_state_changed(**display_watch_state, *watched))
         {
           return std::optional<ava::tui::TuiRuntimeStateSnapshot>{};
         }
@@ -1253,9 +1216,7 @@ int run_tui(ShellState state)
         return state_snapshot(display_theme_status("display theme auto-reloaded"));
       },
       .model_selector_view = [&state]() { return ava::app::model_selector_view(state.session, "Enter switch model · type to filter · Esc cancel"); },
-      .scoped_model_selector_view = [&state]() {
-        return ava::app::scoped_model_selector_view(state.session, scoped_model_selector_footer_hint());
-      },
+      .scoped_model_selector_view = [&state]() { return ava::app::scoped_model_selector_view(state.session, scoped_model_selector_footer_hint()); },
       .session_selector_view =
           [&state, session_selector_sort, session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
            session_selector_show_label_time]() {
@@ -1264,112 +1225,97 @@ int run_tui(ShellState state)
             *session_selector_show_paths = true;
             *session_selector_show_archived = false;
             *session_selector_show_label_time = false;
-            return ava::app::session_selector_view(state.session, *session_selector_sort,
-                                                   session_selector_footer_hint(*session_selector_sort, *session_selector_named_only,
-                                                                                *session_selector_show_paths, *session_selector_show_archived,
-                                                                                *session_selector_show_label_time),
-                                                   *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived,
-                                                   *session_selector_show_label_time);
+            return ava::app::session_selector_view(
+                state.session, *session_selector_sort,
+                session_selector_footer_hint(*session_selector_sort, *session_selector_named_only, *session_selector_show_paths,
+                                             *session_selector_show_archived, *session_selector_show_label_time),
+                *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived, *session_selector_show_label_time);
           },
       .on_session_selector_sort_cycle =
           [&state, session_selector_sort, session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
            session_selector_show_label_time]() {
             *session_selector_sort = ava::app::next_session_selector_sort(*session_selector_sort);
-            return ava::app::session_selector_view(state.session, *session_selector_sort,
-                                                   session_selector_footer_hint(*session_selector_sort, *session_selector_named_only,
-                                                                                *session_selector_show_paths, *session_selector_show_archived,
-                                                                                *session_selector_show_label_time),
-                                                   *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived,
-                                                   *session_selector_show_label_time);
+            return ava::app::session_selector_view(
+                state.session, *session_selector_sort,
+                session_selector_footer_hint(*session_selector_sort, *session_selector_named_only, *session_selector_show_paths,
+                                             *session_selector_show_archived, *session_selector_show_label_time),
+                *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived, *session_selector_show_label_time);
           },
       .on_session_selector_named_filter_toggle =
           [&state, session_selector_sort, session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
            session_selector_show_label_time]() {
             *session_selector_named_only = !*session_selector_named_only;
-            return ava::app::session_selector_view(state.session, *session_selector_sort,
-                                                   session_selector_footer_hint(*session_selector_sort, *session_selector_named_only,
-                                                                                *session_selector_show_paths, *session_selector_show_archived,
-                                                                                *session_selector_show_label_time),
-                                                   *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived,
-                                                   *session_selector_show_label_time);
+            return ava::app::session_selector_view(
+                state.session, *session_selector_sort,
+                session_selector_footer_hint(*session_selector_sort, *session_selector_named_only, *session_selector_show_paths,
+                                             *session_selector_show_archived, *session_selector_show_label_time),
+                *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived, *session_selector_show_label_time);
           },
       .on_session_selector_path_display_toggle =
           [&state, session_selector_sort, session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
            session_selector_show_label_time]() {
             *session_selector_show_paths = !*session_selector_show_paths;
-            return ava::app::session_selector_view(state.session, *session_selector_sort,
-                                                   session_selector_footer_hint(*session_selector_sort, *session_selector_named_only,
-                                                                                *session_selector_show_paths, *session_selector_show_archived,
-                                                                                *session_selector_show_label_time),
-                                                   *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived,
-                                                   *session_selector_show_label_time);
+            return ava::app::session_selector_view(
+                state.session, *session_selector_sort,
+                session_selector_footer_hint(*session_selector_sort, *session_selector_named_only, *session_selector_show_paths,
+                                             *session_selector_show_archived, *session_selector_show_label_time),
+                *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived, *session_selector_show_label_time);
           },
       .on_session_selector_archived_filter_toggle =
           [&state, session_selector_sort, session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
            session_selector_show_label_time]() {
             *session_selector_show_archived = !*session_selector_show_archived;
-            return ava::app::session_selector_view(state.session, *session_selector_sort,
-                                                   session_selector_footer_hint(*session_selector_sort, *session_selector_named_only,
-                                                                                *session_selector_show_paths, *session_selector_show_archived,
-                                                                                *session_selector_show_label_time),
-                                                   *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived,
-                                                   *session_selector_show_label_time);
+            return ava::app::session_selector_view(
+                state.session, *session_selector_sort,
+                session_selector_footer_hint(*session_selector_sort, *session_selector_named_only, *session_selector_show_paths,
+                                             *session_selector_show_archived, *session_selector_show_label_time),
+                *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived, *session_selector_show_label_time);
           },
       .on_session_selector_label_timestamp_toggle =
           [&state, session_selector_sort, session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
            session_selector_show_label_time]() {
             *session_selector_show_label_time = !*session_selector_show_label_time;
-            return ava::app::session_selector_view(state.session, *session_selector_sort,
-                                                   session_selector_footer_hint(*session_selector_sort, *session_selector_named_only,
-                                                                                *session_selector_show_paths, *session_selector_show_archived,
-                                                                                *session_selector_show_label_time),
-                                                   *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived,
-                                                   *session_selector_show_label_time);
+            return ava::app::session_selector_view(
+                state.session, *session_selector_sort,
+                session_selector_footer_hint(*session_selector_sort, *session_selector_named_only, *session_selector_show_paths,
+                                             *session_selector_show_archived, *session_selector_show_label_time),
+                *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived, *session_selector_show_label_time);
           },
-      .on_session_selector_archive =
-          [&state, session_selector_sort, session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
-           session_selector_show_label_time](
-              std::string_view session_id) -> ava::core::Result<ava::tui::SelectListView> {
-            auto command = std::string("/sessions archive ") + std::string(session_id) + " --confirm";
-            auto archived = ava::app::run_command(state.session, ava::app::CommandRequest{.command = std::move(command)});
-            if (!archived)
-              return std::unexpected(std::move(archived.error()));
-            return ava::app::session_selector_view(state.session, *session_selector_sort,
-                                                   session_selector_footer_hint(*session_selector_sort, *session_selector_named_only,
-                                                                                *session_selector_show_paths, *session_selector_show_archived,
-                                                                                *session_selector_show_label_time),
-                                                   *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived,
-                                                   *session_selector_show_label_time);
-          },
-      .on_session_selector_unarchive =
-          [&state, session_selector_sort, session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
-           session_selector_show_label_time](
-              std::string_view session_id) -> ava::core::Result<ava::tui::SelectListView> {
-            auto command = std::string("/sessions unarchive ") + std::string(session_id);
-            auto unarchived = ava::app::run_command(state.session, ava::app::CommandRequest{.command = std::move(command)});
-            if (!unarchived)
-              return std::unexpected(std::move(unarchived.error()));
-            return ava::app::session_selector_view(state.session, *session_selector_sort,
-                                                   session_selector_footer_hint(*session_selector_sort, *session_selector_named_only,
-                                                                                *session_selector_show_paths, *session_selector_show_archived,
-                                                                                *session_selector_show_label_time),
-                                                   *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived,
-                                                   *session_selector_show_label_time);
-          },
-      .on_session_selector_branch_parent =
-          [open_selector_branch](std::string_view session_id) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+      .on_session_selector_archive = [&state, session_selector_sort, session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
+                                      session_selector_show_label_time](std::string_view session_id) -> ava::core::Result<ava::tui::SelectListView> {
+        auto command = std::string("/sessions archive ") + std::string(session_id) + " --confirm";
+        auto archived = ava::app::run_command(state.session, ava::app::CommandRequest{.command = std::move(command)});
+        if (!archived)
+          return std::unexpected(std::move(archived.error()));
+        return ava::app::session_selector_view(state.session, *session_selector_sort,
+                                               session_selector_footer_hint(*session_selector_sort, *session_selector_named_only, *session_selector_show_paths,
+                                                                            *session_selector_show_archived, *session_selector_show_label_time),
+                                               *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived,
+                                               *session_selector_show_label_time);
+      },
+      .on_session_selector_unarchive = [&state, session_selector_sort, session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
+                                        session_selector_show_label_time](std::string_view session_id) -> ava::core::Result<ava::tui::SelectListView> {
+        auto command = std::string("/sessions unarchive ") + std::string(session_id);
+        auto unarchived = ava::app::run_command(state.session, ava::app::CommandRequest{.command = std::move(command)});
+        if (!unarchived)
+          return std::unexpected(std::move(unarchived.error()));
+        return ava::app::session_selector_view(state.session, *session_selector_sort,
+                                               session_selector_footer_hint(*session_selector_sort, *session_selector_named_only, *session_selector_show_paths,
+                                                                            *session_selector_show_archived, *session_selector_show_label_time),
+                                               *session_selector_named_only, *session_selector_show_paths, *session_selector_show_archived,
+                                               *session_selector_show_label_time);
+      },
+      .on_session_selector_branch_parent = [open_selector_branch](std::string_view session_id) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         return open_selector_branch(session_id, true);
       },
-      .on_session_selector_branch_child =
-          [open_selector_branch](std::string_view session_id) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+      .on_session_selector_branch_child = [open_selector_branch](std::string_view session_id) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         return open_selector_branch(session_id, false);
       },
-      .remember_permission_rule =
-          [&state](ava::permissions::PermissionPrompt const& prompt, ava::permissions::PermissionAction action) {
-            return remember_permission_rule_for_prompt(state.session, prompt, action);
-          },
-      .on_settings_selected = [&state, &state_snapshot, &refresh_display_watch_state](
-                                  std::string_view value) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+      .remember_permission_rule = [&state](
+                                      ava::permissions::PermissionPrompt const& prompt,
+                                      ava::permissions::PermissionAction action) { return remember_permission_rule_for_prompt(state.session, prompt, action); },
+      .on_settings_selected = [&state, &state_snapshot,
+                               &refresh_display_watch_state](std::string_view value) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         if (value == "settings:keybindings.validate")
         {
           auto validated = ava::app::run_command(state.session, ava::app::CommandRequest{.command = "/keybindings validate"});
@@ -1417,34 +1363,18 @@ int run_tui(ShellState state)
           return std::unexpected(std::move(switched.error()));
         return state_snapshot(*switched ? "model switched" : "model already selected");
       },
-      .on_scoped_model_toggled =
-          [&state](ava::tui::SelectListView const& previous, std::string_view value)
-          -> ava::core::Result<ava::tui::SelectListView> {
+      .on_scoped_model_toggled = [&state](ava::tui::SelectListView const& previous, std::string_view value) -> ava::core::Result<ava::tui::SelectListView> {
         return toggle_scoped_model(state.session, previous, value);
       },
-      .on_scoped_model_enable_all =
-          [&state](ava::tui::SelectListView const& previous, std::vector<std::string> values)
-          -> ava::core::Result<ava::tui::SelectListView> {
-        return enable_scoped_models(state.session, previous, std::move(values));
-      },
-      .on_scoped_model_clear_all =
-          [&state](ava::tui::SelectListView const& previous, std::vector<std::string> values)
-          -> ava::core::Result<ava::tui::SelectListView> {
-        return clear_scoped_models(state.session, previous, std::move(values));
-      },
-      .on_scoped_model_toggle_provider =
-          [&state](ava::tui::SelectListView const& previous, std::string_view value)
-          -> ava::core::Result<ava::tui::SelectListView> {
-        return toggle_scoped_model_provider(state.session, previous, value);
-      },
-      .on_scoped_model_reorder =
-          [&state](ava::tui::SelectListView const& previous, std::string_view value, bool up)
-          -> ava::core::Result<ava::tui::SelectListView> {
-        return reorder_scoped_model(state.session, previous, value, up);
-      },
-      .on_scoped_model_save = [&state]() -> ava::core::Result<std::string> {
-        return save_scoped_model_cycle(state.session);
-      },
+      .on_scoped_model_enable_all = [&state](ava::tui::SelectListView const& previous, std::vector<std::string> values)
+          -> ava::core::Result<ava::tui::SelectListView> { return enable_scoped_models(state.session, previous, std::move(values)); },
+      .on_scoped_model_clear_all = [&state](ava::tui::SelectListView const& previous, std::vector<std::string> values)
+          -> ava::core::Result<ava::tui::SelectListView> { return clear_scoped_models(state.session, previous, std::move(values)); },
+      .on_scoped_model_toggle_provider = [&state](ava::tui::SelectListView const& previous, std::string_view value)
+          -> ava::core::Result<ava::tui::SelectListView> { return toggle_scoped_model_provider(state.session, previous, value); },
+      .on_scoped_model_reorder = [&state](ava::tui::SelectListView const& previous, std::string_view value, bool up)
+          -> ava::core::Result<ava::tui::SelectListView> { return reorder_scoped_model(state.session, previous, value, up); },
+      .on_scoped_model_save = [&state]() -> ava::core::Result<std::string> { return save_scoped_model_cycle(state.session); },
       .on_session_selected = [&state, &runtime_open_options, &state_snapshot](std::string_view value) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         if (value.empty())
         {
@@ -1466,7 +1396,7 @@ int run_tui(ShellState state)
 
 namespace ava::app {
 
-int run_interactive(runtime::RuntimeSession& session)
+int run_interactive(runtime::Session& session)
 {
   ShellState state{.session = session};
   if (ava::tui::terminal_is_tty())

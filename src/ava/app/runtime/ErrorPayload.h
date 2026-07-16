@@ -6,8 +6,8 @@
 
 namespace ava::app::runtime {
 
-// Extracted cancellation slice of a RuntimeEvent: human-readable text, status, the error classification fields and the triggering reason for the cancellation.
-struct RuntimeCancellationPayload
+// Extracted error slice of an Event: human-readable text, status, the error classification fields, the content type and the triggering reason for the failure.
+struct ErrorPayload
 {
   std::string text;
   std::string status;
@@ -15,6 +15,7 @@ struct RuntimeCancellationPayload
   std::string error_code;
   std::string error_message;
   std::string error_details;
+  std::string content_type;
   std::string trigger;
   std::string reason;
 

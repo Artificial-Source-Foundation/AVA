@@ -7,11 +7,11 @@ struct ModelInfo;
 }
 
 namespace ava::app::runtime {
-struct RuntimeSession;
+struct Session;
 }
 
 namespace ava::app::rpc {
 
-[[nodiscard]] std::string model_info_json(ava::config::ModelInfo const& model, ava::app::runtime::RuntimeSession const& session, bool configured);
+[[nodiscard]] std::string model_info_json(ava::config::ModelInfo const& model, ava::app::runtime::Session const& session, bool configured);
 
 }  // namespace ava::app::rpc

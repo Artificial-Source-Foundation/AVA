@@ -1,7 +1,6 @@
 #include "sys.h"
-#include "ava/app/runtime_model.h"
-
 #include "ava/app/runtime_json.h"
+#include "ava/app/runtime_model.h"
 #include "ava/app/runtime_prompt.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/session/validation.h"
@@ -95,7 +94,7 @@ ava::core::Error incompatible_model_switch_error(ava::config::ModelInfo const& m
   return error;
 }
 
-ava::core::VoidResult validate_model_switch_history(runtime::RuntimeSession const& session, ava::config::ModelInfo const& target)
+ava::core::VoidResult validate_model_switch_history(runtime::Session const& session, ava::config::ModelInfo const& target)
 {
   auto entries = session.store.load();
   if (!entries)
@@ -265,7 +264,7 @@ ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::Xdg
   return *model;
 }
 
-ava::core::Result<bool> switch_runtime_model(runtime::RuntimeSession& session, ava::config::ModelInfo model)
+ava::core::Result<bool> switch_runtime_model(runtime::Session& session, ava::config::ModelInfo model)
 {
   if (session.model.provider_id == model.provider_id && session.model.model_id == model.model_id)
     return false;

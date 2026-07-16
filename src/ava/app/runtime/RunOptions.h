@@ -18,7 +18,7 @@ namespace ava::app::runtime {
 // questions, cancellation and steering, plus an optional session lock and image attachments.
 //
 // All callback members default to null; run_prompt treats a null permission or question resolver as an error and a null event sink as a no-op.
-struct RuntimeRunOptions
+struct RunOptions
 {
   std::string access_token;
   std::string credential_type = "bearer";
@@ -26,7 +26,7 @@ struct RuntimeRunOptions
   std::string openai_account_id;
   bool stream = true;
   bool enable_transport_retries = false;
-  RuntimeEventSink event_sink = nullptr;
+  EventSink event_sink = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;

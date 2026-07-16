@@ -4,7 +4,6 @@
 
 namespace ava::app {
 
-[[nodiscard]] ava::core::Result<CommandResult> run_permissions_command(runtime::RuntimeSession& session,
-                                                                        CommandRequest const& request);
+[[nodiscard]] ava::core::Result<CommandResult> run_permissions_command(runtime::Session& session, CommandRequest const& request);
 
 }  // namespace ava::app

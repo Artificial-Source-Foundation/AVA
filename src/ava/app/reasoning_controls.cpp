@@ -11,7 +11,7 @@
 namespace ava::app {
 namespace {
 
-std::string reasoning_selected_status(runtime::RuntimeReasoningSelection const& selection)
+std::string reasoning_selected_status(runtime::ReasoningSelection const& selection)
 {
   std::string status = "reasoning set to " + selection.level;
   if (selection.budget_tokens)
@@ -23,7 +23,7 @@ std::string reasoning_selected_status(runtime::RuntimeReasoningSelection const& 
 
 }  // namespace
 
-std::optional<std::string> reasoning_status_for_session(runtime::RuntimeSession const& session)
+std::optional<std::string> reasoning_status_for_session(runtime::Session const& session)
 {
   auto const& model = session.model;
   if (!model.supports_reasoning.value_or(false) || model.reasoning_levels.empty())
@@ -33,12 +33,12 @@ std::optional<std::string> reasoning_status_for_session(runtime::RuntimeSession 
   return session.reasoning->level;
 }
 
-ava::core::Result<runtime::RuntimeReasoningSelection> reasoning_selection_for_level(ava::config::ModelInfo const& model, std::string level)
+ava::core::Result<runtime::ReasoningSelection> reasoning_selection_for_level(ava::config::ModelInfo const& model, std::string level)
 {
   auto profile = ava::config::reasoning_provider_profile_for_model(model);
   if (!profile || !profile->enabled_reasoning_requires_budget_tokens || level != "enabled")
   {
-    return runtime::RuntimeReasoningSelection{.level = std::move(level), .budget_tokens = std::nullopt, .display = {}};
+    return runtime::ReasoningSelection{.level = std::move(level), .budget_tokens = std::nullopt, .display = {}};
   }
 
   auto const default_budget =
@@ -55,10 +55,10 @@ ava::core::Result<runtime::RuntimeReasoningSelection> reasoning_selection_for_le
     return std::unexpected(std::move(error));
   }
   auto const budget = std::min<long long>(default_budget, max_output - 1);
-  return runtime::RuntimeReasoningSelection{.level = std::move(level), .budget_tokens = budget, .display = {}};
+  return runtime::ReasoningSelection{.level = std::move(level), .budget_tokens = budget, .display = {}};
 }
 
-ava::core::Result<std::string> cycle_runtime_reasoning(runtime::RuntimeSession& session)
+ava::core::Result<std::string> cycle_runtime_reasoning(runtime::Session& session)
 {
   auto const& model = session.model;
   if (!model.supports_reasoning.value_or(false))

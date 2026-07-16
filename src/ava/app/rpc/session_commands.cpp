@@ -35,7 +35,7 @@ void reset_cancel_after_session_switch(RpcRunState& run_state)
   run_state.cancel_requested.store(false, std::memory_order_relaxed);
 }
 
-ava::core::Result<std::string> resolve_branch_source_session_id(runtime::RuntimeSession const& current, runtime::RuntimeOpenOptions const& open_options,
+ava::core::Result<std::string> resolve_branch_source_session_id(runtime::Session const& current, runtime::OpenOptions const& open_options,
                                                                 RpcCommand const& command)
 {
   if (command.session_id && command.session_id->empty())
@@ -383,14 +383,14 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    std::optional<runtime::RuntimeReasoningSelection> selection = std::nullopt;
+    std::optional<runtime::ReasoningSelection> selection = std::nullopt;
     if (command.type == "set_reasoning")
     {
       if (!command.reasoning_level || command.reasoning_level->empty())
       {
         return handled(write_error(context.output, command.id, invalid_rpc("set_reasoning requires reasoning_level")));
       }
-      selection = runtime::RuntimeReasoningSelection{
+      selection = runtime::ReasoningSelection{
           .level = *command.reasoning_level, .budget_tokens = command.reasoning_budget_tokens, .display = command.reasoning_display.value_or("")};
     }
 

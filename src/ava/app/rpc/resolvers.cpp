@@ -164,8 +164,8 @@ std::string permission_session_grants_clear_result_json(PendingResolverState& pe
 }
 
 ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolverState& pending_state, output_ts& output, RpcRunState& run_state,
-                                                                   runtime::RuntimeSession const& session, std::mutex& session_mutex,
-                                                                   ava::permissions::PermissionResolver policy_resolver, std::string prompt_request_id)
+                                                                  runtime::Session const& session, std::mutex& session_mutex,
+                                                                  ava::permissions::PermissionResolver policy_resolver, std::string prompt_request_id)
 {
   return [&pending_state, &output, &run_state, &session, &session_mutex, policy_resolver = std::move(policy_resolver),
           prompt_request_id = std::move(prompt_request_id)](
@@ -242,7 +242,7 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolve
 }
 
 ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pending_state, output_ts& output, RpcRunState& run_state,
-                                                         runtime::RuntimeSession const& session, std::mutex& session_mutex, std::string prompt_request_id)
+                                                        runtime::Session const& session, std::mutex& session_mutex, std::string prompt_request_id)
 {
   return [&pending_state, &output, &run_state, &session, &session_mutex,
           prompt_request_id = std::move(prompt_request_id)](ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {

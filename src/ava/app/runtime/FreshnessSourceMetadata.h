@@ -10,7 +10,7 @@
 namespace ava::app::runtime {
 
 // Identify which subsystem produced a freshness source entry during prompt assembly.
-enum class RuntimeFreshnessSourceKind
+enum class FreshnessSourceKind
 {
   SystemPrompt,
   AppendSystemPrompt,
@@ -22,9 +22,9 @@ enum class RuntimeFreshnessSourceKind
 };
 
 // Record one tracked freshness source: its producer kind, human-readable scope/name and a content fingerprint for change detection.
-struct RuntimeFreshnessSourceMetadata
+struct FreshnessSourceMetadata
 {
-  RuntimeFreshnessSourceKind kind = RuntimeFreshnessSourceKind::Skill;
+  FreshnessSourceKind kind = FreshnessSourceKind::Skill;
   std::string scope;
   std::string source_id;
   std::string name;

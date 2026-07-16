@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ava/agent/mode.h"
 #include "ava/debug/print_members_on.h"
+#include "ava/agent/mode.h"
 
 #include <cstddef>
 #include <string>
@@ -10,7 +10,7 @@
 namespace ava::app::runtime {
 
 // Categorize the kind of runtime lifecycle or notification event being emitted, driving event-sink dispatch and payload selection.
-enum class RuntimeEventType
+enum class EventType
 {
   SessionStart,
   UserMessage,
@@ -33,10 +33,11 @@ enum class RuntimeEventType
   Done,
 };
 
-// One discrete runtime event for an agent run: its type, identifying and session fields, the active agent mode, and the broad set of text, flag and numeric fields consumed by event sinks, payload extraction and JSON serialization.
-struct RuntimeEvent
+// One discrete runtime event for an agent run: its type, identifying and session fields, the active agent mode, and the broad set of text, flag and numeric
+// fields consumed by event sinks, payload extraction and JSON serialization.
+struct Event
 {
-  RuntimeEventType type = RuntimeEventType::Done;
+  EventType type = EventType::Done;
   std::string timestamp;
   std::string session_id;
   ava::agent::Mode mode = ava::agent::Mode::Build;

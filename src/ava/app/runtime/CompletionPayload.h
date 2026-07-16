@@ -7,8 +7,8 @@
 
 namespace ava::app::runtime {
 
-// Extracted completion slice of a RuntimeEvent: terminal status, stop reason, a human-readable reason and the provider/tool call accounting for the finished run.
-struct RuntimeCompletionPayload
+// Extracted completion slice of an Event: terminal status, stop reason, a human-readable reason and the provider/tool call accounting for the finished run.
+struct CompletionPayload
 {
   std::string status;
   std::string stop_reason;

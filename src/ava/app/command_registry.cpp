@@ -402,7 +402,7 @@ void load_builtin_commands(RegistryBuilder& builder)
   }
 }
 
-void load_prompt_commands(RegistryBuilder& builder, runtime::RuntimeSession const& session)
+void load_prompt_commands(RegistryBuilder& builder, runtime::Session const& session)
 {
   if (project_resources_trusted(session.project_trust))
   {
@@ -413,9 +413,7 @@ void load_prompt_commands(RegistryBuilder& builder, runtime::RuntimeSession cons
   load_prompt_command_dir(builder, session.paths.ava_config_dir / "command", UnifiedCommandSource::PromptGlobal, "global");
 }
 
-void add_prompt_command_source_files(std::vector<PromptCommandSourceFile>& sources,
-                                     std::filesystem::path const& root,
-                                     UnifiedCommandSource source,
+void add_prompt_command_source_files(std::vector<PromptCommandSourceFile>& sources, std::filesystem::path const& root, UnifiedCommandSource source,
                                      std::string_view scope)
 {
   std::vector<CommandRegistryDiagnostic> diagnostics;
@@ -442,7 +440,7 @@ void add_prompt_command_source_files(std::vector<PromptCommandSourceFile>& sourc
   }
 }
 
-void load_skill_commands(RegistryBuilder& builder, runtime::RuntimeSession const& session)
+void load_skill_commands(RegistryBuilder& builder, runtime::Session const& session)
 {
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = session.workspace_dir,
@@ -471,20 +469,19 @@ void load_skill_commands(RegistryBuilder& builder, runtime::RuntimeSession const
   }
 }
 
-ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::RuntimeSession const& session)
+ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::Session const& session)
 {
-  return ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = session.paths.ava_config_dir / "plugins",
-                                             .project_plugins_dir = project_resources_trusted(session.project_trust)
-                                                                        ? session.workspace_dir / ".ava" / "plugins"
-                                                                        : std::filesystem::path{}};
+  return ava::plugin::PluginDiscoveryOptions{
+      .global_plugins_dir = session.paths.ava_config_dir / "plugins",
+      .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{}};
 }
 
-std::filesystem::path plugin_enablement_file(runtime::RuntimeSession const& session)
+std::filesystem::path plugin_enablement_file(runtime::Session const& session)
 {
   return session.paths.ava_state_dir / "plugin-enablement.json";
 }
 
-void load_plugin_commands(RegistryBuilder& builder, runtime::RuntimeSession const& session)
+void load_plugin_commands(RegistryBuilder& builder, runtime::Session const& session)
 {
   auto diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir);
   for (auto const& failure : diagnostics.failures)
@@ -550,13 +547,11 @@ ava::core::VoidResult ensure_mcp_prompt_server_permission(ava::tools::ToolContex
   return {};
 }
 
-void load_mcp_prompt_commands(RegistryBuilder& builder, runtime::RuntimeSession& session, CommandRegistryOptions const& options)
+void load_mcp_prompt_commands(RegistryBuilder& builder, runtime::Session& session, CommandRegistryOptions const& options)
 {
   auto config_options = ava::mcp::default_mcp_config_options(session.workspace_dir);
   config_options.global_config_file = session.paths.ava_config_dir / "mcp.json";
-  config_options.project_config_file = project_resources_trusted(session.project_trust)
-                                           ? session.workspace_dir / ".ava" / "mcp.json"
-                                           : std::filesystem::path{};
+  config_options.project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{};
   auto config = ava::mcp::load_mcp_config(config_options);
   if (!config)
   {
@@ -833,8 +828,7 @@ std::string to_string(UnifiedCommandKind kind)
   return "unknown";
 }
 
-std::vector<PromptCommandSourceFile> prompt_command_source_files(std::filesystem::path const& workspace_dir,
-                                                                 ava::config::XdgPaths const& paths,
+std::vector<PromptCommandSourceFile> prompt_command_source_files(std::filesystem::path const& workspace_dir, ava::config::XdgPaths const& paths,
                                                                  bool include_project_commands)
 {
   std::vector<PromptCommandSourceFile> sources;
@@ -853,7 +847,7 @@ std::vector<PromptCommandSourceFile> prompt_command_source_files(std::filesystem
   return sources;
 }
 
-CommandRegistry load_command_registry(runtime::RuntimeSession& session, CommandRegistryOptions options)
+CommandRegistry load_command_registry(runtime::Session& session, CommandRegistryOptions options)
 {
   RegistryBuilder builder;
   if (options.include_builtins)
@@ -884,7 +878,7 @@ CommandRegistryEntry const* find_command_registry_entry(CommandRegistry const& r
   return nullptr;
 }
 
-bool command_registry_contains(runtime::RuntimeSession& session, std::string_view line)
+bool command_registry_contains(runtime::Session& session, std::string_view line)
 {
   if (!line.starts_with('/'))
     return false;

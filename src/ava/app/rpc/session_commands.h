@@ -12,8 +12,8 @@ namespace ava::app::rpc {
 struct RpcSessionCommandContext
 {
   RpcCommand const& command;
-  runtime::RuntimeSession& session;
-  runtime::RuntimeOpenOptions const& open_options;
+  runtime::Session& session;
+  runtime::OpenOptions const& open_options;
   output_ts& output;                            // Reference to threadsafe output stream.
   RpcRunState& run_state;
   std::mutex& session_mutex;

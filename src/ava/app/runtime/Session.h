@@ -1,14 +1,13 @@
 #pragma once
 
+#include "BasePromptMetadata.h"
 #include "ContextSourceMetadata.h"
-#include "RuntimeBasePromptMetadata.h"
-#include "RuntimeFreshnessSourceMetadata.h"
-#include "RuntimePromptOverrides.h"
-#include "RuntimeReasoningSelection.h"
-
+#include "FreshnessSourceMetadata.h"
+#include "PromptOverrides.h"
+#include "ReasoningSelection.h"
+#include "ava/debug/print_members_on.h"
 #include "ava/app/project_trust.h"
 #include "ava/agent/agent_loop.h"
-#include "ava/debug/print_members_on.h"
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/session/session_store.h"
@@ -24,22 +23,22 @@ namespace ava::app::runtime {
 // Hold the mutable application state associated with an open runtime session.
 //
 // The store may be persistent or ephemeral according to sessionless. Shared background jobs remain valid when the aggregate is moved or replaced.
-struct RuntimeSession
+struct Session
 {
   ava::session::SessionStore store;
   ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::config::ModelInfo model;
-  RuntimeBasePromptMetadata base_prompt;
+  BasePromptMetadata base_prompt;
   ava::config::XdgPaths paths;
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
   ProjectTrustState project_trust;
-  RuntimePromptOverrides prompt_overrides;
+  PromptOverrides prompt_overrides;
   ava::agent::ToolVisibilityOptions tool_visibility;
   std::vector<ContextSourceMetadata> context_sources;
-  std::vector<RuntimeFreshnessSourceMetadata> freshness_sources;
+  std::vector<FreshnessSourceMetadata> freshness_sources;
   std::string system_prompt;
-  std::optional<RuntimeReasoningSelection> reasoning = std::nullopt;
+  std::optional<ReasoningSelection> reasoning = std::nullopt;
   std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
   bool created = false;
   bool sessionless = false;

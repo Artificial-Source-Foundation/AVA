@@ -8,8 +8,9 @@
 
 namespace ava::app::runtime {
 
-// Extracted tool-related slice of a RuntimeEvent, carrying the call identifiers, arguments, (structured) result, status, error fields, diff, changed paths and the byte/line accounting produced by file and search tools.
-struct RuntimeToolPayload
+// Extracted tool-related slice of an Event, carrying the call identifiers, arguments, (structured) result, status, error fields, diff, changed paths and the
+// byte/line accounting produced by file and search tools.
+struct ToolPayload
 {
   std::string text;
   std::string call_id;

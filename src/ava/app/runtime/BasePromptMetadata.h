@@ -10,7 +10,7 @@
 namespace ava::app::runtime {
 
 // Track where the active base prompt came from and how large it is, including a fingerprint for staleness checks.
-struct RuntimeBasePromptMetadata
+struct BasePromptMetadata
 {
   bool from_override = false;
   std::optional<std::filesystem::path> source_path = std::nullopt;

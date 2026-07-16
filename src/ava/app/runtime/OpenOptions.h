@@ -1,7 +1,6 @@
 #pragma once
 
-#include "RuntimePromptOverrides.h"
-
+#include "PromptOverrides.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_visibility.h"
@@ -17,7 +16,7 @@ namespace ava::app::runtime {
 // current directories, optional session selection, agent mode, tool visibility and prompt overrides.
 //
 // paths defaults to the process-wide XDG layout so that callers that do not override it share the standard configuration locations.
-struct RuntimeOpenOptions
+struct OpenOptions
 {
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
@@ -29,7 +28,7 @@ struct RuntimeOpenOptions
   ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::agent::ToolVisibilityOptions tool_visibility;
   ava::config::XdgPaths paths = ava::config::xdg_paths();
-  RuntimePromptOverrides prompt_overrides;
+  PromptOverrides prompt_overrides;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

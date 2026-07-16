@@ -8,7 +8,7 @@
 namespace ava::app::runtime {
 
 // Express a selected reasoning configuration: an opaque level, an optional token budget and a display label.
-struct RuntimeReasoningSelection
+struct ReasoningSelection
 {
   std::string level;
   std::optional<long long> budget_tokens = std::nullopt;

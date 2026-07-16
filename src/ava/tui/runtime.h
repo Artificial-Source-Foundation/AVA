@@ -4,9 +4,9 @@
 #include "ava/agent/question.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
+#include "ava/session/attachments.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
-#include "ava/session/attachments.h"
 
 #include <functional>
 #include <optional>
@@ -94,7 +94,7 @@ struct TuiSubmitContext
 {
   ava::permissions::PermissionResolver permission_resolver;
   ava::agent::QuestionResolver question_resolver;
-  ava::app::runtime::RuntimeEventSink event_sink;
+  ava::app::runtime::EventSink event_sink;
   std::function<bool()> cancel_requested;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages;
   std::function<ava::core::VoidResult(std::string_view)> skip_active_steering;
@@ -131,8 +131,7 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<ava::session::ImageAttachmentRef>(std::string const&)> on_attach_image;
   std::function<ava::core::Result<std::optional<ava::session::ImageAttachmentRef>>()> on_paste_clipboard_image;
   std::function<ava::core::Result<std::optional<std::string>>(std::string_view)> on_external_editor;
-  std::function<ava::core::Result<ava::session::LoadedImageAttachment>(ava::session::ImageAttachmentRef const&)>
-      on_load_image_attachment;
+  std::function<ava::core::Result<ava::session::LoadedImageAttachment>(ava::session::ImageAttachmentRef const&)> on_load_image_attachment;
   std::function<ava::core::Result<std::string>()> on_toggle_mode;
   std::function<ava::core::Result<std::string>()> on_cycle_reasoning;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(bool)> on_cycle_model;
@@ -151,18 +150,14 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<SelectListView>(std::string_view)> on_session_selector_unarchive;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selector_branch_parent;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selector_branch_child;
-  std::function<ava::core::Result<TuiRememberedPermissionRule>(ava::permissions::PermissionPrompt const&,
-                                                               ava::permissions::PermissionAction)>
+  std::function<ava::core::Result<TuiRememberedPermissionRule>(ava::permissions::PermissionPrompt const&, ava::permissions::PermissionAction)>
       remember_permission_rule;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_settings_selected;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_model_selected;
   std::function<ava::core::Result<SelectListView>(SelectListView const&, std::string_view)> on_scoped_model_toggled;
-  std::function<ava::core::Result<SelectListView>(SelectListView const&, std::vector<std::string>)>
-      on_scoped_model_enable_all;
-  std::function<ava::core::Result<SelectListView>(SelectListView const&, std::vector<std::string>)>
-      on_scoped_model_clear_all;
-  std::function<ava::core::Result<SelectListView>(SelectListView const&, std::string_view)>
-      on_scoped_model_toggle_provider;
+  std::function<ava::core::Result<SelectListView>(SelectListView const&, std::vector<std::string>)> on_scoped_model_enable_all;
+  std::function<ava::core::Result<SelectListView>(SelectListView const&, std::vector<std::string>)> on_scoped_model_clear_all;
+  std::function<ava::core::Result<SelectListView>(SelectListView const&, std::string_view)> on_scoped_model_toggle_provider;
   std::function<ava::core::Result<SelectListView>(SelectListView const&, std::string_view, bool)> on_scoped_model_reorder;
   std::function<ava::core::Result<std::string>()> on_scoped_model_save;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selected;
@@ -172,8 +167,7 @@ struct TuiRuntimeOptions
 
 [[nodiscard]] int run_interactive_composer(TuiRuntimeOptions options);
 [[nodiscard]] SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::string footer_hint = {});
-[[nodiscard]] SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, TuiKeyBindings const& bindings,
-                                                       std::string footer_hint = {});
+[[nodiscard]] SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, TuiKeyBindings const& bindings, std::string footer_hint = {});
 [[nodiscard]] SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, std::string footer_hint = {});
 [[nodiscard]] ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_prompt_view(QuestionPromptView const& prompt);
 

@@ -9,7 +9,7 @@
 namespace ava::app::runtime {
 
 // Carry user-supplied overrides for the assembled system prompt: a full replacement and/or appended fragments.
-struct RuntimePromptOverrides
+struct PromptOverrides
 {
   std::optional<std::string> system_prompt = std::nullopt;
   std::vector<std::string> append_system_prompts;

@@ -2,12 +2,13 @@
 
 #include "ava/debug/print_members_on.h"
 
+#include <cstddef>
 #include <string>
 
 namespace ava::app::runtime {
 
-// Extracted error slice of a RuntimeEvent: human-readable text, status, the error classification fields, the content type and the triggering reason for the failure.
-struct RuntimeErrorPayload
+// Extracted retry slice of an Event: human-readable text, status, the error classification fields, the triggering reason and the attempt/backoff accounting.
+struct RetryPayload
 {
   std::string text;
   std::string status;
@@ -15,9 +16,12 @@ struct RuntimeErrorPayload
   std::string error_code;
   std::string error_message;
   std::string error_details;
-  std::string content_type;
   std::string trigger;
   std::string reason;
+  std::size_t attempt = 0;
+  std::size_t max_attempts = 0;
+  std::size_t delay_ms = 0;
+  std::size_t remaining_ms = 0;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

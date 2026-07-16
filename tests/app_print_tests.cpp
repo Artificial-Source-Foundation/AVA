@@ -217,7 +217,7 @@ void test_app_print_text_mode_outputs_final_text_only()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -234,7 +234,7 @@ void test_app_print_text_mode_outputs_final_text_only()
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"print answer\"}\n\n"
               "data: [DONE]\n\n",
   }});
-  ava::app::runtime::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = runtime_options};
   std::ostringstream out;
@@ -255,7 +255,7 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -272,7 +272,7 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"safe \\u001b]52;c;QUJD\\u0007 text\\nnext\\tline\"}\n\n"
               "data: [DONE]\n\n",
   }});
-  ava::app::runtime::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text,
                                                   .runtime_options = runtime_options,
@@ -313,7 +313,7 @@ void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -326,7 +326,7 @@ void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ChunkedStreamingTransport transport({"data: {\"type\":\"response.output_text.delta\",\"delta\":\"live \"}\n\n",
                                        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\n", "data: [DONE]\n\n"});
-  ava::app::runtime::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = runtime_options};
   std::ostringstream out;
@@ -345,7 +345,7 @@ void test_app_print_text_mode_reports_stdout_write_failure()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -362,7 +362,7 @@ void test_app_print_text_mode_reports_stdout_write_failure()
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"print answer\"}\n\n"
               "data: [DONE]\n\n",
   }});
-  ava::app::runtime::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = runtime_options};
   FailingStreambuf failing_buffer;
@@ -387,7 +387,7 @@ void test_app_print_mode_uses_headless_permission_policy()
     file << "outside print policy";
   }
 
-  ava::app::runtime::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -422,7 +422,7 @@ void test_app_print_mode_uses_headless_permission_policy()
   ava::app::HeadlessPermissionPolicyOptions policy_options;
   auto allowed_tool = ava::app::add_headless_allowed_tools(policy_options, "read_file");
   expect(allowed_tool.has_value(), "print policy test configures read_file allow-tool");
-  ava::app::runtime::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   runtime_options.permission_resolver = ava::app::build_headless_permission_resolver(policy_options);
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = std::move(runtime_options)};
@@ -448,7 +448,7 @@ void test_app_print_mode_default_permission_denial_is_actionable()
     file << "outside print deny";
   }
 
-  ava::app::runtime::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Build;
@@ -480,7 +480,7 @@ void test_app_print_mode_default_permission_denial_is_actionable()
                                                    "data: [DONE]\n\n",
                                        }});
 
-  ava::app::runtime::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = std::move(runtime_options)};
   std::ostringstream out;
@@ -507,7 +507,7 @@ void test_app_print_mode_uses_persistent_permission_rules()
   auto const outside_path = root / "outside-print-rule.txt";
   write_app_test_file(outside_path, "outside print persistent rule note");
 
-  ava::app::runtime::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.paths = paths;
@@ -538,7 +538,7 @@ void test_app_print_mode_uses_persistent_permission_rules()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("persistent print allowed"))});
-  ava::app::runtime::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = std::move(runtime_options)};
   std::ostringstream out;
@@ -791,7 +791,7 @@ void test_app_print_json_mode_outputs_runtime_events()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Plan;
@@ -808,7 +808,7 @@ void test_app_print_json_mode_outputs_runtime_events()
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"json answer\"}\n\n"
               "data: [DONE]\n\n",
   }});
-  ava::app::runtime::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Json, .runtime_options = runtime_options};
   std::ostringstream out;
@@ -853,7 +853,7 @@ void test_app_print_json_mode_streams_provider_deltas_before_final_message()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenOptions open_options;
+  ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
   open_options.current_dir = workspace;
   open_options.mode = ava::agent::Mode::Plan;
@@ -866,7 +866,7 @@ void test_app_print_json_mode_streams_provider_deltas_before_final_message()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ChunkedStreamingTransport transport({"data: {\"type\":\"response.output_text.delta\",\"delta\":\"json \"}\n\n",
                                        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"stream\"}\n\n", "data: [DONE]\n\n"});
-  ava::app::runtime::RuntimeRunOptions runtime_options;
+  ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Json, .runtime_options = runtime_options};
   std::ostringstream out;

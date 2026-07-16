@@ -61,7 +61,7 @@ ava::core::Result<std::string> resolve_session_id(std::filesystem::path const& w
 
 }  // namespace
 
-ava::core::Result<runtime::RuntimeSession> open_runtime_session(runtime::RuntimeOpenOptions const& options)
+ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions const& options)
 {
   if (options.requested_session_id && options.continue_last_session)
   {
@@ -153,7 +153,7 @@ ava::core::Result<runtime::RuntimeSession> open_runtime_session(runtime::Runtime
     loaded_entries = std::move(*entries);
   }
 
-  std::optional<runtime::RuntimeReasoningSelection> reasoning;
+  std::optional<runtime::ReasoningSelection> reasoning;
   if (loaded_entries)
     reasoning = runtime::latest_persisted_reasoning(*loaded_entries, model);
 
@@ -180,29 +180,29 @@ ava::core::Result<runtime::RuntimeSession> open_runtime_session(runtime::Runtime
       return std::unexpected(metadata.error());
   }
 
-  return runtime::RuntimeSession{.store = std::move(*store),
-                        .mode = options.mode,
-                        .model = std::move(model),
-                        .base_prompt = std::move(prompt_state->base_prompt),
-                        .paths = options.paths,
-                        .workspace_dir = workspace_dir,
-                        .current_dir = current_dir,
-                        .project_trust = std::move(project_trust),
-                        .prompt_overrides = options.prompt_overrides,
-                        .tool_visibility = options.tool_visibility,
-                        .context_sources = std::move(prompt_state->context_sources),
-                        .freshness_sources = std::move(prompt_state->freshness_sources),
-                        .system_prompt = std::move(prompt_state->system_prompt),
-                        .reasoning = std::move(reasoning),
-                        .scoped_model_cycle = registry->scoped_model_cycle,
-                        .created = created,
-                        .sessionless = options.sessionless,
-                        .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>()};
+  return runtime::Session{.store = std::move(*store),
+                          .mode = options.mode,
+                          .model = std::move(model),
+                          .base_prompt = std::move(prompt_state->base_prompt),
+                          .paths = options.paths,
+                          .workspace_dir = workspace_dir,
+                          .current_dir = current_dir,
+                          .project_trust = std::move(project_trust),
+                          .prompt_overrides = options.prompt_overrides,
+                          .tool_visibility = options.tool_visibility,
+                          .context_sources = std::move(prompt_state->context_sources),
+                          .freshness_sources = std::move(prompt_state->freshness_sources),
+                          .system_prompt = std::move(prompt_state->system_prompt),
+                          .reasoning = std::move(reasoning),
+                          .scoped_model_cycle = registry->scoped_model_cycle,
+                          .created = created,
+                          .sessionless = options.sessionless,
+                          .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>()};
 }
 
-std::string to_string(runtime::RuntimeFreshnessSourceKind kind)
+std::string to_string(runtime::FreshnessSourceKind kind)
 {
-  using enum runtime::RuntimeFreshnessSourceKind;
+  using enum runtime::FreshnessSourceKind;
   switch (kind)
   {
     case SystemPrompt:

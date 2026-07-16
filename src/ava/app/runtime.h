@@ -1,10 +1,9 @@
 #pragma once
 
-#include "runtime/RuntimeOpenOptions.h"
-#include "runtime/RuntimePromptState.h"
-#include "runtime/RuntimeRunOptions.h"
-#include "runtime/RuntimeSession.h"
-
+#include "runtime/OpenOptions.h"
+#include "runtime/PromptState.h"
+#include "runtime/RunOptions.h"
+#include "runtime/Session.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
@@ -26,22 +25,22 @@ using CompactionSummaryGenerator =
     std::function<ava::core::Result<std::string>(std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
                                                  std::string_view instructions, std::size_t estimated_tokens)>;
 
-[[nodiscard]] ava::core::Result<runtime::RuntimeSession> open_runtime_session(runtime::RuntimeOpenOptions const& options);
+[[nodiscard]] ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions const& options);
 
-[[nodiscard]] ava::core::Result<runtime::RuntimePromptState> select_runtime_prompt_state(runtime::RuntimeSession const& session, ava::agent::Mode mode);
+[[nodiscard]] ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::Session const& session, ava::agent::Mode mode);
 
-void apply_runtime_prompt_state(runtime::RuntimeSession& session, runtime::RuntimePromptState prompt_state);
+void apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state);
 
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths, std::string_view provider_id,
                                                                               std::string_view model_id);
 
-[[nodiscard]] ava::core::Result<bool> switch_runtime_model(runtime::RuntimeSession& session, ava::config::ModelInfo model);
+[[nodiscard]] ava::core::Result<bool> switch_runtime_model(runtime::Session& session, ava::config::ModelInfo model);
 
-[[nodiscard]] ava::core::Result<bool> set_runtime_reasoning(runtime::RuntimeSession& session, std::optional<runtime::RuntimeReasoningSelection> selection);
+[[nodiscard]] ava::core::Result<bool> set_runtime_reasoning(runtime::Session& session, std::optional<runtime::ReasoningSelection> selection);
 
-[[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::RuntimeSession& session, std::string const& user_message,
+[[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message,
                                                                         ava::provider::Provider const& provider, ava::provider::Transport& transport,
-                                                                        runtime::RuntimeRunOptions const& options);
+                                                                        runtime::RunOptions const& options);
 
 [[nodiscard]] bool same_session_snapshot(std::vector<ava::session::SessionEntry> const& expected, std::vector<ava::session::SessionEntry> const& actual);
 
@@ -50,11 +49,12 @@ void apply_runtime_prompt_state(runtime::RuntimeSession& session, runtime::Runti
 [[nodiscard]] std::string build_compaction_summary_prompt(std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
                                                           std::string_view instructions, std::size_t estimated_tokens);
 
-[[nodiscard]] ava::core::Result<std::string> generate_compaction_summary(runtime::RuntimeSession const& session, std::vector<ava::session::SessionEntry> const& entries,
+[[nodiscard]] ava::core::Result<std::string> generate_compaction_summary(runtime::Session const& session,
+                                                                         std::vector<ava::session::SessionEntry> const& entries,
                                                                          ava::session::CompactionConfig const& config, std::string_view instructions,
                                                                          std::size_t estimated_tokens, ava::provider::Provider const& provider,
-                                                                         ava::provider::Transport& transport, runtime::RuntimeRunOptions const& options);
+                                                                         ava::provider::Transport& transport, runtime::RunOptions const& options);
 
-[[nodiscard]] std::string to_string(runtime::RuntimeFreshnessSourceKind kind);
+[[nodiscard]] std::string to_string(runtime::FreshnessSourceKind kind);
 
 }  // namespace ava::app

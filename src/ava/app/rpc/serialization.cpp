@@ -26,7 +26,7 @@ std::string joined_output(std::vector<std::string> const& output)
   return text;
 }
 
-std::string context_sources_json(runtime::RuntimeSession const& session)
+std::string context_sources_json(runtime::Session const& session)
 {
   std::string json = "[";
   for (std::size_t index = 0; index < session.context_sources.size(); ++index)
@@ -329,7 +329,7 @@ std::string tool_timeline_json(std::vector<ava::agent::ToolTimelineEntry> const&
 
 }  // namespace
 
-std::string state_result_json(runtime::RuntimeSession const& session, bool cancel_requested)
+std::string state_result_json(runtime::Session const& session, bool cancel_requested)
 {
   std::string json = "{";
   json += "\"protocol_version\":";
@@ -379,7 +379,7 @@ std::string state_result_json(runtime::RuntimeSession const& session, bool cance
   return json;
 }
 
-ava::core::Result<std::string> list_sessions_result_json(runtime::RuntimeSession const& session)
+ava::core::Result<std::string> list_sessions_result_json(runtime::Session const& session)
 {
   auto sessions = ava::session::SessionStore::list_sessions(session.workspace_dir, session.paths.sessions_dir);
   if (!sessions)
@@ -404,7 +404,7 @@ ava::core::Result<std::string> list_sessions_result_json(runtime::RuntimeSession
   return json;
 }
 
-ava::core::Result<std::string> session_tree_result_json(runtime::RuntimeSession const& session)
+ava::core::Result<std::string> session_tree_result_json(runtime::Session const& session)
 {
   auto tree = ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id());
   if (!tree)
@@ -456,7 +456,7 @@ ava::core::Result<std::string> session_tree_result_json(runtime::RuntimeSession 
   return json;
 }
 
-ava::core::Result<std::string> list_models_result_json(runtime::RuntimeSession const& session)
+ava::core::Result<std::string> list_models_result_json(runtime::Session const& session)
 {
   auto registry = ava::config::load_model_registry(session.paths);
   if (!registry)
@@ -617,7 +617,7 @@ std::string command_registry_result_json(CommandRegistry const& registry)
   return json;
 }
 
-ava::core::Result<std::string> messages_result_json(runtime::RuntimeSession const& session)
+ava::core::Result<std::string> messages_result_json(runtime::Session const& session)
 {
   auto entries = session.store.load();
   if (!entries)
@@ -665,7 +665,7 @@ ava::core::Result<std::string> messages_result_json(runtime::RuntimeSession cons
   return json;
 }
 
-ava::core::Result<std::string> session_stats_result_json(runtime::RuntimeSession const& session)
+ava::core::Result<std::string> session_stats_result_json(runtime::Session const& session)
 {
   auto entries = session.store.load();
   if (!entries)
@@ -779,7 +779,7 @@ ava::core::Result<std::string> session_stats_result_json(runtime::RuntimeSession
   return json;
 }
 
-ava::core::Result<std::string> session_validation_result_json(runtime::RuntimeSession const& session)
+ava::core::Result<std::string> session_validation_result_json(runtime::Session const& session)
 {
   auto entries = session.store.load();
   if (!entries)

@@ -18,7 +18,7 @@ namespace ava::app {
 struct CommandRequest
 {
   std::string command;
-  runtime::RuntimeEventSink event_sink = nullptr;
+  runtime::EventSink event_sink = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   CompactionSummaryGenerator compaction_summary_generator = nullptr;
@@ -44,9 +44,9 @@ struct CommandResult
 };
 
 [[nodiscard]] bool is_backend_command(std::string_view line) noexcept;
-[[nodiscard]] bool is_backend_command(std::string_view line, runtime::RuntimeSession& session);
+[[nodiscard]] bool is_backend_command(std::string_view line, runtime::Session& session);
 [[nodiscard]] std::string command_help_text(std::vector<CommandHotkey> const& hotkeys = {});
 [[nodiscard]] std::string command_hotkeys_text(std::vector<CommandHotkey> const& hotkeys = {});
-[[nodiscard]] ava::core::Result<CommandResult> run_command(runtime::RuntimeSession& session, CommandRequest request);
+[[nodiscard]] ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandRequest request);
 
 }  // namespace ava::app

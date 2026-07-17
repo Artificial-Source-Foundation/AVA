@@ -347,11 +347,12 @@ ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptio
   std::optional<ava::core::Error> input_read_error;
   while (true)
   {
-    auto read_line = input.read_line(line, [&run_state, &pending_state, &output](rpc::RpcInputTerminalOutcome outcome) {
-      rpc::observe_input_terminal(run_state, outcome);
-      if (outcome != rpc::RpcInputTerminalOutcome::EofWithFinalRecord)
-        static_cast<void>(rpc::cancel_pending_resolvers(output, pending_state));
-    });
+    // Publish terminal input state from the callback without waiting for the output mutex: a prompt
+    // worker may hold it while flushing its terminal response. Resolver cancellation follows only
+    // after read_line returns, preserving output -> pending-state lock order without delaying EOF.
+    auto read_line = input.read_line(line, [&run_state](rpc::RpcInputTerminalOutcome outcome) { rpc::observe_input_terminal(run_state, outcome); });
+    if (rpc::input_closed(run_state))
+      static_cast<void>(rpc::cancel_pending_resolvers(output, pending_state));
     if (!read_line)
     {
       if (read_line.error().category() == ava::core::ErrorCategory::InvalidArgument)

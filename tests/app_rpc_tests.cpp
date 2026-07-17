@@ -184,15 +184,13 @@ class PausingTerminalCallbackLineReader final : public ava::app::rpc::RpcLineRea
   ava::core::Result<bool> read_line(std::string& line, ava::app::rpc::RpcInputTerminalCallback const& on_terminal) override
   {
     return input_.read_line(line, [this, &on_terminal](ava::app::rpc::RpcInputTerminalOutcome outcome) {
-      // Signal that the reader reached a terminal boundary before forwarding it. Forwarding can
-      // legitimately wait for the output mutex while a terminal response is flushing.
+      if (on_terminal)
+        on_terminal(outcome);
       {
         std::lock_guard lock(mutex_);
         terminal_callback_observed_ = true;
       }
       cv_.notify_all();
-      if (on_terminal)
-        on_terminal(outcome);
       std::unique_lock lock(mutex_);
       cv_.wait(lock, [&] { return terminal_callback_released_; });
     });

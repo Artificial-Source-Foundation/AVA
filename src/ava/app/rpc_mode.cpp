@@ -345,13 +345,19 @@ ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptio
   std::optional<ava::core::Error> input_read_error;
   while (true)
   {
-    auto read_line = input.read_line(line);
+    auto read_line = input.read_line(line, [&run_state, &pending_state](rpc::RpcInputTerminalOutcome outcome) {
+      rpc::observe_input_terminal(run_state, outcome);
+      if (outcome != rpc::RpcInputTerminalOutcome::EofWithFinalRecord)
+        static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
+    });
     if (!read_line)
     {
       if (read_line.error().category() == ava::core::ErrorCategory::InvalidArgument)
       {
         if (auto written = rpc::write_error(output, "", read_line.error()); !written)
           return written;
+        if (rpc::input_closed(run_state))
+          break;
         continue;
       }
       input_read_error = std::move(read_line.error());

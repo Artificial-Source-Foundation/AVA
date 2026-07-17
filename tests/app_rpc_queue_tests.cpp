@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/rpc/input.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
@@ -66,6 +67,48 @@ void test_app_rpc_follow_up_transition_state_machine_is_atomic()
   expect(deactivated.kind == RpcFollowUpTransitionKind::Deactivated && !ava::app::rpc::active_run(deactivated_state) && !late &&
              late.error().message() == "RPC command requires an active prompt",
          "RPC empty-run deactivation and a late follow-up admission have one deterministic lock order with no orphaned queue item");
+
+  ava::app::rpc::RpcRunState final_record_state;
+  ava::app::rpc::set_active_run(final_record_state, RpcRunKind::Prompt, "parent");
+  auto final_record_queued = ava::app::rpc::queue_rpc_message(final_record_state.follow_up_messages, final_record_state, "follow_up", "child", "next");
+  ava::app::rpc::observe_input_terminal(final_record_state, ava::app::rpc::RpcInputTerminalOutcome::EofWithFinalRecord);
+  auto const final_record_admission = ava::app::rpc::await_command_admission(final_record_state, "final-record-command");
+  ava::app::rpc::begin_prompt_terminal_publication(final_record_state);
+  auto final_record_transition = ava::app::rpc::transition_after_prompt_terminal_response(final_record_state);
+  ava::app::rpc::complete_terminal_publication(final_record_state, "parent");
+  bool final_record_open = false;
+  {
+    std::lock_guard lock(final_record_state.mutex);
+    final_record_open =
+        final_record_state.input_terminal_observed && !final_record_state.input_closed && !final_record_state.cancel_requested.load(std::memory_order_relaxed);
+  }
+  expect(final_record_queued && final_record_open && final_record_admission == ava::app::rpc::RpcCommandAdmission::Admitted &&
+             final_record_transition.kind == RpcFollowUpTransitionKind::Skipped && final_record_transition.cleared.follow_up_messages.size() == 1 &&
+             final_record_transition.cleared.follow_up_messages.front().request_id == "child",
+         "RPC final-record input leaves command admission open but atomically skips queued continuation");
+
+  for (auto const outcome :
+       {ava::app::rpc::RpcInputTerminalOutcome::Eof, ava::app::rpc::RpcInputTerminalOutcome::Canceled, ava::app::rpc::RpcInputTerminalOutcome::Error})
+  {
+    ava::app::rpc::RpcRunState terminal_state;
+    ava::app::rpc::set_active_run(terminal_state, RpcRunKind::Prompt, "parent");
+    auto terminal_queued = ava::app::rpc::queue_rpc_message(terminal_state.follow_up_messages, terminal_state, "follow_up", "child", "next");
+    ava::app::rpc::observe_input_terminal(terminal_state, outcome);
+    ava::app::rpc::observe_input_terminal(terminal_state, outcome);
+    auto first_close = ava::app::rpc::close_input_and_cancel(terminal_state);
+    auto second_close = ava::app::rpc::close_input_and_cancel(terminal_state);
+    bool terminal_closed = false;
+    {
+      std::lock_guard lock(terminal_state.mutex);
+      terminal_closed =
+          terminal_state.input_terminal_observed && terminal_state.input_closed && terminal_state.cancel_requested.load(std::memory_order_relaxed);
+    }
+    expect(terminal_queued && terminal_closed &&
+               ava::app::rpc::await_command_admission(terminal_state, "later") == ava::app::rpc::RpcCommandAdmission::InputClosed &&
+               first_close.follow_up_messages.size() == 1 && first_close.follow_up_messages.front().request_id == "child" &&
+               second_close.steering_messages.empty() && second_close.follow_up_messages.empty(),
+           "RPC non-final input terminal transitions close and cancel idempotently while retaining one queue-drain owner");
+  }
 }
 
 void test_app_rpc_cancel_affects_subsequent_prompt()

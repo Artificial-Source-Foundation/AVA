@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "input.h"
 #include "protocol.h"
 #include "run_state.h"
 
@@ -53,6 +54,22 @@ ClearedRpcQueues clear_queued_messages_locked(RpcRunState& state)
     state.follow_up_messages.pop_front();
   }
   return cleared;
+}
+
+void transition_input_terminal_locked(RpcRunState& state, RpcInputTerminalOutcome outcome)
+{
+  state.input_terminal_observed = true;
+  switch (outcome)
+  {
+    case RpcInputTerminalOutcome::EofWithFinalRecord:
+      return;
+    case RpcInputTerminalOutcome::Eof:
+    case RpcInputTerminalOutcome::Canceled:
+    case RpcInputTerminalOutcome::Error:
+      state.input_closed = true;
+      state.cancel_requested.store(true, std::memory_order_relaxed);
+      return;
+  }
 }
 
 }  // namespace
@@ -117,6 +134,16 @@ bool input_closed(RpcRunState& state)
 {
   std::lock_guard lock(state.mutex);
   return state.input_closed;
+}
+
+void observe_input_terminal(RpcRunState& state, RpcInputTerminalOutcome outcome)
+{
+  {
+    std::lock_guard lock(state.mutex);
+    transition_input_terminal_locked(state, outcome);
+  }
+  if (outcome != RpcInputTerminalOutcome::EofWithFinalRecord)
+    state.publication_cv.notify_all();
 }
 
 RpcCommandAdmission await_command_admission(RpcRunState& state, std::string_view request_id, bool wait_for_terminal_publication)
@@ -235,7 +262,7 @@ void begin_prompt_terminal_publication(RpcRunState& state)
 RpcFollowUpTransition transition_after_prompt_terminal_response(RpcRunState& state)
 {
   std::lock_guard lock(state.mutex);
-  if (state.cancel_requested.load(std::memory_order_relaxed) || state.input_closed)
+  if (state.cancel_requested.load(std::memory_order_relaxed) || state.input_closed || state.input_terminal_observed)
   {
     state.active_run_kind = RpcRunKind::None;
     state.active_request_id.clear();
@@ -329,8 +356,7 @@ ClearedRpcQueues close_input_and_cancel(RpcRunState& state)
   ClearedRpcQueues cleared;
   {
     std::lock_guard lock(state.mutex);
-    state.input_closed = true;
-    state.cancel_requested.store(true, std::memory_order_relaxed);
+    transition_input_terminal_locked(state, RpcInputTerminalOutcome::Eof);
     if (!state.terminal_publication_in_progress)
       cleared = clear_queued_messages_locked(state);
   }

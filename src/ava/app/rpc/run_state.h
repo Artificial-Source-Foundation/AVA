@@ -1,5 +1,6 @@
 #pragma once
 
+#include "threadsafe/threadsafe.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
@@ -14,9 +15,10 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include "threadsafe/threadsafe.h"
 
 namespace ava::app::rpc {
+
+enum class RpcInputTerminalOutcome;
 
 // Forward declaration.
 class Output;
@@ -105,6 +107,7 @@ struct RpcRunState
   std::atomic_bool cancel_requested = false;
   bool terminal_publication_in_progress = false;
   RpcRunKind active_run_kind = RpcRunKind::None;
+  bool input_terminal_observed = false;
   bool input_closed = false;
   std::string active_request_id;
   std::set<std::string> outstanding_request_ids;
@@ -125,6 +128,7 @@ struct RpcRunState
 [[nodiscard]] bool active_prompt_run(RpcRunState& state);
 [[nodiscard]] bool async_worker_reap_ready(RpcRunState& state);
 [[nodiscard]] bool input_closed(RpcRunState& state);
+void observe_input_terminal(RpcRunState& state, RpcInputTerminalOutcome outcome);
 enum class RpcCommandAdmission
 {
   Admitted,

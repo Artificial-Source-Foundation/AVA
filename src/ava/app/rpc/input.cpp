@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cerrno>
+#include <istream>
 #include <utility>
 #include <fcntl.h>
 #include <poll.h>
@@ -15,6 +16,12 @@ namespace {
 ava::core::Error input_io_error(std::string message)
 {
   return ava::core::Error(ava::core::ErrorCategory::Io, std::move(message));
+}
+
+void notify_terminal(RpcInputTerminalCallback const& on_terminal, RpcInputTerminalOutcome outcome)
+{
+  if (on_terminal)
+    on_terminal(outcome);
 }
 
 bool configure_wake_fd(int fd)
@@ -37,14 +44,17 @@ class PosixRpcLineReader final : public RpcLineReader
     close(wake_write_fd_);
   }
 
-  [[nodiscard]] ava::core::Result<bool> read_line(std::string& line) override
+  [[nodiscard]] ava::core::Result<bool> read_line(std::string& line, RpcInputTerminalCallback const& on_terminal = {}) override
   {
     line.clear();
     bool oversized = false;
     while (true)
     {
       if (canceled_.load(std::memory_order_acquire))
+      {
+        notify_terminal(on_terminal, RpcInputTerminalOutcome::Canceled);
         return false;
+      }
 
       if (buffer_offset_ == buffer_size_)
       {
@@ -58,11 +68,20 @@ class PosixRpcLineReader final : public RpcLineReader
           ready = poll(descriptors, 2, -1);
         } while (ready == -1 && errno == EINTR);
         if (ready == -1)
+        {
+          notify_terminal(on_terminal, RpcInputTerminalOutcome::Error);
           return std::unexpected(input_io_error("failed to poll RPC stdin"));
+        }
         if (canceled_.load(std::memory_order_acquire) || (descriptors[1].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)) != 0)
+        {
+          notify_terminal(on_terminal, RpcInputTerminalOutcome::Canceled);
           return false;
+        }
         if ((descriptors[0].revents & POLLNVAL) != 0)
+        {
+          notify_terminal(on_terminal, RpcInputTerminalOutcome::Error);
           return std::unexpected(input_io_error("failed to read RPC stdin"));
+        }
         if ((descriptors[0].revents & (POLLIN | POLLHUP | POLLERR)) == 0)
           continue;
 
@@ -72,12 +91,29 @@ class PosixRpcLineReader final : public RpcLineReader
           count = read(input_fd_, buffer_.data(), buffer_.size());
         } while (count == -1 && errno == EINTR);
         if (count == -1)
+        {
+          notify_terminal(on_terminal, RpcInputTerminalOutcome::Error);
           return std::unexpected(input_io_error("failed to read RPC stdin"));
+        }
         if (count == 0)
         {
+          if (canceled_.load(std::memory_order_acquire))
+          {
+            notify_terminal(on_terminal, RpcInputTerminalOutcome::Canceled);
+            return false;
+          }
           if (oversized)
+          {
+            notify_terminal(on_terminal, RpcInputTerminalOutcome::Error);
             return std::unexpected(invalid_rpc("RPC request line is too large"));
-          return !line.empty();
+          }
+          if (line.empty())
+          {
+            notify_terminal(on_terminal, RpcInputTerminalOutcome::Eof);
+            return false;
+          }
+          notify_terminal(on_terminal, RpcInputTerminalOutcome::EofWithFinalRecord);
+          return true;
         }
         buffer_offset_ = 0;
         buffer_size_ = static_cast<std::size_t>(count);
@@ -127,11 +163,59 @@ StreamRpcLineReader::StreamRpcLineReader(std::istream& input, std::function<void
 {
 }
 
-ava::core::Result<bool> StreamRpcLineReader::read_line(std::string& line)
+ava::core::Result<bool> StreamRpcLineReader::read_line(std::string& line, RpcInputTerminalCallback const& on_terminal)
 {
-  if (canceled_.load(std::memory_order_acquire))
-    return false;
-  return read_rpc_line_bounded(input_, line);
+  line.clear();
+  bool oversized = false;
+  while (true)
+  {
+    if (canceled_.load(std::memory_order_acquire))
+    {
+      notify_terminal(on_terminal, RpcInputTerminalOutcome::Canceled);
+      return false;
+    }
+
+    auto const next = input_.get();
+    if (next == std::istream::traits_type::eof())
+    {
+      if (!input_.eof())
+      {
+        notify_terminal(on_terminal, RpcInputTerminalOutcome::Error);
+        return std::unexpected(input_io_error("failed to read RPC stdin"));
+      }
+      if (canceled_.load(std::memory_order_acquire))
+      {
+        notify_terminal(on_terminal, RpcInputTerminalOutcome::Canceled);
+        return false;
+      }
+      if (oversized)
+      {
+        notify_terminal(on_terminal, RpcInputTerminalOutcome::Error);
+        return std::unexpected(invalid_rpc("RPC request line is too large"));
+      }
+      if (line.empty())
+      {
+        notify_terminal(on_terminal, RpcInputTerminalOutcome::Eof);
+        return false;
+      }
+      notify_terminal(on_terminal, RpcInputTerminalOutcome::EofWithFinalRecord);
+      return true;
+    }
+
+    char const ch = static_cast<char>(next);
+    if (ch == '\n')
+      break;
+    if (line.size() >= kMaxRpcLineBytes)
+    {
+      oversized = true;
+      continue;
+    }
+    if (!oversized)
+      line.push_back(ch);
+  }
+  if (oversized)
+    return std::unexpected(invalid_rpc("RPC request line is too large"));
+  return true;
 }
 
 void StreamRpcLineReader::cancel() noexcept

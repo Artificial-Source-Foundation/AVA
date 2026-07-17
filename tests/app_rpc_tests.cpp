@@ -140,6 +140,51 @@ class TerminalPublicationStreamBuf final : public std::streambuf
   bool released_ = false;
 };
 
+class PausingTerminalCallbackLineReader final : public ava::app::rpc::RpcLineReader
+{
+ public:
+  explicit PausingTerminalCallbackLineReader(std::istream& input) : input_(input) { }
+
+  ava::core::Result<bool> read_line(std::string& line, ava::app::rpc::RpcInputTerminalCallback const& on_terminal) override
+  {
+    return input_.read_line(line, [this, &on_terminal](ava::app::rpc::RpcInputTerminalOutcome outcome) {
+      if (on_terminal)
+        on_terminal(outcome);
+      {
+        std::lock_guard lock(mutex_);
+        terminal_callback_observed_ = true;
+      }
+      cv_.notify_all();
+      std::unique_lock lock(mutex_);
+      cv_.wait(lock, [&] { return terminal_callback_released_; });
+    });
+  }
+
+  void cancel() noexcept override { input_.cancel(); }
+
+  bool wait_until_terminal_callback(std::chrono::milliseconds timeout)
+  {
+    std::unique_lock lock(mutex_);
+    return cv_.wait_for(lock, timeout, [&] { return terminal_callback_observed_; });
+  }
+
+  void release_terminal_callback()
+  {
+    {
+      std::lock_guard lock(mutex_);
+      terminal_callback_released_ = true;
+    }
+    cv_.notify_all();
+  }
+
+ private:
+  ava::app::rpc::StreamRpcLineReader input_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  bool terminal_callback_observed_ = false;
+  bool terminal_callback_released_ = false;
+};
+
 std::string read_rpc_golden(std::filesystem::path const& path)
 {
   std::ifstream file(path, std::ios::binary);
@@ -2429,10 +2474,11 @@ void test_app_rpc_eof_during_blocked_parent_publication_skips_follow_up()
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
+  PausingTerminalCallbackLineReader input(in);
   TerminalPublicationStreamBuf output_buffer("\"id\":\"parent\",\"type\":\"response\"");
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, transport, runtime_options, input, out); });
 
   input_buffer.push("{\"id\":\"parent\",\"type\":\"prompt\",\"message\":\"parent\"}\n");
   bool const parent_requested = transport.wait_for_request(std::chrono::seconds(2));
@@ -2441,13 +2487,15 @@ void test_app_rpc_eof_during_blocked_parent_publication_skips_follow_up()
   transport.release();
   bool const parent_publication_blocked = output_buffer.wait_until_terminal(std::chrono::seconds(2));
   input_buffer.close();
-  bool const eof_observed_while_blocked = input_buffer.wait_until_eof_observed(std::chrono::seconds(2));
+  bool const terminal_state_published = input.wait_until_terminal_callback(std::chrono::seconds(2));
   output_buffer.release_terminal();
+  bool const child_skipped_while_reader_paused = output_buffer.wait_contains("\"name\":\"follow_up_skipped\"", std::chrono::seconds(2));
+  input.release_terminal_callback();
   rpc_thread.join();
 
   auto const jsonl = output_buffer.str();
-  expect(result && parent_requested && child_queued && parent_publication_blocked && eof_observed_while_blocked,
-         "RPC EOF is observed while the parent response flush remains blocked");
+  expect(result && parent_requested && child_queued && parent_publication_blocked && terminal_state_published && child_skipped_while_reader_paused,
+         "RPC EOF terminal state is published before the parent response flush is released while the reader remains paused");
   expect(transport.requests().size() == 1 && jsonl.find("\"name\":\"follow_up_started\"") == std::string::npos &&
              jsonl.find("\"id\":\"child\",\"type\":\"response\",\"success\":true") == std::string::npos,
          "RPC EOF during parent publication cannot start or run the queued child");
@@ -2594,6 +2642,8 @@ void test_app_rpc_worker_output_failure_wakes_blocked_input()
 
 void test_app_rpc_posix_line_reader_wake_eof_and_fd_lifetime()
 {
+  using ava::app::rpc::RpcInputTerminalOutcome;
+
   auto fd_count = [] {
     std::error_code error;
     std::size_t count = 0;
@@ -2628,29 +2678,160 @@ void test_app_rpc_posix_line_reader_wake_eof_and_fd_lifetime()
       std::string const records = "one\r\ntwo";
       auto const bytes_written = write(fds[1], records.data(), records.size());
       close(fds[1]);
+      std::vector<RpcInputTerminalOutcome> outcomes;
       std::string line;
-      auto first = (*reader)->read_line(line);
+      auto first = (*reader)->read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
       framing_ok = bytes_written == static_cast<ssize_t>(records.size()) && first && *first && line == "one\r";
-      auto second = (*reader)->read_line(line);
+      auto second = (*reader)->read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
       framing_ok = framing_ok && second && *second && line == "two";
-      auto eof = (*reader)->read_line(line);
-      framing_ok = framing_ok && eof && !*eof;
+      auto eof = (*reader)->read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
+      framing_ok = framing_ok && eof && !*eof &&
+                   outcomes == std::vector<RpcInputTerminalOutcome>{RpcInputTerminalOutcome::EofWithFinalRecord, RpcInputTerminalOutcome::Eof};
     }
     else
     {
       ava::core::Result<bool> read_result = true;
+      std::vector<RpcInputTerminalOutcome> outcomes;
       std::string line;
-      std::jthread reading([&] { read_result = (*reader)->read_line(line); });
+      std::jthread reading([&] { read_result = (*reader)->read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
       (*reader)->cancel();
       close(fds[1]);
       reading.join();
-      races_ok = races_ok && read_result && !*read_result;
+      races_ok = races_ok && read_result && !*read_result && outcomes == std::vector<RpcInputTerminalOutcome>{RpcInputTerminalOutcome::Canceled};
     }
     close(fds[0]);
   }
+
+  int error_fds[2] = {-1, -1};
+  bool error_outcome_ok = false;
+  if (pipe(error_fds) == 0)
+  {
+    auto reader = ava::app::rpc::make_posix_rpc_line_reader(error_fds[0]);
+    if (reader)
+    {
+      close(error_fds[0]);
+      std::vector<RpcInputTerminalOutcome> outcomes;
+      std::string line;
+      auto error = (*reader)->read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
+      error_outcome_ok = !error && error.error().category() == ava::core::ErrorCategory::Io &&
+                         outcomes == std::vector<RpcInputTerminalOutcome>{RpcInputTerminalOutcome::Error};
+    }
+    else
+    {
+      close(error_fds[0]);
+    }
+    close(error_fds[1]);
+  }
   auto const after = fd_count();
-  expect(framing_ok && races_ok, "RPC POSIX line reader preserves CRLF/final-record framing and handles wake/EOF races");
+  expect(framing_ok && races_ok && error_outcome_ok,
+         "RPC POSIX line reader preserves framing and synchronously classifies EOF, final records, wake cancellation, and errors");
   expect(!before || !after || *before == *after, "RPC POSIX line reader wake pipes do not leak file descriptors");
+}
+
+void test_app_rpc_stream_line_reader_terminal_outcomes()
+{
+  using ava::app::rpc::RpcInputTerminalOutcome;
+
+  std::vector<RpcInputTerminalOutcome> outcomes;
+  std::string line;
+  std::istringstream empty_input;
+  ava::app::rpc::StreamRpcLineReader empty_reader(empty_input);
+  auto empty_eof = empty_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
+
+  std::istringstream final_input("final record");
+  ava::app::rpc::StreamRpcLineReader final_reader(final_input);
+  auto final_record = final_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
+  bool const final_record_read = final_record && *final_record && line == "final record";
+  auto final_eof = final_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
+
+  std::istringstream newline_input("complete\n");
+  ava::app::rpc::StreamRpcLineReader newline_reader(newline_input);
+  auto complete_record = newline_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
+  bool const normal_record_silent = complete_record && *complete_record && line == "complete" && outcomes.size() == 3;
+
+  BlockingInputBuf canceled_input_buffer;
+  canceled_input_buffer.push("partial final record");
+  std::istream canceled_input(&canceled_input_buffer);
+  ava::app::rpc::StreamRpcLineReader canceled_reader(canceled_input, [&] { canceled_input_buffer.close(); });
+  ava::core::Result<bool> canceled = true;
+  std::jthread canceled_read(
+      [&] { canceled = canceled_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
+  bool const canceled_while_partial = canceled_input_buffer.wait_until_blocked(std::chrono::seconds(2));
+  canceled_reader.cancel();
+  canceled_read.join();
+
+  std::istringstream error_input("unread");
+  error_input.setstate(std::ios::badbit);
+  ava::app::rpc::StreamRpcLineReader error_reader(error_input);
+  auto read_error = error_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
+
+  expect(empty_eof && !*empty_eof && final_record_read && final_eof && !*final_eof && normal_record_silent && canceled_while_partial && canceled &&
+             !*canceled && !read_error && read_error.error().category() == ava::core::ErrorCategory::Io &&
+             outcomes == std::vector<RpcInputTerminalOutcome>{RpcInputTerminalOutcome::Eof, RpcInputTerminalOutcome::EofWithFinalRecord,
+                                                              RpcInputTerminalOutcome::Eof, RpcInputTerminalOutcome::Canceled, RpcInputTerminalOutcome::Error},
+         "RPC stream line reader synchronously classifies empty EOF, final records, cancellation, and input errors");
+}
+
+void test_app_rpc_unterminated_final_command_executes()
+{
+  auto const root = temp_root() / "app-rpc-unterminated-final-command";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC unterminated final command test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  ava::app::runtime::RunOptions runtime_options;
+  std::istringstream in("{\"id\":\"protocol\",\"type\":\"get_protocol\"}");
+  std::ostringstream out;
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
+  auto const jsonl = out.str();
+
+  expect(result && jsonl.find("\"id\":\"protocol\",\"type\":\"response\",\"success\":true") != std::string::npos,
+         "RPC loop executes an unterminated final command before observing EOF closure");
+}
+
+void test_app_rpc_newline_terminated_oversized_line_recovers()
+{
+  auto const root = temp_root() / "app-rpc-oversized-line-recovery";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC oversized-line recovery test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  ava::app::runtime::RunOptions runtime_options;
+  std::string input(ava::app::rpc::kMaxRpcLineBytes + 1, 'x');
+  input += "\n{\"id\":\"protocol\",\"type\":\"get_protocol\"}\n";
+  std::istringstream in(std::move(input));
+  std::ostringstream out;
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
+  auto const jsonl = out.str();
+
+  expect(result && count_substrings(jsonl, "\"id\":\"\",\"type\":\"response\",\"success\":false") == 1 &&
+             jsonl.find("RPC request line is too large") != std::string::npos &&
+             jsonl.find("\"id\":\"protocol\",\"type\":\"response\",\"success\":true") != std::string::npos,
+         "RPC newline-terminated oversized line is recoverable and the next valid record executes");
 }
 
 void test_app_rpc_compact_cancellation_is_error_response_without_provider_request()
@@ -2735,5 +2916,8 @@ void run_app_rpc_tests()
   test_app_rpc_terminal_publication_gates_direct_and_compaction_runs();
   test_app_rpc_worker_output_failure_wakes_blocked_input();
   test_app_rpc_posix_line_reader_wake_eof_and_fd_lifetime();
+  test_app_rpc_stream_line_reader_terminal_outcomes();
+  test_app_rpc_unterminated_final_command_executes();
+  test_app_rpc_newline_terminated_oversized_line_recovers();
   test_app_rpc_compact_cancellation_is_error_response_without_provider_request();
 }

@@ -16,7 +16,7 @@ scripts/build.sh
 scripts/run-tests.sh
 ```
 
-The build and test runners default to the `build` tree, detect the available logical cores, and supply that positive job count to CMake/CTest. Use `--jobs N`, `CMAKE_BUILD_PARALLEL_LEVEL=N`, or `CTEST_PARALLEL_LEVEL=N` to cap concurrency; append build options such as `--target` or CTest options such as `-R`. They share a build-tree lock so builds, fixed integration-test roots, and CTest logs cannot collide. Direct CMake/CTest commands remain available as sequential diagnostic fallbacks.
+The build and test runners default to the `build` tree, detect the available logical cores, and supply that positive job count to CMake/CTest. Use `--jobs N`, `CMAKE_BUILD_PARALLEL_LEVEL=N`, or `CTEST_PARALLEL_LEVEL=N` to cap concurrency; append build options such as `--target` or CTest options such as `-R`. They share a build-tree lock so builds, fixed integration-test roots, and CTest logs cannot collide. An untrappable wrapper death leaves `.ava-build-tree.lock.d` fail-closed; verify that no build/test worker remains before removing that directory manually. Direct CMake/CTest commands remain available as sequential diagnostic fallbacks.
 
 The test suite is built as one `ava_tests` CTest target from focused test sources under `tests/`. The LSP and MCP tests also build and use fake servers from `tests/support/`.
 

@@ -8,8 +8,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -58,6 +61,20 @@ def run_build_runner(
     )
 
 
+def wait_for_process_exit(pid: int, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        stat_path = Path(f"/proc/{pid}/stat")
+        if stat_path.is_file() and stat_path.read_text(encoding="utf-8").split()[2] == "Z":
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"timed out waiting for worker process {pid} to exit")
+
+
 def wait_for_path(path: Path, process: subprocess.Popen[str], timeout: float) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -77,8 +94,15 @@ def main() -> int:
 
     script = args.script.resolve(strict=True)
     build_script = args.build_script.resolve(strict=True)
-    root = args.root.resolve()
-    shutil.rmtree(root, ignore_errors=True)
+    requested_root = args.root.absolute()
+    try:
+        requested_status = os.lstat(requested_root)
+    except FileNotFoundError:
+        requested_root.mkdir(parents=True, mode=0o700)
+        requested_status = os.lstat(requested_root)
+    require(not stat.S_ISLNK(requested_status.st_mode), f"test root must not be a symlink: {requested_root}")
+    require(stat.S_ISDIR(requested_status.st_mode), f"test root must be a directory: {requested_root}")
+    root = Path(tempfile.mkdtemp(prefix="ava-parallel-runner-test.", dir=requested_root))
     build_dir = root / "build"
     build_dir.mkdir(parents=True)
     (build_dir / "CTestTestfile.cmake").write_text("# fake configured tree\n", encoding="utf-8")
@@ -91,13 +115,28 @@ def main() -> int:
 import json
 import os
 from pathlib import Path
+import signal
+import subprocess
 import sys
 import time
 
 ready = os.environ.get("FAKE_CTEST_READY")
 release = os.environ.get("FAKE_CTEST_RELEASE")
+descendant_ready = os.environ.get("FAKE_CTEST_DESCENDANT_READY")
+if os.environ.get("FAKE_CTEST_IGNORE_TERM") == "1":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+if descendant_ready:
+    subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import pathlib, signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "pathlib.Path(sys.argv[1]).write_text('ready\\\\n', encoding='utf-8'); time.sleep(60)",
+            descendant_ready,
+        ]
+    )
 if ready:
-    Path(ready).write_text("ready\\n", encoding="utf-8")
+    Path(ready).write_text(f"{os.getpid()}\\n", encoding="utf-8")
 if release:
     deadline = time.monotonic() + 8
     while not Path(release).exists():
@@ -136,6 +175,36 @@ Path(os.environ["FAKE_CTEST_ARGS"]).write_text(json.dumps(sys.argv[1:]), encodin
     invalid = run_runner(script, build_dir, fake_ctest, "--jobs", "0", env_extra=common_env)
     require(invalid.returncode == 2, "runner rejects unbounded/zero parallelism")
     require("positive integer" in invalid.stderr and not invocation_file.exists(), "invalid jobs fail before CTest starts")
+
+    other_build_dir = root / "other-build"
+    other_build_dir.mkdir()
+    (other_build_dir / "CTestTestfile.cmake").write_text("# other fake configured tree\n", encoding="utf-8")
+    bypass = run_runner(
+        script,
+        build_dir,
+        fake_ctest,
+        "--",
+        "--test-dir",
+        str(other_build_dir),
+        env_extra=common_env,
+    )
+    require(bypass.returncode == 2, "test runner rejects a post-boundary build-tree override")
+    require("post-boundary" in bypass.stderr and not invocation_file.exists(), "CTest override fails before CTest starts")
+
+    build_and_test = run_runner(
+        script,
+        build_dir,
+        fake_ctest,
+        "--build-and-test",
+        str(root / "source"),
+        str(other_build_dir),
+        env_extra=common_env,
+    )
+    require(build_and_test.returncode == 2, "test runner rejects CTest build-and-test mode")
+    require(
+        "build/script/dashboard modes" in build_and_test.stderr and not invocation_file.exists(),
+        "CTest build-and-test rejection happens before CTest starts",
+    )
 
     build_invocation_file = root / "cmake-args.json"
     build_env = {"FAKE_CTEST_ARGS": str(build_invocation_file)}
@@ -179,6 +248,23 @@ Path(os.environ["FAKE_CTEST_ARGS"]).write_text(json.dumps(sys.argv[1:]), encodin
         "invalid build jobs fail before CMake starts",
     )
 
+    native_build = run_build_runner(
+        build_script,
+        build_dir,
+        fake_ctest,
+        "--jobs",
+        "5",
+        "--",
+        "-n",
+        env_extra=build_env,
+    )
+    require(native_build.returncode == 0, f"native build option forwarding failed: {native_build.stderr}")
+    require(
+        json.loads(build_invocation_file.read_text(encoding="utf-8"))
+        == ["--build", str(build_dir), "--parallel", "5", "--", "-n"],
+        "build runner preserves the native build-tool option delimiter",
+    )
+
     ready = root / "ready"
     release = root / "release"
     first_env = os.environ.copy()
@@ -217,16 +303,26 @@ Path(os.environ["FAKE_CTEST_ARGS"]).write_text(json.dumps(sys.argv[1:]), encodin
 
     ready.unlink()
     release.unlink()
+    descendant_ready = root / "descendant-ready"
+    signal_env = first_env.copy()
+    signal_env["FAKE_CTEST_DESCENDANT_READY"] = str(descendant_ready)
+    signal_env["FAKE_CTEST_IGNORE_TERM"] = "1"
     signaled = subprocess.Popen(
         [str(script), "--build-dir", str(build_dir), "--jobs", "2"],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=first_env,
+        env=signal_env,
     )
     try:
         wait_for_path(ready, signaled, 5)
+        wait_for_path(descendant_ready, signaled, 5)
         signaled.terminate()
+        during_teardown = run_build_runner(build_script, build_dir, fake_ctest, "--jobs", "2", env_extra=build_env)
+        require(
+            during_teardown.returncode == 2 and "already owns build tree" in during_teardown.stderr,
+            "clean termination retains the lock while the direct worker and a descendant remain",
+        )
         signal_stdout, signal_stderr = signaled.communicate(timeout=10)
         require(signaled.returncode in (-15, 143), f"terminated runner returned {signaled.returncode}: {signal_stdout}\n{signal_stderr}")
         after_signal = run_runner(script, build_dir, fake_ctest, "--jobs", "2", env_extra=common_env)
@@ -236,6 +332,44 @@ Path(os.environ["FAKE_CTEST_ARGS"]).write_text(json.dumps(sys.argv[1:]), encodin
             signaled.kill()
             signaled.wait(timeout=5)
 
+    ready.unlink()
+    sigkilled = subprocess.Popen(
+        [str(script), "--build-dir", str(build_dir), "--jobs", "2"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=first_env,
+    )
+    worker_pid: int | None = None
+    try:
+        wait_for_path(ready, sigkilled, 5)
+        worker_pid = int(ready.read_text(encoding="utf-8").strip())
+        sigkilled.kill()
+        sigkilled.wait(timeout=5)
+        stale = run_build_runner(build_script, build_dir, fake_ctest, "--jobs", "2", env_extra=build_env)
+        require(
+            stale.returncode == 2 and "stale AVA build-tree lock" in stale.stderr,
+            "an untrappably killed wrapper leaves a fail-closed cross-run lock",
+        )
+        release.write_text("release\n", encoding="utf-8")
+        wait_for_process_exit(worker_pid, 10)
+        worker_pid = None
+        shutil.rmtree(build_dir / ".ava-build-tree.lock.d")
+    finally:
+        if sigkilled.poll() is None:
+            sigkilled.kill()
+            sigkilled.wait(timeout=5)
+        if worker_pid is not None:
+            try:
+                os.kill(worker_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if sigkilled.stdout is not None:
+            sigkilled.stdout.close()
+        if sigkilled.stderr is not None:
+            sigkilled.stderr.close()
+
+    shutil.rmtree(root)
     return 0
 
 

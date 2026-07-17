@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 IFS=$'\n\t'
-umask 077
 
 readonly SOURCE_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 # shellcheck source=parallel-runner-common.sh
@@ -54,14 +53,15 @@ while (($# > 0)); do
     --preset|--preset=*)
       ava_parallel_die "use --build-dir with this runner so it can lock the selected build tree"
       ;;
+    --build-and-test|--build-and-test=*|-S|-S?*|--script|--script=*|-SP|-SP?*|--script-new-process|--script-new-process=*|-D|-D?*|--dashboard|--dashboard=*|-M|-M?*|--test-model|--test-model=*|-T|-T?*|--test-action|--test-action=*)
+      ava_parallel_die "CTest build/script/dashboard modes are unsupported because they can bypass the locked build tree"
+      ;;
     --help|-h)
       usage
       exit 0
       ;;
     --)
-      shift
-      ctest_args+=("$@")
-      break
+      ava_parallel_die "-- is unsupported because post-boundary CTest options could bypass the locked build tree"
       ;;
     *)
       ctest_args+=("$1")

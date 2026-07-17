@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 IFS=$'\n\t'
-umask 077
 
 readonly SOURCE_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 # shellcheck source=parallel-runner-common.sh
@@ -60,7 +59,7 @@ while (($# > 0)); do
       ;;
     --)
       shift
-      build_args+=("$@")
+      build_args+=(-- "$@")
       break
       ;;
     *)

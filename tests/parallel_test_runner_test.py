@@ -202,8 +202,22 @@ Path(os.environ["FAKE_CTEST_ARGS"]).write_text(json.dumps(sys.argv[1:]), encodin
     )
     require(build_and_test.returncode == 2, "test runner rejects CTest build-and-test mode")
     require(
-        "build/script/dashboard modes" in build_and_test.stderr and not invocation_file.exists(),
+        "unsupported" in build_and_test.stderr and not invocation_file.exists(),
         "CTest build-and-test rejection happens before CTest starts",
+    )
+
+    collect_instrumentation = run_runner(
+        script,
+        build_dir,
+        fake_ctest,
+        "--collect-instrumentation",
+        str(other_build_dir),
+        env_extra=common_env,
+    )
+    require(collect_instrumentation.returncode == 2, "test runner rejects CTest instrumentation collection")
+    require(
+        "instrumentation modes" in collect_instrumentation.stderr and not invocation_file.exists(),
+        "CTest instrumentation rejection happens before CTest starts",
     )
 
     build_invocation_file = root / "cmake-args.json"

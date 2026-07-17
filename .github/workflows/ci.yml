@@ -61,7 +61,7 @@ jobs:
           cmake -S . -B build -G Ninja -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
       - name: Build
-        run: cmake --build build --parallel
+        run: scripts/build.sh --build-dir build
 
       - name: Test
         run: scripts/run-tests.sh --build-dir build
@@ -91,7 +91,7 @@ jobs:
         run: cmake --preset tsan -G Ninja
 
       - name: Build focused test target
-        run: cmake --build --preset tsan --target ava_tests --parallel
+        run: scripts/build.sh --build-dir build-tsan --jobs 2 --target ava_tests
 
       - name: Test focused coordinator and ACP peer races
         run: ctest --preset tsan
@@ -121,7 +121,7 @@ jobs:
         run: cmake -S . -B build-sanitize -G Ninja -DAVA_BUILD_TESTS=ON -DAVA_ENABLE_SANITIZERS=ON
 
       - name: Build
-        run: cmake --build build-sanitize --parallel
+        run: scripts/build.sh --build-dir build-sanitize --jobs 2
 
       - name: Test
         run: scripts/run-tests.sh --build-dir build-sanitize --jobs 2
@@ -160,7 +160,7 @@ jobs:
         run: cmake -S . -B build-sdk -G Ninja -DAVA_BUILD_TESTS=ON -DAVA_REQUIRE_ACP_SDK_INTEROP=ON -DCMAKE_BUILD_TYPE=Release
 
       - name: Build AVA and test helpers
-        run: cmake --build build-sdk --target ava ava_tests ava_fake_provider_server ava_fake_mcp_server --parallel
+        run: scripts/build.sh --build-dir build-sdk --target ava ava_tests ava_fake_provider_server ava_fake_mcp_server
 
       - name: Run focused credential-free ACP tests
         run: |
@@ -212,7 +212,7 @@ jobs:
         run: cmake -S . -B build-acpx -G Ninja -DAVA_BUILD_TESTS=ON -DAVA_ENABLE_ACPX_INTEROP=ON -DCMAKE_BUILD_TYPE=Release
 
       - name: Build AVA and fake provider
-        run: cmake --build build-acpx --target ava ava_fake_provider_server --parallel
+        run: scripts/build.sh --build-dir build-acpx --target ava ava_fake_provider_server
 
       - name: Run opt-in credential-free acpx and manifest tests
         run: |

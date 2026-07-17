@@ -27,12 +27,86 @@ PROCESS_TERM_GRACE = 0.25
 PROCESS_KILL_GRACE = 1.0
 PROCESS_REAP_DEADLINE = 1.0
 PROCESS_DRAIN_DEADLINE = 1.0
+TERMINATION_SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
 # A process is registered only after start_new_session=True created and we
 # verified its private session/process group.  The group ID is then safe to
 # retain after its leader exits: it cannot be reused while descendants remain.
 VERIFIED_OWNED_GROUPS: dict[subprocess.Popen[str], int] = {}
 ASYNC_PACKAGE_PROCESSES: set[subprocess.Popen[str]] = set()
+_termination_deferral_depth = 0
+_deferred_termination_signal: int | None = None
+
+
+class PackageTestTermination(BaseException):
+    def __init__(self, signal_number: int) -> None:
+        super().__init__(f"package test interrupted by signal {signal_number}")
+        self.signal_number = signal_number
+
+
+class PackageTestTerminationHandlers:
+    """Turn terminal signals into exceptions while the harness owns processes."""
+
+    def __init__(self) -> None:
+        self.previous: dict[int, object] = {}
+
+    def __enter__(self) -> PackageTestTerminationHandlers:
+        global _deferred_termination_signal
+        _deferred_termination_signal = None
+        for signal_number in TERMINATION_SIGNALS:
+            self.previous[signal_number] = signal.getsignal(signal_number)
+            signal.signal(signal_number, handle_package_test_termination)
+        return self
+
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> bool:
+        global _deferred_termination_signal
+        for signal_number, previous in self.previous.items():
+            signal.signal(signal_number, previous)
+        _deferred_termination_signal = None
+        return False
+
+
+class PackageTestTerminationDeferral:
+    """Defer cancellation until an owned process is registered or cleaned up."""
+
+    def __enter__(self) -> PackageTestTerminationDeferral:
+        global _termination_deferral_depth
+        _termination_deferral_depth += 1
+        return self
+
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> bool:
+        global _termination_deferral_depth
+        _termination_deferral_depth -= 1
+        if _termination_deferral_depth < 0:
+            raise RuntimeError("package-test termination deferral underflow")
+        return False
+
+
+def handle_package_test_termination(signal_number: int, _frame: object) -> None:
+    global _deferred_termination_signal
+    if _termination_deferral_depth:
+        if _deferred_termination_signal is None:
+            _deferred_termination_signal = signal_number
+        return
+    raise PackageTestTermination(signal_number)
+
+
+def raise_deferred_package_test_termination() -> None:
+    global _deferred_termination_signal
+    if _termination_deferral_depth or _deferred_termination_signal is None:
+        return
+    signal_number = _deferred_termination_signal
+    _deferred_termination_signal = None
+    raise PackageTestTermination(signal_number)
+
+
+def reraise_package_test_termination(cancellation: PackageTestTermination) -> None:
+    # The handler scope has restored the caller's handlers.  Redeliver with the
+    # default disposition so a supervising process observes the conventional
+    # negative signal status instead of a Python traceback or a leaked group.
+    signal.signal(cancellation.signal_number, signal.SIG_DFL)
+    os.kill(os.getpid(), cancellation.signal_number)
+    raise SystemExit(128 + cancellation.signal_number)
 
 
 class ProcessCleanupError(RuntimeError):
@@ -68,27 +142,32 @@ def close_process_pipes(process: subprocess.Popen[str]) -> None:
 
 
 def start_owned_process(command: list[str], *, env: dict[str, str]) -> subprocess.Popen[str]:
-    process = subprocess.Popen(
-        command,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-        start_new_session=True,
-    )
-    pgid = process.pid
-    try:
-        if pgid <= 0 or pgid == os.getpgrp():
-            raise RuntimeError(f"refusing to manage unsafe package process group {pgid}")
-        if os.getpgid(process.pid) != pgid:
-            raise RuntimeError(f"package process did not create its own process group: {pgid}")
-    except BaseException:
-        # Do not signal a group which was not verified as ours.  This branch is
-        # unreachable for a successful POSIX start_new_session=True invocation,
-        # but closing our pipe ends still keeps a failed launch finite.
-        close_process_pipes(process)
-        raise
-    VERIFIED_OWNED_GROUPS[process] = pgid
+    # Python dispatches signal handlers between bytecodes.  Do not let one
+    # interrupt the launch-to-registration sequence: a deferred cancellation
+    # is raised immediately after the verified group has been recorded.
+    with PackageTestTerminationDeferral():
+        process = subprocess.Popen(
+            command,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            start_new_session=True,
+        )
+        pgid = process.pid
+        try:
+            if pgid <= 0 or pgid == os.getpgrp():
+                raise RuntimeError(f"refusing to manage unsafe package process group {pgid}")
+            if os.getpgid(process.pid) != pgid:
+                raise RuntimeError(f"package process did not create its own process group: {pgid}")
+        except BaseException:
+            # Do not signal a group which was not verified as ours.  This branch is
+            # unreachable for a successful POSIX start_new_session=True invocation,
+            # but closing our pipe ends still keeps a failed launch finite.
+            close_process_pipes(process)
+            raise
+        VERIFIED_OWNED_GROUPS[process] = pgid
+    raise_deferred_package_test_termination()
     return process
 
 
@@ -170,30 +249,34 @@ def cleanup_owned_process(
     """Terminate one verified group and finish every local cleanup step finitely."""
     errors: list[str] = []
     try:
-        try:
-            pgid = owned_group_id(process)
-            if owned_group_alive(pgid):
-                signal_owned_group(pgid, signal.SIGTERM)
-                if not wait_for_owned_group_exit(process, pgid, PROCESS_TERM_GRACE):
-                    signal_owned_group(pgid, signal.SIGKILL)
-                    if not wait_for_owned_group_exit(process, pgid, PROCESS_KILL_GRACE):
-                        errors.append(f"owned package process group {pgid} survived SIGKILL")
-        except RuntimeError as exc:
-            errors.append(str(exc))
-
-        if process.poll() is None:
+        # A second terminal signal must not interrupt TERM→KILL, reaping, or
+        # pipe draining and strand the next verified group in the registry.
+        with PackageTestTerminationDeferral():
             try:
-                process.wait(timeout=PROCESS_REAP_DEADLINE)
-            except subprocess.TimeoutExpired:
-                errors.append(f"package process leader did not reap within {PROCESS_REAP_DEADLINE:.2f}s")
+                pgid = owned_group_id(process)
+                if owned_group_alive(pgid):
+                    signal_owned_group(pgid, signal.SIGTERM)
+                    if not wait_for_owned_group_exit(process, pgid, PROCESS_TERM_GRACE):
+                        signal_owned_group(pgid, signal.SIGKILL)
+                        if not wait_for_owned_group_exit(process, pgid, PROCESS_KILL_GRACE):
+                            errors.append(f"owned package process group {pgid} survived SIGKILL")
+            except RuntimeError as exc:
+                errors.append(str(exc))
 
-        if not output_already_drained:
-            stdout, stderr = drain_process_output(process, stdout, stderr, errors)
-        close_process_pipes(process)
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=PROCESS_REAP_DEADLINE)
+                except subprocess.TimeoutExpired:
+                    errors.append(f"package process leader did not reap within {PROCESS_REAP_DEADLINE:.2f}s")
+
+            if not output_already_drained:
+                stdout, stderr = drain_process_output(process, stdout, stderr, errors)
+            close_process_pipes(process)
     finally:
         VERIFIED_OWNED_GROUPS.pop(process, None)
         ASYNC_PACKAGE_PROCESSES.discard(process)
 
+    raise_deferred_package_test_termination()
     if errors:
         raise ProcessCleanupError("; ".join(errors), stdout, stderr)
     return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
@@ -307,13 +390,29 @@ def wait_for_path(path: pathlib.Path, process: subprocess.Popen[str], *, timeout
 
 def cleanup_async_package_processes() -> None:
     errors: list[str] = []
-    for process in tuple(ASYNC_PACKAGE_PROCESSES):
-        try:
-            cleanup_owned_process(process)
-        except ProcessCleanupError as exc:
-            errors.append(f"{exc}\nstdout:\n{exc.stdout}\nstderr:\n{exc.stderr}")
+    with PackageTestTerminationDeferral():
+        for process in tuple(ASYNC_PACKAGE_PROCESSES):
+            try:
+                cleanup_owned_process(process)
+            except ProcessCleanupError as exc:
+                errors.append(f"{exc}\nstdout:\n{exc.stdout}\nstderr:\n{exc.stderr}")
+    raise_deferred_package_test_termination()
     if errors:
         raise RuntimeError("abandoned package-process cleanup failed:\n" + "\n".join(errors))
+
+
+def cleanup_verified_owned_processes() -> None:
+    """Clean both synchronous and asynchronous groups left in the registry."""
+    errors: list[str] = []
+    with PackageTestTerminationDeferral():
+        for process in tuple(VERIFIED_OWNED_GROUPS):
+            try:
+                cleanup_owned_process(process)
+            except ProcessCleanupError as exc:
+                errors.append(f"{exc}\nstdout:\n{exc.stdout}\nstderr:\n{exc.stderr}")
+    raise_deferred_package_test_termination()
+    if errors:
+        raise RuntimeError("verified package-process cleanup failed:\n" + "\n".join(errors))
 
 
 def parse_path(output: str, label: str) -> pathlib.Path:
@@ -450,6 +549,29 @@ def assert_cleanup_bounded(start_time: float, context: str) -> None:
         raise RuntimeError(f"{context}: cleanup exceeded its finite {maximum:.2f}s bound ({elapsed:.2f}s)")
 
 
+def wait_for_group_disappearance(pgid: int, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while True:
+        if not owned_group_alive(pgid):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(PROCESS_POLL_INTERVAL, remaining))
+
+
+def cleanup_signal_regression_group(pgid: int) -> None:
+    """Failure-only backstop for the subprocess regression's published group."""
+    with PackageTestTerminationDeferral():
+        if owned_group_alive(pgid):
+            signal_owned_group(pgid, signal.SIGTERM)
+            if not wait_for_group_disappearance(pgid, PROCESS_TERM_GRACE):
+                signal_owned_group(pgid, signal.SIGKILL)
+                if not wait_for_group_disappearance(pgid, PROCESS_KILL_GRACE):
+                    raise RuntimeError(f"signal-cleanup regression group {pgid} survived SIGKILL")
+    raise_deferred_package_test_termination()
+
+
 def run_process_cleanup_regressions(root: pathlib.Path, env: dict[str, str]) -> None:
     """Prove all package-process paths kill pipe-holding descendants finitely."""
     regression_root = root / "process-cleanup-regressions"
@@ -532,6 +654,94 @@ def run_process_cleanup_regressions(root: pathlib.Path, env: dict[str, str]) -> 
     assert_owned_group_disappeared(
         int(abandoned_leader.read_text(encoding="utf-8")), "exceptional package-process abandonment"
     )
+
+    run_harness_signal_cleanup_regression(regression_root, fixture, env)
+
+
+def run_harness_signal_cleanup_regression(
+    regression_root: pathlib.Path,
+    fixture: pathlib.Path,
+    env: dict[str, str],
+) -> None:
+    """SIGTERM a harness whose child keeps both of its inherited pipes open."""
+    harness_ready = regression_root / "signal-harness.ready"
+    descendant_ready = regression_root / "signal-descendant.ready"
+    leader = regression_root / "signal-descendant.leader"
+    harness = start(
+        [
+            sys.executable,
+            str(pathlib.Path(__file__).resolve()),
+            "--script",
+            str(pathlib.Path(__file__).resolve()),
+            "--ava",
+            str(fixture),
+            "--fake-provider",
+            str(fixture),
+            "--repo",
+            str(regression_root),
+            "--root",
+            str(regression_root),
+            "--signal-cleanup-regression-child",
+            "--signal-cleanup-fixture",
+            str(fixture),
+            "--signal-cleanup-descendant-ready",
+            str(descendant_ready),
+            "--signal-cleanup-leader",
+            str(leader),
+            "--signal-cleanup-ready",
+            str(harness_ready),
+        ],
+        env=env,
+    )
+    descendant_group: int | None = None
+    try:
+        wait_for_path(harness_ready, harness, timeout=5.0)
+        if not descendant_ready.is_file() or not leader.is_file():
+            raise RuntimeError("signal-cleanup harness did not publish descendant condition markers")
+        descendant_group = int(leader.read_text(encoding="utf-8"))
+
+        started = time.monotonic()
+        os.kill(harness.pid, signal.SIGTERM)
+        result = finish(
+            harness,
+            timeout=PROCESS_TERM_GRACE + PROCESS_KILL_GRACE + PROCESS_REAP_DEADLINE + PROCESS_DRAIN_DEADLINE,
+        )
+        if result.returncode != -signal.SIGTERM:
+            raise RuntimeError(
+                "SIGTERM-cleaned package harness did not preserve signal status "
+                f"(return code {result.returncode})\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            )
+        assert_cleanup_bounded(started, "SIGTERM-cleaned package harness")
+        assert_owned_group_disappeared(descendant_group, "SIGTERM-cleaned package harness")
+    finally:
+        if harness in VERIFIED_OWNED_GROUPS:
+            cleanup_owned_process(harness)
+        if descendant_group is not None:
+            cleanup_signal_regression_group(descendant_group)
+
+
+def run_signal_cleanup_regression_child(args: argparse.Namespace) -> int:
+    fixture = args.signal_cleanup_fixture
+    descendant_ready = args.signal_cleanup_descendant_ready
+    leader = args.signal_cleanup_leader
+    ready = args.signal_cleanup_ready
+    if fixture is None or descendant_ready is None or leader is None or ready is None:
+        raise RuntimeError("signal-cleanup regression child is missing its synchronization paths")
+
+    with PackageTestTerminationHandlers():
+        try:
+            process = start(
+                [sys.executable, str(fixture), "stall", str(descendant_ready), str(leader)],
+                env=os.environ.copy(),
+            )
+            wait_for_path(descendant_ready, process, timeout=5.0)
+            if owned_group_id(process) != int(leader.read_text(encoding="utf-8")):
+                raise RuntimeError("signal-cleanup child did not verify the fixture process group")
+            ready.write_text("ready\n", encoding="utf-8")
+            signal.pause()
+            raise RuntimeError("signal-cleanup child resumed without a terminal signal")
+        finally:
+            cleanup_verified_owned_processes()
 
 
 def write_ava_fixture(path: pathlib.Path, version: str) -> None:
@@ -1876,21 +2086,47 @@ raise SystemExit(91)
 
 def cleanup_main_resources(workspace: PackageTestWorkspace) -> None:
     errors: list[str] = []
-    try:
-        cleanup_async_package_processes()
-    except RuntimeError as exc:
-        errors.append(str(exc))
-    cleanup_error = workspace.cleanup()
-    if cleanup_error is not None:
-        errors.append(f"package-test workspace cleanup failed: {cleanup_error}")
-    if not errors:
-        return
-    message = "\n".join(errors)
-    active_error = sys.exc_info()[1]
-    if active_error is not None:
-        active_error.add_note(message)
-        return
-    raise RuntimeError(message)
+    cleanup_failure: RuntimeError | None = None
+    # Preserve the descriptor-anchored workspace cleanup even when a second
+    # termination request arrives while owned groups are being drained.
+    with PackageTestTerminationDeferral():
+        try:
+            cleanup_verified_owned_processes()
+        except RuntimeError as exc:
+            errors.append(str(exc))
+        cleanup_error = workspace.cleanup()
+        if cleanup_error is not None:
+            errors.append(f"package-test workspace cleanup failed: {cleanup_error}")
+
+    if errors:
+        message = "\n".join(errors)
+        active_error = sys.exc_info()[1]
+        if active_error is not None:
+            active_error.add_note(message)
+        else:
+            cleanup_failure = RuntimeError(message)
+    raise_deferred_package_test_termination()
+    if cleanup_failure is not None:
+        raise cleanup_failure
+
+
+def run_main_package_tests(args: argparse.Namespace) -> int:
+    if platform.system() != "Linux":
+        print("skipping Linux package tests on non-Linux host")
+        return 77
+
+    workspace: PackageTestWorkspace | None = None
+    with PackageTestTerminationHandlers():
+        try:
+            repo = args.repo.resolve()
+            run_workspace_safety_regressions(repo)
+            workspace = prepare_workspace(args.root, repo)
+            return run_package_tests(args, workspace, repo)
+        finally:
+            if workspace is None:
+                cleanup_verified_owned_processes()
+            else:
+                cleanup_main_resources(workspace)
 
 
 def main() -> int:
@@ -1900,19 +2136,19 @@ def main() -> int:
     parser.add_argument("--fake-provider", type=pathlib.Path, required=True)
     parser.add_argument("--repo", type=pathlib.Path, required=True)
     parser.add_argument("--root", type=pathlib.Path, required=True)
+    parser.add_argument("--signal-cleanup-regression-child", action="store_true")
+    parser.add_argument("--signal-cleanup-fixture", type=pathlib.Path)
+    parser.add_argument("--signal-cleanup-descendant-ready", type=pathlib.Path)
+    parser.add_argument("--signal-cleanup-leader", type=pathlib.Path)
+    parser.add_argument("--signal-cleanup-ready", type=pathlib.Path)
     args = parser.parse_args()
 
-    if platform.system() != "Linux":
-        print("skipping Linux package tests on non-Linux host")
-        return 77
-
-    repo = args.repo.resolve()
-    run_workspace_safety_regressions(repo)
-    workspace = prepare_workspace(args.root, repo)
     try:
-        return run_package_tests(args, workspace, repo)
-    finally:
-        cleanup_main_resources(workspace)
+        if args.signal_cleanup_regression_child:
+            return run_signal_cleanup_regression_child(args)
+        return run_main_package_tests(args)
+    except PackageTestTermination as cancellation:
+        reraise_package_test_termination(cancellation)
 
 
 if __name__ == "__main__":

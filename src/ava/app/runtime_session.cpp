@@ -15,6 +15,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "debug.h"
 
 namespace ava::app {
 namespace {

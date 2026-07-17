@@ -2,7 +2,6 @@
 
 #include "ava/debug/print_members_on.h"
 #include "ava/config/xdg_paths.h"
-#include "ava/debug/print_members_on.h"
 #include "ava/provider/provider.h"
 #include "ava/core/result.h"
 

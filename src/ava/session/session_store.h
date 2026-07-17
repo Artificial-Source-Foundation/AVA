@@ -3,7 +3,6 @@
 #include "ava/debug/print_members_on.h"
 #include "ava/observability/run_observer.h"
 #include "ava/agent/mode.h"
-#include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
 #include <filesystem>

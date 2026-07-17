@@ -144,7 +144,8 @@ class SubprocessLspClient final : public DiagnosticsProvider {
 
   ServerConfig config_;
   pid_t pid_ = -1;
-  bool can_signal_group_ = false;
+  // Set only after the parent verifies that this child owns a distinct group.
+  pid_t owned_pgid_ = -1;
   int stdin_fd_ = -1;
   int stdout_fd_ = -1;
   int next_id_ = 1;

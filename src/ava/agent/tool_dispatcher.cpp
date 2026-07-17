@@ -56,15 +56,54 @@ bool is_lsp_diagnostics_metadata(ToolMetadata const& tool)
          tool.name == std::string_view("lsp_references");
 }
 
+bool is_safe_lsp_timeout_ms(std::string_view value)
+{
+  if (value.empty() || value.size() > 5)
+    return false;
+  int timeout_ms = 0;
+  for (char const ch : value)
+  {
+    if (ch < '0' || ch > '9')
+      return false;
+    timeout_ms = timeout_ms * 10 + (ch - '0');
+  }
+  return timeout_ms >= 100 && timeout_ms <= 30000;
+}
+
+bool is_safe_lsp_phase(std::string_view value)
+{
+  return value == "startup" || value == "request";
+}
+
+bool is_known_lsp_method(std::string_view value)
+{
+  return value == "initialize" || value == "initialized" || value == "textDocument/didOpen" || value == "textDocument/diagnostic" ||
+         value == "textDocument/documentSymbol" || value == "workspace/symbol" || value == "textDocument/definition" || value == "textDocument/references";
+}
+
+void append_safe_lsp_error_context(ava::core::Error& redacted, ava::core::Error const& error)
+{
+  for (auto const& context : error.context())
+  {
+    if ((context.key == "timeout_ms" && is_safe_lsp_timeout_ms(context.value)) || (context.key == "phase" && is_safe_lsp_phase(context.value)) ||
+        (context.key == "method" && is_known_lsp_method(context.value)))
+    {
+      redacted.with_context(context.key, context.value);
+    }
+  }
+}
+
 ToolDispatchResult lsp_error_result(ProviderToolCall const& call, ava::core::Error const& error)
 {
   if (error.message().find("canceled") != std::string::npos || error.message().find("cancelled") != std::string::npos)
   {
     auto redacted = ava::core::Error(error.category(), "LSP query canceled");
+    append_safe_lsp_error_context(redacted, error);
     redacted.with_context("tool", call.name);
     return tool_error_result(call, redacted);
   }
   auto redacted = ava::core::Error(error.category(), "LSP query failed");
+  append_safe_lsp_error_context(redacted, error);
   redacted.with_context("tool", call.name);
   return tool_error_result(call, redacted);
 }

@@ -286,13 +286,13 @@ Rules:
 - Treat permission as read-like: deny secret paths, ask outside the workspace, and allow workspace files by default.
 - Provider-visible input includes only the file path. Server command argv is local configuration/test harness state and is not model-controlled.
 - Advertise the provider schema only when an explicit LSP provider config is present; otherwise the tool is not available to model calls.
-- Load LSP server config from AVA-owned `lsp.json` files (`$AVA_CONFIG_DIR/lsp.json` and workspace `.ava/lsp.json`). The supported schema is `version:1` plus a bounded `servers[]` list with `id`, explicit `argv[]`, optional `file_extensions[]`, optional `language_id`, and `timeout_ms`.
+- Load LSP server config from AVA-owned `lsp.json` files (`$AVA_CONFIG_DIR/lsp.json` and workspace `.ava/lsp.json`). The supported schema is `version:1` plus a bounded `servers[]` list with `id`, explicit `argv[]`, optional `file_extensions[]`, optional `language_id`, request `timeout_ms`, and optional `startup_timeout_ms` (which falls back to the parsed request timeout).
 - Validate unique server ids, argv strings, extension filters, language ids, config size, regular-file status, strict integer fields, and timeout bounds before exposing LSP schemas. Config symlinks, mixed-type arrays, wrong known-field types, duplicate ids, and control-byte arguments are rejected.
 - Start the selected server lazily after the tool's `lsp.query` permission and `lsp.server.launch` permission have already been granted, with an explicit argv vector and workspace root; do not use a shell and do not launch servers during schema discovery.
 - Use JSON-RPC `Content-Length` framing, initialize the server, then request the matching LSP method: `textDocument/diagnostic`, `textDocument/documentSymbol`, `workspace/symbol`, `textDocument/definition`, or `textDocument/references`.
 - Before position-based definition/reference requests, send a bounded full-text `textDocument/didOpen` notification for the on-disk workspace file. Unsaved buffers and incremental sync remain deferred.
 - Percent-encode file URI path bytes while preserving real path separators, so literal encoded separators in filenames cannot cross the permission boundary.
-- Bound request timeouts and kill the LSP child process group on timeout or client destruction.
+- Bound startup and request timeouts independently, contain each LSP subprocess in a parent-verified process group before exec, and tear down the verified group on timeout, cancellation, leader exit, or client destruction.
 - Return bounded structured diagnostics, symbols, or locations. Symbol, definition, and reference results normalize in-workspace file URIs to workspace-relative paths and include stable LSP ranges.
 - Redact local server command and workspace details from provider-visible LSP failures; keep detailed process context for local diagnostics only.
 

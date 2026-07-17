@@ -34,6 +34,7 @@ struct ConfiguredServer
   std::vector<std::string> argv;
   std::vector<std::string> file_extensions;
   std::string language_id = "plaintext";
+  std::chrono::milliseconds startup_timeout{3000};
   std::chrono::milliseconds request_timeout{3000};
   bool project_scoped = false;
   std::filesystem::path source_path;
@@ -476,6 +477,16 @@ ava::core::Result<void> parse_config(std::filesystem::path const& path, std::str
       return std::unexpected(config_error(ava::core::ErrorCategory::InvalidArgument, "LSP server timeout is outside supported limits", path));
     }
 
+    auto const startup_timeout_value = strict_integer_field(server_json, "startup_timeout_ms", *timeout_value);
+    if (!startup_timeout_value)
+    {
+      return std::unexpected(config_error(ava::core::ErrorCategory::InvalidArgument, "LSP server startup_timeout_ms must be an integer", path));
+    }
+    if (*startup_timeout_value < kMinTimeoutMs || *startup_timeout_value > kMaxTimeoutMs)
+    {
+      return std::unexpected(config_error(ava::core::ErrorCategory::InvalidArgument, "LSP server startup timeout is outside supported limits", path));
+    }
+
     if (!project_scoped)
     {
       auto relative_arg = workspace_relative_process_arg(*argv);
@@ -498,6 +509,7 @@ ava::core::Result<void> parse_config(std::filesystem::path const& path, std::str
                                        .argv = std::move(*argv),
                                        .file_extensions = std::move(extensions),
                                        .language_id = std::move(language_id),
+                                       .startup_timeout = std::chrono::milliseconds(*startup_timeout_value),
                                        .request_timeout = std::chrono::milliseconds(*timeout_value),
                                        .project_scoped = project_scoped,
                                        .source_path = path});
@@ -604,6 +616,7 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
     auto client = SubprocessLspClient::start(ServerConfig{.argv = server.argv,
                                                           .workspace_root = workspace_root_,
                                                           .process_cwd = process_cwd,
+                                                          .startup_timeout = server.startup_timeout,
                                                           .request_timeout = server.request_timeout,
                                                           .language_id = server.language_id},
                                              cancel_requested);

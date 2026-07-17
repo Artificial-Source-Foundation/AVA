@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 
+#include <signal.h>
 #include <unistd.h>
 
 namespace {
@@ -29,12 +30,16 @@ enum class Mode
   HugeHeader,
   MalformedSymbols,
   CwdMarker,
+  TermIgnoringDescendantDiagnostics,
+  LeaderExitsFirstDiagnostics,
+  LeaderExitsAfterMarkerDiagnostics,
 };
 
 struct Options
 {
   Mode mode = Mode::Normal;
   std::string marker_path;
+  std::string descendant_marker_path;
   std::string launch_marker_path;
 };
 
@@ -141,6 +146,24 @@ Options parse_options(int argc, char** argv)
       options.mode = Mode::CwdMarker;
       options.marker_path = argv[++index];
     }
+    if (std::strcmp(argv[index], "--term-ignoring-descendant-diagnostics-markers") == 0 && index + 2 < argc)
+    {
+      options.mode = Mode::TermIgnoringDescendantDiagnostics;
+      options.marker_path = argv[++index];
+      options.descendant_marker_path = argv[++index];
+    }
+    if (std::strcmp(argv[index], "--leader-exits-first-diagnostics-markers") == 0 && index + 2 < argc)
+    {
+      options.mode = Mode::LeaderExitsFirstDiagnostics;
+      options.marker_path = argv[++index];
+      options.descendant_marker_path = argv[++index];
+    }
+    if (std::strcmp(argv[index], "--leader-exits-after-marker-diagnostics-markers") == 0 && index + 2 < argc)
+    {
+      options.mode = Mode::LeaderExitsAfterMarkerDiagnostics;
+      options.marker_path = argv[++index];
+      options.descendant_marker_path = argv[++index];
+    }
   }
   return options;
 }
@@ -150,7 +173,25 @@ void write_process_group_marker(std::string const& path)
   if (path.empty())
     return;
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
-  file << static_cast<long long>(getpgrp()) << '\n';
+  file << static_cast<long long>(getpid()) << ' ' << static_cast<long long>(getpgrp()) << '\n';
+}
+
+void spawn_term_ignoring_descendant(Options const& options)
+{
+  write_process_group_marker(options.marker_path);
+  pid_t const descendant = fork();
+  if (descendant < 0)
+    return;
+  if (descendant == 0)
+  {
+    struct sigaction ignored{};
+    ignored.sa_handler = SIG_IGN;
+    sigemptyset(&ignored.sa_mask);
+    sigaction(SIGTERM, &ignored, nullptr);
+    write_process_group_marker(options.descendant_marker_path);
+    for (int attempt = 0; attempt < 50; ++attempt) usleep(100000);
+    _exit(0);
+  }
 }
 
 void write_launch_marker(std::string const& path)
@@ -207,6 +248,22 @@ void respond_diagnostics(long long id, Options const& options, std::string_view 
   }
   if (mode == Mode::CrashDiagnostics)
     std::exit(23);
+  if (mode == Mode::TermIgnoringDescendantDiagnostics)
+  {
+    spawn_term_ignoring_descendant(options);
+    return;
+  }
+  if (mode == Mode::LeaderExitsFirstDiagnostics)
+  {
+    spawn_term_ignoring_descendant(options);
+    _exit(23);
+  }
+  if (mode == Mode::LeaderExitsAfterMarkerDiagnostics)
+  {
+    spawn_term_ignoring_descendant(options);
+    usleep(500000);
+    _exit(23);
+  }
   if (mode == Mode::SleepDiagnostics || mode == Mode::SleepDiagnosticsMarker)
   {
     write_process_group_marker(options.marker_path);

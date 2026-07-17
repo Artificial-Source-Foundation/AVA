@@ -19,6 +19,7 @@
 #include <vector>
 #include <signal.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 
 namespace {
 
@@ -65,6 +66,34 @@ std::optional<pid_t> read_pid_file_for_test(std::filesystem::path const& path)
   return static_cast<pid_t>(value);
 }
 
+struct ProcessMarker
+{
+  pid_t pid = -1;
+  pid_t pgid = -1;
+};
+
+std::optional<ProcessMarker> read_process_marker_for_test(std::filesystem::path const& path)
+{
+  std::ifstream file(path, std::ios::binary);
+  long long pid = 0;
+  long long pgid = 0;
+  file >> pid >> pgid;
+  if (!file || pid <= 1 || pgid <= 1)
+    return std::nullopt;
+  return ProcessMarker{.pid = static_cast<pid_t>(pid), .pgid = static_cast<pid_t>(pgid)};
+}
+
+std::optional<ProcessMarker> wait_for_process_marker_for_test(std::filesystem::path const& path)
+{
+  for (int index = 0; index < 100; ++index)
+  {
+    if (auto marker = read_process_marker_for_test(path))
+      return marker;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  return read_process_marker_for_test(path);
+}
+
 bool process_group_exists(pid_t pgid)
 {
   errno = 0;
@@ -83,6 +112,27 @@ bool wait_for_process_group_exit(pid_t pgid)
   }
   return !process_group_exists(pgid);
 }
+
+class TestOwnedProcessGroupCleanup final
+{
+ public:
+  void arm(pid_t pgid)
+  {
+    if (pgid > 1 && pgid != getpgrp())
+      pgid_ = pgid;
+  }
+
+  ~TestOwnedProcessGroupCleanup()
+  {
+    if (pgid_ <= 1 || pgid_ == getpgrp())
+      return;
+    kill(-pgid_, SIGKILL);
+    wait_for_process_group_exit(pgid_);
+  }
+
+ private:
+  pid_t pgid_ = -1;
+};
 
 bool file_is_not_created(std::filesystem::path const& path)
 {
@@ -107,6 +157,27 @@ class ManyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider
       diagnostics.push_back(ava::lsp::Diagnostic{.severity = 2, .message = std::string(1024, 'x'), .line = index, .column = 1, .code = "MANY"});
     }
     return diagnostics;
+  }
+};
+
+class ContextualLspFailureProvider final : public ava::lsp::DiagnosticsProvider
+{
+ public:
+  [[nodiscard]] ava::core::Result<std::vector<ava::lsp::Diagnostic>> diagnostics(std::filesystem::path const&, ava::lsp::CancelCallback = nullptr) override
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "synthetic LSP failure");
+    error.with_context("timeout_ms", "250");
+    error.with_context("phase", "request");
+    error.with_context("method", "textDocument/diagnostic");
+    error.with_context("command", "sensitive-command");
+    error.with_context("workspace", "/sensitive-workspace");
+    error.with_context("path", "/sensitive-path");
+    error.with_context("cause", "sensitive-cause");
+    error.with_context("status", "exit 23");
+    error.with_context("timeout_ms", "not-a-timeout");
+    error.with_context("phase", "unrecognized-phase");
+    error.with_context("method", "unrecognized/method");
+    return std::unexpected(std::move(error));
   }
 };
 
@@ -188,6 +259,42 @@ void test_lsp_manager_fake_server_symbols_and_definition()
   auto references = (*client)->references(workspace / "main.cpp", 0, 4);
   expect(references && references->size() == 2 && (*references)[0].path == workspace / "main.cpp" && (*references)[1].range.start_column == 13,
          "LSP manager sends didOpen before references and parses locations");
+}
+
+void test_lsp_manager_closed_standard_fds()
+{
+  auto const workspace = make_lsp_workspace("lsp-closed-standard-fds");
+  pid_t const test_child = fork();
+  if (test_child == 0)
+  {
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+    auto client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
+        .argv = fake_lsp_argv(),
+        .workspace_root = workspace,
+        .process_cwd = workspace,
+        .request_timeout = std::chrono::milliseconds(3000),
+    });
+    if (!client)
+      _exit(1);
+    auto diagnostics = (*client)->diagnostics(workspace / "main.cpp");
+    _exit(diagnostics && diagnostics->size() == 1 && (*diagnostics)[0].message == "fake diagnostic from LSP" ? 0 : 1);
+  }
+  if (test_child < 0)
+  {
+    expect(false, "LSP closed-standard-fds test forks an isolated helper");
+    return;
+  }
+
+  int status = 0;
+  pid_t waited = -1;
+  do
+  {
+    waited = waitpid(test_child, &status, 0);
+  } while (waited < 0 && errno == EINTR);
+  expect(waited == test_child && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+         "LSP initializes and requests diagnostics when an isolated helper starts with fds 0, 1, and 2 closed");
 }
 
 void test_lsp_manager_malformed_symbols_error()
@@ -277,6 +384,10 @@ void test_lsp_manager_timeout_error()
 
 void test_lsp_manager_startup_timeout_and_validation()
 {
+  ava::lsp::ServerConfig const direct_defaults;
+  expect(direct_defaults.startup_timeout == std::chrono::milliseconds(10000) && direct_defaults.request_timeout == std::chrono::milliseconds(3000),
+         "direct LSP ServerConfig callers retain independent startup and request defaults");
+
   auto const timeout_workspace = make_lsp_workspace("lsp-startup-timeout");
   auto const timeout_pgid_file = timeout_workspace / "lsp-startup-timeout-pgid.txt";
   auto timed_out = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
@@ -319,6 +430,136 @@ void test_lsp_manager_startup_timeout_and_validation()
   expect(!invalid_request && request_detail.find("request timeout") != std::string::npos &&
              request_detail.find("field: request_timeout") != std::string::npos && file_is_not_created(request_marker),
          "LSP rejects invalid request timeout bounds before launching a server");
+}
+
+void test_lsp_manager_containment_cleanup()
+{
+  auto const timeout_workspace = make_lsp_workspace("lsp-term-ignoring-descendant-timeout");
+  auto const timeout_leader_marker = timeout_workspace / "leader-marker.txt";
+  auto const timeout_descendant_marker = timeout_workspace / "descendant-marker.txt";
+  TestOwnedProcessGroupCleanup timeout_cleanup;
+  auto timeout_client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
+      .argv =
+          fake_lsp_argv({"--term-ignoring-descendant-diagnostics-markers", timeout_leader_marker.generic_string(), timeout_descendant_marker.generic_string()}),
+      .workspace_root = timeout_workspace,
+      .process_cwd = timeout_workspace,
+      .startup_timeout = std::chrono::milliseconds(1000),
+      .request_timeout = std::chrono::milliseconds(250),
+  });
+  auto timeout_diagnostics =
+      timeout_client
+          ? (*timeout_client)->diagnostics(timeout_workspace / "main.cpp")
+          : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing client"))};
+  auto const timeout_leader = wait_for_process_marker_for_test(timeout_leader_marker);
+  auto const timeout_descendant = wait_for_process_marker_for_test(timeout_descendant_marker);
+  if (timeout_leader)
+    timeout_cleanup.arm(timeout_leader->pgid);
+  auto const timeout_detail = timeout_diagnostics ? std::string{} : timeout_diagnostics.error().format();
+  bool const timeout_group_cleaned = timeout_leader && wait_for_process_group_exit(timeout_leader->pgid);
+  expect(!timeout_diagnostics && timeout_detail.find("timed out") != std::string::npos && timeout_leader && timeout_descendant &&
+             timeout_leader->pid == timeout_leader->pgid && timeout_leader->pgid != getpgrp() && timeout_descendant->pid != timeout_leader->pid &&
+             timeout_descendant->pgid == timeout_leader->pgid && timeout_group_cleaned,
+         "LSP timeout TERM/KILL teardown removes an in-group TERM-ignoring descendant without touching the runner group");
+
+  auto const exit_workspace = make_lsp_workspace("lsp-leader-exits-first");
+  auto const exit_leader_marker = exit_workspace / "leader-marker.txt";
+  auto const exit_descendant_marker = exit_workspace / "descendant-marker.txt";
+  TestOwnedProcessGroupCleanup exit_cleanup;
+  auto exit_client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
+      .argv = fake_lsp_argv({"--leader-exits-first-diagnostics-markers", exit_leader_marker.generic_string(), exit_descendant_marker.generic_string()}),
+      .workspace_root = exit_workspace,
+      .process_cwd = exit_workspace,
+      .startup_timeout = std::chrono::milliseconds(1000),
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  auto exit_diagnostics =
+      exit_client ? (*exit_client)->diagnostics(exit_workspace / "main.cpp")
+                  : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing client"))};
+  auto const exit_leader = wait_for_process_marker_for_test(exit_leader_marker);
+  auto const exit_descendant = wait_for_process_marker_for_test(exit_descendant_marker);
+  if (exit_leader)
+    exit_cleanup.arm(exit_leader->pgid);
+  auto const exit_detail = exit_diagnostics ? std::string{} : exit_diagnostics.error().format();
+  bool const exit_group_cleaned = exit_leader && wait_for_process_group_exit(exit_leader->pgid);
+  expect(!exit_diagnostics && exit_detail.find("LSP server exited") != std::string::npos && exit_detail.find("status: exit 23") != std::string::npos &&
+             exit_leader && exit_descendant && exit_leader->pid == exit_leader->pgid && exit_leader->pgid != getpgrp() &&
+             exit_descendant->pid != exit_leader->pid && exit_descendant->pgid == exit_leader->pgid && exit_group_cleaned,
+         "LSP leader exit is inspected without reaping, then tears down its verified group before returning status");
+}
+
+void test_lsp_manager_cancellation_precedence()
+{
+  auto const timeout_workspace = make_lsp_workspace("lsp-cancel-vs-timeout");
+  auto const timeout_marker = timeout_workspace / "timeout-marker.txt";
+  auto timeout_client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
+      .argv = fake_lsp_argv({"--sleep-diagnostics-marker", timeout_marker.generic_string()}),
+      .workspace_root = timeout_workspace,
+      .process_cwd = timeout_workspace,
+      .startup_timeout = std::chrono::milliseconds(1000),
+      .request_timeout = std::chrono::milliseconds(250),
+  });
+  TestOwnedProcessGroupCleanup timeout_cleanup;
+  std::optional<std::chrono::steady_clock::time_point> timeout_cancel_seen;
+  auto timeout_cancel = [&] {
+    if (!read_pid_file_for_test(timeout_marker))
+      return false;
+    auto const now = std::chrono::steady_clock::now();
+    if (!timeout_cancel_seen)
+    {
+      timeout_cancel_seen = now;
+      return false;
+    }
+    return now - *timeout_cancel_seen >= std::chrono::milliseconds(150);
+  };
+  ava::tools::ToolContext const timeout_context{
+      .workspace_dir = timeout_workspace,
+      .cancel_requested = timeout_cancel,
+      .lsp_diagnostics_provider = timeout_client ? std::shared_ptr<ava::lsp::DiagnosticsProvider>(*timeout_client) : nullptr};
+  ava::agent::ToolDispatcher const timeout_dispatcher(timeout_context);
+  auto timeout_dispatched = timeout_dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_cancel_timeout", .name = "lsp_diagnostics", .arguments_json = "{\"path\":\"main.cpp\"}"});
+  auto const timeout_process = wait_for_process_marker_for_test(timeout_marker);
+  if (timeout_process)
+    timeout_cleanup.arm(timeout_process->pgid);
+  bool const timeout_group_cleaned = timeout_process && wait_for_process_group_exit(timeout_process->pgid);
+  expect(timeout_dispatched && !timeout_dispatched->success && timeout_dispatched->payload.status == ava::agent::ToolResultStatus::Canceled &&
+             timeout_dispatched->result_text.find("LSP query canceled") != std::string::npos && timeout_process && timeout_group_cleaned,
+         "LSP cancellation after a poll wins over request timeout and preserves canceled ToolResult status");
+
+  auto const exit_workspace = make_lsp_workspace("lsp-cancel-vs-exit");
+  auto const exit_leader_marker = exit_workspace / "leader-marker.txt";
+  auto const exit_descendant_marker = exit_workspace / "descendant-marker.txt";
+  auto exit_client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
+      .argv = fake_lsp_argv({"--leader-exits-after-marker-diagnostics-markers", exit_leader_marker.generic_string(), exit_descendant_marker.generic_string()}),
+      .workspace_root = exit_workspace,
+      .process_cwd = exit_workspace,
+      .startup_timeout = std::chrono::milliseconds(1000),
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  TestOwnedProcessGroupCleanup exit_cleanup;
+  std::optional<std::chrono::steady_clock::time_point> exit_cancel_seen;
+  auto exit_cancel = [&] {
+    if (!read_pid_file_for_test(exit_leader_marker))
+      return false;
+    auto const now = std::chrono::steady_clock::now();
+    if (!exit_cancel_seen)
+    {
+      exit_cancel_seen = now;
+      return false;
+    }
+    return now - *exit_cancel_seen >= std::chrono::milliseconds(150);
+  };
+  auto exit_diagnostics =
+      exit_client ? (*exit_client)->diagnostics(exit_workspace / "main.cpp", exit_cancel)
+                  : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing client"))};
+  auto const exit_leader = wait_for_process_marker_for_test(exit_leader_marker);
+  auto const exit_descendant = wait_for_process_marker_for_test(exit_descendant_marker);
+  if (exit_leader)
+    exit_cleanup.arm(exit_leader->pgid);
+  bool const exit_group_cleaned = exit_leader && wait_for_process_group_exit(exit_leader->pgid);
+  expect(!exit_diagnostics && exit_diagnostics.error().message().find("canceled") != std::string::npos && exit_leader && exit_descendant &&
+             exit_descendant->pgid == exit_leader->pgid && exit_group_cleaned,
+         "LSP cancellation after a poll wins before an exiting leader's EOF/error classification and tears down its group");
 }
 
 void test_lsp_manager_cancellation()
@@ -497,6 +738,24 @@ void test_lsp_dispatcher_redacts_server_error_context()
          "provider-facing LSP errors redact local server command and workspace context");
 }
 
+void test_lsp_dispatcher_preserves_safe_error_context_only()
+{
+  auto const workspace = make_lsp_workspace("lsp-safe-error-context");
+  ava::tools::ToolContext const context{.workspace_dir = workspace, .lsp_diagnostics_provider = std::make_shared<ContextualLspFailureProvider>()};
+  ava::agent::ToolDispatcher const dispatcher(context);
+  auto dispatched =
+      dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_lsp_safe_context", .name = "lsp_diagnostics", .arguments_json = "{\"path\":\"main.cpp\"}"});
+  expect(
+      dispatched && !dispatched->success && dispatched->result_text.find("LSP query failed") != std::string::npos &&
+          dispatched->result_text.find("timeout_ms: 250") != std::string::npos && dispatched->result_text.find("phase: request") != std::string::npos &&
+          dispatched->result_text.find("method: textDocument/diagnostic") != std::string::npos &&
+          dispatched->result_text.find("sensitive-command") == std::string::npos && dispatched->result_text.find("/sensitive-workspace") == std::string::npos &&
+          dispatched->result_text.find("/sensitive-path") == std::string::npos && dispatched->result_text.find("sensitive-cause") == std::string::npos &&
+          dispatched->result_text.find("status: exit 23") == std::string::npos && dispatched->result_text.find("not-a-timeout") == std::string::npos &&
+          dispatched->result_text.find("unrecognized-phase") == std::string::npos && dispatched->result_text.find("unrecognized/method") == std::string::npos,
+      "LSP dispatcher JSON preserves only validated timeout, phase, and method context while redacting local error details");
+}
+
 void test_lsp_dispatcher_bounds_provider_json()
 {
   auto const workspace = make_lsp_workspace("lsp-bounded-json");
@@ -617,6 +876,59 @@ void test_lsp_configured_provider_loads_global_config_from_safe_cwd()
          "configured global LSP server process cwd is the global config directory, not the workspace");
 }
 
+void test_lsp_configured_provider_timeout_defaults()
+{
+  auto const fallback_workspace = make_lsp_workspace("lsp-configured-startup-fallback");
+  std::filesystem::create_directories(fallback_workspace / ".ava");
+  auto const fallback_config_path = fallback_workspace / ".ava" / "lsp.json";
+  {
+    std::ofstream config(fallback_config_path, std::ios::binary | std::ios::trunc);
+    config << "{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"" << ava::core::json::escape(AVA_FAKE_LSP_SERVER_PATH)
+           << "\",\"--delayed-initialize\"],\"timeout_ms\":200}]}";
+  }
+  auto fallback_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
+      .global_config_file = fallback_workspace / "missing-global-lsp.json",
+      .project_config_file = fallback_config_path,
+      .workspace_root = fallback_workspace,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Allow, "test allow"};
+      },
+  });
+  ava::tools::ToolContext const fallback_context{.workspace_dir = fallback_workspace,
+                                                 .lsp_diagnostics_provider = fallback_provider ? *fallback_provider : nullptr};
+  ava::agent::ToolDispatcher const fallback_dispatcher(fallback_context);
+  auto fallback_result = fallback_dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_lsp_startup_fallback", .name = "lsp_diagnostics", .arguments_json = "{\"path\":\"main.cpp\"}"});
+  expect(fallback_provider && fallback_result && !fallback_result->success && fallback_result->result_text.find("timeout_ms: 200") != std::string::npos &&
+             fallback_result->result_text.find("phase: startup") != std::string::npos &&
+             fallback_result->result_text.find("method: initialize") != std::string::npos,
+         "configured LSP startup timeout falls back to parsed timeout_ms and exposes only safe request context to the dispatcher");
+
+  auto const explicit_workspace = make_lsp_workspace("lsp-configured-startup-explicit");
+  std::filesystem::create_directories(explicit_workspace / ".ava");
+  auto const explicit_config_path = explicit_workspace / ".ava" / "lsp.json";
+  {
+    std::ofstream config(explicit_config_path, std::ios::binary | std::ios::trunc);
+    config << "{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"" << ava::core::json::escape(AVA_FAKE_LSP_SERVER_PATH)
+           << "\",\"--delayed-initialize\"],\"timeout_ms\":200,\"startup_timeout_ms\":1000}]}";
+  }
+  auto explicit_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
+      .global_config_file = explicit_workspace / "missing-global-lsp.json",
+      .project_config_file = explicit_config_path,
+      .workspace_root = explicit_workspace,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Allow, "test allow"};
+      },
+  });
+  ava::tools::ToolContext const explicit_context{.workspace_dir = explicit_workspace,
+                                                 .lsp_diagnostics_provider = explicit_provider ? *explicit_provider : nullptr};
+  ava::agent::ToolDispatcher const explicit_dispatcher(explicit_context);
+  auto explicit_result = explicit_dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_lsp_startup_explicit", .name = "lsp_diagnostics", .arguments_json = "{\"path\":\"main.cpp\"}"});
+  expect(explicit_provider && explicit_result && explicit_result->success && explicit_result->result_text.find("fake diagnostic from LSP") != std::string::npos,
+         "configured LSP startup_timeout_ms independently extends initialize while timeout_ms remains the request budget");
+}
+
 void test_lsp_configured_provider_inspection_does_not_launch_servers()
 {
   auto const workspace = make_lsp_workspace("lsp-config-inspection");
@@ -678,6 +990,8 @@ void test_lsp_configured_provider_rejects_invalid_config()
   rejects_config("{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"server\"],\"file_extensions\":[\".cpp\",123]}]}", "file_extensions");
   rejects_config("{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"server\"],\"language_id\":123}]}", "language_id");
   rejects_config("{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"server\"],\"timeout_ms\":1000.5}]}", "timeout_ms");
+  rejects_config("{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"server\"],\"startup_timeout_ms\":1000.5}]}", "startup_timeout_ms");
+  rejects_config("{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"server\"],\"startup_timeout_ms\":99}]}", "startup timeout");
   rejects_config("{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"server\"]},{\"id\":\"fake\",\"argv\":[\"other\"]}]}", "duplicated");
 
   auto const global_workspace = make_lsp_workspace("lsp-global-relative-config");
@@ -718,20 +1032,25 @@ void run_lsp_tests()
 {
   test_lsp_manager_fake_server_diagnostics();
   test_lsp_manager_fake_server_symbols_and_definition();
+  test_lsp_manager_closed_standard_fds();
   test_lsp_manager_malformed_symbols_error();
   test_lsp_manager_malformed_response_error();
   test_lsp_manager_crash_error();
   test_lsp_manager_delayed_initialize_uses_startup_timeout();
   test_lsp_manager_timeout_error();
   test_lsp_manager_startup_timeout_and_validation();
+  test_lsp_manager_containment_cleanup();
+  test_lsp_manager_cancellation_precedence();
   test_lsp_manager_cancellation();
   test_lsp_manager_huge_response_caps();
   test_lsp_diagnostics_tool_and_dispatcher_json();
   test_lsp_file_uri_escapes_encoded_separators();
   test_lsp_dispatcher_redacts_server_error_context();
+  test_lsp_dispatcher_preserves_safe_error_context_only();
   test_lsp_dispatcher_bounds_provider_json();
   test_lsp_configured_provider_loads_project_config_lazily();
   test_lsp_configured_provider_loads_global_config_from_safe_cwd();
+  test_lsp_configured_provider_timeout_defaults();
   test_lsp_configured_provider_inspection_does_not_launch_servers();
   test_lsp_configured_provider_rejects_invalid_config();
 }

@@ -221,13 +221,14 @@ Both files use the same explicit schema. Global servers are loaded before worksp
       "argv": ["clangd", "--background-index"],
       "file_extensions": [".cpp", ".h"],
       "language_id": "cpp",
-      "timeout_ms": 3000
+      "timeout_ms": 3000,
+      "startup_timeout_ms": 3000
     }
   ]
 }
 ```
 
-`id` is a unique short identifier using letters, digits, `_`, `-`, or `.`. `argv` is a non-empty JSON string array executed directly without a shell. `file_extensions` is an optional JSON string array; when omitted or empty, the server can match any file. `language_id` defaults to `plaintext` and is sent in bounded `textDocument/didOpen` notifications for definition/reference queries. `timeout_ms` defaults to `3000` and must be a base-10 integer from `100` through `30000`. Known fields reject wrong JSON types, mixed arrays, duplicate server ids, control bytes, oversized values, symlinked config files, and configs over 64 KiB.
+`id` is a unique short identifier using letters, digits, `_`, `-`, or `.`. `argv` is a non-empty JSON string array executed directly without a shell. `file_extensions` is an optional JSON string array; when omitted or empty, the server can match any file. `language_id` defaults to `plaintext` and is sent in bounded `textDocument/didOpen` notifications for definition/reference queries. `timeout_ms` is parsed first, defaults to `3000`, and bounds individual requests. `startup_timeout_ms` is an optional independent bound for the initialize handshake; when omitted it uses the parsed `timeout_ms` value. Both timeout fields must be base-10 integers from `100` through `30000`. Direct `ServerConfig` callers retain their independent startup and request defaults. Known fields reject wrong JSON types, mixed arrays, duplicate server ids, control bytes, oversized values, symlinked config files, and configs over 64 KiB.
 
 Using an LSP tool first requests `lsp.query` for the target file or workspace. Starting the configured subprocess separately requests high-risk `lsp.server.launch`; persistent permission rules match the exact JSON-array encoded argv string, not a shell command line. Project-local LSP server code should be declared only in `$WORKSPACE/.ava/lsp.json` and becomes available only after `/trust project`. `/context lsp` parses the global and trusted-project config files and reports load errors without launching configured servers.
 

@@ -20,6 +20,7 @@ enum class Mode
   EchoUriDiagnostics,
   SleepInitialize,
   SleepInitializeMarker,
+  DelayedInitialize,
   MalformedDiagnostics,
   CrashDiagnostics,
   SleepDiagnostics,
@@ -34,6 +35,7 @@ struct Options
 {
   Mode mode = Mode::Normal;
   std::string marker_path;
+  std::string launch_marker_path;
 };
 
 ssize_t read_retry(char* data, std::size_t size)
@@ -117,6 +119,10 @@ Options parse_options(int argc, char** argv)
       options.mode = Mode::SleepInitializeMarker;
       options.marker_path = argv[++index];
     }
+    if (std::strcmp(argv[index], "--delayed-initialize") == 0)
+      options.mode = Mode::DelayedInitialize;
+    if (std::strcmp(argv[index], "--launch-marker") == 0 && index + 1 < argc)
+      options.launch_marker_path = argv[++index];
     if (std::strcmp(argv[index], "--sleep-diagnostics") == 0)
       options.mode = Mode::SleepDiagnostics;
     if (std::strcmp(argv[index], "--sleep-diagnostics-marker") == 0 && index + 1 < argc)
@@ -145,6 +151,14 @@ void write_process_group_marker(std::string const& path)
     return;
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << static_cast<long long>(getpgrp()) << '\n';
+}
+
+void write_launch_marker(std::string const& path)
+{
+  if (path.empty())
+    return;
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  file << "started\n";
 }
 
 void write_cwd_marker(std::string const& path)
@@ -183,9 +197,14 @@ std::string request_uri(std::string_view message)
   return uri.value_or(std::string{});
 }
 
-void respond_diagnostics(long long id, Options const& options, std::string_view uri)
+void respond_diagnostics(long long id, Options const& options, std::string_view uri, bool initialized)
 {
   auto const mode = options.mode;
+  if (mode == Mode::DelayedInitialize && !initialized)
+  {
+    write_message("{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) + ",\"error\":{\"code\":-32002,\"message\":\"initialized notification required\"}}");
+    return;
+  }
   if (mode == Mode::CrashDiagnostics)
     std::exit(23);
   if (mode == Mode::SleepDiagnostics || mode == Mode::SleepDiagnosticsMarker)
@@ -284,7 +303,9 @@ void respond_references(long long id, bool did_open)
 int main(int argc, char** argv)
 {
   auto const options = parse_options(argc, argv);
+  write_launch_marker(options.launch_marker_path);
   bool did_open = false;
+  bool initialized = false;
   while (auto message = read_message())
   {
     auto const method = ava::core::json::string_field(*message, "method");
@@ -299,13 +320,19 @@ int main(int argc, char** argv)
         usleep(1000000);
         continue;
       }
+      if (options.mode == Mode::DelayedInitialize)
+        usleep(500000);
       if (options.mode == Mode::CwdMarker)
         write_cwd_marker(options.marker_path);
       respond_initialize(*id);
     }
+    else if (*method == "initialized")
+    {
+      initialized = true;
+    }
     else if (*method == "textDocument/diagnostic" && id)
     {
-      respond_diagnostics(*id, options, request_uri(*message));
+      respond_diagnostics(*id, options, request_uri(*message), initialized);
     }
     else if (*method == "textDocument/documentSymbol" && id)
     {

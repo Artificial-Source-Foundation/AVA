@@ -84,6 +84,17 @@ bool wait_for_process_group_exit(pid_t pgid)
   return !process_group_exists(pgid);
 }
 
+bool file_is_not_created(std::filesystem::path const& path)
+{
+  for (int index = 0; index < 20; ++index)
+  {
+    if (std::filesystem::exists(path))
+      return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  return true;
+}
+
 class ManyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider
 {
  public:
@@ -226,6 +237,24 @@ void test_lsp_manager_crash_error()
   expect(!diagnostics && diagnostics.error().format().find("LSP server") != std::string::npos, "LSP manager reports crashed diagnostics server cleanly");
 }
 
+void test_lsp_manager_delayed_initialize_uses_startup_timeout()
+{
+  auto const workspace = make_lsp_workspace("lsp-delayed-initialize");
+  auto client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
+      .argv = fake_lsp_argv({"--delayed-initialize"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .startup_timeout = std::chrono::milliseconds(1000),
+      .request_timeout = std::chrono::milliseconds(200),
+  });
+  expect(client.has_value(), "LSP startup accepts a delayed initialize response within the independent startup timeout");
+  auto diagnostics =
+      client ? (*client)->diagnostics(workspace / "main.cpp")
+             : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing client"))};
+  expect(diagnostics && diagnostics->size() == 1 && (*diagnostics)[0].message == "fake diagnostic from LSP",
+         "LSP startup sends initialized before diagnostics after delayed initialization");
+}
+
 void test_lsp_manager_timeout_error()
 {
   auto const workspace = make_lsp_workspace("lsp-timeout");
@@ -233,14 +262,63 @@ void test_lsp_manager_timeout_error()
       .argv = fake_lsp_argv({"--sleep-diagnostics"}),
       .workspace_root = workspace,
       .process_cwd = workspace,
+      .startup_timeout = std::chrono::milliseconds(1000),
       .request_timeout = std::chrono::milliseconds(250),
   });
   expect(client.has_value(), "LSP timeout test starts sleeping fake server");
   auto diagnostics =
       client ? (*client)->diagnostics(workspace / "main.cpp")
              : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing client"))};
-  expect(!diagnostics && diagnostics.error().format().find("timed out") != std::string::npos,
-         "LSP manager times out and terminates unresponsive diagnostics requests");
+  auto const detail = diagnostics ? std::string{} : diagnostics.error().format();
+  expect(!diagnostics && detail.find("timed out") != std::string::npos && detail.find("timeout_ms: 250") != std::string::npos &&
+             detail.find("phase: request") != std::string::npos && detail.find("method: textDocument/diagnostic") != std::string::npos,
+         "LSP diagnostics timeout keeps the request budget and identifies its request phase and method");
+}
+
+void test_lsp_manager_startup_timeout_and_validation()
+{
+  auto const timeout_workspace = make_lsp_workspace("lsp-startup-timeout");
+  auto const timeout_pgid_file = timeout_workspace / "lsp-startup-timeout-pgid.txt";
+  auto timed_out = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
+      .argv = fake_lsp_argv({"--sleep-initialize-marker", timeout_pgid_file.generic_string()}),
+      .workspace_root = timeout_workspace,
+      .process_cwd = timeout_workspace,
+      .startup_timeout = std::chrono::milliseconds(200),
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  auto const timeout_pgid = read_pid_file_for_test(timeout_pgid_file);
+  auto const timeout_detail = timed_out ? std::string{} : timed_out.error().format();
+  expect(!timed_out && timeout_detail.find("timed out") != std::string::npos && timeout_detail.find("timeout_ms: 200") != std::string::npos &&
+             timeout_detail.find("phase: startup") != std::string::npos && timeout_detail.find("method: initialize") != std::string::npos && timeout_pgid &&
+             wait_for_process_group_exit(*timeout_pgid),
+         "LSP startup timeout reports initialize startup context and terminates the server process group");
+
+  auto const validation_workspace = make_lsp_workspace("lsp-timeout-validation");
+  auto const startup_marker = validation_workspace / "invalid-startup-launched.txt";
+  auto invalid_startup = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
+      .argv = fake_lsp_argv({"--launch-marker", startup_marker.generic_string()}),
+      .workspace_root = validation_workspace,
+      .process_cwd = validation_workspace,
+      .startup_timeout = std::chrono::milliseconds(99),
+      .request_timeout = std::chrono::milliseconds(200),
+  });
+  auto const startup_detail = invalid_startup ? std::string{} : invalid_startup.error().format();
+  expect(!invalid_startup && startup_detail.find("startup timeout") != std::string::npos &&
+             startup_detail.find("field: startup_timeout") != std::string::npos && file_is_not_created(startup_marker),
+         "LSP rejects invalid startup timeout bounds before launching a server");
+
+  auto const request_marker = validation_workspace / "invalid-request-launched.txt";
+  auto invalid_request = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
+      .argv = fake_lsp_argv({"--launch-marker", request_marker.generic_string()}),
+      .workspace_root = validation_workspace,
+      .process_cwd = validation_workspace,
+      .startup_timeout = std::chrono::milliseconds(200),
+      .request_timeout = std::chrono::milliseconds(30001),
+  });
+  auto const request_detail = invalid_request ? std::string{} : invalid_request.error().format();
+  expect(!invalid_request && request_detail.find("request timeout") != std::string::npos &&
+             request_detail.find("field: request_timeout") != std::string::npos && file_is_not_created(request_marker),
+         "LSP rejects invalid request timeout bounds before launching a server");
 }
 
 void test_lsp_manager_cancellation()
@@ -643,7 +721,9 @@ void run_lsp_tests()
   test_lsp_manager_malformed_symbols_error();
   test_lsp_manager_malformed_response_error();
   test_lsp_manager_crash_error();
+  test_lsp_manager_delayed_initialize_uses_startup_timeout();
   test_lsp_manager_timeout_error();
+  test_lsp_manager_startup_timeout_and_validation();
   test_lsp_manager_cancellation();
   test_lsp_manager_huge_response_caps();
   test_lsp_diagnostics_tool_and_dispatcher_json();

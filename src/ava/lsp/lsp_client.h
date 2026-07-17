@@ -56,6 +56,7 @@ struct ServerConfig {
   std::vector<std::string> argv;
   std::filesystem::path workspace_root;
   std::filesystem::path process_cwd;
+  std::chrono::milliseconds startup_timeout{10000};
   std::chrono::milliseconds request_timeout{3000};
   std::string language_id = "plaintext";
 
@@ -116,18 +117,27 @@ class SubprocessLspClient final : public DiagnosticsProvider {
   [[nodiscard]] ava::core::VoidResult launch();
   [[nodiscard]] ava::core::VoidResult initialize(CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult send_notification(std::string_view method, std::string_view params_json,
+                                                        std::chrono::steady_clock::time_point deadline,
+                                                        std::chrono::milliseconds timeout, std::string_view phase,
                                                         CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult send_did_open(std::filesystem::path const& path,
                                                     CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<std::string> request_response(std::string_view method, std::string_view params_json,
+                                                                std::chrono::steady_clock::time_point deadline,
+                                                                std::chrono::milliseconds timeout, std::string_view phase,
                                                                 CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::VoidResult write_message(std::string_view body, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::VoidResult write_message(std::string_view body, std::chrono::steady_clock::time_point deadline,
+                                                    std::chrono::milliseconds timeout, std::string_view phase,
+                                                    std::string_view method, CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<std::string> read_message(std::chrono::steady_clock::time_point deadline,
-                                                            CancelCallback cancel_requested = nullptr);
+                                                            std::chrono::milliseconds timeout, std::string_view phase,
+                                                            std::string_view method, CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult wait_for_readable(std::chrono::steady_clock::time_point deadline,
-                                                        CancelCallback cancel_requested = nullptr);
+                                                        std::chrono::milliseconds timeout, std::string_view phase,
+                                                        std::string_view method, CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult wait_for_writable(std::chrono::steady_clock::time_point deadline,
-                                                        CancelCallback cancel_requested = nullptr);
+                                                        std::chrono::milliseconds timeout, std::string_view phase,
+                                                        std::string_view method, CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult check_child_running();
   void close_fds() noexcept;
   void terminate_child() noexcept;

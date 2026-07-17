@@ -212,7 +212,7 @@ void test_builtin_session_alias_registers_as_current_stats_command()
 
   expect(ava::app::is_backend_command("/session"), "command catalog classifies /session as a backend slash command");
 
-  auto seeded_stats_usage = session.store.append(ava::session::SessionEntry{.id = "entry_session_alias_usage",
+  auto seeded_stats_usage = session.append_owned(ava::session::SessionEntry{.id = "entry_session_alias_usage",
                                                                             .parent_id = "",
                                                                             .type = ava::session::EntryType::AssistantMessage,
                                                                             .timestamp = "2026-05-02T00:00:00Z",

@@ -133,27 +133,70 @@ struct ActiveRunGuard::State
   std::unordered_map<std::string, RunOutcome> outcomes;
   std::deque<std::string> outcome_order;
   std::optional<ava::core::Error> persistence_failure;
+  std::shared_ptr<ava::session::SessionAppendTarget> append_target;
   std::deque<RunCommand> commands;
   std::deque<std::shared_ptr<AppendItem>> appends;
   std::size_t append_bytes = 0;
 };
 
-SessionRunController::SessionRunController() : state_(std::make_shared<ActiveRunGuard::State>())
+SessionRunController::SessionRunController(std::shared_ptr<ava::session::SessionAppendTarget> append_target)
+    : state_(std::make_shared<ActiveRunGuard::State>())
 {
+  state_->append_target = std::move(append_target);
 }
 
 SessionRunController::~SessionRunController()
 {
-  static_cast<void>(request_stop(StopReason::UserCanceled));
-  std::lock_guard lock(state_->mutex);
-  state_->shutting_down = true;
-  state_->closing = true;
+  shutdown();
+}
+
+void SessionRunController::shutdown() noexcept
+{
+  auto state = state_;
+  if (!state)
+    return;
+  try
+  {
+    std::stop_source source;
+    {
+      std::lock_guard lock(state->mutex);
+      if (!state->shutting_down)
+      {
+        state->shutting_down = true;
+        state->closing = true;
+        state->requested_stop = StopReason::UserCanceled;
+        source = state->stop_source;
+      }
+    }
+    static_cast<void>(source.request_stop());
+
+    // Serialize with an active append driver before clearing the only target
+    // reference. Queued callers have either drained or are failed below.
+    std::lock_guard driver_lock(state->append_mutex);
+    std::lock_guard lock(state->mutex);
+    auto closing_error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session is closing");
+    while (!state->appends.empty())
+    {
+      auto pending = state->appends.front();
+      state->appends.pop_front();
+      state->append_bytes -= pending->bytes;
+      pending->error = closing_error;
+      pending->done = true;
+      pending->ready.notify_all();
+    }
+    state->appends_drained.notify_all();
+    state->append_target.reset();
+  }
+  catch (...)
+  {
+    // Destructors must not throw. Routes still fail closed through closing.
+  }
 }
 
 AdmissionDisposition SessionRunController::inspect_admission(RunRequest const& request) const
 {
   std::lock_guard lock(state_->mutex);
-  if (state_->shutting_down)
+  if (state_->shutting_down || !state_->append_target)
     return AdmissionDisposition::RejectClosing;
   if (state_->persistence_failure)
     return AdmissionDisposition::RejectPersistenceFailure;
@@ -167,7 +210,7 @@ ava::core::Result<ActiveRunGuard> SessionRunController::admit(RunRequest request
   if (request.request_id.empty())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "run request id is required"));
   std::lock_guard lock(state_->mutex);
-  if (state_->shutting_down)
+  if (state_->shutting_down || !state_->append_target)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session is closing"));
   if (state_->persistence_failure)
     return std::unexpected(*state_->persistence_failure);
@@ -270,7 +313,7 @@ RunSnapshot SessionRunController::snapshot() const
 }
 
 ava::core::VoidResult SessionRunController::append_for_generation(std::shared_ptr<ActiveRunGuard::State> const& state, std::uint64_t generation,
-                                                                  ava::session::SessionStore& store, ava::session::SessionEntry entry, bool owner_route)
+                                                                  ava::session::SessionEntry entry, bool owner_route)
 {
   if (!state)
     return std::unexpected(inactive_error());
@@ -285,7 +328,7 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
       return std::unexpected(*state->persistence_failure);
     // The stable owner route is valid between runs as well as during one. Only
     // shutdown and an explicitly latched persistence failure revoke it.
-    if (state->shutting_down)
+    if (state->shutting_down || !state->append_target)
       return std::unexpected(inactive_error());
     if (!owner_route && (!state->active || state->closing || state->generation != generation))
       return std::unexpected(stale_error());
@@ -316,8 +359,20 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
     ava::core::VoidResult persisted;
     try
     {
-      AppendMarker marker(state.get());
-      persisted = store.append(head->entry);
+      std::shared_ptr<ava::session::SessionAppendTarget> target;
+      {
+        std::lock_guard lock(state->mutex);
+        target = state->append_target;
+      }
+      if (!target)
+      {
+        persisted = std::unexpected(inactive_error());
+      }
+      else
+      {
+        AppendMarker marker(state.get());
+        persisted = target->append(head->entry);
+      }
     }
     catch (std::exception const& exception)
     {
@@ -372,15 +427,15 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
   }
 }
 
-ava::core::VoidResult SessionRunController::append(ava::session::SessionStore& store, ava::session::SessionEntry entry)
+ava::core::VoidResult SessionRunController::append(ava::session::SessionEntry entry)
 {
-  return append_for_generation(state_, 0, store, std::move(entry), true);
+  return append_for_generation(state_, 0, std::move(entry), true);
 }
 
-std::function<ava::core::VoidResult(ava::session::SessionEntry)> SessionRunController::owner_append_route(ava::session::SessionStore& store) const
+std::function<ava::core::VoidResult(ava::session::SessionEntry)> SessionRunController::owner_append_route() const
 {
   auto state = state_;
-  return [state = std::move(state), &store](ava::session::SessionEntry entry) { return append_for_generation(state, 0, store, std::move(entry), true); };
+  return [state = std::move(state)](ava::session::SessionEntry entry) { return append_for_generation(state, 0, std::move(entry), true); };
 }
 
 ava::core::VoidResult SessionRunController::reset_persistence_failure()
@@ -496,12 +551,12 @@ bool ActiveRunGuard::active() const noexcept
   return state_->active && state_->generation == generation_;
 }
 
-std::function<ava::core::VoidResult(ava::session::SessionEntry)> ActiveRunGuard::append_route(ava::session::SessionStore& store) const
+std::function<ava::core::VoidResult(ava::session::SessionEntry)> ActiveRunGuard::append_route() const
 {
   auto state = state_;
   auto generation = generation_;
-  return [state = std::move(state), generation, &store](ava::session::SessionEntry entry) {
-    return SessionRunController::append_for_generation(state, generation, store, std::move(entry), false);
+  return [state = std::move(state), generation](ava::session::SessionEntry entry) {
+    return SessionRunController::append_for_generation(state, generation, std::move(entry), false);
   };
 }
 

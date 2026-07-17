@@ -26,6 +26,8 @@ struct SessionBranchOptions
   std::optional<std::string> name;
   std::optional<std::vector<std::string>> labels;
   std::optional<SessionReadLimits> read_limits = std::nullopt;
+  // Retained by callers that already own the source while preparing a branch.
+  SessionLease const* source_lease = nullptr;
   SessionBranchMode mode = SessionBranchMode::Fork;
   std::string actor = "rpc";
 
@@ -55,6 +57,9 @@ struct BranchSummaryOptions
   std::string provider;
   std::string model;
   std::string reason;
+  // The caller retains this exact source lease across snapshot validation and
+  // the summary append. When omitted, this helper acquires one itself.
+  SessionLease const* source_lease = nullptr;
   std::string actor = "rpc";
 
   AVA_DEBUG_PRINT_MEMBERS_ON

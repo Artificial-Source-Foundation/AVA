@@ -49,7 +49,7 @@ struct Session
   bool created = false;
   bool sessionless = false;
   // Declare before workers so reverse destruction stops background work before destroying store routes.
-  std::unique_ptr<SessionRunController> run_controller = std::make_unique<SessionRunController>();
+  std::unique_ptr<SessionRunController> run_controller = nullptr;
   std::shared_ptr<ava::agent::BackgroundJobRegistry> background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>();
   // Null uses normal global/project discovery; non-null is immutable session-local MCP composition.
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;
@@ -60,13 +60,13 @@ struct Session
   {
     if (!run_controller)
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));
-    return run_controller->append(store, std::move(entry));
+    return run_controller->append(std::move(entry));
   }
 
   // Return the stable append route owned by this session, or an empty route when the controller is unavailable.
   [[nodiscard]] ava::agent::SessionAppendSink owner_append_route()
   {
-    return run_controller ? run_controller->owner_append_route(store) : ava::agent::SessionAppendSink{};
+    return run_controller ? run_controller->owner_append_route() : ava::agent::SessionAppendSink{};
   }
 
   AVA_DEBUG_PRINT_MEMBERS_ON

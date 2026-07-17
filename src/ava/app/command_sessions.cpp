@@ -664,6 +664,7 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
                                          .branch_from_entry_id = {},
                                          .name = trimmed_name.empty() ? std::nullopt : std::optional<std::string>(trimmed_name),
                                          .labels = std::nullopt,
+                                         .source_lease = &session.lease,
                                          .mode = mode,
                                          .actor = "tui"});
   if (!branched)
@@ -738,7 +739,7 @@ ava::core::Result<CommandResult> run_sessions_rename_command(runtime::Session& s
     if (!target)
       return std::unexpected(std::move(target.error()));
     target_id = target->store.session_id();
-    metadata = ava::session::append_session_metadata(target->store, std::move(update));
+    metadata = append_runtime_session_metadata(*target, std::move(update));
   }
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
@@ -796,7 +797,7 @@ ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& s
   ava::session::SessionMetadataUpdate update;
   update.labels = next_labels;
   update.actor = "tui";
-  auto metadata = ava::session::append_session_metadata(target->store, std::move(update));
+  auto metadata = append_runtime_session_metadata(*target, std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
@@ -853,7 +854,7 @@ ava::core::Result<CommandResult> run_sessions_archive_command(runtime::Session& 
   ava::session::SessionMetadataUpdate update;
   update.archived = archived;
   update.actor = "tui";
-  auto metadata = ava::session::append_session_metadata(target->store, std::move(update));
+  auto metadata = append_runtime_session_metadata(*target, std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
@@ -1039,8 +1040,8 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::Session& sessi
   auto const created_session_id = opened->store.session_id();
   if (!trimmed_name.empty())
   {
-    auto metadata = ava::session::append_session_metadata(
-        opened->store, ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
+    auto metadata = append_runtime_session_metadata(
+        *opened, ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
   }
@@ -1371,13 +1372,16 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
         last_current_entries = current_entries->size();
         return {};
       }
-      return ava::session::append_manual_compaction(session.store, ava::session::ManualCompactionRequest{.summary = *summary,
-                                                                                                         .instructions = instructions,
-                                                                                                         .config = *config,
-                                                                                                         .estimated_tokens = estimated_tokens,
-                                                                                                         .threshold_tokens = 0,
-                                                                                                         .trigger = "manual",
-                                                                                                         .recent_context = ""});
+      auto entry = ava::session::make_manual_compaction_entry(ava::session::ManualCompactionRequest{.summary = *summary,
+                                                                                                      .instructions = instructions,
+                                                                                                      .config = *config,
+                                                                                                      .estimated_tokens = estimated_tokens,
+                                                                                                      .threshold_tokens = 0,
+                                                                                                      .trigger = "manual",
+                                                                                                      .recent_context = ""});
+      if (!entry)
+        return std::unexpected(std::move(entry.error()));
+      return session.append_owned(std::move(*entry));
     };
     ava::core::VoidResult appended;
     if (request.session_mutex)
@@ -1563,7 +1567,7 @@ ava::core::Result<CommandResult> run_import_command(runtime::Session& session, s
     auto entry_to_append = entry;
     if (entry_to_append.version == 0)
       entry_to_append.version = ava::session::kCurrentSessionEntryVersion;
-    if (auto appended = imported_store->append(entry_to_append); !appended)
+    if (auto appended = imported_store->append(*imported_lease, entry_to_append); !appended)
     {
       auto error = std::move(appended.error());
       attach_created_session_cleanup_context(*imported_store, *imported_lease, error);

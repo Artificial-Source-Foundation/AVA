@@ -304,7 +304,7 @@ void test_observer_failures_bounds_and_disabled_artifacts()
   {
     static_cast<void>(disabled_store->set_run_observation(std::make_shared<ava::observability::RunObservation>(nullptr, clock, ids)));
     static_cast<void>(
-        disabled_store->append({.id = "disabled", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"}));
+        append_session_entry_for_test(*disabled_store, {.id = "disabled", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"}));
     static_cast<void>(disabled_store->load());
   }
   expect(clock->calls == 0 && ids->calls == 0, "disabled SessionStore append/load takes no attachment lock, trace allocation, clock, or ID path");
@@ -698,7 +698,7 @@ void test_session_attachment_generation_alias_stress()
     std::lock_guard lock(collector->mutex);
     return collector->events.size();
   }();
-  auto retained = alias.append({.id = "retained", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"});
+  auto retained = append_session_entry_for_test(alias, {.id = "retained", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"});
   auto const events_after_disabled_setup = [&] {
     std::lock_guard lock(collector->mutex);
     return collector->events.size();
@@ -714,7 +714,7 @@ void test_session_attachment_generation_alias_stress()
                                                              .parent_turn_id = {},
                                                              .parent_session_id = {}});
   store->clear_run_observation(stale_generation);
-  auto appended = alias.append({.id = "newer", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"});
+  auto appended = append_session_entry_for_test(alias, {.id = "newer", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"});
   expect(appended.has_value(), "stale generation clear leaves newer aliased attachment intact");
   std::atomic<bool> run = true;
   std::thread attach_clear([&] {
@@ -735,8 +735,8 @@ void test_session_attachment_generation_alias_stress()
     int i = 0;
     while (run.load(std::memory_order_acquire))
     {
-      static_cast<void>(alias.append(
-          {.id = "stress-" + std::to_string(i++), .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"}));
+      static_cast<void>(append_session_entry_for_test(
+          alias, {.id = "stress-" + std::to_string(i++), .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"}));
       static_cast<void>(alias.load());
     }
   });
@@ -748,7 +748,7 @@ void test_session_attachment_generation_alias_stress()
     return collector->events.size();
   }();
   static_cast<void>(
-      alias.append({.id = "after-parent-terminal", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"}));
+      append_session_entry_for_test(alias, {.id = "after-parent-terminal", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"}));
   std::lock_guard lock(collector->mutex);
   expect(collector->events.size() == events_before_terminal,
          "copied background-style store emits no session event after parent terminal clear and concurrent attachment snapshots remain safe");
@@ -775,10 +775,10 @@ void test_session_attachment_generation_alias_stress()
                                                              .parent_session_id = {}});
     auto before_old_write = collector->events.size();
     static_cast<void>(
-        old_background_store.append({.id = "A-background", .parent_id = "", .type = ava::session::EntryType::Error, .timestamp = "now", .data_json = "{}"}));
+        append_session_entry_for_test(old_background_store, {.id = "A-background", .parent_id = "", .type = ava::session::EntryType::Error, .timestamp = "now", .data_json = "{}"}));
     overlap_store->clear_run_observation(run_b);
-    static_cast<void>(old_background_store.append(
-        {.id = "A-after-terminal", .parent_id = "", .type = ava::session::EntryType::Error, .timestamp = "now", .data_json = "{}"}));
+    static_cast<void>(append_session_entry_for_test(
+        old_background_store, {.id = "A-after-terminal", .parent_id = "", .type = ava::session::EntryType::Error, .timestamp = "now", .data_json = "{}"}));
     expect(collector->events.size() == before_old_write,
            "an old background persistence copy cannot snapshot B's live attachment or emit after A's terminal cleanup");
   }
@@ -796,7 +796,7 @@ void test_session_and_process_boundaries_are_independent()
   session_context.turn_id = "turn";
   session_context.session_id = store->session_id();
   static_cast<void>(store->set_run_observation(observation, std::move(session_context)));
-  auto appended = store->append({.id = "entry-1", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"});
+  auto appended = append_session_entry_for_test(*store, {.id = "entry-1", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"});
   expect(static_cast<bool>(appended), "session append succeeds with observer");
   auto loaded = store->load();
   expect(static_cast<bool>(loaded), "session load succeeds with observer");
@@ -861,6 +861,7 @@ void test_agent_fake_provider_boundaries()
   options.model_id = "gpt-5.5";
   options.system_prompt = "system";
   options.access_token = "CANARY_TOKEN";
+  options.append_entry = append_route_for_test(store);
   options.observation = observation;
   ava::agent::AgentLoop loop(std::move(options));
   auto result = loop.run_turn("CANARY_PROMPT", store, provider, transport);
@@ -907,7 +908,7 @@ void test_disabled_and_enabled_runs_preserve_authoritative_session_semantics()
       observation = std::make_shared<ava::observability::RunObservation>(writer, std::make_shared<FixedClock>(1),
                                                                          std::make_shared<ava::observability::CounterIdGenerator>());
     }
-    ava::agent::AgentLoop loop({.workspace_dir = run_root / "workspace",
+    ava::agent::AgentLoop loop({.append_entry = append_route_for_test(store), .workspace_dir = run_root / "workspace",
                                 .provider_id = "openai",
                                 .model_id = "gpt-5.5",
                                 .system_prompt = "system",
@@ -1176,7 +1177,7 @@ void test_agent_terminal_uses_returned_control_state_without_callback_repoll()
   ava::provider::OpenAIProvider provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
   unsigned cancellation_callback_calls = 0;
-  ava::agent::AgentLoop loop({.workspace_dir = root / "workspace",
+  ava::agent::AgentLoop loop({.append_entry = append_route_for_test(store), .workspace_dir = root / "workspace",
                               .provider_id = "openai",
                               .model_id = "gpt-5.5",
                               .system_prompt = "system",
@@ -1218,7 +1219,7 @@ void test_agent_lifecycle_survives_observation_attachment_failure()
   ava::provider::OpenAIProvider provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200, .headers = {}, .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: [DONE]\n\n"}});
-  ava::agent::AgentLoop loop({.workspace_dir = root / "workspace",
+  ava::agent::AgentLoop loop({.append_entry = append_route_for_test(store), .workspace_dir = root / "workspace",
                               .provider_id = "openai",
                               .model_id = "gpt-5.5",
                               .system_prompt = "system",
@@ -1244,7 +1245,8 @@ void test_session_results_and_agent_terminal_cleanup()
   static_cast<void>(invalid.set_run_observation(
       observation,
       {.run_id = "run", .turn_id = "turn", .session_id = {}, .provider_id = {}, .parent_run_id = {}, .parent_turn_id = {}, .parent_session_id = {}}));
-  auto append = invalid.append({.id = "entry", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"});
+  auto append = invalid.append(ava::session::SessionLease{},
+                               {.id = "entry", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"});
   auto load = invalid.load();
   expect(!append && !load, "invalid session store produces append and load failures");
 
@@ -1253,7 +1255,8 @@ void test_session_results_and_agent_terminal_cleanup()
   ava::session::SessionStore store({.root_dir = root / "sessions", .workspace_dir = root / "workspace", .session_id = "terminal"});
   ava::provider::OpenAIProvider provider("https://api.example.test");
   ava::tests::FakeTransport provider_failure({});
-  ava::agent::AgentLoop failed_loop({.workspace_dir = root / "workspace",
+  auto append_route = append_route_for_test(store);
+  ava::agent::AgentLoop failed_loop({.append_entry = append_route, .workspace_dir = root / "workspace",
                                      .provider_id = "openai",
                                      .model_id = "gpt-5.5",
                                      .system_prompt = "system",
@@ -1262,7 +1265,7 @@ void test_session_results_and_agent_terminal_cleanup()
   auto failed = failed_loop.run_turn("prompt", store, provider, provider_failure);
   expect(!failed, "fake provider failure reaches the agent terminal observer");
   ava::tests::FakeTransport canceled_transport({});
-  ava::agent::AgentLoop canceled_loop({.workspace_dir = root / "workspace",
+  ava::agent::AgentLoop canceled_loop({.append_entry = append_route, .workspace_dir = root / "workspace",
                                        .provider_id = "openai",
                                        .model_id = "gpt-5.5",
                                        .system_prompt = "system",
@@ -1272,15 +1275,15 @@ void test_session_results_and_agent_terminal_cleanup()
   auto canceled = canceled_loop.run_turn("prompt", store, provider, canceled_transport);
   expect(!canceled, "canceled agent run reaches the terminal observer");
   auto const events_after_observed_runs = collector->events.size();
-  ava::agent::AgentLoop disabled_loop({.workspace_dir = root / "workspace",
+  ava::agent::AgentLoop disabled_loop({.append_entry = append_route, .workspace_dir = root / "workspace",
                                        .provider_id = "openai",
                                        .model_id = "gpt-5.5",
                                        .system_prompt = "system",
                                        .access_token = "CANARY",
                                        .cancel_requested = [] { return true; }});
   static_cast<void>(disabled_loop.run_turn("prompt", store, provider, canceled_transport));
-  static_cast<void>(
-      store.append({.id = "post-disabled", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"}));
+  static_cast<void>(append_route(
+      {.id = "post-disabled", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"}));
 
   std::lock_guard lock(collector->mutex);
   bool append_error = false;

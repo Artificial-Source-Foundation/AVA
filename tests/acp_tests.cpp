@@ -1340,7 +1340,7 @@ void test_acp_cross_process_lease_and_bounded_streaming()
   expect(store.has_value(), "lease test creates store");
   if (!store)
     return;
-  static_cast<void>(store->append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  static_cast<void>(append_session_entry_for_test(*store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                              .parent_id = "",
                                                              .type = ava::session::EntryType::SessionStart,
                                                              .timestamp = ava::session::now_timestamp(),
@@ -1359,11 +1359,14 @@ void test_acp_cross_process_lease_and_bounded_streaming()
   static_cast<void>(waitpid(child, &status, 0));
   expect(WIFEXITED(status) && WEXITSTATUS(status) == 0, "session lease excludes a second AVA process for the host lifetime");
 
-  static_cast<void>(store->append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                             .parent_id = "",
-                                                             .type = ava::session::EntryType::UserMessage,
-                                                             .timestamp = ava::session::now_timestamp(),
-                                                             .data_json = "{\"text\":\"0123456789abcdef\"}"}));
+  if (lease)
+  {
+    static_cast<void>(store->append(*lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::UserMessage,
+                                                                       .timestamp = ava::session::now_timestamp(),
+                                                                       .data_json = "{\"text\":\"0123456789abcdef\"}"}));
+  }
   auto bounded = store->load_bounded(ava::session::SessionReadLimits{.max_file_bytes = 32, .max_line_bytes = 32, .max_entries = 2});
   expect(!bounded && bounded.error().message().find("bounded") != std::string::npos,
          "bounded streaming session open rejects an oversized transcript without unbounded allocation");
@@ -1386,7 +1389,7 @@ void test_acp_list_pagination_cancel_race_stop_reasons_and_file_safety()
     auto store = ava::session::SessionStore::create(workspace, paths.sessions_dir);
     if (!store)
       continue;
-    static_cast<void>(store->append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+    static_cast<void>(append_session_entry_for_test(*store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                .parent_id = "",
                                                                .type = ava::session::EntryType::SessionStart,
                                                                .timestamp = "2026-07-12T12:" + std::to_string(index / 10) + std::to_string(index % 10) + ":00Z",
@@ -1420,12 +1423,12 @@ void test_acp_list_pagination_cancel_race_stop_reasons_and_file_safety()
     auto store = ava::session::SessionStore::create(workspace, paths.sessions_dir);
     if (!store)
       continue;
-    static_cast<void>(store->append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+    static_cast<void>(append_session_entry_for_test(*store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                .parent_id = "",
                                                                .type = ava::session::EntryType::SessionStart,
                                                                .timestamp = ava::session::now_timestamp(),
                                                                .data_json = "{\"original_cwd\":\"" + ava::core::json::escape(workspace.string()) + "\"}"}));
-    static_cast<void>(ava::session::append_session_metadata(
+    static_cast<void>(append_session_metadata_for_test(
         *store, ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(std::string(256, 't')), .actor = "test"}));
   }
   std::vector<std::string> retained_cursors;

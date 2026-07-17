@@ -114,7 +114,7 @@ class ActiveRunGuard
   [[nodiscard]] bool active() const noexcept;
   // Immutable-generation route.  Copies remain safe after session teardown
   // because they only retain controller state, never runtime::Session.
-  [[nodiscard]] std::function<ava::core::VoidResult(ava::session::SessionEntry)> append_route(ava::session::SessionStore& store) const;
+  [[nodiscard]] std::function<ava::core::VoidResult(ava::session::SessionEntry)> append_route() const;
 
  private:
   struct State;
@@ -130,7 +130,7 @@ class ActiveRunGuard
 class SessionRunController
 {
  public:
-  SessionRunController();
+  explicit SessionRunController(std::shared_ptr<ava::session::SessionAppendTarget> append_target);
   ~SessionRunController();
   SessionRunController(SessionRunController const&) = delete;
   SessionRunController& operator=(SessionRunController const&) = delete;
@@ -153,15 +153,18 @@ class SessionRunController
 
   // Compatibility owner route for notifications that are not tied to a run.
   // It is still session-bound, serialized, and rejects once terminal/closed.
-  [[nodiscard]] ava::core::VoidResult append(ava::session::SessionStore& store, ava::session::SessionEntry entry);
-  [[nodiscard]] std::function<ava::core::VoidResult(ava::session::SessionEntry)> owner_append_route(ava::session::SessionStore& store) const;
+  [[nodiscard]] ava::core::VoidResult append(ava::session::SessionEntry entry);
+  [[nodiscard]] std::function<ava::core::VoidResult(ava::session::SessionEntry)> owner_append_route() const;
+  // Reject new work, finish or fail accepted appends, then release the target.
+  // Stale copied routes retain only controller state and cannot retain a lease.
+  void shutdown() noexcept;
   // Explicit recovery boundary after a persistence latch. Never clears it
   // implicitly on later admission.
   [[nodiscard]] ava::core::VoidResult reset_persistence_failure();
 
  private:
   [[nodiscard]] static ava::core::VoidResult append_for_generation(std::shared_ptr<ActiveRunGuard::State> const& state, std::uint64_t generation,
-                                                                   ava::session::SessionStore& store, ava::session::SessionEntry entry, bool owner_route);
+                                                                   ava::session::SessionEntry entry, bool owner_route);
   std::shared_ptr<ActiveRunGuard::State> state_;
   friend class ActiveRunGuard;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

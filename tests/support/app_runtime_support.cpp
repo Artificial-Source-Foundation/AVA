@@ -335,9 +335,9 @@ std::optional<ava::session::SessionEntry> latest_compaction_entry(std::vector<av
   return std::nullopt;
 }
 
-MutatingSummaryTransport::MutatingSummaryTransport(ava::session::SessionStore& store, std::vector<ava::provider::HttpResponse> responses,
+MutatingSummaryTransport::MutatingSummaryTransport(ava::agent::SessionAppendSink append_sink, std::vector<ava::provider::HttpResponse> responses,
                                                    std::size_t mutate_requests)
-    : store_(store), responses_(std::move(responses)), mutate_requests_(mutate_requests)
+    : append_sink_(std::move(append_sink)), responses_(std::move(responses)), mutate_requests_(mutate_requests)
 {
 }
 
@@ -346,11 +346,14 @@ ava::core::Result<ava::provider::HttpResponse> MutatingSummaryTransport::send(av
   requests_.push_back(request);
   if (requests_.size() <= mutate_requests_)
   {
-    static_cast<void>(store_.append(ava::session::SessionEntry{.id = "entry_concurrent_change_" + std::to_string(requests_.size()),
-                                                               .parent_id = "",
-                                                               .type = ava::session::EntryType::UserMessage,
-                                                               .timestamp = ava::session::now_timestamp(),
-                                                               .data_json = "{\"text\":\"concurrent change\"}"}));
+    if (append_sink_)
+    {
+      static_cast<void>(append_sink_(ava::session::SessionEntry{.id = "entry_concurrent_change_" + std::to_string(requests_.size()),
+                                                                .parent_id = "",
+                                                                .type = ava::session::EntryType::UserMessage,
+                                                                .timestamp = ava::session::now_timestamp(),
+                                                                .data_json = "{\"text\":\"concurrent change\"}"}));
+    }
   }
   if (responses_.empty())
   {

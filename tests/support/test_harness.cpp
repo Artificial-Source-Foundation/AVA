@@ -1,5 +1,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/core/ids.h"
+#include "ava/session/record.h"
+#include "ava/session/validation.h"
 
 #include <climits>
 #include <cstdlib>
@@ -186,13 +188,84 @@ bool has_active_sgr_at_text(std::string_view line, std::string_view text, std::s
   return reset_pos == std::string_view::npos || reset_pos < sgr_pos;
 }
 
+namespace {
+
+ava::core::Result<ava::session::SessionLease> acquire_test_session_lease(ava::session::SessionStore const& store)
+{
+  if (auto valid = ava::session::validate_session_id(store.session_id()); !valid)
+    return std::unexpected(std::move(valid.error()));
+  auto lease = ava::session::SessionLease::acquire(store.session_path());
+  if (!lease)
+  {
+    std::error_code exists_error;
+    if (std::filesystem::exists(store.session_path(), exists_error) || exists_error)
+      return std::unexpected(std::move(lease.error()));
+    lease = ava::session::SessionLease::create_and_acquire(store.session_path());
+  }
+  return lease;
+}
+
+}  // namespace
+
+ava::core::VoidResult append_session_entry_for_test(ava::session::SessionStore& store, ava::session::SessionEntry const& entry)
+{
+  if (store.is_ephemeral())
+    return store.append_ephemeral(entry);
+  auto lease = acquire_test_session_lease(store);
+  if (!lease)
+    return std::unexpected(std::move(lease.error()));
+  return store.append(*lease, entry);
+}
+
+std::function<ava::core::VoidResult(ava::session::SessionEntry const&)> append_route_for_test(ava::session::SessionStore const& store)
+{
+  ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>> target =
+      store.is_ephemeral() ? ava::session::SessionAppendTarget::create_ephemeral(store)
+                           : [&]() -> ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>> {
+                               auto lease = acquire_test_session_lease(store);
+                               if (!lease)
+                                 return std::unexpected(std::move(lease.error()));
+                               return ava::session::SessionAppendTarget::create_persistent(store, *lease);
+                             }();
+  if (target)
+  {
+    auto retained_target = std::move(*target);
+    return [retained_target = std::move(retained_target)](ava::session::SessionEntry const& entry) { return retained_target->append(entry); };
+  }
+  auto const message = target.error().format();
+  return [message](ava::session::SessionEntry const&) {
+    return ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, message)));
+  };
+}
+
+ava::core::Result<ava::session::SessionMetadataView> append_session_metadata_for_test(ava::session::SessionStore& store,
+                                                                                       ava::session::SessionMetadataUpdate update)
+{
+  if (store.is_ephemeral())
+    return ava::session::append_session_metadata_ephemeral(store, std::move(update));
+  auto lease = acquire_test_session_lease(store);
+  if (!lease)
+    return std::unexpected(std::move(lease.error()));
+  return ava::session::append_session_metadata(store, *lease, std::move(update));
+}
+
+ava::core::VoidResult append_manual_compaction_for_test(ava::session::SessionStore& store, ava::session::ManualCompactionRequest request)
+{
+  if (store.is_ephemeral())
+    return ava::session::append_manual_compaction_ephemeral(store, std::move(request));
+  auto lease = acquire_test_session_lease(store);
+  if (!lease)
+    return std::unexpected(std::move(lease.error()));
+  return ava::session::append_manual_compaction(store, *lease, std::move(request));
+}
+
 ava::core::VoidResult append_permission_audit_for_test(ava::session::SessionStore& store, ava::tools::PermissionAuditEvent const& event)
 {
-  return store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                 .parent_id = "",
-                                                 .type = ava::session::EntryType::PermissionDecision,
-                                                 .timestamp = ava::session::now_timestamp(),
-                                                 .data_json = ava::tools::permission_audit_data_json(event)});
+  return append_session_entry_for_test(store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                          .parent_id = "",
+                                                                          .type = ava::session::EntryType::PermissionDecision,
+                                                                          .timestamp = ava::session::now_timestamp(),
+                                                                          .data_json = ava::tools::permission_audit_data_json(event)});
 }
 
 std::vector<ava::session::SessionEntry> permission_entries(std::vector<ava::session::SessionEntry> const& entries)

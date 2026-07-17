@@ -499,6 +499,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (auto recovered = recover_source_session_for_mutation(context.session, *source_session_id, temporary_source_lease); !recovered)
       return handled(write_error(context.output, command.id, recovered.error()));
 
+    auto const* source_lease = *source_session_id == context.session.store.session_id() ? &context.session.lease : &*temporary_source_lease;
     auto branched = ava::session::create_session_branch(ava::session::SessionBranchOptions{
         .workspace_dir = context.session.workspace_dir,
         .root_dir = context.session.paths.sessions_dir,
@@ -507,6 +508,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
         .name = command.session_name,
         .labels = command.labels,
         .read_limits = context.open_options.session_read_limits,
+        .source_lease = source_lease,
         .mode = command.type == "clone_session" ? ava::session::SessionBranchMode::Clone : ava::session::SessionBranchMode::Fork,
         .actor = "rpc"});
     if (!branched)
@@ -564,6 +566,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     std::optional<ava::session::SessionLease> temporary_source_lease;
     if (auto recovered = recover_source_session_for_mutation(context.session, *source_session_id, temporary_source_lease); !recovered)
       return handled(write_error(context.output, command.id, recovered.error()));
+    auto const* source_lease = *source_session_id == context.session.store.session_id() ? &context.session.lease : &*temporary_source_lease;
     auto summary = ava::session::append_branch_summary(ava::session::BranchSummaryOptions{.workspace_dir = context.session.workspace_dir,
                                                                                           .root_dir = context.session.paths.sessions_dir,
                                                                                           .source_session_id = *source_session_id,
@@ -573,6 +576,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
                                                                                           .provider = *command.provider,
                                                                                           .model = *command.model,
                                                                                           .reason = *command.reason,
+                                                                                          .source_lease = source_lease,
                                                                                           .actor = "rpc"});
     if (!summary)
       return handled(write_error(context.output, command.id, summary.error()));

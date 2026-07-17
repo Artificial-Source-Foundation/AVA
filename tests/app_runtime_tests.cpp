@@ -644,7 +644,7 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
     return;
   auto const entry_limited_id = entry_limited_seed->store.session_id();
   auto const entry_limited_path = entry_limited_seed->store.session_path();
-  auto appended_entry = entry_limited_seed->store.append(ava::session::SessionEntry{.id = "bounded_second_entry",
+  auto appended_entry = entry_limited_seed->append_owned(ava::session::SessionEntry{.id = "bounded_second_entry",
                                                                                     .parent_id = "",
                                                                                     .type = ava::session::EntryType::UserMessage,
                                                                                     .timestamp = "2026-07-14T00:00:00Z",
@@ -1468,7 +1468,7 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
   if (!session)
     return;
   session->model.context_window_tokens = 100;
-  auto seeded = session->store.append({.id = "observed-old-context",
+  auto seeded = session->append_owned({.id = "observed-old-context",
                                        .parent_id = "",
                                        .type = ava::session::EntryType::UserMessage,
                                        .timestamp = ava::session::now_timestamp(),
@@ -2475,6 +2475,7 @@ void test_app_command_dispatcher()
                                          .branch_from_entry_id = {},
                                          .name = std::optional<std::string>("Review branch"),
                                          .labels = std::optional<std::vector<std::string>>(std::vector<std::string>{"review", "ui"}),
+                                         .source_lease = &session->lease,
                                          .mode = ava::session::SessionBranchMode::Fork,
                                          .actor = "test"});
   expect(branch.has_value(),
@@ -2568,7 +2569,7 @@ void test_app_command_dispatcher()
              permissions_diagnose->output[0].find("outside the model-writable workspace") != std::string::npos,
          "command dispatcher /permissions diagnose reports storage and fail-closed behavior");
   auto append_permission_audit =
-      append_permission_audit_for_test(session->store, ava::tools::PermissionAuditEvent{.permission_request_id = "permreq_runtime_deny",
+      ava::agent::append_permission_decision(session->owner_append_route(), ava::tools::PermissionAuditEvent{.permission_request_id = "permreq_runtime_deny",
                                                                                         .operation = ava::permissions::Operation::RunCommand,
                                                                                         .mode = ava::agent::Mode::Build,
                                                                                         .tool_name = "bash",
@@ -2904,7 +2905,7 @@ void test_app_command_dispatcher()
                       if (!introduced_manual_stale_snapshot)
                       {
                         introduced_manual_stale_snapshot = true;
-                        static_cast<void>(session->store.append(ava::session::SessionEntry{.id = "entry_manual_compact_concurrent_change",
+                        static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_manual_compact_concurrent_change",
                                                                                            .parent_id = "",
                                                                                            .type = ava::session::EntryType::UserMessage,
                                                                                            .timestamp = ava::session::now_timestamp(),
@@ -3056,7 +3057,7 @@ void test_app_command_dispatcher()
          "confirmed /import retains its destination lease through append and runtime handoff");
 
   auto seeded_stats_usage =
-      session->store.append(ava::session::SessionEntry{.id = "entry_slash_stats_usage",
+      session->append_owned(ava::session::SessionEntry{.id = "entry_slash_stats_usage",
                                                        .parent_id = "",
                                                        .type = ava::session::EntryType::AssistantMessage,
                                                        .timestamp = "2026-05-02T00:00:00Z",
@@ -3108,7 +3109,7 @@ void test_app_session_jsonl_import_export_attachment_caveat()
                                                          .type = ava::session::EntryType::UserMessage,
                                                          .timestamp = "2026-05-02T00:00:01Z",
                                                          .data_json = "{\"text\":\"see attached\",\"attachments\":[" + attachment_json + "]}"};
-  auto appended = session->store.append(attached_entry);
+  auto appended = session->append_owned(attached_entry);
   expect(appended.has_value(), "JSONL attachment caveat test seeds non-redacted image attachment metadata");
 
   auto exported = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export jsonl attachment-export.jsonl"});
@@ -3186,7 +3187,7 @@ void test_app_session_branch_commands()
     return;
 
   auto const source_session_id = session->store.session_id();
-  auto seed = session->store.append(ava::session::SessionEntry{.id = "entry_branch_seed",
+  auto seed = session->append_owned(ava::session::SessionEntry{.id = "entry_branch_seed",
                                                                .parent_id = "",
                                                                .type = ava::session::EntryType::UserMessage,
                                                                .timestamp = "2026-05-07T00:00:00Z",
@@ -3460,7 +3461,7 @@ void test_app_runtime_model_switch_persists_and_reopens()
   }
   expect(saw_model_change, "runtime model switch appends model_change entry");
 
-  auto appended_escaped_model_change = session->store.append(ava::session::SessionEntry{
+  auto appended_escaped_model_change = session->append_owned(ava::session::SessionEntry{
       .id = ava::core::make_id("entry"),
       .parent_id = "",
       .type = ava::session::EntryType::ModelChange,
@@ -3576,14 +3577,14 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
   if (!session)
     return;
 
-  auto appended_tool_call = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_tool_call = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                              .parent_id = "",
                                                                              .type = ava::session::EntryType::ToolCall,
                                                                              .timestamp = ava::session::now_timestamp(),
                                                                              .data_json = "{\"call_id\":\"call_1\","
                                                                                           "\"name\":\"read_file\","
                                                                                           "\"arguments\":{}}"});
-  auto appended_tool_result = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_tool_result = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                .parent_id = "",
                                                                                .type = ava::session::EntryType::ToolResult,
                                                                                .timestamp = ava::session::now_timestamp(),
@@ -3600,7 +3601,7 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
          "runtime tool-history switch error explains missing tool support");
   expect(session->model.provider_id == "openai" && session->model.model_id == "gpt-5.5", "rejected tool-history switch leaves active model unchanged");
 
-  auto appended_reasoning = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_reasoning = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                              .parent_id = "",
                                                                              .type = ava::session::EntryType::ReasoningBlock,
                                                                              .timestamp = ava::session::now_timestamp(),
@@ -3629,7 +3630,7 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
          "runtime reasoning switch error includes incompatible reasoning format");
   expect(session->model.provider_id == "anthropic" && session->model.model_id == "claude-replay", "rejected reasoning switch leaves active model unchanged");
 
-  auto appended_compaction = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_compaction = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                               .parent_id = "",
                                                                               .type = ava::session::EntryType::Compaction,
                                                                               .timestamp = ava::session::now_timestamp(),
@@ -3640,7 +3641,7 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
          "runtime ignores pre-compaction native history for switch compatibility");
   expect(session->model.provider_id == "openai" && session->model.model_id == "no-tools", "post-compaction switch updates active model");
 
-  auto appended_large_image = session->store.append(ava::session::SessionEntry{
+  auto appended_large_image = session->append_owned(ava::session::SessionEntry{
       .id = ava::core::make_id("entry"),
       .parent_id = "",
       .type = ava::session::EntryType::UserMessage,
@@ -3656,14 +3657,14 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
   expect(!rejected_large_image.has_value() && rejected_large_image.error().format().find("byte-size") != std::string::npos,
          "runtime rejects model switches that exceed provider-specific image limits");
   expect(session->model.provider_id == "openai" && session->model.model_id == "no-tools", "rejected image-limit switch leaves active model unchanged");
-  auto appended_post_image_compaction = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_post_image_compaction = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                          .parent_id = "",
                                                                                          .type = ava::session::EntryType::Compaction,
                                                                                          .timestamp = ava::session::now_timestamp(),
                                                                                          .data_json = "{\"summary\":\"image history compacted\"}"});
   expect(appended_post_image_compaction.has_value(), "model switch compatibility test clears image history with compaction");
 
-  auto appended_deepseek_reasoning = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_deepseek_reasoning = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                       .parent_id = "",
                                                                                       .type = ava::session::EntryType::ReasoningBlock,
                                                                                       .timestamp = ava::session::now_timestamp(),
@@ -3679,14 +3680,14 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
   expect(session->model.provider_id == "openai" && session->model.model_id == "no-tools",
          "rejected cross-provider compatible reasoning switch leaves active model unchanged");
 
-  auto appended_deepseek_compaction = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_deepseek_compaction = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                        .parent_id = "",
                                                                                        .type = ava::session::EntryType::Compaction,
                                                                                        .timestamp = ava::session::now_timestamp(),
                                                                                        .data_json = "{\"summary\":\"deepseek reasoning compacted\"}"});
   expect(appended_deepseek_compaction.has_value(), "model switch compatibility test clears DeepSeek reasoning with compaction");
 
-  auto appended_kimi_reasoning = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_kimi_reasoning = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                   .parent_id = "",
                                                                                   .type = ava::session::EntryType::ReasoningBlock,
                                                                                   .timestamp = ava::session::now_timestamp(),
@@ -3907,7 +3908,7 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
     if (!entries || entries->empty())
       return false;
     auto appended =
-        session.store.append(ava::session::SessionEntry{.id = "entry_rollback_attachment",
+        session.append_owned(ava::session::SessionEntry{.id = "entry_rollback_attachment",
                                                         .parent_id = entries->back().id,
                                                         .type = ava::session::EntryType::UserMessage,
                                                         .timestamp = "2026-07-16T00:00:00Z",

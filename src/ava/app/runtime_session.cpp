@@ -201,19 +201,34 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
         return std::unexpected(std::move(acquired.error()));
       lease = std::move(*acquired);
     }
-    auto appended = runtime::append_session_start(store, options.mode, model, prompt_state->base_prompt, prompt_state->context_sources.size(), current_dir);
+    auto appended = store.is_ephemeral()
+                        ? runtime::append_session_start_ephemeral(store, options.mode, model, prompt_state->base_prompt, prompt_state->context_sources.size(),
+                                                                  current_dir)
+                        : runtime::append_session_start(store, lease, options.mode, model, prompt_state->base_prompt,
+                                                        prompt_state->context_sources.size(), current_dir);
     if (!appended)
-      return std::unexpected(appended.error());
+      return std::unexpected(std::move(appended.error()));
   }
 
   if (append_initial_session_name && options.initial_session_name)
   {
-    auto metadata = ava::session::append_session_metadata(store, ava::session::SessionMetadataUpdate{.name = options.initial_session_name, .actor = "cli"});
-    if (!metadata)
-      return std::unexpected(metadata.error());
+    auto entries = store.load();
+    if (!entries)
+      return std::unexpected(std::move(entries.error()));
+    auto entry = ava::session::make_session_metadata_entry(
+        ava::session::SessionMetadataUpdate{.name = options.initial_session_name, .actor = "cli"}, entries->empty() ? std::string{} : entries->back().id);
+    if (!entry)
+      return std::unexpected(std::move(entry.error()));
+    auto appended = store.is_ephemeral() ? store.append_ephemeral(*entry) : store.append(lease, *entry);
+    if (!appended)
+      return std::unexpected(std::move(appended.error()));
   }
 
   bool const sessionless = store.is_ephemeral();
+  auto append_target = sessionless ? ava::session::SessionAppendTarget::create_ephemeral(store)
+                                   : ava::session::SessionAppendTarget::create_persistent(store, lease);
+  if (!append_target)
+    return std::unexpected(std::move(append_target.error()));
   runtime::Session session{.store = std::move(store),
                            .lease = std::move(lease),
                            .mode = options.mode,
@@ -232,7 +247,7 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
                            .scoped_model_cycle = registry.scoped_model_cycle,
                            .created = created,
                            .sessionless = sessionless,
-                           .run_controller = std::make_unique<SessionRunController>(),
+                           .run_controller = std::make_unique<SessionRunController>(std::move(*append_target)),
                            .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>(),
                            .offline = options.offline};
 
@@ -297,6 +312,7 @@ ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions co
                                                                                          .name = options.initial_session_name,
                                                                                          .labels = std::nullopt,
                                                                                          .read_limits = options.session_read_limits,
+                                                                                         .source_lease = &*source_lease,
                                                                                          .mode = ava::session::SessionBranchMode::Fork,
                                                                                          .actor = "cli"});
     if (!branch)

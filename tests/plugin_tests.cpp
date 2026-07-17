@@ -4,6 +4,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/app/command_plugins.h"
 #include "ava/app/plugin_event_hooks.h"
+#include "ava/app/session_run_controller.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/file_tools.h"
 #include "ava/plugin/discovery.h"
@@ -242,6 +243,10 @@ ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths con
 {
   auto store = ava::session::SessionStore::create_ephemeral(workspace);
   expect(store.has_value(), store ? "plugin command test session store opens" : "plugin command test session store opens: " + store.error().format());
+  auto target = store ? ava::session::SessionAppendTarget::create_ephemeral(*store)
+                      : ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>>(std::unexpected(store.error()));
+  expect(target.has_value(), target ? "plugin command test session append target opens"
+                                   : "plugin command test session append target opens: " + target.error().format());
   ava::config::ModelInfo model;
   model.provider_id = "openai";
   model.model_id = "gpt-test";
@@ -267,6 +272,7 @@ ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths con
                                   .scoped_model_cycle = std::nullopt,
                                   .created = false,
                                   .sessionless = false,
+                                  .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr),
                                   .background_jobs = nullptr,
                                   .offline = false};
 }

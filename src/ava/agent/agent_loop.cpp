@@ -348,13 +348,14 @@ ava::observability::TraceOutcome terminal_outcome(ava::core::Error const& error)
   }
 }
 
-void append_background_error_best_effort(ava::session::SessionStore& store, ava::core::Error const& error)
+void append_background_error_best_effort(SessionAppendSink const& append_sink, ava::core::Error const& error)
 {
-  static_cast<void>(append_error(store, error));
+  if (append_sink)
+    static_cast<void>(append_error(append_sink, error));
 }
 
-void append_background_parent_error_best_effort(SessionAppendSink const& parent_append, std::optional<ava::session::SessionStore>& parent_store,
-                                                std::string const& task_id, std::string const& subagent_type, ava::core::Error error)
+void append_background_parent_error_best_effort(SessionAppendSink const& parent_append, std::string const& task_id,
+                                                std::string const& subagent_type, ava::core::Error error)
 {
   // Parent notifications are owner-routed. A completed/stale parent route
   // deliberately rejects rather than writing around its append authority.
@@ -362,8 +363,6 @@ void append_background_parent_error_best_effort(SessionAppendSink const& parent_
   error.with_context("subagent_type", subagent_type);
   if (parent_append)
     static_cast<void>(append_error(parent_append, error));
-  else if (parent_store)
-    static_cast<void>(append_error(*parent_store, error));
 }
 
 BackgroundJobCompletion background_failure_completion(BackgroundJobContext const& context, ava::core::Error const& error)
@@ -407,6 +406,11 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
                                                        ava::session::SessionStore& store, ava::provider::Provider const& provider,
                                                        ava::provider::Transport& transport)
 {
+  if (!store.is_ephemeral() && !options_.append_entry)
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent AgentLoop requires an append authority route before producing records"));
+  }
   ava::observability::TraceContext trace_context;
   std::optional<AgentTraceScope> trace_scope;
   if (options_.observation && options_.observation->enabled())
@@ -708,7 +712,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
         name.resize(ava::session::kMaxSessionNameBytes);
       }
       auto metadata = ava::session::append_session_metadata(
-          child_store, ava::session::SessionMetadataUpdate{.name = std::move(name), .parent_session_id = store.session_id(), .actor = "subagent"});
+          child_store, child_lease, ava::session::SessionMetadataUpdate{.name = std::move(name), .parent_session_id = store.session_id(), .actor = "subagent"});
       if (!metadata)
         return std::unexpected(std::move(metadata.error()));
     }
@@ -754,12 +758,6 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       auto provider_instance = std::move(*background_provider);
       auto transport_instance = std::move(*background_transport);
       auto parent_append = options_.parent_notification_sink;
-      // A standalone AgentLoop has no runtime::Session owner. Its detached copy
-      // is proven inactive; runtime::Session runs always carry the stable owner
-      // sink, never the generation-bound active append route.
-      std::optional<ava::session::SessionStore> parent_store;
-      if (!parent_append)
-        parent_store.emplace(store.detached_copy_for_background_persistence());
       child_options.permission_resolver = nullptr;
       child_options.question_resolver = nullptr;
       child_options.session_mutex = nullptr;
@@ -769,9 +767,9 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
         ava::session::SessionStore child_store;
         ava::session::SessionLease child_lease;
         AgentLoopOptions child_options;
+        SessionAppendSink child_append;
         std::string prompt;
         SessionAppendSink parent_append;
-        std::optional<ava::session::SessionStore> parent_store;
         std::string task_id;
         std::string subagent_type;
         std::unique_ptr<ava::provider::Provider> provider_instance;
@@ -780,14 +778,22 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       auto run_state = std::make_shared<BackgroundTaskRunState>(BackgroundTaskRunState{.child_store = std::move(child_store),
                                                                                        .child_lease = std::move(child_lease),
                                                                                        .child_options = std::move(child_options),
+                                                                                       .child_append = {},
                                                                                        .prompt = request.prompt,
                                                                                        .parent_append = std::move(parent_append),
-                                                                                       .parent_store = std::move(parent_store),
                                                                                        .task_id = task_id,
                                                                                        .subagent_type = request.subagent_type,
                                                                                        .provider_instance = std::move(provider_instance),
                                                                                        .transport_instance = std::move(transport_instance)});
-      auto job = options_.background_jobs->start(
+      // The run state now owns the child store and its original lease. Create
+      // the duplicate append target only after that ownership is stable; the
+      // sink captures the target, never the run state, so no cycle is formed.
+      auto child_target = ava::session::SessionAppendTarget::create_persistent(run_state->child_store, run_state->child_lease);
+      if (!child_target)
+        return std::unexpected(std::move(child_target.error()));
+      run_state->child_options.append_entry = [target = std::move(*child_target)](ava::session::SessionEntry entry) { return target->append(entry); };
+      run_state->child_append = run_state->child_options.append_entry;
+      auto job =  options_.background_jobs->start(
           BackgroundJobStartOptions{.title = request.description,
                                     .description = request.prompt,
                                     .subagent_type = request.subagent_type,
@@ -802,9 +808,8 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
               auto error = child_result.error();
               if (!context.stop_token.stop_requested())
               {
-                append_background_error_best_effort(run_state->child_store, error);
-                append_background_parent_error_best_effort(run_state->parent_append, run_state->parent_store, run_state->task_id, run_state->subagent_type,
-                                                           error);
+                append_background_error_best_effort(run_state->child_append, error);
+                append_background_parent_error_best_effort(run_state->parent_append, run_state->task_id, run_state->subagent_type, error);
               }
               return background_failure_completion(context, error);
             }
@@ -826,6 +831,10 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
                                             .tool_iterations = 0};
     }
 
+    auto child_target = ava::session::SessionAppendTarget::create_persistent(child_store, child_lease);
+    if (!child_target)
+      return std::unexpected(std::move(child_target.error()));
+    child_options.append_entry = [target = std::move(*child_target)](ava::session::SessionEntry entry) { return target->append(entry); };
     AgentLoop child_loop(std::move(child_options));
     auto child_result = child_loop.run_turn(request.prompt, child_store, provider, transport);
     if (!child_result)

@@ -21,6 +21,13 @@ ava::core::Error branch_error(ava::core::ErrorCategory category, std::string mes
   return ava::core::Error(category, std::move(message));
 }
 
+std::filesystem::path normalized_absolute_path(std::filesystem::path const& path)
+{
+  std::error_code error;
+  auto absolute = std::filesystem::absolute(path, error);
+  return (error ? path : absolute).lexically_normal();
+}
+
 void append_json_string_field(std::string& json, std::string_view key, std::string_view value)
 {
   json += ",\"";
@@ -299,6 +306,22 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
   auto source = SessionStore::open(options.workspace_dir, options.source_session_id, options.root_dir);
   if (!source)
     return std::unexpected(std::move(source.error()));
+  std::optional<SessionLease> owned_source_lease;
+  SessionLease const* source_lease = options.source_lease;
+  if (source_lease == nullptr)
+  {
+    auto acquired = SessionLease::acquire(source->session_path());
+    if (!acquired)
+      return std::unexpected(std::move(acquired.error()));
+    owned_source_lease.emplace(std::move(*acquired));
+    source_lease = &*owned_source_lease;
+  }
+  if (!source_lease->active() || source_lease->canonical_path() != normalized_absolute_path(source->session_path()))
+  {
+    auto error = branch_error(ava::core::ErrorCategory::InvalidArgument, "source branch lease does not exactly match the source session");
+    error.with_context("source_session_id", options.source_session_id);
+    return std::unexpected(std::move(error));
+  }
   auto source_entries = source->load_bounded(options.read_limits.value_or(legacy_unbounded_session_read_limits()));
   if (!source_entries)
     return std::unexpected(std::move(source_entries.error()));
@@ -321,7 +344,7 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
 
   for (std::size_t index = 0; index < *copy_count; ++index)
   {
-    if (auto appended = created->append((*source_entries)[index]); !appended)
+    if (auto appended = created->append(*destination_lease, (*source_entries)[index]); !appended)
     {
       auto error = std::move(appended.error());
       error.with_context("source_session_id", options.source_session_id);
@@ -346,7 +369,7 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
   metadata_update.branch_from_entry_id = resolved_branch_from_entry_id;
   metadata_update.branch_origin = options.mode == SessionBranchMode::Clone ? "clone" : "fork";
   metadata_update.actor = std::move(options.actor);
-  auto metadata = append_session_metadata(*created, std::move(metadata_update));
+  auto metadata = append_session_metadata(*created, *destination_lease, std::move(metadata_update));
   if (!metadata)
   {
     auto error = std::move(metadata.error());
@@ -398,6 +421,22 @@ ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOption
   auto source = SessionStore::open(options.workspace_dir, options.source_session_id, options.root_dir);
   if (!source)
     return std::unexpected(std::move(source.error()));
+  std::optional<SessionLease> owned_source_lease;
+  SessionLease const* source_lease = options.source_lease;
+  if (source_lease == nullptr)
+  {
+    auto acquired = SessionLease::acquire(source->session_path());
+    if (!acquired)
+      return std::unexpected(std::move(acquired.error()));
+    owned_source_lease.emplace(std::move(*acquired));
+    source_lease = &*owned_source_lease;
+  }
+  if (!source_lease->active() || source_lease->canonical_path() != normalized_absolute_path(source->session_path()))
+  {
+    auto error = branch_error(ava::core::ErrorCategory::InvalidArgument, "source branch summary lease does not exactly match the source session");
+    error.with_context("source_session_id", options.source_session_id);
+    return std::unexpected(std::move(error));
+  }
   auto entries = source->load();
   if (!entries)
     return std::unexpected(std::move(entries.error()));
@@ -446,7 +485,7 @@ ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOption
                             .type = EntryType::BranchSummary,
                             .timestamp = now_timestamp(),
                             .data_json = std::move(data)};
-  if (auto appended = source->append(entry); !appended)
+  if (auto appended = source->append(*source_lease, entry); !appended)
   {
     return std::unexpected(std::move(appended.error()));
   }

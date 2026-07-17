@@ -1226,7 +1226,7 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   parent_metadata.labels = std::vector<std::string>{"root"};
   parent_metadata.branch_origin = "root";
   parent_metadata.actor = "test";
-  auto parent_meta = ava::session::append_session_metadata(parent->store, std::move(parent_metadata));
+  auto parent_meta = ava::app::append_runtime_session_metadata(*parent, std::move(parent_metadata));
 
   ava::session::SessionMetadataUpdate child_metadata;
   child_metadata.name = "Child";
@@ -1237,7 +1237,7 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   child_metadata.branch_from_entry_id = parent_entries->front().id;
   child_metadata.branch_origin = "fork";
   child_metadata.actor = "test";
-  auto child_meta = ava::session::append_session_metadata(child->store, std::move(child_metadata));
+  auto child_meta = ava::app::append_runtime_session_metadata(*child, std::move(child_metadata));
   expect(parent_meta && child_meta, "RPC session_tree test persists branch metadata");
   parent = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release parent runtime before RPC switch"));
 
@@ -1353,7 +1353,7 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
   if (!entries || entries->empty())
     return;
   auto appended =
-      source->store.append(ava::session::SessionEntry{.id = "entry_rpc_rollback_attachment",
+      source->append_owned(ava::session::SessionEntry{.id = "entry_rpc_rollback_attachment",
                                                       .parent_id = entries->back().id,
                                                       .type = ava::session::EntryType::UserMessage,
                                                       .timestamp = "2026-07-16T00:00:00Z",
@@ -1689,14 +1689,14 @@ void test_app_rpc_protocol_version_and_session_commands()
   ava::session::SessionMetadataUpdate metadata_update;
   metadata_update.name = "Stats audit";
   metadata_update.actor = "test";
-  auto appended_metadata = ava::session::append_session_metadata(session->store, std::move(metadata_update));
+  auto appended_metadata = ava::app::append_runtime_session_metadata(*session, std::move(metadata_update));
 
-  auto appended_user = session->store.append(ava::session::SessionEntry{.id = "entry_user",
+  auto appended_user = session->append_owned(ava::session::SessionEntry{.id = "entry_user",
                                                                         .parent_id = "",
                                                                         .type = ava::session::EntryType::UserMessage,
                                                                         .timestamp = ava::session::now_timestamp(),
                                                                         .data_json = "{\"text\":\"hello\"}"});
-  auto appended_internal_replay = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_internal_replay = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                    .parent_id = "",
                                                                                    .type = ava::session::EntryType::UserMessage,
                                                                                    .timestamp = ava::session::now_timestamp(),
@@ -1704,7 +1704,7 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                                                 "\"internal_replay\":true,"
                                                                                                 "\"replay_of\":\"entry_user\","
                                                                                                 "\"reason\":\"test\"}"});
-  auto appended_assistant = session->store.append(ava::session::SessionEntry{.id = "entry_assistant",
+  auto appended_assistant = session->append_owned(ava::session::SessionEntry{.id = "entry_assistant",
                                                                              .parent_id = "",
                                                                              .type = ava::session::EntryType::AssistantMessage,
                                                                              .timestamp = ava::session::now_timestamp(),
@@ -1712,7 +1712,7 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                                           "\"output_tokens\":1,\"total_tokens\":2,"
                                                                                           "\"cost_usd\":0.001,"
                                                                                           "\"source\":\"provider\"}}"});
-  auto appended_unpriced_assistant = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_unpriced_assistant = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                       .parent_id = "",
                                                                                       .type = ava::session::EntryType::AssistantMessage,
                                                                                       .timestamp = ava::session::now_timestamp(),
@@ -1720,7 +1720,7 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                                                    "\"input_tokens\":1,\"cache_read_tokens\":1,"
                                                                                                    "\"total_tokens\":1,"
                                                                                                    "\"source\":\"provider\"}}"});
-  auto appended_reasoning = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_reasoning = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                              .parent_id = "",
                                                                              .type = ava::session::EntryType::ReasoningBlock,
                                                                              .timestamp = ava::session::now_timestamp(),
@@ -1729,7 +1729,7 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                                           "\"format\":\"anthropic_thinking\","
                                                                                           "\"text\":\"visible reasoning\","
                                                                                           "\"signature\":\"rpc-secret-signature\"}"});
-  auto appended_redacted_reasoning = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_redacted_reasoning = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                       .parent_id = "",
                                                                                       .type = ava::session::EntryType::ReasoningBlock,
                                                                                       .timestamp = ava::session::now_timestamp(),
@@ -1739,22 +1739,22 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                                                    "\"text\":\"hidden redacted rpc reasoning\","
                                                                                                    "\"signature\":\"rpc-redacted-secret-signature\","
                                                                                                    "\"redacted\": true }"});
-  auto appended_mode = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_mode = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                         .parent_id = "",
                                                                         .type = ava::session::EntryType::ModeChange,
                                                                         .timestamp = ava::session::now_timestamp(),
                                                                         .data_json = "{\"mode\":\"build\"}"});
-  auto appended_compaction = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_compaction = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                               .parent_id = "",
                                                                               .type = ava::session::EntryType::Compaction,
                                                                               .timestamp = ava::session::now_timestamp(),
                                                                               .data_json = "{\"summary\":\"prior\"}"});
-  auto appended_cancel = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_cancel = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                           .parent_id = "",
                                                                           .type = ava::session::EntryType::Cancel,
                                                                           .timestamp = ava::session::now_timestamp(),
                                                                           .data_json = "{}"});
-  auto appended_branch_summary = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_branch_summary = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                   .parent_id = "",
                                                                                   .type = ava::session::EntryType::BranchSummary,
                                                                                   .timestamp = ava::session::now_timestamp(),

@@ -72,13 +72,13 @@ void test_app_compact_provider_summary_success()
   expect(session.has_value(), "provider-backed /compact test opens runtime session");
   if (!session)
     return;
-  auto seeded = session->store.append(ava::session::SessionEntry{.id = "entry_user_compact_source",
+  auto seeded = session->append_owned(ava::session::SessionEntry{.id = "entry_user_compact_source",
                                                                  .parent_id = "",
                                                                  .type = ava::session::EntryType::UserMessage,
                                                                  .timestamp = "2026-05-01T00:00:00Z",
                                                                  .data_json = "{\"text\":\"Goal: refactor compaction\"}"});
   expect(seeded.has_value(), "provider-backed /compact test seeds source entry");
-  auto seeded_reasoning = session->store.append(ava::session::SessionEntry{
+  auto seeded_reasoning = session->append_owned(ava::session::SessionEntry{
       .id = "entry_reasoning_compact_source",
       .parent_id = "",
       .type = ava::session::EntryType::ReasoningBlock,
@@ -86,7 +86,7 @@ void test_app_compact_provider_summary_success()
       .data_json =
           R"({"provider":"anthropic","model":"claude","format":"anthropic_thinking","text":"visible compact reasoning","signature":"compact-secret-signature","redacted_data":"opaque-compaction-redacted","redacted":false})"});
   expect(seeded_reasoning.has_value(), "provider-backed /compact test seeds reasoning source entry");
-  auto seeded_redacted_reasoning = session->store.append(ava::session::SessionEntry{
+  auto seeded_redacted_reasoning = session->append_owned(ava::session::SessionEntry{
       .id = "entry_redacted_reasoning_compact_source",
       .parent_id = "",
       .type = ava::session::EntryType::ReasoningBlock,
@@ -293,7 +293,7 @@ void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
   if (!session)
     return;
   session->model.context_window_tokens = 100;
-  static_cast<void>(session->store.append(ava::session::SessionEntry{.id = "entry_canceled_auto_compact",
+  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_canceled_auto_compact",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
@@ -424,14 +424,14 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context()
   session->model.context_window_tokens = 100;
 
   std::string const old_context = "old context marker " + std::string(420, 'x');
-  static_cast<void>(session->store.append(ava::session::SessionEntry{.id = "entry_old_user",
+  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_old_user",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
                                                                      .data_json = "{\"text\":\"" + ava::core::json::escape(old_context) + "\"}"}));
   for (int index = 0; index < 6; ++index)
   {
-    static_cast<void>(session->store.append(ava::session::SessionEntry{.id = "entry_recent_" + std::to_string(index),
+    static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_recent_" + std::to_string(index),
                                                                        .parent_id = "",
                                                                        .type = ava::session::EntryType::AssistantMessage,
                                                                        .timestamp = ava::session::now_timestamp(),
@@ -488,7 +488,7 @@ void test_app_auto_compaction_recent_context_respects_token_budget()
   session->model.context_window_tokens = 1000;
   for (int index = 0; index < 4; ++index)
   {
-    static_cast<void>(session->store.append(
+    static_cast<void>(session->append_owned(
         ava::session::SessionEntry{.id = "entry_budget_" + std::to_string(index),
                                    .parent_id = "",
                                    .type = ava::session::EntryType::UserMessage,
@@ -537,7 +537,7 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely()
 
   std::string emoji_tail;
   for (int index = 0; index < 80; ++index) emoji_tail += "\xF0\x9F\x98\x80";
-  static_cast<void>(session->store.append(ava::session::SessionEntry{.id = "entry_utf8_budget",
+  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_utf8_budget",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
@@ -584,7 +584,7 @@ void test_app_auto_compaction_explicit_zero_disables()
   if (!session)
     return;
   session->model.context_window_tokens = 10;
-  static_cast<void>(session->store.append(ava::session::SessionEntry{.id = "entry_big_user",
+  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_big_user",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
@@ -623,7 +623,7 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
 
   auto const config = ava::session::default_compaction_config();
   auto const threshold = ava::session::effective_auto_threshold_tokens(config, std::nullopt);
-  static_cast<void>(session->store.append(ava::session::SessionEntry{.id = "entry_default_threshold_big",
+  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_default_threshold_big",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
@@ -663,14 +663,14 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
     return;
   session->model.context_window_tokens = 100;
 
-  static_cast<void>(session->store.append(ava::session::SessionEntry{.id = "entry_revalidate_big",
+  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_revalidate_big",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
                                                                      .data_json = "{\"text\":\"" + std::string(420, 'r') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  MutatingSummaryTransport transport(session->store,
+  MutatingSummaryTransport transport(session->owner_append_route(),
                                      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE SUMMARY\"}"},
                                       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"RETRIED SUMMARY\"}"},
                                       sse_response(final_text_sse("retry after stale"))});
@@ -709,14 +709,14 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
     return;
   session->model.context_window_tokens = 100;
 
-  static_cast<void>(session->store.append(ava::session::SessionEntry{.id = "entry_repeated_stale_big",
+  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_repeated_stale_big",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
                                                                      .data_json = "{\"text\":\"" + std::string(420, 's') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  MutatingSummaryTransport transport(session->store,
+  MutatingSummaryTransport transport(session->owner_append_route(),
                                      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE ONE\"}"},
                                       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE TWO\"}"}},
                                      2);

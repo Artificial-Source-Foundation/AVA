@@ -241,12 +241,20 @@ ava::core::Result<SessionEntry> make_manual_compaction_entry(ManualCompactionReq
                       .data_json = compaction_data_json(request, summary, summary_unavailable)};
 }
 
-ava::core::VoidResult append_manual_compaction(SessionStore& store, ManualCompactionRequest request)
+ava::core::VoidResult append_manual_compaction(SessionStore& store, SessionLease const& lease, ManualCompactionRequest request)
 {
   auto entry = make_manual_compaction_entry(std::move(request));
   if (!entry)
     return std::unexpected(std::move(entry.error()));
-  return store.append(std::move(*entry));
+  return store.append(lease, std::move(*entry));
+}
+
+ava::core::VoidResult append_manual_compaction_ephemeral(SessionStore& store, ManualCompactionRequest request)
+{
+  auto entry = make_manual_compaction_entry(std::move(request));
+  if (!entry)
+    return std::unexpected(std::move(entry.error()));
+  return store.append_ephemeral(std::move(*entry));
 }
 
 }  // namespace ava::session

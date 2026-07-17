@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/config/xdg_paths.h"
+#include "ava/agent/agent_loop_session.h"
 #include "ava/session/session_store.h"
 #include "ava/provider/provider.h"
 
@@ -112,13 +113,14 @@ std::optional<ava::session::SessionEntry> latest_compaction_entry(std::vector<av
 class MutatingSummaryTransport final : public ava::provider::Transport
 {
  public:
-  MutatingSummaryTransport(ava::session::SessionStore& store, std::vector<ava::provider::HttpResponse> responses, std::size_t mutate_requests = 1);
+  MutatingSummaryTransport(ava::agent::SessionAppendSink append_sink, std::vector<ava::provider::HttpResponse> responses,
+                          std::size_t mutate_requests = 1);
 
   ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override;
   [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept;
 
  private:
-  ava::session::SessionStore& store_;
+  ava::agent::SessionAppendSink append_sink_;
   std::vector<ava::provider::HttpResponse> responses_;
   std::size_t mutate_requests_ = 1;
   std::vector<ava::provider::HttpRequest> requests_;

@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <sys/types.h>
 
 namespace ava::session {
 
@@ -91,6 +92,8 @@ struct SessionSummary
 // Exclusive advisory lease for one regular session file. The originally
 // requested final path component is opened with O_NOFOLLOW; the descriptor is
 // CLOEXEC and the lock is released automatically on destruction.
+class SessionAppendTarget;
+
 class SessionLease
 {
  public:
@@ -103,12 +106,14 @@ class SessionLease
 
   [[nodiscard]] static ava::core::Result<SessionLease> create_and_acquire(std::filesystem::path const& session_path);
   [[nodiscard]] static ava::core::Result<SessionLease> acquire(std::filesystem::path const& session_path);
+  [[nodiscard]] bool active() const noexcept;
   [[nodiscard]] std::filesystem::path const& canonical_path() const noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   friend class SessionStore;
+  friend class SessionAppendTarget;
 
   SessionLease(int fd, std::filesystem::path canonical_path, bool created);
   int fd_ = -1;
@@ -139,7 +144,10 @@ class SessionStore
   // It may write the same session, but cannot inherit or clear a newer run.
   [[nodiscard]] SessionStore detached_copy_for_background_persistence() const;
 
-  [[nodiscard]] ava::core::VoidResult append(SessionEntry const& entry);
+  // Persistent stores require the active exact matching lease. Ephemeral
+  // stores deliberately use the explicitly named in-memory path below.
+  [[nodiscard]] ava::core::VoidResult append(SessionLease const& lease, SessionEntry const& entry);
+  [[nodiscard]] ava::core::VoidResult append_ephemeral(SessionEntry const& entry);
   // Removes a newly-created persistent session only when the supplied active
   // lease still identifies its sole linked pathname. Intended for rollback
   // before ownership is transferred into a runtime::Session.
@@ -147,6 +155,9 @@ class SessionStore
   // Test-only deterministic race seams. Production callers must not install them.
   void set_before_append_identity_check_for_test(std::function<void()> hook);
   void set_after_append_write_for_test(std::function<void()> hook);
+  // Test-only write seam. A negative result is treated like write(2) failure
+  // with errno supplied by the hook, allowing deterministic torn-tail tests.
+  void set_append_write_for_test(std::function<ssize_t(int, std::string_view)> hook);
   void set_after_recovery_quarantine_publication_for_test(std::function<void()> hook);
   void set_before_created_file_rollback_detach_for_test(std::function<void()> hook);
   void set_after_created_file_rollback_detach_for_test(std::function<void()> hook);
@@ -182,6 +193,7 @@ class SessionStore
 
   [[nodiscard]] ava::core::Result<SessionSummary> inspect_bounded_for_listing(SessionReadLimits limits, bool inspect_metadata,
                                                                               SessionCancelCallback cancel_requested = nullptr) const;
+  [[nodiscard]] ava::core::VoidResult append_impl(SessionLease const* lease, SessionEntry const& entry);
   explicit SessionStore(SessionStoreOptions options, std::shared_ptr<EphemeralState> ephemeral_state);
 
   SessionStoreOptions options_;
@@ -189,9 +201,33 @@ class SessionStore
   std::shared_ptr<ObservationAttachment> observation_attachment_;
   std::function<void()> before_append_identity_check_for_test_;
   std::function<void()> after_append_write_for_test_;
+  std::function<ssize_t(int, std::string_view)> append_write_for_test_;
   std::function<void()> after_recovery_quarantine_publication_for_test_;
   std::function<void()> before_created_file_rollback_detach_for_test_;
   std::function<void()> after_created_file_rollback_detach_for_test_;
+};
+
+// The sole copyable append authority for runtime routes. Persistent targets
+// duplicate the caller's locked open-file description and revalidate the exact
+// published inode before accepting it. Ephemeral targets retain only the
+// shared in-memory store state.
+class SessionAppendTarget
+{
+ public:
+  [[nodiscard]] static ava::core::Result<std::shared_ptr<SessionAppendTarget>> create_persistent(SessionStore const& store,
+                                                                                                  SessionLease const& lease);
+  [[nodiscard]] static ava::core::Result<std::shared_ptr<SessionAppendTarget>> create_ephemeral(SessionStore const& store);
+
+  [[nodiscard]] ava::core::VoidResult append(SessionEntry const& entry);
+  [[nodiscard]] bool is_ephemeral() const noexcept;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
+ private:
+  SessionAppendTarget(SessionStore store, std::optional<SessionLease> lease);
+
+  SessionStore store_;
+  std::optional<SessionLease> lease_;
 };
 
 // Legacy CLI/TUI/RPC reads retain their historical unbounded file/entry policy

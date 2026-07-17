@@ -371,17 +371,32 @@ std::optional<bool> bool_json_field(std::string_view object, std::string_view ke
   return std::nullopt;
 }
 
-ava::core::VoidResult append_session_start(ava::session::SessionStore& store, ava::agent::Mode mode, ava::config::ModelInfo const& model,
-                                           BasePromptMetadata const& base_prompt, std::size_t context_source_count,
-                                           std::filesystem::path const& original_cwd)
+namespace {
+
+ava::session::SessionEntry session_start_entry(ava::agent::Mode mode, ava::config::ModelInfo const& model, BasePromptMetadata const& base_prompt,
+                                               std::size_t context_source_count, std::filesystem::path const& original_cwd)
 {
-  return store.append(ava::session::SessionEntry{
-      .id = ava::core::make_id("entry"),
-      .parent_id = "",
-      .type = ava::session::EntryType::SessionStart,
-      .timestamp = ava::session::now_timestamp(),
-      .data_json = session_start_data_json(mode, model, base_prompt, context_source_count, original_cwd),
-  });
+  return ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                    .parent_id = "",
+                                    .type = ava::session::EntryType::SessionStart,
+                                    .timestamp = ava::session::now_timestamp(),
+                                    .data_json = session_start_data_json(mode, model, base_prompt, context_source_count, original_cwd)};
+}
+
+}  // namespace
+
+ava::core::VoidResult append_session_start(ava::session::SessionStore& store, ava::session::SessionLease const& lease, ava::agent::Mode mode,
+                                           ava::config::ModelInfo const& model, BasePromptMetadata const& base_prompt,
+                                           std::size_t context_source_count, std::filesystem::path const& original_cwd)
+{
+  return store.append(lease, session_start_entry(mode, model, base_prompt, context_source_count, original_cwd));
+}
+
+ava::core::VoidResult append_session_start_ephemeral(ava::session::SessionStore& store, ava::agent::Mode mode,
+                                                     ava::config::ModelInfo const& model, BasePromptMetadata const& base_prompt,
+                                                     std::size_t context_source_count, std::filesystem::path const& original_cwd)
+{
+  return store.append_ephemeral(session_start_entry(mode, model, base_prompt, context_source_count, original_cwd));
 }
 
 ava::session::SessionEntry make_model_change_entry(ava::config::ModelInfo const& previous, ava::config::ModelInfo const& current)
@@ -393,9 +408,16 @@ ava::session::SessionEntry make_model_change_entry(ava::config::ModelInfo const&
                                     .data_json = model_change_data_json(previous, current)};
 }
 
-ava::core::VoidResult append_model_change(ava::session::SessionStore& store, ava::config::ModelInfo const& previous, ava::config::ModelInfo const& current)
+ava::core::VoidResult append_model_change(ava::session::SessionStore& store, ava::session::SessionLease const& lease,
+                                           ava::config::ModelInfo const& previous, ava::config::ModelInfo const& current)
 {
-  return store.append(make_model_change_entry(previous, current));
+  return store.append(lease, make_model_change_entry(previous, current));
+}
+
+ava::core::VoidResult append_model_change_ephemeral(ava::session::SessionStore& store, ava::config::ModelInfo const& previous,
+                                                     ava::config::ModelInfo const& current)
+{
+  return store.append_ephemeral(make_model_change_entry(previous, current));
 }
 
 ava::session::SessionEntry make_reasoning_change_entry(ava::config::ModelInfo const& model, std::optional<ReasoningSelection> const& selection)
@@ -407,10 +429,16 @@ ava::session::SessionEntry make_reasoning_change_entry(ava::config::ModelInfo co
                                     .data_json = reasoning_change_data_json(model, selection)};
 }
 
-ava::core::VoidResult append_reasoning_change(ava::session::SessionStore& store, ava::config::ModelInfo const& model,
-                                              std::optional<ReasoningSelection> const& selection)
+ava::core::VoidResult append_reasoning_change(ava::session::SessionStore& store, ava::session::SessionLease const& lease,
+                                              ava::config::ModelInfo const& model, std::optional<ReasoningSelection> const& selection)
 {
-  return store.append(make_reasoning_change_entry(model, selection));
+  return store.append(lease, make_reasoning_change_entry(model, selection));
+}
+
+ava::core::VoidResult append_reasoning_change_ephemeral(ava::session::SessionStore& store, ava::config::ModelInfo const& model,
+                                                        std::optional<ReasoningSelection> const& selection)
+{
+  return store.append_ephemeral(make_reasoning_change_entry(model, selection));
 }
 
 }  // namespace ava::app::runtime

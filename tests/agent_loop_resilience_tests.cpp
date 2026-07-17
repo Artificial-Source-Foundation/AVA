@@ -68,7 +68,7 @@ void test_agent_loop_cancellation_boundaries()
     ava::tests::FakeTransport transport(
         {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"should not send\"}\n\n"
                       "data: [DONE]\n\n")});
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -103,7 +103,7 @@ void test_agent_loop_cancellation_boundaries()
         {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"should not send\"}\n\n"
                       "data: [DONE]\n\n")});
     int cancel_checks = 0;
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -143,7 +143,7 @@ void test_agent_loop_cancellation_boundaries()
                                               "\\\"note.txt\\\"}\"}\n\n"
                                               "data: [DONE]\n\n")},
                                 [&cancel] { cancel = true; });
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -184,7 +184,7 @@ void test_agent_loop_cancellation_boundaries()
                       "data: [DONE]\n\n")});
     bool bash_started = false;
     int bash_cancel_checks = 0;
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -234,7 +234,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "provider-error"});
     ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.error\",\"error\":{\"message\":\"bad request\"}}\n\n")});
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -253,7 +253,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "empty-transport"});
     ava::tests::FakeTransport transport({});
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -272,7 +272,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "empty-response"});
     ava::tests::FakeTransport transport({sse_response("")});
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -292,7 +292,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::tests::FakeTransport transport(
         {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"a\"}\n\n"
                       "data: [DONE]\n\n")});
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -313,7 +313,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::tests::FakeTransport transport(
         {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
                       "data: [DONE]\n\n")});
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -337,7 +337,7 @@ void test_agent_loop_error_paths_and_bounds()
                       "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
                       "\\\"note.txt\\\"}\"}\n\n"
                       "data: [DONE]\n\n")});
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -359,7 +359,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::tests::FakeTransport transport(
         {sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_\\u0001bad\",\"name\":\"read_file\"}\n\n"
                       "data: [DONE]\n\n")});
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -390,7 +390,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"" + long_call_id +
                                                       "\",\"name\":\"read_file\"}\n\n"
                                                       "data: [DONE]\n\n")});
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                             .mode = ava::agent::Mode::Build,
                                                             .provider_id = "openai",
                                                             .model_id = "gpt-5.5",
@@ -422,7 +422,7 @@ void test_agent_loop_max_iteration_guard()
   };
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(tool_sse("call_glob_1")), sse_response(tool_sse("call_glob_2"))});
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
                                                           .provider_id = "openai",
                                                           .model_id = "gpt-5.5",

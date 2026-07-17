@@ -304,7 +304,10 @@ ava::core::Result<SessionEntry> make_session_metadata_entry(SessionMetadataUpdat
       .id = entry_id, .parent_id = std::move(parent_entry_id), .type = EntryType::SessionMetadata, .timestamp = now_timestamp(), .data_json = std::move(data)};
 }
 
-ava::core::Result<SessionMetadataView> append_session_metadata(SessionStore& store, SessionMetadataUpdate update)
+namespace {
+
+template <typename Append>
+ava::core::Result<SessionMetadataView> append_session_metadata_impl(SessionStore& store, SessionMetadataUpdate update, Append&& append)
 {
   auto entries = store.load();
   if (!entries)
@@ -313,10 +316,22 @@ ava::core::Result<SessionMetadataView> append_session_metadata(SessionStore& sto
   auto entry = make_session_metadata_entry(std::move(update), std::move(parent_entry_id));
   if (!entry)
     return std::unexpected(std::move(entry.error()));
-  if (auto appended = store.append(*entry); !appended)
+  if (auto appended = append(*entry); !appended)
     return std::unexpected(std::move(appended.error()));
   entries->push_back(std::move(*entry));
   return session_metadata_from_entries(*entries);
+}
+
+}  // namespace
+
+ava::core::Result<SessionMetadataView> append_session_metadata(SessionStore& store, SessionLease const& lease, SessionMetadataUpdate update)
+{
+  return append_session_metadata_impl(store, std::move(update), [&](SessionEntry const& entry) { return store.append(lease, entry); });
+}
+
+ava::core::Result<SessionMetadataView> append_session_metadata_ephemeral(SessionStore& store, SessionMetadataUpdate update)
+{
+  return append_session_metadata_impl(store, std::move(update), [&](SessionEntry const& entry) { return store.append_ephemeral(entry); });
 }
 
 std::string session_metadata_json(std::string_view session_id, SessionMetadataView const& metadata)

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <thread>
 #include <utility>
@@ -13,9 +14,24 @@
 
 namespace {
 
+std::shared_ptr<ava::session::SessionAppendTarget> ephemeral_controller_target()
+{
+  auto store = ava::session::SessionStore::create_ephemeral(temp_root() / "controller-ephemeral-workspace");
+  if (!store)
+    return {};
+  auto target = ava::session::SessionAppendTarget::create_ephemeral(*store);
+  return target ? std::move(*target) : std::shared_ptr<ava::session::SessionAppendTarget>{};
+}
+
+ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>> persistent_controller_target(ava::session::SessionStore const& store,
+                                                                                                    ava::session::SessionLease const& lease)
+{
+  return ava::session::SessionAppendTarget::create_persistent(store, lease);
+}
+
 void test_session_run_controller_transitions_and_guard_release()
 {
-  ava::app::SessionRunController controller;
+  ava::app::SessionRunController controller(ephemeral_controller_target());
   auto admitted = controller.admit({.request_id = "run-1"});
   expect(admitted.has_value(), "controller admits one run");
   if (!admitted)
@@ -44,7 +60,7 @@ void test_session_run_controller_transitions_and_guard_release()
 
 void test_session_run_controller_concurrent_admit_wake_stop()
 {
-  ava::app::SessionRunController controller;
+  ava::app::SessionRunController controller(ephemeral_controller_target());
   auto admitted = controller.admit({.request_id = "run"});
   expect(admitted.has_value(), "controller admits concurrency fixture run");
   if (!admitted)
@@ -70,7 +86,7 @@ void test_session_run_controller_concurrent_admit_wake_stop()
 
 void test_session_run_controller_generation_and_cancel_precedence()
 {
-  ava::app::SessionRunController controller;
+  ava::app::SessionRunController controller(ephemeral_controller_target());
   auto first = controller.admit({.request_id = "A"});
   expect(first.has_value(), "controller admits first generation");
   if (!first)
@@ -114,15 +130,23 @@ void test_session_run_controller_owner_and_generation_routes()
   if (!store)
     return;
 
-  ava::app::SessionRunController controller;
-  auto owner = controller.owner_append_route(*store);
+  auto lease = ava::session::SessionLease::create_and_acquire(store->session_path());
+  expect(lease.has_value(), "controller route fixture acquires a lease");
+  if (!lease)
+    return;
+  auto target = persistent_controller_target(*store, *lease);
+  expect(target.has_value(), "controller route fixture creates append target");
+  if (!target)
+    return;
+  ava::app::SessionRunController controller(std::move(*target));
+  auto owner = controller.owner_append_route();
   expect(owner(append_entry("inactive-owner")).has_value(), "owner route persists while no run is active");
   auto first = controller.admit({.request_id = "A"});
   expect(first.has_value(), "controller admits append generation A");
   if (!first)
     return;
   auto guard = std::move(*first);
-  auto active = guard.append_route(*store);
+  auto active = guard.append_route();
   expect(active(append_entry("A-active")).has_value(), "generation route persists active A entry");
   expect(owner(append_entry("A-owner")).has_value(), "owner route serializes active parent notice");
   expect(guard.transition(ava::app::RunPhase::BuildingContext).has_value(), "A enters context before completion");
@@ -153,11 +177,19 @@ void test_runtime_session_destroys_background_before_owner_route()
   if (!store)
     return;
 
+  auto lease = ava::session::SessionLease::create_and_acquire(store->session_path());
+  expect(lease.has_value(), "teardown fixture acquires a lease");
+  if (!lease)
+    return;
+  auto target = persistent_controller_target(*store, *lease);
+  expect(target.has_value(), "teardown fixture creates append target");
+  if (!target)
+    return;
   std::atomic<bool> worker_started = false;
   std::atomic<bool> owner_append_succeeded = false;
   {
     ava::app::runtime::Session session{.store = std::move(*store),
-                                     .lease = {},
+                                     .lease = std::move(*lease),
                                      .mode = ava::agent::Mode::Build,
                                      .model = {},
                                      .base_prompt = {},
@@ -174,7 +206,7 @@ void test_runtime_session_destroys_background_before_owner_route()
                                      .scoped_model_cycle = std::nullopt,
                                      .created = false,
                                      .sessionless = false,
-                                     .run_controller = std::make_unique<ava::app::SessionRunController>(),
+                                     .run_controller = std::make_unique<ava::app::SessionRunController>(std::move(*target)),
                                      .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>(),
                                      .offline = false};
     auto owner = session.owner_append_route();
@@ -195,7 +227,7 @@ void test_runtime_session_destroys_background_before_owner_route()
 
 void test_session_run_controller_admission_inspection_and_join()
 {
-  ava::app::SessionRunController controller;
+  ava::app::SessionRunController controller(ephemeral_controller_target());
   expect(controller.inspect_admission({.request_id = "same"}) == ava::app::AdmissionDisposition::Admit, "inactive request is admissible");
   auto admitted = controller.admit({.request_id = "same"});
   expect(admitted.has_value(), "same-correlation fixture admits");
@@ -230,7 +262,7 @@ void test_session_run_controller_admission_inspection_and_join()
 
 void test_session_run_controller_stable_join_and_command_kinds()
 {
-  ava::app::SessionRunController controller;
+  ava::app::SessionRunController controller(ephemeral_controller_target());
   auto a = controller.admit({.request_id = "A"});
   expect(a.has_value(), "stable join fixture admits A");
   if (!a)
@@ -273,7 +305,15 @@ void test_session_run_controller_effective_failure_and_stop_reentry()
   expect(store.has_value(), "latch fixture store creates");
   if (!store)
     return;
-  ava::app::SessionRunController controller;
+  auto lease = ava::session::SessionLease::create_and_acquire(store->session_path());
+  expect(lease.has_value(), "latch fixture acquires a lease");
+  if (!lease)
+    return;
+  auto target = persistent_controller_target(*store, *lease);
+  expect(target.has_value(), "latch fixture creates append target");
+  if (!target)
+    return;
+  ava::app::SessionRunController controller(std::move(*target));
   auto admitted = controller.admit({.request_id = "failed"});
   expect(admitted.has_value(), "latch fixture admits");
   if (!admitted)
@@ -283,7 +323,7 @@ void test_session_run_controller_effective_failure_and_stop_reentry()
   std::stop_callback callback(guard.stop_token(), [&] { callback_reentered.store(controller.snapshot().stop_requested, std::memory_order_release); });
   auto invalid = append_entry("invalid");
   invalid.data_json.clear();
-  expect(!guard.append_route(*store)(std::move(invalid)).has_value(), "append failure latches");
+  expect(!guard.append_route()(std::move(invalid)).has_value(), "append failure latches");
   expect(callback_reentered.load(std::memory_order_acquire), "append failure stop callback reenters without deadlock");
   auto effective = guard.complete({.run_id = {}, .reason = ava::app::StopReason::ProviderError});
   expect(effective && effective->reason == ava::app::StopReason::PersistenceError && effective->error,
@@ -303,14 +343,22 @@ void test_session_run_controller_concurrent_fifo_appends()
   expect(store.has_value(), "fifo fixture store creates");
   if (!store)
     return;
-  ava::app::SessionRunController controller;
+  auto lease = ava::session::SessionLease::create_and_acquire(store->session_path());
+  expect(lease.has_value(), "fifo fixture acquires a lease");
+  if (!lease)
+    return;
+  auto target = persistent_controller_target(*store, *lease);
+  expect(target.has_value(), "fifo fixture creates append target");
+  if (!target)
+    return;
+  ava::app::SessionRunController controller(std::move(*target));
   auto admitted = controller.admit({.request_id = "fifo"});
   expect(admitted.has_value(), "fifo fixture admits");
   if (!admitted)
     return;
   auto guard = std::move(*admitted);
-  auto active = guard.append_route(*store);
-  auto owner = controller.owner_append_route(*store);
+  auto active = guard.append_route();
+  auto owner = controller.owner_append_route();
   std::atomic<int> accepted = 0;
   std::vector<std::jthread> workers;
   for (int i = 0; i < 16; ++i)
@@ -330,9 +378,58 @@ void test_session_run_controller_concurrent_fifo_appends()
   }
 }
 
+void test_session_run_controller_routes_release_target_on_shutdown()
+{
+  auto store = ava::session::SessionStore::create_ephemeral(temp_root() / "controller-route-teardown");
+  expect(store.has_value(), "sessionless route teardown fixture creates an ephemeral store");
+  if (!store)
+    return;
+  auto target = ava::session::SessionAppendTarget::create_ephemeral(*store);
+  expect(target.has_value(), "sessionless route teardown fixture creates an append target");
+  if (!target)
+    return;
+  ava::app::SessionRunController controller(std::move(*target));
+  auto admitted = controller.admit({.request_id = "shutdown"});
+  expect(admitted.has_value(), "sessionless controller admits an active generation");
+  if (!admitted)
+    return;
+  auto guard = std::move(*admitted);
+  auto owner = controller.owner_append_route();
+  auto active = guard.append_route();
+  expect(owner(append_entry("sessionless-owner")).has_value() && active(append_entry("sessionless-active")).has_value(),
+         "sessionless owner and active routes append through the immutable target");
+
+  std::mutex mutex;
+  std::condition_variable ready;
+  bool writer_ready = false;
+  bool release_writer = false;
+  std::optional<ava::core::VoidResult> racing_result;
+  std::jthread writer([&] {
+    std::unique_lock lock(mutex);
+    writer_ready = true;
+    ready.notify_all();
+    ready.wait(lock, [&] { return release_writer; });
+    lock.unlock();
+    racing_result.emplace(owner(append_entry("racing-owner")));
+  });
+  {
+    std::unique_lock lock(mutex);
+    ready.wait(lock, [&] { return writer_ready; });
+    release_writer = true;
+  }
+  ready.notify_all();
+  controller.shutdown();
+  writer.join();
+  expect(racing_result.has_value(), "route-vs-teardown racing append completes or fails without retaining a runtime reference");
+  expect(!owner(append_entry("stale-owner")).has_value() && !active(append_entry("stale-active")).has_value(),
+         "owner and active route copies reject after teardown clears the append target");
+  auto entries = store->load();
+  expect(entries && entries->size() >= 2 && entries->size() <= 3, "teardown either drains or fails the one concurrent accepted append without data loss");
+}
+
 void test_session_run_controller_bounds_and_reentrant_snapshot()
 {
-  ava::app::SessionRunController controller;
+  ava::app::SessionRunController controller(ephemeral_controller_target());
   auto admitted = controller.admit({.request_id = "run"});
   expect(admitted.has_value(), "controller admits bounded queue fixture");
   if (!admitted)
@@ -361,5 +458,6 @@ void run_session_run_controller_tests()
   test_session_run_controller_stable_join_and_command_kinds();
   test_session_run_controller_effective_failure_and_stop_reentry();
   test_session_run_controller_concurrent_fifo_appends();
+  test_session_run_controller_routes_release_target_on_shutdown();
   test_session_run_controller_bounds_and_reentrant_snapshot();
 }

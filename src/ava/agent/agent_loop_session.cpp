@@ -12,7 +12,12 @@ namespace {
 
 ava::core::VoidResult append_entry_with_id(ava::session::SessionStore& store, ava::session::EntryType type, std::string const& id, std::string data_json)
 {
-  return store.append(
+  if (!store.is_ephemeral())
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent AgentLoop session writes require an append authority route"));
+  }
+  return store.append_ephemeral(
       ava::session::SessionEntry{.id = id, .parent_id = "", .type = type, .timestamp = ava::session::now_timestamp(), .data_json = std::move(data_json)});
 }
 

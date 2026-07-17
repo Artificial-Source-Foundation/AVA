@@ -1,10 +1,13 @@
 #pragma once
 
 #include "ava/tools/file_tools.h"
+#include "ava/session/compaction.h"
+#include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
 #include "ava/core/error.h"
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -50,6 +53,13 @@ class ScopedEnvVar
 
 std::string strip_sgr(std::string_view text);
 bool has_active_sgr_at_text(std::string_view line, std::string_view text, std::string_view sgr);
+// Test-only authority adapter. Persistent test fixtures acquire the exact
+// lease for the duration of one append; runtime tests instead use owner routes.
+ava::core::VoidResult append_session_entry_for_test(ava::session::SessionStore& store, ava::session::SessionEntry const& entry);
+std::function<ava::core::VoidResult(ava::session::SessionEntry const&)> append_route_for_test(ava::session::SessionStore const& store);
+ava::core::Result<ava::session::SessionMetadataView> append_session_metadata_for_test(ava::session::SessionStore& store,
+                                                                                      ava::session::SessionMetadataUpdate update);
+ava::core::VoidResult append_manual_compaction_for_test(ava::session::SessionStore& store, ava::session::ManualCompactionRequest request);
 ava::core::VoidResult append_permission_audit_for_test(ava::session::SessionStore& store, ava::tools::PermissionAuditEvent const& event);
 std::vector<ava::session::SessionEntry> permission_entries(std::vector<ava::session::SessionEntry> const& entries);
 std::size_t visible_columns(std::string_view text);

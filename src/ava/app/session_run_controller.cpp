@@ -592,14 +592,31 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
     }
     completion = item->completion;
     failure = item->failure;
-    // Publish the final shutdown check and release append_mutex as one handoff
-    // under state->mutex. An observer-side shutdown either sets shutting_down
-    // before this check or acquires append_mutex after this unlock; it cannot
-    // lose the boundary race and leave the target retained.
-    driver_lock.unlock();
   }
   state->appends_drained.notify_all();
-  released_target.reset();
+
+  // Destroy any released target while append_mutex still serializes authority
+  // handoff. Then recheck under state->mutex and unlock append_mutex while that
+  // state lock is held. An observer shutdown either publishes shutting_down
+  // before a recheck or acquires append_mutex after the atomic unlock; an
+  // ordinary shutdown cannot return before the duplicated lease is closed.
+  while (true)
+  {
+    released_target.reset();
+    std::lock_guard lock(state->mutex);
+    if (state->shutting_down)
+    {
+      if (!state->persistence_failure)
+        drain_locked(ActiveRunGuard::State::AppendItem::Completion::Closing);
+      released_target = std::move(state->append_target);
+    }
+    if (!released_target)
+    {
+      driver_lock.unlock();
+      break;
+    }
+  }
+  state->appends_drained.notify_all();
 
   if (completion == ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed)
     return std::unexpected(failure ? *failure : *state->append_exception_fallback);

@@ -2351,7 +2351,12 @@ def run_main_package_tests(args: argparse.Namespace) -> int:
     with PackageTestTerminationHandlers():
         try:
             repo = args.repo.resolve()
-            run_workspace_safety_regressions(repo)
+            # Every safety regression creates and then immediately cleans a private
+            # workspace. Defer terminal delivery across the complete sequence so a
+            # signal cannot land between creation and that local cleanup.
+            with PackageTestTerminationDeferral():
+                run_workspace_safety_regressions(repo)
+            raise_deferred_package_test_termination()
             # Keep a terminal signal from landing after prepare_workspace()
             # creates its private child but before this finally block can own it.
             with PackageTestTerminationDeferral():

@@ -27,7 +27,7 @@ namespace {
 // follows symlinks that stay within the anchor; the fallback is only reached
 // on systems that lack openat2, where faithfully reproducing contained
 // symlink-following in userspace is not safe.
-int open_beneath_fallback(int anchor_fd, std::filesystem::path const& relative, int flags)
+int open_beneath_fallback(int anchor_fd, std::filesystem::path const& relative, int flags, mode_t mode)
 {
   int current = ::dup(anchor_fd);
   if (current < 0)
@@ -68,7 +68,7 @@ int open_beneath_fallback(int anchor_fd, std::filesystem::path const& relative, 
     bool const final = index + 1 == components.size();
     int const open_flags =
         final ? (flags | O_CLOEXEC | O_NOFOLLOW) : (O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-    int const next = ::openat(current, name.c_str(), open_flags);
+    int const next = (open_flags & O_CREAT) ? ::openat(current, name.c_str(), open_flags, mode) : ::openat(current, name.c_str(), open_flags);
     int const saved = errno;
     ::close(current);
     if (next < 0)
@@ -83,7 +83,7 @@ int open_beneath_fallback(int anchor_fd, std::filesystem::path const& relative, 
 
 }  // namespace
 
-int open_beneath(int anchor_fd, std::filesystem::path const& relative, int flags)
+int open_beneath(int anchor_fd, std::filesystem::path const& relative, int flags, mode_t mode)
 {
   auto const text = relative.empty() ? std::string(".") : relative.generic_string();
 #ifdef __linux__
@@ -95,6 +95,7 @@ int open_beneath(int anchor_fd, std::filesystem::path const& relative, int flags
   {
     struct open_how how{};
     how.flags = static_cast<std::uint64_t>(flags | O_CLOEXEC);
+    how.mode = static_cast<std::uint64_t>(mode);
     how.resolve = RESOLVE_BENEATH;
     int const opened = static_cast<int>(::syscall(SYS_openat2, anchor_fd, text.c_str(), &how, sizeof(how)));
     if (opened >= 0)
@@ -106,10 +107,10 @@ int open_beneath(int anchor_fd, std::filesystem::path const& relative, int flags
   // the request/structure. Any other error (escape, missing path, etc.) is
   // real and is propagated.
   if (errno == ENOSYS || errno == EINVAL || errno == E2BIG)
-    return open_beneath_fallback(anchor_fd, relative, flags);
+    return open_beneath_fallback(anchor_fd, relative, flags, mode);
   return -1;
 #else
-  return open_beneath_fallback(anchor_fd, relative, flags);
+  return open_beneath_fallback(anchor_fd, relative, flags, mode);
 #endif
 }
 

@@ -1177,6 +1177,118 @@ void test_secure_workspace_symlinked_root()
   }
 }
 
+// Verify that the descriptor-anchored workspace follows non-escaping symlinks
+// in the relative path (both intermediate directory components and the final
+// file component) and rejects symlinks that escape the anchor — for reads,
+// writes, and AllowMissing resolution alike. The anchor is the workspace root
+// fd; every symlink below is evaluated against that single anchor.
+void test_secure_workspace_symlink_containment()
+{
+  auto const root = temp_root() / "symlink-containment";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  // Anchor: ws is the workspace root opened as the SecureWorkspace descriptor.
+  auto const ws = root / "ws";
+  auto const outside = root / "outside";
+  std::filesystem::create_directories(ws / "real_dir");
+  std::filesystem::create_directories(outside);
+  {
+    std::ofstream f(ws / "real_dir" / "file.txt", std::ios::binary | std::ios::trunc);
+    f << "real content";
+  }
+  {
+    std::ofstream f(ws / "real_file.txt", std::ios::binary | std::ios::trunc);
+    f << "real file content";
+  }
+  {
+    std::ofstream f(outside / "secret.txt", std::ios::binary | std::ios::trunc);
+    f << "outside secret";
+  }
+  {
+    std::ofstream f(outside / "file.txt", std::ios::binary | std::ios::trunc);
+    f << "outside file";
+  }
+
+  auto secure = ava::tools::SecureWorkspace::open(ws);
+  expect(secure.has_value(), "secure workspace opens the anchor directory");
+  if (!secure)
+    return;
+  ava::tools::ToolContext context{.workspace_dir = ws, .mode = ava::agent::Mode::Build, .secure_workspace = *secure};
+
+  std::error_code link_error;
+
+  // linked_dir is a relative symlink to real_dir (both inside ws, no "..").
+  // Anchor: ws. Symlink location: ws/linked_dir (intermediate component).
+  // Symlink target: ws/real_dir — inside the anchor, so this must be ACCEPTED.
+  std::filesystem::create_directory_symlink("real_dir", ws / "linked_dir", link_error);
+  expect(!link_error, "create non-escaping intermediate directory symlink");
+  if (!link_error)
+  {
+    auto read = ava::tools::read_file(context, ws / "linked_dir" / "file.txt");
+    expect(read.has_value() && read->content == "real content",
+           "read through non-escaping intermediate directory symlink is accepted");
+  }
+
+  // linked_file.txt is a relative symlink to real_file.txt (both inside ws).
+  // Anchor: ws. Symlink location: ws/linked_file.txt (final component).
+  // Symlink target: ws/real_file.txt — inside the anchor, so this must be ACCEPTED.
+  std::filesystem::create_symlink("real_file.txt", ws / "linked_file.txt", link_error);
+  expect(!link_error, "create non-escaping final-component file symlink");
+  if (!link_error)
+  {
+    auto read = ava::tools::read_file(context, ws / "linked_file.txt");
+    expect(read.has_value() && read->content == "real file content",
+           "read through non-escaping final-component symlink is accepted");
+  }
+
+  // escape_dir is a relative symlink to ../outside (the ".." leaves ws).
+  // Anchor: ws. Symlink location: ws/escape_dir (intermediate component).
+  // Symlink target: root/outside — outside the anchor, so this must be REJECTED.
+  std::filesystem::create_directory_symlink("../outside", ws / "escape_dir", link_error);
+  expect(!link_error, "create escaping intermediate directory symlink");
+  if (!link_error)
+  {
+    auto read = ava::tools::read_file(context, ws / "escape_dir" / "secret.txt");
+    expect(!read, "read through escaping intermediate directory symlink is rejected");
+  }
+
+  // escape_file.txt is a relative symlink to ../outside/file.txt (leaves ws).
+  // Anchor: ws. Symlink location: ws/escape_file.txt (final component).
+  // Symlink target: root/outside/file.txt — outside the anchor, so this must be REJECTED.
+  std::filesystem::create_symlink("../outside/file.txt", ws / "escape_file.txt", link_error);
+  expect(!link_error, "create escaping final-component file symlink");
+  if (!link_error)
+  {
+    auto read = ava::tools::read_file(context, ws / "escape_file.txt");
+    expect(!read, "read through escaping final-component symlink is rejected");
+  }
+
+  // Writing a new file through a non-escaping intermediate directory symlink.
+  // Anchor: ws. Symlink: ws/linked_dir -> real_dir (intermediate, non-escaping).
+  // The parent directory resolves inside the anchor, so the write must be ACCEPTED.
+  auto written = ava::tools::write_file(context, ws / "linked_dir" / "new.txt", "new content");
+  expect(written.has_value(), "write through non-escaping intermediate directory symlink is accepted");
+
+  // Writing a new file through an escaping intermediate directory symlink.
+  // Anchor: ws. Symlink: ws/escape_dir -> ../outside (intermediate, escaping).
+  // The parent directory escapes the anchor, so the write must be REJECTED.
+  auto escape_write = ava::tools::write_file(context, ws / "escape_dir" / "new.txt", "bad");
+  expect(!escape_write, "write through escaping intermediate directory symlink is rejected");
+
+  // resolve(AllowMissing) through a non-escaping symlinked parent directory.
+  // Anchor: ws. Symlink: ws/linked_dir -> real_dir (intermediate, non-escaping).
+  // The file does not exist yet, but the parent path is contained, so this must be ACCEPTED.
+  auto resolved = (*secure)->resolve(ws / "linked_dir" / "nonexistent.txt", ava::tools::SecureWorkspaceResolveMode::AllowMissing);
+  expect(resolved.has_value() && !resolved->exists,
+         "resolve AllowMissing through non-escaping symlinked parent is accepted");
+
+  // resolve(AllowMissing) through an escaping symlinked parent directory.
+  // Anchor: ws. Symlink: ws/escape_dir -> ../outside (intermediate, escaping).
+  // The parent path escapes the anchor, so this must be REJECTED.
+  auto escape_resolved = (*secure)->resolve(ws / "escape_dir" / "nonexistent.txt", ava::tools::SecureWorkspaceResolveMode::AllowMissing);
+  expect(!escape_resolved, "resolve AllowMissing through escaping symlinked parent is rejected");
+}
+
 }  // namespace
 
 void run_tools_file_tests()
@@ -1188,4 +1300,5 @@ void run_tools_file_tests()
   test_injected_exact_file_access();
   test_secure_workspace_file_tools();
   test_secure_workspace_symlinked_root();
+  test_secure_workspace_symlink_containment();
 }

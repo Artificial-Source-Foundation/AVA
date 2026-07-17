@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <sys/types.h>
 
 namespace ava::core {
 
@@ -13,13 +14,14 @@ namespace ava::core {
 // anchor. Any component that would escape the anchor (a ".." that climbs above
 // it, an absolute symlink, or a symlink whose target lies outside the anchor)
 // fails the call. flags are the usual open(2) flags; O_CLOEXEC is forced on
-// the returned descriptor.
+// the returned descriptor. mode is the file creation mode used when O_CREAT is
+// present in flags (ignored otherwise); pass 0 when no creation is requested.
 //
 // Returns the opened descriptor on success, or -1 on failure with errno set.
 // EXDEV indicates an escape from the anchor; ELOOP, ENOENT, etc. carry their
 // usual meaning. On Linux 5.6+ this is implemented with openat2(RESOLVE_BENEATH);
 // on systems without openat2 a component walk is used that rejects every
 // symlink component, which is stricter than the openat2 path.
-int open_beneath(int anchor_fd, std::filesystem::path const& relative, int flags);
+int open_beneath(int anchor_fd, std::filesystem::path const& relative, int flags, mode_t mode = 0);
 
 }  // namespace ava::core

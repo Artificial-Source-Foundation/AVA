@@ -12,6 +12,7 @@ import platform
 import re
 import secrets
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -21,6 +22,228 @@ import time
 from typing import Callable
 
 
+PROCESS_POLL_INTERVAL = 0.01
+PROCESS_TERM_GRACE = 0.25
+PROCESS_KILL_GRACE = 1.0
+PROCESS_REAP_DEADLINE = 1.0
+PROCESS_DRAIN_DEADLINE = 1.0
+
+# A process is registered only after start_new_session=True created and we
+# verified its private session/process group.  The group ID is then safe to
+# retain after its leader exits: it cannot be reused while descendants remain.
+VERIFIED_OWNED_GROUPS: dict[subprocess.Popen[str], int] = {}
+ASYNC_PACKAGE_PROCESSES: set[subprocess.Popen[str]] = set()
+
+
+class ProcessCleanupError(RuntimeError):
+    def __init__(self, message: str, stdout: str, stderr: str) -> None:
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def as_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value
+
+
+def combine_output(previous: str, current: str) -> str:
+    if not current or current.startswith(previous):
+        return current or previous
+    if not previous:
+        return current
+    return previous + current
+
+
+def close_process_pipes(process: subprocess.Popen[str]) -> None:
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream is not None and not stream.closed:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+
+def start_owned_process(command: list[str], *, env: dict[str, str]) -> subprocess.Popen[str]:
+    process = subprocess.Popen(
+        command,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        start_new_session=True,
+    )
+    pgid = process.pid
+    try:
+        if pgid <= 0 or pgid == os.getpgrp():
+            raise RuntimeError(f"refusing to manage unsafe package process group {pgid}")
+        if os.getpgid(process.pid) != pgid:
+            raise RuntimeError(f"package process did not create its own process group: {pgid}")
+    except BaseException:
+        # Do not signal a group which was not verified as ours.  This branch is
+        # unreachable for a successful POSIX start_new_session=True invocation,
+        # but closing our pipe ends still keeps a failed launch finite.
+        close_process_pipes(process)
+        raise
+    VERIFIED_OWNED_GROUPS[process] = pgid
+    return process
+
+
+def owned_group_id(process: subprocess.Popen[str]) -> int:
+    try:
+        pgid = VERIFIED_OWNED_GROUPS[process]
+    except KeyError as exc:
+        raise RuntimeError("package process is not a verified owned process") from exc
+    if pgid <= 0 or pgid == os.getpgrp():
+        raise RuntimeError(f"refusing to signal unsafe package process group {pgid}")
+    return pgid
+
+
+def owned_group_alive(pgid: int) -> bool:
+    if pgid <= 0 or pgid == os.getpgrp():
+        raise RuntimeError(f"refusing to inspect unsafe package process group {pgid}")
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError as exc:
+        raise RuntimeError(f"unable to inspect owned package process group {pgid}: {exc}") from exc
+    return True
+
+
+def signal_owned_group(pgid: int, signal_number: int) -> bool:
+    if pgid <= 0 or pgid == os.getpgrp():
+        raise RuntimeError(f"refusing to signal unsafe package process group {pgid}")
+    try:
+        os.killpg(pgid, signal_number)
+    except ProcessLookupError:
+        return False
+    except PermissionError as exc:
+        raise RuntimeError(f"unable to signal owned package process group {pgid}: {exc}") from exc
+    return True
+
+
+def wait_for_owned_group_exit(process: subprocess.Popen[str], pgid: int, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while True:
+        process.poll()  # Reap an exited leader while its descendants are checked.
+        if not owned_group_alive(pgid):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(PROCESS_POLL_INTERVAL, remaining))
+
+
+def drain_process_output(
+    process: subprocess.Popen[str],
+    stdout: str,
+    stderr: str,
+    errors: list[str],
+) -> tuple[str, str]:
+    try:
+        drained_stdout, drained_stderr = process.communicate(timeout=PROCESS_DRAIN_DEADLINE)
+    except subprocess.TimeoutExpired as exc:
+        stdout = combine_output(stdout, as_text(exc.stdout))
+        stderr = combine_output(stderr, as_text(exc.stderr))
+        errors.append(f"stdout/stderr did not drain within {PROCESS_DRAIN_DEADLINE:.2f}s")
+        close_process_pipes(process)
+    except (OSError, ValueError) as exc:
+        errors.append(f"unable to drain stdout/stderr: {exc}")
+        close_process_pipes(process)
+    else:
+        stdout = combine_output(stdout, as_text(drained_stdout))
+        stderr = combine_output(stderr, as_text(drained_stderr))
+    return stdout, stderr
+
+
+def cleanup_owned_process(
+    process: subprocess.Popen[str],
+    *,
+    stdout: str = "",
+    stderr: str = "",
+    output_already_drained: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Terminate one verified group and finish every local cleanup step finitely."""
+    errors: list[str] = []
+    try:
+        try:
+            pgid = owned_group_id(process)
+            if owned_group_alive(pgid):
+                signal_owned_group(pgid, signal.SIGTERM)
+                if not wait_for_owned_group_exit(process, pgid, PROCESS_TERM_GRACE):
+                    signal_owned_group(pgid, signal.SIGKILL)
+                    if not wait_for_owned_group_exit(process, pgid, PROCESS_KILL_GRACE):
+                        errors.append(f"owned package process group {pgid} survived SIGKILL")
+        except RuntimeError as exc:
+            errors.append(str(exc))
+
+        if process.poll() is None:
+            try:
+                process.wait(timeout=PROCESS_REAP_DEADLINE)
+            except subprocess.TimeoutExpired:
+                errors.append(f"package process leader did not reap within {PROCESS_REAP_DEADLINE:.2f}s")
+
+        if not output_already_drained:
+            stdout, stderr = drain_process_output(process, stdout, stderr, errors)
+        close_process_pipes(process)
+    finally:
+        VERIFIED_OWNED_GROUPS.pop(process, None)
+        ASYNC_PACKAGE_PROCESSES.discard(process)
+
+    if errors:
+        raise ProcessCleanupError("; ".join(errors), stdout, stderr)
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+
+
+def cleanup_after_communication_exception(process: subprocess.Popen[str], error: BaseException) -> None:
+    try:
+        result = cleanup_owned_process(
+            process,
+            stdout=as_text(getattr(error, "stdout", None)),
+            stderr=as_text(getattr(error, "stderr", None)),
+        )
+    except ProcessCleanupError as cleanup_error:
+        error.add_note(
+            f"package process cleanup failed: {cleanup_error}\n"
+            f"stdout:\n{cleanup_error.stdout}\nstderr:\n{cleanup_error.stderr}"
+        )
+    else:
+        setattr(error, "package_cleanup_stdout", result.stdout)
+        setattr(error, "package_cleanup_stderr", result.stderr)
+
+
+def collect_process(process: subprocess.Popen[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        cleanup_after_communication_exception(process, exc)
+        raise
+    except BaseException as exc:
+        cleanup_after_communication_exception(process, exc)
+        raise
+
+    try:
+        if owned_group_alive(owned_group_id(process)):
+            return cleanup_owned_process(
+                process,
+                stdout=as_text(stdout),
+                stderr=as_text(stderr),
+                output_already_drained=True,
+            )
+    except BaseException as exc:
+        cleanup_after_communication_exception(process, exc)
+        raise
+
+    close_process_pipes(process)
+    VERIFIED_OWNED_GROUPS.pop(process, None)
+    ASYNC_PACKAGE_PROCESSES.discard(process)
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+
+
 def run(
     command: list[str],
     *,
@@ -28,7 +251,7 @@ def run(
     check: bool = True,
     timeout: float = 120.0,
 ) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=timeout)
+    result = collect_process(start_owned_process(command, env=env), timeout=timeout)
     if check and result.returncode != 0:
         raise RuntimeError(
             f"command failed ({result.returncode}): {' '.join(command)}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -37,37 +260,60 @@ def run(
 
 
 def start(command: list[str], *, env: dict[str, str]) -> subprocess.Popen[str]:
-    return subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    process = start_owned_process(command, env=env)
+    ASYNC_PACKAGE_PROCESSES.add(process)
+    return process
 
 
 def finish(process: subprocess.Popen[str], *, timeout: float = 120.0) -> subprocess.CompletedProcess[str]:
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        stdout, stderr = process.communicate()
-        raise RuntimeError(f"timed out waiting for package process\nstdout:\n{stdout}\nstderr:\n{stderr}")
-    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+        return collect_process(process, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        stdout = getattr(exc, "package_cleanup_stdout", as_text(exc.stdout))
+        stderr = getattr(exc, "package_cleanup_stderr", as_text(exc.stderr))
+        raise RuntimeError(f"timed out waiting for package process\nstdout:\n{stdout}\nstderr:\n{stderr}") from exc
+
+
+def result_after_cleanup(process: subprocess.Popen[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return cleanup_owned_process(process)
+    except ProcessCleanupError as exc:
+        raise RuntimeError(
+            f"package process cleanup failed: {exc}\nstdout:\n{exc.stdout}\nstderr:\n{exc.stderr}"
+        ) from exc
 
 
 def wait_for_path(path: pathlib.Path, process: subprocess.Popen[str], *, timeout: float = 15.0) -> None:
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    while True:
         if path.exists():
             return
         if process.poll() is not None:
-            result = finish(process)
+            result = result_after_cleanup(process)
             raise RuntimeError(
                 f"package process exited before creating synchronization marker {path}\n"
                 f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
             )
-        time.sleep(0.01)
-    process.kill()
-    result = finish(process)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(PROCESS_POLL_INTERVAL, remaining))
+    result = result_after_cleanup(process)
     raise RuntimeError(
         f"package process did not create synchronization marker {path}\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
+
+
+def cleanup_async_package_processes() -> None:
+    errors: list[str] = []
+    for process in tuple(ASYNC_PACKAGE_PROCESSES):
+        try:
+            cleanup_owned_process(process)
+        except ProcessCleanupError as exc:
+            errors.append(f"{exc}\nstdout:\n{exc.stdout}\nstderr:\n{exc.stderr}")
+    if errors:
+        raise RuntimeError("abandoned package-process cleanup failed:\n" + "\n".join(errors))
 
 
 def parse_path(output: str, label: str) -> pathlib.Path:
@@ -139,6 +385,153 @@ def expected_files(package_name: str) -> set[str]:
 def write_executable(path: pathlib.Path, contents: str) -> None:
     path.write_text(contents, encoding="utf-8")
     path.chmod(0o700)
+
+
+def write_process_cleanup_fixture(path: pathlib.Path) -> None:
+    write_executable(
+        path,
+        """#!/usr/bin/env python3
+import os
+import pathlib
+import signal
+import subprocess
+import sys
+import time
+
+mode, ready_path, leader_path = sys.argv[1:]
+ready = pathlib.Path(ready_path)
+leader = pathlib.Path(leader_path)
+
+if mode == "descendant":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    if os.environ["AVA_PACKAGE_CLEANUP_CLOSE_PIPES"] == "1":
+        os.close(sys.stdout.fileno())
+        os.close(sys.stderr.fileno())
+    ready.write_text("ready\\n", encoding="utf-8")
+    while True:
+        time.sleep(1)
+
+leader.write_text(f"{os.getpid()}\\n", encoding="utf-8")
+child_env = os.environ.copy()
+child_env["AVA_PACKAGE_CLEANUP_CLOSE_PIPES"] = "1" if mode == "exit-close-pipes" else "0"
+subprocess.Popen(
+    [sys.executable, __file__, "descendant", str(ready), str(leader)],
+    env=child_env,
+)
+deadline = time.monotonic() + 1
+while not ready.exists():
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SystemExit("descendant did not publish its readiness marker")
+    time.sleep(min(0.01, remaining))
+if mode in ("exit", "exit-close-pipes"):
+    raise SystemExit(0)
+while True:
+    time.sleep(1)
+""",
+    )
+
+
+def assert_owned_group_disappeared(pgid: int, context: str) -> None:
+    deadline = time.monotonic() + PROCESS_KILL_GRACE
+    while True:
+        if not owned_group_alive(pgid):
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(f"{context}: owned process group {pgid} survived cleanup")
+        time.sleep(min(PROCESS_POLL_INTERVAL, remaining))
+
+
+def assert_cleanup_bounded(start_time: float, context: str) -> None:
+    elapsed = time.monotonic() - start_time
+    maximum = PROCESS_TERM_GRACE + PROCESS_KILL_GRACE + PROCESS_REAP_DEADLINE + PROCESS_DRAIN_DEADLINE + 0.5
+    if elapsed > maximum:
+        raise RuntimeError(f"{context}: cleanup exceeded its finite {maximum:.2f}s bound ({elapsed:.2f}s)")
+
+
+def run_process_cleanup_regressions(root: pathlib.Path, env: dict[str, str]) -> None:
+    """Prove all package-process paths kill pipe-holding descendants finitely."""
+    regression_root = root / "process-cleanup-regressions"
+    regression_root.mkdir(mode=0o700)
+    fixture = regression_root / "pipe-holding-descendant.py"
+    write_process_cleanup_fixture(fixture)
+
+    def command(mode: str, name: str) -> tuple[list[str], pathlib.Path, pathlib.Path]:
+        ready = regression_root / f"{name}.ready"
+        leader = regression_root / f"{name}.leader"
+        return [sys.executable, str(fixture), mode, str(ready), str(leader)], ready, leader
+
+    sync_command, sync_ready, sync_leader = command("stall", "synchronous-timeout")
+    started = time.monotonic()
+    try:
+        run(sync_command, env=env, timeout=1.0)
+    except subprocess.TimeoutExpired:
+        pass
+    else:
+        raise RuntimeError("synchronous package timeout fixture unexpectedly completed")
+    assert_cleanup_bounded(started, "synchronous package timeout")
+    if not sync_ready.is_file() or not sync_leader.is_file():
+        raise RuntimeError("synchronous package timeout did not start its pipe-holding descendant")
+    assert_owned_group_disappeared(int(sync_leader.read_text(encoding="utf-8")), "synchronous package timeout")
+
+    async_command, async_ready, async_leader = command("stall", "async-finish-timeout")
+    async_process = start(async_command, env=env)
+    wait_for_path(async_ready, async_process, timeout=1.0)
+    started = time.monotonic()
+    try:
+        finish(async_process, timeout=0.25)
+    except RuntimeError as exc:
+        if "timed out waiting for package process" not in str(exc):
+            raise RuntimeError(f"async finish timeout failed for the wrong reason: {exc}") from exc
+    else:
+        raise RuntimeError("async finish timeout fixture unexpectedly completed")
+    assert_cleanup_bounded(started, "async finish timeout")
+    assert_owned_group_disappeared(
+        int(async_leader.read_text(encoding="utf-8")), "async finish timeout"
+    )
+
+    marker_command, marker_ready, marker_leader = command("exit", "missing-marker")
+    marker_process = start(marker_command, env=env)
+    wait_for_path(marker_ready, marker_process, timeout=1.0)
+    started = time.monotonic()
+    try:
+        wait_for_path(regression_root / "marker-that-is-never-created", marker_process, timeout=1.0)
+    except RuntimeError as exc:
+        if "exited before creating synchronization marker" not in str(exc):
+            raise RuntimeError(f"missing-marker cleanup failed for the wrong reason: {exc}") from exc
+    else:
+        raise RuntimeError("missing-marker fixture unexpectedly created its synchronization marker")
+    assert_cleanup_bounded(started, "missing synchronization marker")
+    assert_owned_group_disappeared(int(marker_leader.read_text(encoding="utf-8")), "missing synchronization marker")
+
+    normal_command, normal_ready, normal_leader = command("exit-close-pipes", "successful-leader")
+    normal_process = start(normal_command, env=env)
+    wait_for_path(normal_ready, normal_process, timeout=1.0)
+    started = time.monotonic()
+    normal_result = finish(normal_process, timeout=1.0)
+    if normal_result.returncode != 0:
+        raise RuntimeError(f"successful package fixture returned {normal_result.returncode}")
+    assert_cleanup_bounded(started, "successful package process descendant cleanup")
+    assert_owned_group_disappeared(
+        int(normal_leader.read_text(encoding="utf-8")), "successful package process descendant cleanup"
+    )
+
+    abandoned_command, abandoned_ready, abandoned_leader = command("stall", "exceptional-abandonment")
+    started = time.monotonic()
+    try:
+        abandoned_process = start(abandoned_command, env=env)
+        wait_for_path(abandoned_ready, abandoned_process, timeout=1.0)
+        raise RuntimeError("simulated assertion between package-process start and finish")
+    except RuntimeError as exc:
+        if str(exc) != "simulated assertion between package-process start and finish":
+            raise
+    finally:
+        cleanup_async_package_processes()
+    assert_cleanup_bounded(started, "exceptional package-process abandonment")
+    assert_owned_group_disappeared(
+        int(abandoned_leader.read_text(encoding="utf-8")), "exceptional package-process abandonment"
+    )
 
 
 def write_ava_fixture(path: pathlib.Path, version: str) -> None:
@@ -941,22 +1334,11 @@ def run_workspace_safety_regressions(repo: pathlib.Path) -> None:
             raise RuntimeError("cleanup followed a symbolic link target")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--script", type=pathlib.Path, required=True)
-    parser.add_argument("--ava", type=pathlib.Path, required=True)
-    parser.add_argument("--fake-provider", type=pathlib.Path, required=True)
-    parser.add_argument("--repo", type=pathlib.Path, required=True)
-    parser.add_argument("--root", type=pathlib.Path, required=True)
-    args = parser.parse_args()
-
-    if platform.system() != "Linux":
-        print("skipping Linux package tests on non-Linux host")
-        return 77
-
-    repo = args.repo.resolve()
-    run_workspace_safety_regressions(repo)
-    workspace = prepare_workspace(args.root, repo)
+def run_package_tests(
+    args: argparse.Namespace,
+    workspace: PackageTestWorkspace,
+    repo: pathlib.Path,
+) -> int:
     root = workspace.root
     script = args.script.resolve()
     publisher = script.parent / "publish-linux-artifacts.py"
@@ -968,6 +1350,7 @@ def main() -> int:
     temp.mkdir(mode=0o700)
     env = os.environ.copy()
     env["TMPDIR"] = str(temp)
+    run_process_cleanup_regressions(root, env)
 
     # Exercise the real built CLI and fake provider once for the complete model smoke.
     output = root / "accepted-output"
@@ -1488,10 +1871,48 @@ raise SystemExit(91)
         raise RuntimeError("publication removed an existing destination symlink")
 
     print("Linux package snapshot, identity, rollback, allowlist, checksum, and smoke tests passed")
+    return 0
+
+
+def cleanup_main_resources(workspace: PackageTestWorkspace) -> None:
+    errors: list[str] = []
+    try:
+        cleanup_async_package_processes()
+    except RuntimeError as exc:
+        errors.append(str(exc))
     cleanup_error = workspace.cleanup()
     if cleanup_error is not None:
-        raise RuntimeError(f"package-test workspace cleanup failed: {cleanup_error}")
-    return 0
+        errors.append(f"package-test workspace cleanup failed: {cleanup_error}")
+    if not errors:
+        return
+    message = "\n".join(errors)
+    active_error = sys.exc_info()[1]
+    if active_error is not None:
+        active_error.add_note(message)
+        return
+    raise RuntimeError(message)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--script", type=pathlib.Path, required=True)
+    parser.add_argument("--ava", type=pathlib.Path, required=True)
+    parser.add_argument("--fake-provider", type=pathlib.Path, required=True)
+    parser.add_argument("--repo", type=pathlib.Path, required=True)
+    parser.add_argument("--root", type=pathlib.Path, required=True)
+    args = parser.parse_args()
+
+    if platform.system() != "Linux":
+        print("skipping Linux package tests on non-Linux host")
+        return 77
+
+    repo = args.repo.resolve()
+    run_workspace_safety_regressions(repo)
+    workspace = prepare_workspace(args.root, repo)
+    try:
+        return run_package_tests(args, workspace, repo)
+    finally:
+        cleanup_main_resources(workspace)
 
 
 if __name__ == "__main__":

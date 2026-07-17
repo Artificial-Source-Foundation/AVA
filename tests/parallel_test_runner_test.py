@@ -130,10 +130,14 @@ if descendant_ready:
         [
             sys.executable,
             "-c",
-            "import pathlib, signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-            "pathlib.Path(sys.argv[1]).write_text('ready\\\\n', encoding='utf-8'); time.sleep(60)",
+            "import os, pathlib, signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "pathlib.Path(sys.argv[1]).write_text(f'{os.getpid()}\\\\n', encoding='utf-8'); time.sleep(60)",
             descendant_ready,
-        ]
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=os.environ.get("FAKE_CTEST_DESCENDANT_DETACH") == "1",
     )
 if ready:
     Path(ready).write_text(f"{os.getpid()}\\n", encoding="utf-8")
@@ -320,6 +324,7 @@ Path(os.environ["FAKE_CTEST_ARGS"]).write_text(json.dumps(sys.argv[1:]), encodin
     descendant_ready = root / "descendant-ready"
     signal_env = first_env.copy()
     signal_env["FAKE_CTEST_DESCENDANT_READY"] = str(descendant_ready)
+    signal_env["FAKE_CTEST_DESCENDANT_DETACH"] = "1"
     signal_env["FAKE_CTEST_IGNORE_TERM"] = "1"
     signaled = subprocess.Popen(
         [str(script), "--build-dir", str(build_dir), "--jobs", "2"],
@@ -327,24 +332,41 @@ Path(os.environ["FAKE_CTEST_ARGS"]).write_text(json.dumps(sys.argv[1:]), encodin
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=signal_env,
+        start_new_session=True,
     )
     try:
         wait_for_path(ready, signaled, 5)
         wait_for_path(descendant_ready, signaled, 5)
-        signaled.terminate()
+        detached_pid = int(descendant_ready.read_text(encoding="utf-8").strip())
+        os.killpg(signaled.pid, signal.SIGTERM)
         during_teardown = run_build_runner(build_script, build_dir, fake_ctest, "--jobs", "2", env_extra=build_env)
         require(
-            during_teardown.returncode == 2 and "already owns build tree" in during_teardown.stderr,
+            during_teardown.returncode == 2 and "another AVA build or test run" in during_teardown.stderr,
             "clean termination retains the lock while the direct worker and a descendant remain",
         )
+        # A repeated terminal group signal must not kill the escalation watchdog.
+        os.killpg(signaled.pid, signal.SIGTERM)
         signal_stdout, signal_stderr = signaled.communicate(timeout=10)
         require(signaled.returncode in (-15, 143), f"terminated runner returned {signaled.returncode}: {signal_stdout}\n{signal_stderr}")
         after_signal = run_runner(script, build_dir, fake_ctest, "--jobs", "2", env_extra=common_env)
-        require(after_signal.returncode == 0, f"terminated runner retained its build lock: {after_signal.stderr}")
+        require(
+            after_signal.returncode == 2 and "stale AVA build-tree lock" in after_signal.stderr,
+            "signaled runner leaves the build lock fail-closed when detached descendants cannot be proven absent",
+        )
+        os.kill(detached_pid, signal.SIGKILL)
+        wait_for_process_exit(detached_pid, 5)
+        shutil.rmtree(build_dir / ".ava-build-tree.lock.d")
+        recovered = run_runner(script, build_dir, fake_ctest, "--jobs", "2", env_extra=common_env)
+        require(recovered.returncode == 0, f"manual fail-closed recovery did not restore the runner: {recovered.stderr}")
     finally:
         if signaled.poll() is None:
             signaled.kill()
             signaled.wait(timeout=5)
+        if "detached_pid" in locals():
+            try:
+                os.kill(detached_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
     ready.unlink()
     sigkilled = subprocess.Popen(

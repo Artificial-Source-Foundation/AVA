@@ -91,10 +91,17 @@ ava_parallel_fail_closed() {
 
 ava_parallel_request_child_stop() {
   AVA_PARALLEL_REQUESTED_EXIT=$1
+  # A signaled worker may have descendants that escaped its process group. The
+  # wrapper cannot prove their absence, so preserve the build-tree lock for
+  # explicit, fail-closed recovery even when the owned group is drained.
+  AVA_PARALLEL_LOCK_OWNED=false
   if [[ -n ${AVA_PARALLEL_CHILD_PGID:-} ]]; then
     ava_parallel_signal_group "$AVA_PARALLEL_CHILD_PGID" TERM || ava_parallel_fail_closed
-    if [[ -z ${AVA_PARALLEL_ESCALATION_PID:-} ]]; then
+    if [[ -z ${AVA_PARALLEL_ESCALATION_PID:-} ]] || ! kill -0 "$AVA_PARALLEL_ESCALATION_PID" 2>/dev/null; then
       (
+        # Repeated terminal signals may target the wrapper's process group.
+        # Keep the finite escalation watchdog alive until TERM-to-KILL completes.
+        trap '' HUP INT TERM
         if ! ava_parallel_wait_group_exit "$AVA_PARALLEL_CHILD_PGID" 2; then
           ava_parallel_signal_group "$AVA_PARALLEL_CHILD_PGID" KILL ||
             kill -USR1 "$AVA_PARALLEL_WRAPPER_PID"

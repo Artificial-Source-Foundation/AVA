@@ -49,6 +49,7 @@
 #include <iterator>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -3776,6 +3777,138 @@ void test_lease_bound_session_reads_hold_exact_authority()
   }
 }
 
+void test_session_read_authority_binding_and_descriptor_lifetime()
+{
+  auto const root = temp_root() / "session-read-authority";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const sessions = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto entry = [](std::string id, std::string text) {
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::UserMessage,
+                                      .timestamp = ava::session::now_timestamp(),
+                                      .data_json = "{\"text\":\"" + text + "\"}"};
+  };
+
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "persistent-authority"});
+  auto lease = ava::session::SessionLease::create_and_acquire(store.session_path());
+  expect(lease.has_value(), "session read authority fixture acquires its persistent lease");
+  if (!lease)
+    return;
+  expect(store.append(*lease, entry("original", "ORIGINAL_HISTORY")).has_value(), "session read authority fixture seeds original history");
+
+  auto bound = ava::session::SessionReadAuthority::create_persistent(store, *lease);
+  expect(bound.has_value(), "persistent read authority binds the exact store and lease identity");
+  if (!bound)
+    return;
+  std::optional<ava::session::SessionReadAuthority> authority(std::move(*bound));
+  std::optional<ava::session::SessionReadAuthority> retained_copy(*authority);
+  *lease = ava::session::SessionLease{};
+  auto blocked_while_copied = ava::session::SessionLease::acquire(store.session_path());
+  expect(!blocked_while_copied, "a copied read authority retains the duplicated lease after caller lease release");
+
+  auto loaded = authority->load();
+  expect(loaded && loaded->size() == 1 && loaded->front().id == "original", "bound read authority loads the leased original history");
+
+  auto const parked = store.session_path().string() + ".parked";
+  std::filesystem::rename(store.session_path(), parked);
+  auto replacement_line = ava::session::serialize_session_entry_line(entry("replacement", "REPLACEMENT_CANARY"));
+  expect(replacement_line.has_value(), "replacement read-authority fixture serializes a valid session record");
+  if (!replacement_line)
+    return;
+  write_binary_file(store.session_path(), *replacement_line + "\n");
+  auto rejected = authority->load();
+  auto pathname_loaded = store.load();
+  expect(!rejected && pathname_loaded && pathname_loaded->size() == 1 && pathname_loaded->front().id == "replacement",
+         "bound read authority rejects a replaced live pathname while observational pathname loading sees only the replacement");
+
+  authority.reset();
+  auto still_blocked = ava::session::SessionLease::acquire(parked);
+  expect(!still_blocked, "one retained authority copy continues holding the original inode lease");
+  retained_copy.reset();
+  auto released = ava::session::SessionLease::acquire(parked);
+  expect(released.has_value(), "destroying the last read authority copy releases its duplicated lease descriptor");
+
+  ava::session::SessionStore wrong_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "wrong-authority"});
+  auto wrong_lease = ava::session::SessionLease::create_and_acquire(wrong_store.session_path());
+  if (wrong_lease)
+  {
+    auto wrong_binding = ava::session::SessionReadAuthority::create_persistent(store, *wrong_lease);
+    expect(!wrong_binding, "persistent read authority rejects a lease for a different exact store path");
+  }
+
+  ava::session::SessionStore allocation_store(
+      ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "read-authority-allocation"});
+  auto allocation_lease = ava::session::SessionLease::create_and_acquire(allocation_store.session_path());
+  if (allocation_lease)
+  {
+    allocation_store.fail_persistent_read_authority_allocation_for_test();
+    auto failed = ava::session::SessionReadAuthority::create_persistent(allocation_store, *allocation_lease);
+    allocation_store.fail_persistent_read_authority_allocation_for_test(false);
+    *allocation_lease = ava::session::SessionLease{};
+    auto reacquired = ava::session::SessionLease::acquire(allocation_store.session_path());
+    expect(!failed && reacquired,
+           "read authority allocation failure closes its immediately adopted duplicate descriptor and releases flock with the caller lease");
+  }
+
+  auto ephemeral = ava::session::SessionStore::create_ephemeral(workspace);
+  if (ephemeral)
+  {
+    auto ephemeral_authority = ava::session::SessionReadAuthority::create_ephemeral(*ephemeral);
+    expect(ephemeral_authority.has_value(), "ephemeral read authority binds copied shared in-memory state");
+    auto appended = ephemeral->append_ephemeral(entry("ephemeral", "shared"));
+    auto ephemeral_entries = ephemeral_authority ? ephemeral_authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>{};
+    expect(appended && ephemeral_entries && ephemeral_entries->size() == 1 && ephemeral_entries->front().id == "ephemeral",
+           "ephemeral read authority observes later appends through shared in-memory state");
+  }
+
+#if defined(__linux__)
+  ava::session::SessionStore throwing_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "throwing-read"});
+  auto throwing_lease = ava::session::SessionLease::create_and_acquire(throwing_store.session_path());
+  if (throwing_lease && throwing_store.append(*throwing_lease, entry("throwing", "visitor")).has_value())
+  {
+    auto count_fds = [] {
+      return static_cast<std::size_t>(std::distance(std::filesystem::directory_iterator("/proc/self/fd"), std::filesystem::directory_iterator{}));
+    };
+    throwing_store.set_after_lease_bound_read_for_test([] { throw std::bad_alloc(); });
+    auto const before_visitor = count_fds();
+    bool visitor_threw = false;
+    try
+    {
+      auto loaded = throwing_store.load_bounded(*throwing_lease, ava::session::legacy_unbounded_session_read_limits());
+      visitor_threw = !loaded;
+    }
+    catch (std::bad_alloc const&)
+    {
+      visitor_threw = true;
+    }
+    auto const after_visitor = count_fds();
+    throwing_store.set_after_lease_bound_read_for_test({});
+
+    auto const before_cancel = count_fds();
+    bool cancel_threw = false;
+    try
+    {
+      static_cast<void>(throwing_store.load_bounded(*throwing_lease, ava::session::legacy_unbounded_session_read_limits(),
+                                                    []() -> bool { throw std::runtime_error("cancel callback failure"); }));
+    }
+    catch (std::runtime_error const&)
+    {
+      cancel_threw = true;
+    }
+    auto const after_cancel = count_fds();
+    expect(visitor_threw, "lease-bound read test hook reports allocation exceptions");
+    expect(before_visitor == after_visitor, "lease-bound read RAII closes owned descriptors after an allocation exception");
+    expect(cancel_threw, "lease-bound read propagates cancellation callback exceptions");
+    expect(before_cancel == after_cancel, "lease-bound read RAII closes owned descriptors after a cancellation callback exception");
+  }
+#endif
+}
+
 void test_session_append_authority_and_commit_state()
 {
   auto const root = temp_root() / "session-append-authority";
@@ -3988,6 +4121,7 @@ void run_session_tests()
   test_image_attachment_import();
   test_created_session_rollback_is_identity_safe_and_preserves_attachments();
   test_lease_bound_session_reads_hold_exact_authority();
+  test_session_read_authority_binding_and_descriptor_lifetime();
   test_session_append_authority_and_commit_state();
   test_provider_base64_encoding();
 }

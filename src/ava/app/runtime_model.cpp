@@ -170,10 +170,10 @@ ava::core::VoidResult validate_model_history_entries(std::vector<ava::session::S
 
 }  // namespace
 
-ava::core::VoidResult validate_runtime_model_history(ava::session::SessionStore const& store, ava::config::ModelInfo const& target,
+ava::core::VoidResult validate_runtime_model_history(ava::session::SessionReadAuthority read_authority, ava::config::ModelInfo const& target,
                                                      ava::session::SessionReadLimits read_limits)
 {
-  auto entries = store.load_bounded(read_limits);
+  auto entries = read_authority.load_bounded(read_limits);
   if (!entries)
     return std::unexpected(std::move(entries.error()));
   return validate_model_history_entries(*entries, target);
@@ -274,7 +274,10 @@ ava::core::Result<bool> switch_runtime_model(runtime::Session& session, ava::con
   if (session.model.provider_id == model.provider_id && session.model.model_id == model.model_id)
     return false;
 
-  auto compatible = runtime::validate_runtime_model_history(session.store, model, ava::session::SessionReadLimits{});
+  auto read_authority = session.read_authority();
+  if (!read_authority)
+    return std::unexpected(std::move(read_authority.error()));
+  auto compatible = runtime::validate_runtime_model_history(std::move(*read_authority), model, ava::session::SessionReadLimits{});
   if (!compatible)
     return std::unexpected(std::move(compatible.error()));
 

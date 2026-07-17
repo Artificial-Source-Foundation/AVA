@@ -468,7 +468,10 @@ std::optional<std::string> compact_token_status(ava::session::SessionStats const
 
 std::optional<std::string> token_status_for_session(ava::app::runtime::Session const& session)
 {
-  auto entries = session.store.load();
+  auto read_authority = session.read_authority();
+  if (!read_authority)
+    return std::nullopt;
+  auto entries = read_authority->load();
   if (!entries)
     return std::nullopt;
   return compact_token_status(ava::session::compute_session_stats(*entries), session.model.context_window_tokens);

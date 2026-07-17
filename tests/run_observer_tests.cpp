@@ -866,6 +866,7 @@ void test_agent_fake_provider_boundaries()
   options.system_prompt = "system";
   options.access_token = "CANARY_TOKEN";
   options.append_entry = append_route_for_test(store);
+  options.session_read_authority = read_authority_for_test(store);
   options.observation = observation;
   ava::agent::AgentLoop loop(std::move(options));
   auto result = loop.run_turn("CANARY_PROMPT", store, provider, transport);
@@ -918,6 +919,7 @@ void test_disabled_and_enabled_runs_preserve_authoritative_session_semantics()
                                 .system_prompt = "system",
                                 .access_token = "CANARY_TOKEN",
                                 .append_entry = append_route_for_test(store),
+                                .session_read_authority = read_authority_for_test(store),
                                 .observation = observation});
     auto result = loop.run_turn("scripted prompt", store, provider, transport);
     expect(result && result->final_text == "ok", "scripted fake-provider semantic characterization run succeeds");
@@ -1194,6 +1196,7 @@ void test_agent_terminal_uses_returned_control_state_without_callback_repoll()
                                 throw std::runtime_error("terminal classification repolled cancellation");
                               },
                               .append_entry = append_route_for_test(store),
+                              .session_read_authority = read_authority_for_test(store),
                               .observation = observation});
   bool cancellation_callback_threw = false;
   ava::core::Result<ava::agent::AgentLoopResult> result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "not run"));
@@ -1231,6 +1234,7 @@ void test_agent_lifecycle_survives_observation_attachment_failure()
                               .system_prompt = "system",
                               .access_token = "CANARY",
                               .append_entry = append_route_for_test(store),
+                              .session_read_authority = read_authority_for_test(store),
                               .observation = observation});
   auto result = loop.run_turn("prompt", store, provider, transport);
   std::lock_guard lock(collector->mutex);
@@ -1269,6 +1273,7 @@ void test_session_results_and_agent_terminal_cleanup()
                                      .system_prompt = "system",
                                      .access_token = "CANARY",
                                      .append_entry = append_route,
+                                     .session_read_authority = read_authority_for_test(store),
                                      .observation = observation});
   auto failed = failed_loop.run_turn("prompt", store, provider, provider_failure);
   expect(!failed, "fake provider failure reaches the agent terminal observer");
@@ -1280,6 +1285,7 @@ void test_session_results_and_agent_terminal_cleanup()
                                        .access_token = "CANARY",
                                        .cancel_requested = [] { return true; },
                                        .append_entry = append_route,
+                                       .session_read_authority = read_authority_for_test(store),
                                        .observation = observation});
   auto canceled = canceled_loop.run_turn("prompt", store, provider, canceled_transport);
   expect(!canceled, "canceled agent run reaches the terminal observer");
@@ -1292,6 +1298,7 @@ void test_session_results_and_agent_terminal_cleanup()
       .access_token = "CANARY",
       .cancel_requested = [] { return true; },
       .append_entry = append_route,
+      .session_read_authority = read_authority_for_test(store),
   });
   static_cast<void>(disabled_loop.run_turn("prompt", store, provider, canceled_transport));
   static_cast<void>(
@@ -1503,6 +1510,12 @@ void test_provider_stream_event_outcomes_are_exhaustive()
   options.model_id = "test";
   options.stream = false;
   options.observation = observation;
+  if (store)
+  {
+    auto read_authority = ava::session::SessionReadAuthority::create_ephemeral(*store);
+    if (read_authority)
+      options.session_read_authority = std::move(*read_authority);
+  }
   ava::agent::AgentLoop loop(std::move(options));
   if (store)
     static_cast<void>(loop.run_turn("all events", *store, provider, transport));

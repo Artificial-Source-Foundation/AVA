@@ -77,6 +77,7 @@ void test_agent_loop_cancellation_boundaries()
         .access_token = "token",
         .cancel_requested = [] { return true; },
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("cancel now", store, provider, transport);
     auto entries = store.load();
@@ -119,6 +120,7 @@ void test_agent_loop_cancellation_boundaries()
               return cancel_checks >= 2;
             },
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("cancel before provider", store, provider, transport);
     auto entries = store.load();
@@ -159,6 +161,7 @@ void test_agent_loop_cancellation_boundaries()
         .access_token = "token",
         .cancel_requested = [&cancel] { return cancel; },
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("read then cancel", store, provider, transport);
     auto entries = store.load();
@@ -216,6 +219,7 @@ void test_agent_loop_cancellation_boundaries()
               return bash_cancel_checks >= 3;
             },
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("sleep then cancel", store, provider, transport);
     auto entries = store.load();
@@ -255,6 +259,7 @@ void test_agent_loop_error_paths_and_bounds()
         .system_prompt = "system prompt",
         .access_token = "token",
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
     expect(!result && result.error().message().find("provider stream error") != std::string::npos, "agent loop returns provider error events");
@@ -277,6 +282,7 @@ void test_agent_loop_error_paths_and_bounds()
         .system_prompt = "system prompt",
         .access_token = "token",
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
     expect(!result && result.error().message().find("fake transport has no response") != std::string::npos, "agent loop returns transport failures");
@@ -299,6 +305,7 @@ void test_agent_loop_error_paths_and_bounds()
         .system_prompt = "system prompt",
         .access_token = "token",
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
     expect(!result && result.error().message().find("empty") != std::string::npos, "agent loop returns empty provider responses");
@@ -323,6 +330,7 @@ void test_agent_loop_error_paths_and_bounds()
         .access_token = "token",
         .max_provider_events = 1,
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
     expect(!result && result.error().message().find("event limit") != std::string::npos, "agent loop enforces provider event bounds");
@@ -347,6 +355,7 @@ void test_agent_loop_error_paths_and_bounds()
         .access_token = "token",
         .max_assistant_text_bytes = 3,
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
     expect(!result && result.error().message().find("text byte limit") != std::string::npos, "agent loop enforces assistant text byte bounds");
@@ -374,6 +383,7 @@ void test_agent_loop_error_paths_and_bounds()
         .access_token = "token",
         .max_tool_argument_bytes = 5,
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
     expect(!result && result.error().message().find("argument byte limit") != std::string::npos, "agent loop enforces tool argument byte bounds");
@@ -398,6 +408,7 @@ void test_agent_loop_error_paths_and_bounds()
         .system_prompt = "system prompt",
         .access_token = "token",
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("bad id", store, provider, transport);
     auto entries = store.load();
@@ -432,6 +443,7 @@ void test_agent_loop_error_paths_and_bounds()
         .system_prompt = "system prompt",
         .access_token = "token",
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("long id", store, provider, transport);
     expect(!result && result.error().message().find("too long") != std::string::npos, "agent loop rejects overlong provider tool call ids");
@@ -468,6 +480,7 @@ void test_agent_loop_max_iteration_guard()
       .access_token = "token",
       .max_tool_iterations = 2,
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("loop", store, provider, transport);
   expect(result && result->outcome == ava::core::RuntimeTerminalOutcome::MaxTurnRequests && result->provider_iterations == 2 && result->tool_iterations == 2 &&

@@ -372,7 +372,7 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
 
 namespace ava::app::runtime {
 
-ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::SessionStore& store, std::string_view trigger,
+ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::SessionReadAuthority read_authority, std::string_view trigger,
                                                 ava::provider::Provider const& provider, ava::provider::Transport& transport, RunOptions const& options,
                                                 std::vector<std::string> const& replayed_user_messages)
 {
@@ -402,11 +402,11 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
     if (options.session_mutex)
     {
       std::lock_guard lock(*options.session_mutex);
-      entries = store.load();
+      entries = read_authority.load();
     }
     else
     {
-      entries = store.load();
+      entries = read_authority.load();
     }
     if (!entries)
       return std::unexpected(std::move(entries.error()));
@@ -465,7 +465,7 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
 
     bool snapshot_stale = false;
     auto validate_and_append = [&]() -> ava::core::Result<bool> {
-      auto current_entries = store.load();
+      auto current_entries = read_authority.load();
       if (!current_entries)
         return std::unexpected(std::move(current_entries.error()));
       if (options.cancel_requested && options.cancel_requested())

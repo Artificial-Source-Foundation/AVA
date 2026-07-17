@@ -2,9 +2,12 @@
 #include "ava/app/session_run_controller.h"
 #include "ava/core/error.h"
 
+#include <algorithm>
 #include <condition_variable>
 #include <deque>
 #include <exception>
+#include <limits>
+#include <thread>
 #include <utility>
 #include "debug.h"
 
@@ -82,6 +85,7 @@ bool legal_transition(RunPhase from, RunPhase to)
 }
 
 thread_local void const* append_in_progress = nullptr;
+thread_local void const* append_driver_in_progress = nullptr;
 
 class AppendMarker final
 {
@@ -95,11 +99,41 @@ class AppendMarker final
   void const* previous_;
 };
 
-ava::core::Error append_exception_error(std::string_view cause)
+class AppendDriverMarker final
+{
+ public:
+  explicit AppendDriverMarker(void const* state) : previous_(std::exchange(append_driver_in_progress, state)) { }
+  ~AppendDriverMarker() { append_driver_in_progress = previous_; }
+  AppendDriverMarker(AppendDriverMarker const&) = delete;
+  AppendDriverMarker& operator=(AppendDriverMarker const&) = delete;
+
+ private:
+  void const* previous_;
+};
+
+ava::core::Error reentrant_reset_error()
+{
+  return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot reset persistence from a session append observer");
+}
+
+std::shared_ptr<ava::core::Error const> make_append_exception_fallback()
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::Io, "session append threw an unexpected exception");
-  error.with_context("cause", std::string(cause));
-  return error;
+  error.with_context("append_commit_state", "partial_or_unknown");
+  error.with_context("recovery", "run explicit session persistence recovery before any later append");
+  return std::make_shared<ava::core::Error>(std::move(error));
+}
+
+ava::core::Result<std::size_t> entry_byte_count(ava::session::SessionEntry const& entry)
+{
+  std::size_t bytes = 32;
+  for (auto const size : {entry.id.size(), entry.parent_id.size(), entry.timestamp.size(), entry.data_json.size()})
+  {
+    if (size > std::numeric_limits<std::size_t>::max() - bytes)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session append byte accounting overflow"));
+    bytes += size;
+  }
+  return bytes;
 }
 
 }  // namespace
@@ -119,8 +153,7 @@ struct ActiveRunGuard::State
     ava::session::SessionEntry entry;
     std::size_t bytes = 0;
     Completion completion = Completion::Pending;
-    std::optional<ava::core::Error> error;
-    std::condition_variable ready;
+    std::shared_ptr<ava::core::Error const> failure;
   };
 
   mutable std::mutex mutex;
@@ -140,9 +173,12 @@ struct ActiveRunGuard::State
   // newly admitted B and lose A's result before it wakes.
   std::unordered_map<std::string, RunOutcome> outcomes;
   std::deque<std::string> outcome_order;
-  std::optional<ava::core::Error> persistence_failure;
+  std::shared_ptr<ava::core::Error const> persistence_failure;
   std::uint64_t persistence_failure_generation = 0;
+  std::shared_ptr<ava::core::Error const> append_exception_fallback = make_append_exception_fallback();
   std::shared_ptr<ava::session::SessionAppendTarget> append_target;
+  bool append_driver_active = false;
+  std::thread::id append_driver_thread;
   std::deque<RunCommand> commands;
   std::deque<std::shared_ptr<AppendItem>> appends;
   std::size_t append_bytes = 0;
@@ -166,8 +202,10 @@ void SessionRunController::shutdown() noexcept
   try
   {
     std::stop_source source;
+    bool called_by_append_driver = false;
     {
       std::lock_guard lock(state->mutex);
+      called_by_append_driver = state->append_driver_active && state->append_driver_thread == std::this_thread::get_id();
       if (!state->shutting_down)
       {
         state->shutting_down = true;
@@ -176,38 +214,41 @@ void SessionRunController::shutdown() noexcept
         source = state->stop_source;
       }
     }
+    // Stop callbacks can reenter controller APIs and therefore run without the
+    // state mutex. A callback reached from SessionStore::append must not try to
+    // reacquire append_mutex; the active driver performs deferred cleanup.
     static_cast<void>(source.request_stop());
+    state->outcome_changed.notify_all();
+    if (called_by_append_driver || append_driver_in_progress == state.get())
+      return;
 
-    // The active driver completes before shutdown takes this lock. Once
-    // serialized, revoke and move authority before any caller-side Error is
-    // synthesized. Closing completion itself is nonallocating.
     std::shared_ptr<ava::session::SessionAppendTarget> released_target;
     {
       std::lock_guard driver_lock(state->append_mutex);
-      std::lock_guard lock(state->mutex);
-      released_target = std::move(state->append_target);
-      while (!state->appends.empty())
       {
-        auto pending = state->appends.front();
-        state->appends.pop_front();
-        state->append_bytes -= pending->bytes;
-        pending->completion = ActiveRunGuard::State::AppendItem::Completion::Closing;
-        pending->ready.notify_all();
+        std::lock_guard lock(state->mutex);
+        released_target = std::move(state->append_target);
+        while (!state->appends.empty())
+        {
+          auto pending = state->appends.front();
+          state->appends.pop_front();
+          state->append_bytes -= pending->bytes;
+          pending->completion = ActiveRunGuard::State::AppendItem::Completion::Closing;
+        }
       }
       state->appends_drained.notify_all();
+      released_target.reset();
     }
-    released_target.reset();
   }
   catch (...)
   {
-    // Destructors must not throw. Best-effort revocation is nonallocating and
-    // active drivers retain their own temporary target until completion.
+    // Destructors must not throw. Never revoke the append target here: without
+    // append_mutex that could close its lease while an append is in flight.
     try
     {
       std::lock_guard lock(state->mutex);
       state->shutting_down = true;
       state->closing = true;
-      state->append_target.reset();
     }
     catch (...)
     {
@@ -331,6 +372,7 @@ RunSnapshot SessionRunController::snapshot() const
           .stop_requested = state_->stop_source.stop_requested(),
           .queued_commands = state_->commands.size(),
           .queued_appends = state_->appends.size(),
+          .queued_append_bytes = state_->append_bytes,
           .outcome = state_->outcome};
 }
 
@@ -341,8 +383,12 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
     return std::unexpected(inactive_error());
   if (append_in_progress == state.get())
     return std::unexpected(reentrant_append_error());
+  auto bytes = entry_byte_count(entry);
+  if (!bytes)
+    return std::unexpected(std::move(bytes.error()));
+
   auto item = std::make_shared<ActiveRunGuard::State::AppendItem>();
-  item->bytes = entry.id.size() + entry.parent_id.size() + entry.timestamp.size() + entry.data_json.size() + 32;
+  item->bytes = *bytes;
   item->entry = std::move(entry);
   {
     std::lock_guard lock(state->mutex);
@@ -358,98 +404,182 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
       return std::unexpected(queue_limit_error("appends", kMaxSessionAppendQueueEntries));
     if (item->bytes > kMaxSessionAppendQueueBytes || state->append_bytes > kMaxSessionAppendQueueBytes - item->bytes)
       return std::unexpected(queue_limit_error("append_bytes", kMaxSessionAppendQueueBytes));
-    state->append_bytes += item->bytes;
     state->appends.push_back(item);
+    state->append_bytes += item->bytes;
   }
 
+  auto drain_locked = [&](ActiveRunGuard::State::AppendItem::Completion completion, std::shared_ptr<ava::core::Error const> const& failure = {}) {
+    while (!state->appends.empty())
+    {
+      auto pending = state->appends.front();
+      state->appends.pop_front();
+      state->append_bytes -= pending->bytes;
+      pending->failure = failure;
+      pending->completion = completion;
+    }
+  };
+
   std::unique_lock driver_lock(state->append_mutex);
+  AppendDriverMarker driver_marker(state.get());
+  {
+    std::lock_guard lock(state->mutex);
+    state->append_driver_active = true;
+    state->append_driver_thread = std::this_thread::get_id();
+  }
+
+  std::shared_ptr<ava::session::SessionAppendTarget> released_target;
   while (true)
   {
     std::shared_ptr<ActiveRunGuard::State::AppendItem> head;
+    std::shared_ptr<ava::session::SessionAppendTarget> target;
+    std::shared_ptr<ava::core::Error const> fallback;
     {
-      std::unique_lock lock(state->mutex);
+      std::lock_guard lock(state->mutex);
       if (item->completion != ActiveRunGuard::State::AppendItem::Completion::Pending)
+        break;
+      if (state->shutting_down || !state->append_target)
       {
-        if (item->completion == ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed && item->error)
-          return std::unexpected(*item->error);
-        if (item->completion == ActiveRunGuard::State::AppendItem::Completion::Closing)
-          return std::unexpected(inactive_error());
-        return {};
+        drain_locked(ActiveRunGuard::State::AppendItem::Completion::Closing);
+        released_target = std::move(state->append_target);
       }
-      if (state->appends.empty())
-        continue;
-      head = state->appends.front();
-    }
-    ava::core::VoidResult persisted;
-    try
-    {
-      std::shared_ptr<ava::session::SessionAppendTarget> target;
+      else if (state->persistence_failure)
       {
-        std::lock_guard lock(state->mutex);
-        target = state->append_target;
-      }
-      if (!target)
-      {
-        persisted = std::unexpected(inactive_error());
+        drain_locked(ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed, state->persistence_failure);
       }
       else
       {
-        AppendMarker marker(state.get());
-        persisted = target->append(head->entry);
+        head = state->appends.front();
+        target = state->append_target;
+        fallback = state->append_exception_fallback;
+      }
+    }
+    state->appends_drained.notify_all();
+    released_target.reset();
+    if (!head)
+      continue;
+
+    // Build one immutable failure before mutating queue state. Every ticket
+    // affected by this append then shares the exact same terminal error and
+    // append_commit_state, even if error-detail allocation itself fails.
+    std::shared_ptr<ava::core::Error const> failure;
+    try
+    {
+      AppendMarker marker(state.get());
+      auto persisted = target->append(head->entry);
+      if (!persisted)
+      {
+        try
+        {
+          failure = std::make_shared<ava::core::Error>(std::move(persisted.error()));
+        }
+        catch (...)
+        {
+          failure = fallback;
+        }
       }
     }
     catch (std::exception const& exception)
     {
-      persisted = std::unexpected(append_exception_error(exception.what()));
+      try
+      {
+        auto error = ava::core::Error(ava::core::ErrorCategory::Io, "session append threw an unexpected exception");
+        error.with_context("cause", exception.what());
+        error.with_context("append_commit_state", "partial_or_unknown");
+        error.with_context("recovery", "run explicit session persistence recovery before any later append");
+        failure = std::make_shared<ava::core::Error>(std::move(error));
+      }
+      catch (...)
+      {
+        failure = fallback;
+      }
     }
     catch (...)
     {
-      persisted = std::unexpected(append_exception_error("non-standard exception"));
+      failure = fallback;
     }
+    target.reset();
 
     std::stop_source source;
     bool request_stop = false;
     {
       std::lock_guard lock(state->mutex);
-      // This driver is the only consumer, so the head cannot change here.
-      if (!state->appends.empty() && state->appends.front() == head)
+      // append_mutex makes this the only queue consumer. Preserve exact byte
+      // accounting even if an invariant is violated, then fail closed.
+      auto found = std::ranges::find(state->appends, head);
+      if (found != state->appends.end())
       {
-        state->appends.pop_front();
         state->append_bytes -= head->bytes;
+        state->appends.erase(found);
       }
-      if (!persisted)
+      else if (!failure)
       {
-        auto error = persisted.error();
-        state->persistence_failure = error;
-        ++state->persistence_failure_generation;
-        state->requested_stop = StopReason::PersistenceError;
-        source = state->stop_source;
-        request_stop = true;
-        head->error = error;
+        failure = fallback;
+      }
+
+      if (failure)
+      {
+        head->failure = failure;
         head->completion = ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed;
-        head->ready.notify_all();
-        while (!state->appends.empty())
+        state->persistence_failure = failure;
+        ++state->persistence_failure_generation;
+        if (state->active)
         {
-          auto pending = state->appends.front();
-          state->appends.pop_front();
-          state->append_bytes -= pending->bytes;
-          pending->error = error;
-          pending->completion = ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed;
-          pending->ready.notify_all();
+          state->requested_stop = StopReason::PersistenceError;
+          source = state->stop_source;
+          request_stop = true;
         }
-        state->appends_drained.notify_all();
+        drain_locked(ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed, failure);
       }
       else
       {
         head->completion = ActiveRunGuard::State::AppendItem::Completion::Succeeded;
-        head->ready.notify_all();
-        if (state->appends.empty())
-          state->appends_drained.notify_all();
+      }
+      if (state->shutting_down)
+      {
+        if (!state->persistence_failure)
+          drain_locked(ActiveRunGuard::State::AppendItem::Completion::Closing);
+        released_target = std::move(state->append_target);
       }
     }
+    state->appends_drained.notify_all();
     if (request_stop)
-      source.request_stop();
+      static_cast<void>(source.request_stop());
+
+    // A stop callback or SessionStore observer can request shutdown after the
+    // first state update. Recheck while still serialized and release authority
+    // only after target->append and all of its callbacks have returned.
+    {
+      std::lock_guard lock(state->mutex);
+      if (state->shutting_down)
+      {
+        if (!state->persistence_failure)
+          drain_locked(ActiveRunGuard::State::AppendItem::Completion::Closing);
+        released_target = std::move(state->append_target);
+      }
+    }
+    state->appends_drained.notify_all();
+    released_target.reset();
   }
+
+  ActiveRunGuard::State::AppendItem::Completion completion;
+  std::shared_ptr<ava::core::Error const> failure;
+  {
+    std::lock_guard lock(state->mutex);
+    state->append_driver_active = false;
+    state->append_driver_thread = {};
+    completion = item->completion;
+    failure = item->failure;
+  }
+  state->appends_drained.notify_all();
+  driver_lock.unlock();
+
+  if (completion == ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed)
+    return std::unexpected(failure ? *failure : *state->append_exception_fallback);
+  if (completion == ActiveRunGuard::State::AppendItem::Completion::Closing)
+    return std::unexpected(inactive_error());
+  if (completion != ActiveRunGuard::State::AppendItem::Completion::Succeeded)
+    return std::unexpected(*state->append_exception_fallback);
+  return {};
 }
 
 ava::core::VoidResult SessionRunController::append(ava::session::SessionEntry entry)
@@ -466,6 +596,8 @@ std::function<ava::core::VoidResult(ava::session::SessionEntry)> SessionRunContr
 ava::core::VoidResult SessionRunController::reset_persistence_failure()
 {
   auto state = state_;
+  if (append_driver_in_progress == state.get())
+    return std::unexpected(reentrant_reset_error());
   std::unique_lock driver_lock(state->append_mutex);
 
   std::shared_ptr<ava::session::SessionAppendTarget> target;
@@ -591,8 +723,8 @@ ava::core::Result<RunOutcome> ActiveRunGuard::complete(RunOutcome outcome)
   }
   state_->active = false;
   state_->commands.clear();
-  state_->outcome_changed.notify_all();
   lock.unlock();
+  state_->outcome_changed.notify_all();
   state_.reset();
   generation_ = 0;
   return outcome;
@@ -649,9 +781,9 @@ void ActiveRunGuard::release() noexcept
     }
     state_->active = false;
     state_->commands.clear();
-    state_->outcome_changed.notify_all();
   }
   lock.unlock();
+  state_->outcome_changed.notify_all();
   state_.reset();
   generation_ = 0;
 }

@@ -46,6 +46,17 @@ void reset_cancel_after_session_switch(RpcRunState& run_state)
   run_state.cancel_requested.store(false, std::memory_order_relaxed);
 }
 
+ava::core::Result<ava::session::SessionMetadataView> load_runtime_metadata(runtime::Session const& session)
+{
+  auto read_authority = session.read_authority();
+  if (!read_authority)
+    return std::unexpected(std::move(read_authority.error()));
+  auto entries = read_authority->load();
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  return ava::session::session_metadata_from_entries(*entries);
+}
+
 ava::core::Result<std::string> resolve_branch_source_session_id(runtime::Session const& current, runtime::OpenOptions const& open_options,
                                                                 RpcCommand const& command)
 {
@@ -310,8 +321,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
   if (command.type == "session_metadata")
   {
     std::lock_guard lock(context.session_mutex);
-    auto metadata = context.session.sessionless ? ava::session::load_session_metadata(context.session.store)
-                                                : ava::session::load_session_metadata(context.session.store, context.session.lease);
+    auto metadata = load_runtime_metadata(context.session);
     if (!metadata)
       return handled(write_error(context.output, command.id, metadata.error()));
     return handled(write_success(context.output, command.id, ava::session::session_metadata_json(context.session.store.session_id(), *metadata)));

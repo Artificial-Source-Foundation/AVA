@@ -82,6 +82,22 @@ struct JsonlAttachmentSummary
   std::string first_storage_path;
 };
 
+ava::core::Result<std::vector<ava::session::SessionEntry>> load_runtime_entries(runtime::Session const& session)
+{
+  auto read_authority = session.read_authority();
+  if (!read_authority)
+    return std::unexpected(std::move(read_authority.error()));
+  return read_authority->load();
+}
+
+ava::core::Result<ava::session::SessionMetadataView> load_runtime_metadata(runtime::Session const& session)
+{
+  auto entries = load_runtime_entries(session);
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  return ava::session::session_metadata_from_entries(*entries);
+}
+
 std::string export_format_text(ExportFormat format)
 {
   switch (format)
@@ -776,8 +792,7 @@ ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& s
 
   if (parts.size() == 1)
   {
-    auto metadata =
-        target->sessionless ? ava::session::load_session_metadata(target->store) : ava::session::load_session_metadata(target->store, target->lease);
+    auto metadata = load_runtime_metadata(*target);
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
     auto text = metadata->labels.empty() ? std::string("session " + target->store.session_id() + " labels: <none>")
@@ -843,8 +858,7 @@ ava::core::Result<CommandResult> run_sessions_archive_command(runtime::Session& 
   if (!target)
     return std::unexpected(std::move(target.error()));
 
-  auto current_metadata =
-      target->sessionless ? ava::session::load_session_metadata(target->store) : ava::session::load_session_metadata(target->store, target->lease);
+  auto current_metadata = load_runtime_metadata(*target);
   if (!current_metadata)
     return std::unexpected(std::move(current_metadata.error()));
   if (current_metadata->archived == archived)
@@ -1117,8 +1131,7 @@ ava::core::Result<CommandResult> run_labels_command(runtime::Session& session, s
   auto const parts = split_command_arguments(labels);
   if (parts.empty())
   {
-    auto metadata =
-        session.sessionless ? ava::session::load_session_metadata(session.store) : ava::session::load_session_metadata(session.store, session.lease);
+    auto metadata = load_runtime_metadata(session);
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
     auto text = metadata->labels.empty() ? std::string("session labels: <none>") : std::string("session labels: ") + labels_text(metadata->labels);
@@ -1278,7 +1291,7 @@ ava::core::Result<CommandResult> run_stats_command(runtime::Session& session)
 {
   CommandResult result;
   result.handled = true;
-  auto entries = session.store.load();
+  auto entries = load_runtime_entries(session);
   if (!entries)
   {
     add_output(result, entries.error().format());
@@ -1308,6 +1321,9 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
   {
     return fail_compaction(std::move(config.error()));
   }
+  auto read_authority = session.read_authority();
+  if (!read_authority)
+    return fail_compaction(std::move(read_authority.error()));
 
   constexpr std::size_t max_compaction_attempts = 2;
   std::size_t last_snapshot_entries = 0;
@@ -1321,11 +1337,11 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
     if (request.session_mutex)
     {
       std::lock_guard lock(*request.session_mutex);
-      entries = session.store.load();
+      entries = read_authority->load();
     }
     else
     {
-      entries = session.store.load();
+      entries = read_authority->load();
     }
     if (!entries)
     {
@@ -1363,7 +1379,7 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
 
     bool snapshot_stale = false;
     auto validate_and_append = [&]() -> ava::core::VoidResult {
-      auto current_entries = session.store.load();
+      auto current_entries = read_authority->load();
       if (!current_entries)
         return std::unexpected(std::move(current_entries.error()));
       if (command_canceled(request))
@@ -1623,7 +1639,7 @@ ava::core::Result<CommandResult> run_export_command(runtime::Session& session, C
     add_output(result, parsed.error().format());
     return result;
   }
-  auto entries = session.store.load();
+  auto entries = load_runtime_entries(session);
   if (!entries)
   {
     add_output(result, entries.error().format());

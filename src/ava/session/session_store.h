@@ -93,6 +93,7 @@ struct SessionSummary
 // requested final path component is opened with O_NOFOLLOW; the descriptor is
 // CLOEXEC and the lock is released automatically on destruction.
 class SessionAppendTarget;
+class SessionReadAuthority;
 
 class SessionLease
 {
@@ -117,6 +118,7 @@ class SessionLease
  private:
   friend class SessionStore;
   friend class SessionAppendTarget;
+  friend class SessionReadAuthority;
 
   SessionLease(int fd, std::filesystem::path canonical_path, bool created);
   int fd_ = -1;
@@ -160,6 +162,7 @@ class SessionStore
   void set_after_append_write_for_test(std::function<void()> hook);
   void set_after_lease_bound_read_for_test(std::function<void()> hook);
   void fail_persistent_append_target_allocation_for_test(bool fail = true) noexcept;
+  void fail_persistent_read_authority_allocation_for_test(bool fail = true) noexcept;
   // Test-only write seam. A negative result is treated like write(2) failure
   // with errno supplied by the hook, allowing deterministic torn-tail tests.
   void set_append_write_for_test(std::function<ssize_t(int, std::string_view)> hook);
@@ -201,6 +204,7 @@ class SessionStore
 
  private:
   friend class SessionAppendTarget;
+  friend class SessionReadAuthority;
   struct EphemeralState;
   struct ObservationAttachment;
 
@@ -219,9 +223,38 @@ class SessionStore
   std::function<void()> after_lease_bound_read_for_test_;
   std::function<ssize_t(int, std::string_view)> append_write_for_test_;
   bool fail_persistent_append_target_allocation_for_test_ = false;
+  bool fail_persistent_read_authority_allocation_for_test_ = false;
   std::function<void()> after_recovery_quarantine_publication_for_test_;
   std::function<void()> before_created_file_rollback_detach_for_test_;
   std::function<void()> after_created_file_rollback_detach_for_test_;
+};
+
+// Narrow copyable history authority for one runtime session. Persistent
+// authorities share an owned F_DUPFD_CLOEXEC duplicate of the exact active
+// lease; ephemeral authorities retain only the shared in-memory store state.
+class SessionReadAuthority
+{
+ public:
+  SessionReadAuthority(SessionReadAuthority const&) noexcept = default;
+  SessionReadAuthority& operator=(SessionReadAuthority const&) noexcept = default;
+  SessionReadAuthority(SessionReadAuthority&&) noexcept = default;
+  SessionReadAuthority& operator=(SessionReadAuthority&&) noexcept = default;
+  ~SessionReadAuthority() = default;
+
+  [[nodiscard]] static ava::core::Result<SessionReadAuthority> create_persistent(SessionStore const& store, SessionLease const& lease);
+  [[nodiscard]] static ava::core::Result<SessionReadAuthority> create_ephemeral(SessionStore const& store);
+
+  [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load() const;
+  [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested = nullptr) const;
+  [[nodiscard]] ava::core::Result<SessionSummary> inspect_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested = nullptr) const;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
+ private:
+  struct State;
+  explicit SessionReadAuthority(std::shared_ptr<State const> state);
+
+  std::shared_ptr<State const> state_;
 };
 
 // The sole copyable append authority for runtime routes. Persistent targets
@@ -238,6 +271,7 @@ class SessionAppendTarget
   // Persistent targets repair through their private duplicated lease. Recovery
   // is deliberately a successful no-op for an ephemeral target.
   [[nodiscard]] ava::core::VoidResult recover();
+  [[nodiscard]] ava::core::Result<SessionReadAuthority> read_authority() const;
   [[nodiscard]] bool is_ephemeral() const noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_ON

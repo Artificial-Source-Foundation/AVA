@@ -24,7 +24,8 @@ struct MessageBuildOptions
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-[[nodiscard]] ava::core::Result<BuiltProviderMessages> build_messages(ava::session::SessionStore const& store, std::size_t max_tool_result_context_bytes);
+[[nodiscard]] ava::core::Result<BuiltProviderMessages> build_messages(ava::session::SessionReadAuthority read_authority,
+                                                                      std::size_t max_tool_result_context_bytes);
 
 [[nodiscard]] ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messages_from_entries(
     std::vector<ava::session::SessionEntry> const& entries, MessageBuildOptions options = MessageBuildOptions{});

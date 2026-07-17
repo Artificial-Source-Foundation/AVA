@@ -786,6 +786,9 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
     return fail_run(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));
   if (!guard.active())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime prompt admission is inactive"));
+  auto session_read_authority = session.read_authority();
+  if (!session_read_authority)
+    return fail_run(std::move(session_read_authority.error()));
   if (auto transitioned = guard.transition(RunPhase::BuildingContext); !transitioned)
     return fail_run(std::move(transitioned.error()));
 
@@ -1033,9 +1036,10 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .take_steering_messages = runtime_options.take_steering_messages,
       .lsp_diagnostics_provider = configured_lsp_provider,
       .compact_context = runtime_options.access_token.empty() ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
-                                                              : [&](ava::session::SessionStore& store, std::string_view trigger,
+                                                              : [&](ava::session::SessionReadAuthority read_authority, std::string_view trigger,
                                                                     std::vector<std::string> const& replayed_user_messages) -> ava::core::Result<bool> {
-        return runtime::compact_runtime_context(session, store, trigger, provider, *runtime_transport, runtime_options, replayed_user_messages);
+        return runtime::compact_runtime_context(session, std::move(read_authority), trigger, provider, *runtime_transport, runtime_options,
+                                                replayed_user_messages);
       },
       .background_provider_factory = [provider_id = session.model.provider_id]() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
         return ava::provider::builtin_provider_registry().create(provider_id);
@@ -1047,6 +1051,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .background_jobs = session.background_jobs,
       .session_mutex = runtime_options.session_mutex,
       .append_entry = append_route,
+      .session_read_authority = std::move(*session_read_authority),
       .parent_notification_sink = session.owner_append_route(),
       .on_phase = [&guard, &runtime_options](ava::agent::RunPhase phase) -> ava::core::VoidResult {
         if (phase == ava::agent::RunPhase::Completing && runtime_options.on_terminal_commit)

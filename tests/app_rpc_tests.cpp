@@ -17,6 +17,7 @@
 #include "ava/agent/question.h"
 #include "ava/config/auth.h"
 #include "ava/session/attachments.h"
+#include "ava/session/record.h"
 #include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
 #include "ava/session/validation.h"
@@ -1149,6 +1150,66 @@ void test_app_rpc_state_list_sessions_and_open_session()
              jsonl.find("\"id\":\"open\"") != std::string::npos,
          "RPC state, list_sessions, and open_session return session metadata");
   expect(second->store.session_id() == first_id, "RPC open_session switches the active runtime session");
+}
+
+void test_app_rpc_current_session_reads_reject_path_replacement()
+{
+  auto const root = temp_root() / "app-rpc-current-session-replacement";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "replacement-safe current-session RPC test opens runtime session");
+  if (!session)
+    return;
+  expect(session
+             ->append_owned(ava::session::SessionEntry{.id = "original_rpc_history",
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::UserMessage,
+                                                       .timestamp = "2026-05-02T00:00:00Z",
+                                                       .data_json = "{\"text\":\"ORIGINAL_RPC_HISTORY\"}"})
+             .has_value(),
+         "replacement-safe current-session RPC test seeds original history");
+
+  auto replacement = ava::session::serialize_session_entry_line(ava::session::SessionEntry{.id = "replacement_rpc_history",
+                                                                                           .parent_id = "",
+                                                                                           .type = ava::session::EntryType::UserMessage,
+                                                                                           .timestamp = "2026-05-02T00:00:01Z",
+                                                                                           .data_json = "{\"text\":\"RPC_REPLACEMENT_CANARY\"}"});
+  expect(replacement.has_value(), "replacement-safe current-session RPC test serializes replacement history");
+  if (!replacement)
+    return;
+  bool replaced = false;
+  session->store.set_after_lease_bound_read_for_test([&] {
+    if (replaced)
+      return;
+    replaced = true;
+    std::filesystem::rename(session->store.session_path(), session->store.session_path().string() + ".parked");
+    std::ofstream file(session->store.session_path(), std::ios::binary | std::ios::trunc);
+    file << *replacement << '\n';
+  });
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  std::istringstream in(
+      "{\"id\":\"messages\",\"type\":\"get_messages\"}\n"
+      "{\"id\":\"metadata\",\"type\":\"session_metadata\"}\n"
+      "{\"id\":\"stats\",\"type\":\"get_session_stats\"}\n"
+      "{\"id\":\"validate\",\"type\":\"validate_session\"}\n");
+  std::ostringstream out;
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto const jsonl = out.str();
+  auto pathname_entries = session->store.load();
+  expect(result && replaced && jsonl.find("replaced") != std::string::npos && jsonl.find("RPC_REPLACEMENT_CANARY") == std::string::npos && pathname_entries &&
+             pathname_entries->size() == 1 && pathname_entries->front().data_json.find("RPC_REPLACEMENT_CANARY") != std::string::npos,
+         "current-session RPC messages, metadata, stats, and validation fail closed after authority binding without serializing replacement content");
 }
 
 void test_app_rpc_session_metadata_name_and_labels()
@@ -3008,6 +3069,7 @@ void run_app_rpc_tests()
   test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request();
   test_app_rpc_malformed_line_recovery_and_unknown_command();
   test_app_rpc_state_list_sessions_and_open_session();
+  test_app_rpc_current_session_reads_reject_path_replacement();
   test_app_rpc_session_metadata_name_and_labels();
   test_app_rpc_session_tree_command_and_switch_navigation();
   test_app_rpc_session_fork_and_clone_commands();

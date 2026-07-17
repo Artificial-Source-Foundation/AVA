@@ -45,12 +45,21 @@ ToolDispatchResult synthetic_failed_dispatch_result(ProviderToolCall const& call
       ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = dispatch_error_result_json(call, error)});
 }
 
-ava::core::Result<std::unordered_set<std::string>> persisted_provider_tool_call_ids(ava::session::SessionStore const& store)
+ava::core::Result<std::unordered_set<std::string>> persisted_provider_tool_call_ids(ava::session::SessionReadAuthority read_authority)
 {
+  auto entries = read_authority.load_bounded(ava::session::SessionReadLimits{});
+  if (!entries)
+  {
+    auto error = std::move(entries.error());
+    error.with_context("operation", "seed persistent provider tool-call ids");
+    return std::unexpected(std::move(error));
+  }
+
   std::unordered_set<std::string> ids;
-  auto visited = store.visit_entries(ava::session::SessionReadLimits{}, [&ids](ava::session::SessionEntry const& entry) -> ava::core::Result<bool> {
+  for (auto const& entry : *entries)
+  {
     if (entry.type != ava::session::EntryType::ToolCall)
-      return true;
+      continue;
     auto id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
     if (auto valid = validate_provider_tool_call_id(id); !valid)
     {
@@ -59,15 +68,6 @@ ava::core::Result<std::unordered_set<std::string>> persisted_provider_tool_call_
       return std::unexpected(std::move(error));
     }
     ids.insert(std::move(id));
-    return true;
-  });
-  if (!visited)
-  {
-    if (visited.error().category() == ava::core::ErrorCategory::NotFound)
-      return ids;
-    auto error = std::move(visited.error());
-    error.with_context("operation", "seed persistent provider tool-call ids");
-    return std::unexpected(std::move(error));
   }
   return ids;
 }
@@ -411,6 +411,11 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent AgentLoop requires an append authority route before producing records"));
   }
+  if (!options_.session_read_authority)
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "AgentLoop requires a lifetime-safe session read authority before reading history"));
+  }
   ava::observability::TraceContext trace_context;
   std::optional<AgentTraceScope> trace_scope;
   if (options_.observation && options_.observation->enabled())
@@ -484,9 +489,9 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     if (options_.session_mutex)
     {
       std::lock_guard lock(*options_.session_mutex);
-      return build_messages(store, options_.max_tool_result_context_bytes);
+      return build_messages(*options_.session_read_authority, options_.max_tool_result_context_bytes);
     }
-    return build_messages(store, options_.max_tool_result_context_bytes);
+    return build_messages(*options_.session_read_authority, options_.max_tool_result_context_bytes);
   };
   auto append_assistant_message_locked = [&](std::string const& text, std::size_t tool_call_count, ava::provider::TokenUsage const& usage,
                                              std::optional<long double> const& cost_usd) -> ava::core::VoidResult {
@@ -574,7 +579,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       return std::unexpected(std::move(error));
     }
     auto const replayed_messages = replayable_active_turn_texts();
-    return options_.compact_context(store, trigger, replayed_messages);
+    return options_.compact_context(*options_.session_read_authority, trigger, replayed_messages);
   };
   auto append_active_turn_user_message_locked = [&](std::string const& text,
                                                     std::vector<ava::session::ImageAttachmentRef> const& attachments) -> ava::core::VoidResult {
@@ -641,9 +646,9 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     if (options_.session_mutex)
     {
       std::lock_guard lock(*options_.session_mutex);
-      return persisted_provider_tool_call_ids(store);
+      return persisted_provider_tool_call_ids(*options_.session_read_authority);
     }
-    return persisted_provider_tool_call_ids(store);
+    return persisted_provider_tool_call_ids(*options_.session_read_authority);
   }();
   if (!finalized_ids_result)
     return std::unexpected(std::move(finalized_ids_result.error()));
@@ -717,7 +722,12 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
         return std::unexpected(std::move(metadata.error()));
     }
 
+    auto child_read_authority = ava::session::SessionReadAuthority::create_persistent(child_store, child_lease);
+    if (!child_read_authority)
+      return std::unexpected(std::move(child_read_authority.error()));
+
     auto child_options = options_;
+    child_options.session_read_authority = std::move(*child_read_authority);
     child_options.system_prompt = subagent_system_prompt(options_.system_prompt, request.subagent_system_prompt);
     child_options.tool_visibility = subagent_tool_visibility(options_.tool_visibility, request.tool_preset);
     child_options.max_tool_iterations = std::min<std::size_t>(child_options.max_tool_iterations, 6);

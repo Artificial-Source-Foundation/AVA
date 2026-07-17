@@ -142,7 +142,7 @@ struct AgentLoopOptions
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
   std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
-  std::function<ava::core::Result<bool>(ava::session::SessionStore&, std::string_view, std::vector<std::string> const& replayed_user_messages)>
+  std::function<ava::core::Result<bool>(ava::session::SessionReadAuthority, std::string_view, std::vector<std::string> const& replayed_user_messages)>
       compact_context = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Provider>>()> background_provider_factory = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Transport>>()> background_transport_factory = nullptr;
@@ -150,6 +150,8 @@ struct AgentLoopOptions
   std::mutex* session_mutex = nullptr;
   // Immutable generation route for records produced by this run.
   SessionAppendSink append_entry = nullptr;
+  // Copyable exact-lease (or in-memory) authority used for every history read.
+  std::optional<ava::session::SessionReadAuthority> session_read_authority = std::nullopt;
   // Stable session-owner route for parent notices produced by background
   // children. Unlike append_entry it remains valid between generations.
   SessionAppendSink parent_notification_sink = nullptr;

@@ -8,6 +8,7 @@
 #include "ava/app/runtime.h"
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
+#include "ava/session/record.h"
 #include "ava/session/session_store.h"
 #include "ava/session/stats.h"
 #include "ava/provider/openai_provider.h"
@@ -133,6 +134,65 @@ void test_app_compact_provider_summary_success()
                                                  entry.data_json.find("\"summary_unavailable\":false") != std::string::npos;
                                         }),
          "/compact appends returned summary with summary_unavailable false");
+}
+
+void test_app_compact_rejects_replaced_current_session_history()
+{
+  auto const root = temp_root() / "app-compact-path-replacement";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "replacement-safe /compact test opens runtime session");
+  if (!session)
+    return;
+  expect(session
+             ->append_owned(ava::session::SessionEntry{.id = "original_compaction_source",
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::UserMessage,
+                                                       .timestamp = "2026-05-01T00:00:00Z",
+                                                       .data_json = "{\"text\":\"ORIGINAL_COMPACTION_SOURCE\"}"})
+             .has_value(),
+         "replacement-safe /compact test seeds original history");
+
+  auto replacement = ava::session::serialize_session_entry_line(ava::session::SessionEntry{.id = "replacement_compaction_source",
+                                                                                           .parent_id = "",
+                                                                                           .type = ava::session::EntryType::UserMessage,
+                                                                                           .timestamp = "2026-05-01T00:00:01Z",
+                                                                                           .data_json = "{\"text\":\"REPLACEMENT_COMPACTION_CANARY\"}"});
+  expect(replacement.has_value(), "replacement-safe /compact test serializes replacement history");
+  if (!replacement)
+    return;
+  bool replaced = false;
+  session->store.set_after_lease_bound_read_for_test([&] {
+    if (replaced)
+      return;
+    replaced = true;
+    std::filesystem::rename(session->store.session_path(), session->store.session_path().string() + ".parked");
+    std::ofstream file(session->store.session_path(), std::ios::binary | std::ios::trunc);
+    file << *replacement << '\n';
+  });
+  std::size_t generator_calls = 0;
+  auto compact = ava::app::run_command(
+      *session,
+      ava::app::CommandRequest{.command = "/compact",
+                               .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const&, ava::session::CompactionConfig const&,
+                                                                   std::string_view, std::size_t) -> ava::core::Result<std::string> {
+                                 ++generator_calls;
+                                 return std::string("must not summarize replacement");
+                               }});
+  auto pathname_entries = session->store.load();
+  expect(replaced && compact && compact->handled && generator_calls == 0 && !compact->output.empty() &&
+             compact->output.front().find("replaced") != std::string::npos && pathname_entries && pathname_entries->size() == 1 &&
+             pathname_entries->front().data_json.find("REPLACEMENT_COMPACTION_CANARY") != std::string::npos,
+         "manual compaction snapshot fails closed after authority binding and never summarizes replacement pathname content");
 }
 
 void test_app_compact_openai_oauth_streaming_summary_success()
@@ -908,6 +968,7 @@ void test_app_context_overflow_retry_is_bounded()
 void run_app_compaction_tests()
 {
   test_app_compact_provider_summary_success();
+  test_app_compact_rejects_replaced_current_session_history();
   test_app_compact_openai_oauth_streaming_summary_success();
   test_app_compact_provider_failure_leaves_session_untouched();
   test_compaction_observation_preserves_cancellation_callback_contract();

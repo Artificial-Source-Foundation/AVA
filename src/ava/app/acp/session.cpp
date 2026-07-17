@@ -760,7 +760,10 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::load(std:
   auto session = open_runtime_session_at(std::move(options), options_.launch_root, cwd, session_id);
   if (!session)
     return std::unexpected(std::move(session.error()));
-  auto compatible = ava::app::runtime::validate_runtime_model_history(session->store, session->model, kAcpSessionReadLimits);
+  auto read_authority = session->read_authority();
+  if (!read_authority)
+    return std::unexpected(std::move(read_authority.error()));
+  auto compatible = ava::app::runtime::validate_runtime_model_history(std::move(*read_authority), session->model, kAcpSessionReadLimits);
   if (!compatible)
     return std::unexpected(std::move(compatible.error()));
   session->mcp_config = std::move(mcp_config);

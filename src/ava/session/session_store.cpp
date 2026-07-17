@@ -49,6 +49,44 @@ struct SessionStore::ObservationAttachment
 
 namespace {
 
+class ScopedFd
+{
+ public:
+  explicit ScopedFd(int fd = -1) noexcept : fd_(fd) { }
+  ScopedFd(ScopedFd const&) = delete;
+  ScopedFd& operator=(ScopedFd const&) = delete;
+  ScopedFd(ScopedFd&& other) noexcept : fd_(std::exchange(other.fd_, -1)) { }
+  ScopedFd& operator=(ScopedFd&& other) noexcept
+  {
+    if (this != &other)
+    {
+      reset();
+      fd_ = std::exchange(other.fd_, -1);
+    }
+    return *this;
+  }
+  ~ScopedFd() { reset(); }
+
+  [[nodiscard]] int get() const noexcept { return fd_; }
+  [[nodiscard]] int release() noexcept { return std::exchange(fd_, -1); }
+  [[nodiscard]] int close_checked() noexcept
+  {
+    if (fd_ < 0)
+      return 0;
+    int const fd = std::exchange(fd_, -1);
+    return ::close(fd) == 0 ? 0 : errno;
+  }
+  void reset(int fd = -1) noexcept
+  {
+    if (fd_ >= 0)
+      static_cast<void>(::close(fd_));
+    fd_ = fd;
+  }
+
+ private:
+  int fd_ = -1;
+};
+
 std::string project_key(std::filesystem::path const& workspace_dir)
 {
   auto const normalized = std::filesystem::absolute(workspace_dir).lexically_normal().string();
@@ -91,8 +129,8 @@ ava::core::Result<std::pair<int, off_t>> open_regular_snapshot(std::filesystem::
 {
   // Inspect the final component with O_PATH first. In particular, never open a
   // pathname replaced by a FIFO through blocking O_RDONLY before classifying it.
-  int metadata_fd = ::open(path.c_str(), O_PATH | O_CLOEXEC | O_NOFOLLOW);
-  if (metadata_fd < 0)
+  ScopedFd metadata_fd(::open(path.c_str(), O_PATH | O_CLOEXEC | O_NOFOLLOW));
+  if (metadata_fd.get() < 0)
   {
     auto category =
         errno == ENOENT ? ava::core::ErrorCategory::NotFound : (errno == ELOOP ? ava::core::ErrorCategory::PermissionDenied : ava::core::ErrorCategory::Io);
@@ -101,8 +139,8 @@ ava::core::Result<std::pair<int, off_t>> open_regular_snapshot(std::filesystem::
     return std::unexpected(std::move(error));
   }
   struct stat metadata_status{};
-  int metadata_error = fstat(metadata_fd, &metadata_status) == 0 ? 0 : errno;
-  int metadata_close_error = ::close(metadata_fd) == 0 ? 0 : errno;
+  int metadata_error = fstat(metadata_fd.get(), &metadata_status) == 0 ? 0 : errno;
+  int metadata_close_error = metadata_fd.close_checked();
   if (metadata_error != 0)
     return std::unexpected(path_io_error("failed to inspect session file metadata", path, metadata_error));
   if (metadata_close_error != 0)
@@ -127,19 +165,18 @@ ava::core::Result<std::pair<int, off_t>> open_regular_snapshot(std::filesystem::
     return std::unexpected(std::move(error));
   }
 
-  int const fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
-  if (fd < 0)
+  ScopedFd fd(::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW));
+  if (fd.get() < 0)
     return std::unexpected(path_io_error("failed to securely open session snapshot", path, errno));
   struct stat status{};
-  int status_error = fstat(fd, &status) == 0 ? 0 : errno;
+  int status_error = fstat(fd.get(), &status) == 0 ? 0 : errno;
   if (status_error != 0 || !S_ISREG(status.st_mode) || metadata_status.st_dev != status.st_dev || metadata_status.st_ino != status.st_ino)
   {
-    static_cast<void>(::close(fd));
     if (status_error != 0)
       return std::unexpected(path_io_error("failed to inspect session snapshot", path, status_error));
     return std::unexpected(path_io_error("session snapshot target changed while opening", path));
   }
-  return std::pair<int, off_t>(fd, metadata_status.st_size);
+  return std::pair<int, off_t>(fd.release(), metadata_status.st_size);
 }
 
 ava::core::VoidResult validate_read_limits(SessionReadLimits const& limits)
@@ -297,9 +334,9 @@ ava::core::VoidResult visit_regular_session_snapshot(std::filesystem::path const
   auto opened = open_regular_snapshot(path, limits.max_file_bytes);
   if (!opened)
     return std::unexpected(std::move(opened.error()));
-  int const fd = opened->first;
-  auto visited = visit_session_snapshot_fd(fd, opened->second, path, limits, visitor, cancel_requested, tolerate_invalid_final_suffix);
-  int const close_error = ::close(fd) == 0 ? 0 : errno;
+  ScopedFd fd(opened->first);
+  auto visited = visit_session_snapshot_fd(fd.get(), opened->second, path, limits, visitor, cancel_requested, tolerate_invalid_final_suffix);
+  int const close_error = fd.close_checked();
   if (!visited)
     return std::unexpected(std::move(visited.error()));
   if (close_error != 0)
@@ -742,6 +779,11 @@ void SessionStore::set_after_lease_bound_read_for_test(std::function<void()> hoo
 void SessionStore::fail_persistent_append_target_allocation_for_test(bool fail) noexcept
 {
   fail_persistent_append_target_allocation_for_test_ = fail;
+}
+
+void SessionStore::fail_persistent_read_authority_allocation_for_test(bool fail) noexcept
+{
+  fail_persistent_read_authority_allocation_for_test_ = fail;
 }
 
 void SessionStore::set_append_write_for_test(std::function<ssize_t(int, std::string_view)> hook)
@@ -1366,33 +1408,26 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
   auto& append_mutex = append_mutex_for_path(path);
   std::lock_guard append_lock(append_mutex);
 
-  int parent_fd = ::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-  if (parent_fd < 0)
+  ScopedFd parent_fd(::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
+  if (parent_fd.get() < 0)
     return std::unexpected(path_io_error("failed to open the session directory for torn tail recovery", parent_path, errno));
-  int repair_fd = -1;
-  auto close_fd = [](int& fd) {
-    if (fd < 0)
-      return 0;
-    int const close_result = ::close(fd);
-    int const close_error = close_result == 0 ? 0 : errno;
-    fd = -1;
-    return close_error;
-  };
+  ScopedFd repair_fd;
+  auto close_fd = [](ScopedFd& fd) { return fd.close_checked(); };
   auto close_both_best_effort = [&] {
     static_cast<void>(close_fd(repair_fd));
     static_cast<void>(close_fd(parent_fd));
   };
 
   struct stat parent_status{};
-  if (fstat(parent_fd, &parent_status) != 0 || !S_ISDIR(parent_status.st_mode))
+  if (fstat(parent_fd.get(), &parent_status) != 0 || !S_ISDIR(parent_status.st_mode))
   {
     int const error_number = errno;
     close_both_best_effort();
     return std::unexpected(path_io_error("session recovery parent is not a directory", parent_path, error_number));
   }
 
-  repair_fd = ::openat(parent_fd, session_name.c_str(), O_RDWR | O_CLOEXEC | O_NOFOLLOW);
-  if (repair_fd < 0)
+  repair_fd.reset(::openat(parent_fd.get(), session_name.c_str(), O_RDWR | O_CLOEXEC | O_NOFOLLOW));
+  if (repair_fd.get() < 0)
   {
     int const error_number = errno;
     close_both_best_effort();
@@ -1407,7 +1442,7 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
     close_both_best_effort();
     return std::unexpected(std::move(error));
   }
-  if (fstat(repair_fd, &repair_status) != 0)
+  if (fstat(repair_fd.get(), &repair_status) != 0)
   {
     auto error = path_io_error("failed to inspect session opened for torn tail recovery", path, errno);
     close_both_best_effort();
@@ -1450,7 +1485,7 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
   ssize_t final_byte_count = 0;
   do
   {
-    final_byte_count = ::pread(repair_fd, &final_byte, 1, repair_status.st_size - 1);
+    final_byte_count = ::pread(repair_fd.get(), &final_byte, 1, repair_status.st_size - 1);
   } while (final_byte_count < 0 && errno == EINTR);
   if (final_byte_count != 1)
   {
@@ -1505,7 +1540,7 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
     ssize_t count = 0;
     do
     {
-      count = ::pread(repair_fd, buffer.data(), wanted, offset);
+      count = ::pread(repair_fd.get(), buffer.data(), wanted, offset);
     } while (count < 0 && errno == EINTR);
     if (count < 0)
     {
@@ -1603,7 +1638,8 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
     close_both_best_effort();
     return std::unexpected(std::move(canceled.error()));
   }
-  if (auto unchanged = require_unchanged_repair_namespace(repair_fd, parent_fd, repair_status, parent_status, parent_path, session_name, path); !unchanged)
+  if (auto unchanged = require_unchanged_repair_namespace(repair_fd.get(), parent_fd.get(), repair_status, parent_status, parent_path, session_name, path);
+      !unchanged)
   {
     auto error = std::move(unchanged.error());
     close_both_best_effort();
@@ -1615,7 +1651,7 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
     ssize_t count = 0;
     do
     {
-      count = ::pwrite(repair_fd, "\n", 1, repair_status.st_size);
+      count = ::pwrite(repair_fd.get(), "\n", 1, repair_status.st_size);
     } while (count < 0 && errno == EINTR);
     if (count != 1)
     {
@@ -1624,20 +1660,21 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
       close_both_best_effort();
       return std::unexpected(std::move(error));
     }
-    if (fdatasync(repair_fd) != 0)
+    if (fdatasync(repair_fd.get()) != 0)
     {
       auto error = path_io_error("failed to sync final LF during torn tail recovery", path, errno);
       close_both_best_effort();
       return std::unexpected(std::move(error));
     }
     struct stat repaired_status{};
-    if (fstat(repair_fd, &repaired_status) != 0)
+    if (fstat(repair_fd.get(), &repaired_status) != 0)
     {
       auto error = path_io_error("failed to inspect session after appending final LF", path, errno);
       close_both_best_effort();
       return std::unexpected(std::move(error));
     }
-    if (auto unchanged = require_unchanged_repair_namespace(repair_fd, parent_fd, repaired_status, parent_status, parent_path, session_name, path); !unchanged)
+    if (auto unchanged = require_unchanged_repair_namespace(repair_fd.get(), parent_fd.get(), repaired_status, parent_status, parent_path, session_name, path);
+        !unchanged)
     {
       auto error = std::move(unchanged.error());
       close_both_best_effort();
@@ -1652,7 +1689,7 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
     return std::optional<std::filesystem::path>{};
   }
 
-  auto quarantined = quarantine_session_tail(parent_fd, parent_path, session_name, line, cancel_requested);
+  auto quarantined = quarantine_session_tail(parent_fd.get(), parent_path, session_name, line, cancel_requested);
   if (!quarantined)
   {
     auto error = std::move(quarantined.error());
@@ -1673,21 +1710,22 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
       return std::unexpected(std::move(error));
     }
   }
-  if (auto unchanged = require_unchanged_repair_namespace(repair_fd, parent_fd, repair_status, parent_status, parent_path, session_name, path); !unchanged)
+  if (auto unchanged = require_unchanged_repair_namespace(repair_fd.get(), parent_fd.get(), repair_status, parent_status, parent_path, session_name, path);
+      !unchanged)
   {
     auto error = std::move(unchanged.error());
     error.with_context("quarantine_path", quarantined->string());
     close_both_best_effort();
     return std::unexpected(std::move(error));
   }
-  if (ftruncate(repair_fd, last_validated_newline) != 0)
+  if (ftruncate(repair_fd.get(), last_validated_newline) != 0)
   {
     auto error = path_io_error("failed to truncate quarantined torn session tail", path, errno);
     error.with_context("quarantine_path", quarantined->string());
     close_both_best_effort();
     return std::unexpected(std::move(error));
   }
-  if (fdatasync(repair_fd) != 0)
+  if (fdatasync(repair_fd.get()) != 0)
   {
     auto error = path_io_error("session tail was truncated but the source sync failed", path, errno);
     error.with_context("quarantine_path", quarantined->string());
@@ -1695,14 +1733,15 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
     return std::unexpected(std::move(error));
   }
   struct stat repaired_status{};
-  if (fstat(repair_fd, &repaired_status) != 0)
+  if (fstat(repair_fd.get(), &repaired_status) != 0)
   {
     auto error = path_io_error("failed to inspect session after truncating its torn tail", path, errno);
     error.with_context("quarantine_path", quarantined->string());
     close_both_best_effort();
     return std::unexpected(std::move(error));
   }
-  if (auto unchanged = require_unchanged_repair_namespace(repair_fd, parent_fd, repaired_status, parent_status, parent_path, session_name, path); !unchanged)
+  if (auto unchanged = require_unchanged_repair_namespace(repair_fd.get(), parent_fd.get(), repaired_status, parent_status, parent_path, session_name, path);
+      !unchanged)
   {
     auto error = std::move(unchanged.error());
     error.with_context("quarantine_path", quarantined->string());
@@ -1884,21 +1923,14 @@ ava::core::VoidResult SessionStore::visit_entries_leased(SessionLease const& lea
   if (session_name.empty())
     return std::unexpected(path_io_error("lease-bound session read target has no basename", path));
 
-  int parent_fd = ::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-  if (parent_fd < 0)
+  ScopedFd parent_fd(::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+  if (parent_fd.get() < 0)
     return std::unexpected(path_io_error("failed to anchor lease-bound session read directory", parent_path, errno));
-  auto close_parent = [&] {
-    int const result = ::close(parent_fd);
-    int const error_number = result == 0 ? 0 : errno;
-    parent_fd = -1;
-    return error_number;
-  };
 
   struct stat initial_parent_status{};
-  if (fstat(parent_fd, &initial_parent_status) != 0 || !S_ISDIR(initial_parent_status.st_mode))
+  if (fstat(parent_fd.get(), &initial_parent_status) != 0 || !S_ISDIR(initial_parent_status.st_mode))
   {
     int const error_number = errno;
-    static_cast<void>(close_parent());
     return std::unexpected(path_io_error("lease-bound session read parent is not a directory", parent_path, error_number));
   }
 
@@ -1911,7 +1943,7 @@ ava::core::VoidResult SessionStore::visit_entries_leased(SessionLease const& lea
     ReadIdentity identity;
     if (fstat(lease.fd_, &identity.lease_status) != 0)
       return std::unexpected(path_io_error("failed to inspect session lease " + std::string(timing), path, errno));
-    if (fstatat(parent_fd, session_name.c_str(), &identity.named_status, AT_SYMLINK_NOFOLLOW) != 0)
+    if (fstatat(parent_fd.get(), session_name.c_str(), &identity.named_status, AT_SYMLINK_NOFOLLOW) != 0)
       return std::unexpected(path_io_error("failed to inspect leased session name " + std::string(timing), path, errno));
     if (!same_file_identity(identity.lease_status, identity.named_status) || identity.lease_status.st_nlink != 1 || identity.named_status.st_nlink != 1)
     {
@@ -1923,7 +1955,7 @@ ava::core::VoidResult SessionStore::visit_entries_leased(SessionLease const& lea
     }
 
     struct stat anchored_parent_status{};
-    if (fstat(parent_fd, &anchored_parent_status) != 0)
+    if (fstat(parent_fd.get(), &anchored_parent_status) != 0)
       return std::unexpected(path_io_error("failed to inspect anchored session directory " + std::string(timing), parent_path, errno));
     if (!same_directory_identity(initial_parent_status, anchored_parent_status))
     {
@@ -1932,12 +1964,12 @@ ava::core::VoidResult SessionStore::visit_entries_leased(SessionLease const& lea
       return std::unexpected(std::move(error));
     }
 
-    int publication_fd = ::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-    if (publication_fd < 0)
+    ScopedFd publication_fd(::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    if (publication_fd.get() < 0)
       return std::unexpected(path_io_error("failed to re-open session directory publication " + std::string(timing), parent_path, errno));
     struct stat publication_status{};
-    int const publication_error = fstat(publication_fd, &publication_status) == 0 ? 0 : errno;
-    int const publication_close_error = ::close(publication_fd) == 0 ? 0 : errno;
+    int const publication_error = fstat(publication_fd.get(), &publication_status) == 0 ? 0 : errno;
+    int const publication_close_error = publication_fd.close_checked();
     if (publication_error != 0)
       return std::unexpected(path_io_error("failed to inspect session directory publication " + std::string(timing), parent_path, publication_error));
     if (publication_close_error != 0)
@@ -1953,19 +1985,12 @@ ava::core::VoidResult SessionStore::visit_entries_leased(SessionLease const& lea
 
   auto initial = validate_identity("before snapshot");
   if (!initial)
-  {
-    static_cast<void>(close_parent());
     return std::unexpected(std::move(initial.error()));
-  }
   if (initial->lease_status.st_size < 0)
-  {
-    static_cast<void>(close_parent());
     return std::unexpected(path_io_error("lease-bound session snapshot has an invalid size", path));
-  }
   auto const initial_size = initial->lease_status.st_size;
   if (static_cast<std::uintmax_t>(initial_size) > limits.max_file_bytes)
   {
-    static_cast<void>(close_parent());
     auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session file exceeds bounded read limit");
     error.with_context("path", path.string()).with_context("max_file_bytes", std::to_string(limits.max_file_bytes));
     return std::unexpected(std::move(error));
@@ -1981,7 +2006,7 @@ ava::core::VoidResult SessionStore::visit_entries_leased(SessionLease const& lea
     error.with_context("path", path.string());
     final = std::unexpected(std::move(error));
   }
-  int const parent_close_error = close_parent();
+  int const parent_close_error = parent_fd.close_checked();
   if (!final)
     return std::unexpected(std::move(final.error()));
   if (!visited)
@@ -2181,7 +2206,9 @@ ava::core::Result<SessionStore> SessionStore::open(std::filesystem::path const& 
     error.with_context("session_id", store.session_id());
     return std::unexpected(std::move(error));
   }
-  ::close(opened->first);
+  ScopedFd snapshot_fd(opened->first);
+  if (int const close_error = snapshot_fd.close_checked(); close_error != 0)
+    return std::unexpected(path_io_error("failed to close session open snapshot", store.session_path(), close_error));
   return store;
 }
 
@@ -2591,6 +2618,133 @@ off_t SessionLease::offset_for_test() const noexcept
   return ::lseek(fd_, 0, SEEK_CUR);
 }
 
+struct SessionReadAuthority::State
+{
+  State(SessionStore store_in, std::optional<SessionLease> lease_in) : store(std::move(store_in)), lease(std::move(lease_in)) { }
+
+  SessionStore store;
+  std::optional<SessionLease> lease;
+};
+
+SessionReadAuthority::SessionReadAuthority(std::shared_ptr<State const> state) : state_(std::move(state))
+{
+}
+
+ava::core::Result<SessionReadAuthority> SessionReadAuthority::create_persistent(SessionStore const& store, SessionLease const& lease)
+{
+  if (store.is_ephemeral())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent read authority requires a persistent store"));
+  if (!lease.active())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent read authority requires an active session lease"));
+
+  try
+  {
+    // Complete every potentially throwing metadata copy before duplicating the
+    // locked open-file description. The local SessionLease adopts the duplicate
+    // immediately, so all later allocation failures close it through RAII.
+    SessionStore authority_store = store;
+    std::filesystem::path authority_path = normalized_absolute_path(store.session_path());
+    std::filesystem::path authority_lease_path = lease.canonical_path_;
+    bool const authority_created = lease.created_;
+    bool const fail_allocation_for_test = store.fail_persistent_read_authority_allocation_for_test_;
+
+    if (authority_path != authority_lease_path)
+    {
+      auto error = append_authority_error("persistent read authority lease does not exactly match the store", authority_path);
+      error.with_context("lease_path", authority_lease_path.string());
+      return std::unexpected(std::move(error));
+    }
+    auto const parent_path = authority_path.parent_path();
+    auto const name = authority_path.filename().string();
+    if (name.empty())
+      return std::unexpected(path_io_error("persistent read authority has no basename", authority_path));
+
+    ScopedFd parent_fd(::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    if (parent_fd.get() < 0)
+      return std::unexpected(path_io_error("failed to anchor persistent read authority directory", parent_path, errno));
+    ScopedFd name_fd(::openat(parent_fd.get(), name.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC));
+    if (name_fd.get() < 0)
+      return std::unexpected(path_io_error("failed to inspect persistent read authority target", authority_path, errno));
+
+    struct stat lease_status{};
+    struct stat name_status{};
+    struct stat named_status{};
+    int const lease_error = fstat(lease.fd_, &lease_status) == 0 ? 0 : errno;
+    int const name_error = fstat(name_fd.get(), &name_status) == 0 ? 0 : errno;
+    int const named_error = fstatat(parent_fd.get(), name.c_str(), &named_status, AT_SYMLINK_NOFOLLOW) == 0 ? 0 : errno;
+    int const name_close_error = name_fd.close_checked();
+    int const parent_close_error = parent_fd.close_checked();
+    if (lease_error != 0)
+      return std::unexpected(path_io_error("failed to inspect persistent read authority lease", authority_path, lease_error));
+    if (name_error != 0)
+      return std::unexpected(path_io_error("failed to inspect persistent read authority name", authority_path, name_error));
+    if (named_error != 0)
+      return std::unexpected(path_io_error("failed to inspect persistent read authority publication", authority_path, named_error));
+    if (name_close_error != 0)
+      return std::unexpected(path_io_error("failed to close persistent read authority name descriptor", authority_path, name_close_error));
+    if (parent_close_error != 0)
+      return std::unexpected(path_io_error("failed to close persistent read authority directory", parent_path, parent_close_error));
+    if (!same_file_identity(lease_status, name_status) || !same_file_identity(lease_status, named_status) || lease_status.st_nlink != 1 ||
+        name_status.st_nlink != 1 || named_status.st_nlink != 1)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "persistent read authority does not identify one regular leased inode");
+      error.with_context("path", authority_path.string());
+      return std::unexpected(std::move(error));
+    }
+
+    int const duplicate_fd = fcntl(lease.fd_, F_DUPFD_CLOEXEC, 3);
+    if (duplicate_fd < 0)
+      return std::unexpected(path_io_error("failed to duplicate persistent read lease with CLOEXEC", authority_path, errno));
+    SessionLease duplicated_lease(duplicate_fd, std::move(authority_lease_path), authority_created);
+    if (fail_allocation_for_test)
+      throw std::bad_alloc();
+    auto state = std::make_shared<State>(std::move(authority_store), std::optional<SessionLease>(std::move(duplicated_lease)));
+    return SessionReadAuthority(std::move(state));
+  }
+  catch (...)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "failed to allocate persistent session read authority"));
+  }
+}
+
+ava::core::Result<SessionReadAuthority> SessionReadAuthority::create_ephemeral(SessionStore const& store)
+{
+  if (!store.is_ephemeral())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "ephemeral read authority requires an ephemeral store"));
+  try
+  {
+    auto state = std::make_shared<State>(store, std::nullopt);
+    return SessionReadAuthority(std::move(state));
+  }
+  catch (...)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "failed to allocate ephemeral session read authority"));
+  }
+}
+
+ava::core::Result<std::vector<SessionEntry>> SessionReadAuthority::load() const
+{
+  if (!state_)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session read authority is inactive"));
+  return state_->lease ? state_->store.load(*state_->lease) : state_->store.load();
+}
+
+ava::core::Result<std::vector<SessionEntry>> SessionReadAuthority::load_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested) const
+{
+  if (!state_)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session read authority is inactive"));
+  return state_->lease ? state_->store.load_bounded(*state_->lease, limits, std::move(cancel_requested))
+                       : state_->store.load_bounded(limits, std::move(cancel_requested));
+}
+
+ava::core::Result<SessionSummary> SessionReadAuthority::inspect_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested) const
+{
+  if (!state_)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session read authority is inactive"));
+  return state_->lease ? state_->store.inspect_bounded(*state_->lease, limits, std::move(cancel_requested))
+                       : state_->store.inspect_bounded(limits, std::move(cancel_requested));
+}
+
 SessionAppendTarget::SessionAppendTarget(SessionStore store, std::optional<SessionLease> lease) : store_(std::move(store)), lease_(std::move(lease))
 {
 }
@@ -2612,24 +2766,20 @@ ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::cre
   auto const name = path.filename().string();
   if (name.empty())
     return std::unexpected(path_io_error("persistent append target has no basename", path));
-  int parent_fd = ::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-  if (parent_fd < 0)
+  ScopedFd parent_fd(::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+  if (parent_fd.get() < 0)
     return std::unexpected(path_io_error("failed to anchor persistent append target directory", parent_path, errno));
-  int name_fd = ::openat(parent_fd, name.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
-  if (name_fd < 0)
-  {
-    int const error_number = errno;
-    static_cast<void>(::close(parent_fd));
-    return std::unexpected(path_io_error("failed to inspect persistent append target", path, error_number));
-  }
+  ScopedFd name_fd(::openat(parent_fd.get(), name.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC));
+  if (name_fd.get() < 0)
+    return std::unexpected(path_io_error("failed to inspect persistent append target", path, errno));
   struct stat lease_status{};
   struct stat name_status{};
   struct stat named_status{};
   int const lease_error = fstat(lease.fd_, &lease_status) == 0 ? 0 : errno;
-  int const name_error = fstat(name_fd, &name_status) == 0 ? 0 : errno;
-  int const named_error = fstatat(parent_fd, name.c_str(), &named_status, AT_SYMLINK_NOFOLLOW) == 0 ? 0 : errno;
-  int const name_close_error = ::close(name_fd) == 0 ? 0 : errno;
-  int const parent_close_error = ::close(parent_fd) == 0 ? 0 : errno;
+  int const name_error = fstat(name_fd.get(), &name_status) == 0 ? 0 : errno;
+  int const named_error = fstatat(parent_fd.get(), name.c_str(), &named_status, AT_SYMLINK_NOFOLLOW) == 0 ? 0 : errno;
+  int const name_close_error = name_fd.close_checked();
+  int const parent_close_error = parent_fd.close_checked();
   if (lease_error != 0)
     return std::unexpected(path_io_error("failed to inspect persistent append target lease", path, lease_error));
   if (name_error != 0)
@@ -2710,6 +2860,11 @@ ava::core::VoidResult SessionAppendTarget::recover()
   if (!recovered)
     return std::unexpected(std::move(recovered.error()));
   return {};
+}
+
+ava::core::Result<SessionReadAuthority> SessionAppendTarget::read_authority() const
+{
+  return lease_ ? SessionReadAuthority::create_persistent(store_, *lease_) : SessionReadAuthority::create_ephemeral(store_);
 }
 
 bool SessionAppendTarget::is_ephemeral() const noexcept

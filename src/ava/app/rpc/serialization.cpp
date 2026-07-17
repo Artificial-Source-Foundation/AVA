@@ -26,6 +26,14 @@ std::string joined_output(std::vector<std::string> const& output)
   return text;
 }
 
+ava::core::Result<std::vector<ava::session::SessionEntry>> load_runtime_entries(runtime::Session const& session)
+{
+  auto read_authority = session.read_authority();
+  if (!read_authority)
+    return std::unexpected(std::move(read_authority.error()));
+  return read_authority->load();
+}
+
 std::string context_sources_json(runtime::Session const& session)
 {
   std::string json = "[";
@@ -624,7 +632,7 @@ std::string command_registry_result_json(CommandRegistry const& registry)
 
 ava::core::Result<std::string> messages_result_json(runtime::Session const& session)
 {
-  auto entries = session.store.load();
+  auto entries = load_runtime_entries(session);
   if (!entries)
     return std::unexpected(entries.error());
 
@@ -672,7 +680,7 @@ ava::core::Result<std::string> messages_result_json(runtime::Session const& sess
 
 ava::core::Result<std::string> session_stats_result_json(runtime::Session const& session)
 {
-  auto entries = session.store.load();
+  auto entries = load_runtime_entries(session);
   if (!entries)
     return std::unexpected(entries.error());
   auto const stats = ava::session::compute_session_stats(*entries);
@@ -786,7 +794,7 @@ ava::core::Result<std::string> session_stats_result_json(runtime::Session const&
 
 ava::core::Result<std::string> session_validation_result_json(runtime::Session const& session)
 {
-  auto entries = session.store.load();
+  auto entries = load_runtime_entries(session);
   if (!entries)
     return std::unexpected(entries.error());
   auto const validation = ava::session::validate_session_replay(*entries);

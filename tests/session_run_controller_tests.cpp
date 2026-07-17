@@ -1,4 +1,5 @@
 #include "tests/support/test_harness.h"
+#include "ava/observability/run_observer.h"
 #include "ava/app/runtime.h"
 #include "ava/app/session_run_controller.h"
 #include "ava/session/session_store.h"
@@ -10,12 +11,27 @@
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <thread>
 #include <utility>
 #include <vector>
 #include <unistd.h>
 
 namespace {
+
+class CallbackRunObserver final : public ava::observability::RunObserver
+{
+ public:
+  explicit CallbackRunObserver(std::function<void(ava::observability::TraceEvent const&)> callback) : callback_(std::move(callback)) { }
+
+  void on_event(ava::observability::TraceEvent const& event) override { callback_(event); }
+
+ private:
+  std::function<void(ava::observability::TraceEvent const&)> callback_;
+};
 
 std::shared_ptr<ava::session::SessionAppendTarget> ephemeral_controller_target()
 {
@@ -599,6 +615,274 @@ void test_session_run_controller_shutdown_during_recovery_and_queued_append()
   }
 }
 
+void test_session_run_controller_observer_shutdown_is_deferred()
+{
+  std::error_code error;
+  auto const root = temp_root() / "session-run-controller-observer-shutdown";
+  std::filesystem::remove_all(root, error);
+  auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+  auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                     : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+  expect(store && lease, "observer shutdown fixture creates a persistent owned session");
+  if (!store || !lease)
+    return;
+
+  std::mutex gate_mutex;
+  std::condition_variable gate_changed;
+  bool active_entered = false;
+  bool release_active = false;
+  store->set_before_append_identity_check_for_test([&] {
+    std::unique_lock lock(gate_mutex);
+    if (active_entered)
+      return;
+    active_entered = true;
+    gate_changed.notify_all();
+    static_cast<void>(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return release_active; }));
+  });
+
+  ava::app::SessionRunController* controller_ptr = nullptr;
+  std::atomic_bool shutdown_once = false;
+  std::mutex observer_mutex;
+  std::condition_variable observer_changed;
+  bool shutdown_returned = false;
+  auto observer = std::make_shared<CallbackRunObserver>([&](ava::observability::TraceEvent const& event) {
+    if (event.type != ava::observability::TraceEventType::SessionAppendResult || shutdown_once.exchange(true, std::memory_order_acq_rel))
+      return;
+    controller_ptr->shutdown();
+    {
+      std::lock_guard lock(observer_mutex);
+      shutdown_returned = true;
+    }
+    observer_changed.notify_all();
+  });
+  auto observation = std::make_shared<ava::observability::RunObservation>(observer);
+  static_cast<void>(store->set_run_observation(observation, {}));
+
+  auto target = persistent_controller_target(*store, *lease);
+  expect(target.has_value(), "observer shutdown fixture creates append target");
+  if (!target)
+    return;
+  ava::app::SessionRunController controller(std::move(*target));
+  controller_ptr = &controller;
+  auto admitted = controller.admit({.request_id = "observer-shutdown"});
+  expect(admitted.has_value(), "observer shutdown fixture admits an active run");
+  if (!admitted)
+    return;
+  auto guard = std::move(*admitted);
+  auto route = guard.append_route();
+  auto first_entry = append_entry("observer-shutdown-active");
+  auto second_entry = append_entry("observer-shutdown-queued");
+  auto const expected_bytes = first_entry.id.size() + first_entry.parent_id.size() + first_entry.timestamp.size() + first_entry.data_json.size() + 32 +
+                              second_entry.id.size() + second_entry.parent_id.size() + second_entry.timestamp.size() + second_entry.data_json.size() + 32;
+  std::optional<ava::core::VoidResult> first_result;
+  std::optional<ava::core::VoidResult> second_result;
+  std::jthread first([&] { first_result.emplace(route(std::move(first_entry))); });
+  {
+    std::unique_lock lock(gate_mutex);
+    expect(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return active_entered; }),
+           "observer shutdown active append reaches its deterministic gate");
+  }
+  std::jthread second([&] { second_result.emplace(route(std::move(second_entry))); });
+  auto const queue_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  auto queued = controller.snapshot();
+  while (queued.queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline)
+  {
+    std::this_thread::yield();
+    queued = controller.snapshot();
+  }
+  expect(queued.queued_appends == 2 && queued.queued_append_bytes == expected_bytes,
+         "observer shutdown fixture queues the cross-thread ticket with exact byte accounting before callback reentry");
+  {
+    std::lock_guard lock(gate_mutex);
+    release_active = true;
+  }
+  gate_changed.notify_all();
+  first.join();
+  second.join();
+  {
+    std::unique_lock lock(observer_mutex);
+    expect(observer_changed.wait_for(lock, std::chrono::seconds(3), [&] { return shutdown_returned; }),
+           "observer shutdown returns from the append callback without recursively acquiring append_mutex");
+  }
+
+  auto outcome = guard.complete({.run_id = {}, .reason = ava::app::StopReason::ProviderError});
+  auto terminal = controller.snapshot();
+  *lease = ava::session::SessionLease{};
+  auto reacquired = ava::session::SessionLease::acquire(store->session_path());
+  expect(first_result && *first_result && second_result && !*second_result && outcome && outcome->reason == ava::app::StopReason::UserCanceled &&
+             outcome->reason != ava::app::StopReason::PersistenceError && terminal.queued_appends == 0 && terminal.queued_append_bytes == 0 && reacquired,
+         "observer shutdown commits only the current append, closes the queued ticket, avoids a persistence latch, and releases target lease authority");
+}
+
+void test_session_run_controller_observer_reset_reentrancy_is_rejected()
+{
+  struct ResetState
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool callback_returned = false;
+    bool writer_done = false;
+    std::optional<ava::core::VoidResult> reset_result;
+    std::optional<ava::core::VoidResult> append_result;
+  };
+
+  std::error_code error;
+  auto const root = temp_root() / "session-run-controller-observer-reset";
+  std::filesystem::remove_all(root, error);
+  auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+  auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                     : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+  expect(store && lease, "observer reset fixture creates a persistent owned session");
+  if (!store || !lease)
+    return;
+
+  auto reset_state = std::make_shared<ResetState>();
+  auto controller_slot = std::make_shared<std::weak_ptr<ava::app::SessionRunController>>();
+  auto reset_once = std::make_shared<std::atomic_bool>(false);
+  auto observer = std::make_shared<CallbackRunObserver>([reset_state, controller_slot, reset_once](ava::observability::TraceEvent const& event) {
+    if (event.type != ava::observability::TraceEventType::SessionAppendResult || reset_once->exchange(true, std::memory_order_acq_rel))
+      return;
+    auto controller = controller_slot->lock();
+    auto reset = controller ? controller->reset_persistence_failure()
+                            : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "controller expired")));
+    {
+      std::lock_guard lock(reset_state->mutex);
+      reset_state->reset_result.emplace(std::move(reset));
+      reset_state->callback_returned = true;
+    }
+    reset_state->changed.notify_all();
+  });
+  static_cast<void>(store->set_run_observation(std::make_shared<ava::observability::RunObservation>(observer), {}));
+  auto target = persistent_controller_target(*store, *lease);
+  if (!target)
+    return;
+  auto controller = std::make_shared<ava::app::SessionRunController>(std::move(*target));
+  *controller_slot = controller;
+  auto owner = controller->owner_append_route();
+
+  std::thread writer([controller, owner, reset_state] {
+    auto appended = owner(append_entry("observer-reset"));
+    {
+      std::lock_guard lock(reset_state->mutex);
+      reset_state->append_result.emplace(std::move(appended));
+      reset_state->writer_done = true;
+    }
+    reset_state->changed.notify_all();
+  });
+  bool completed = false;
+  {
+    std::unique_lock lock(reset_state->mutex);
+    completed = reset_state->changed.wait_for(lock, std::chrono::seconds(3), [&] { return reset_state->callback_returned && reset_state->writer_done; });
+  }
+  if (!completed)
+  {
+    writer.detach();
+    expect(false, "observer persistence reset must return without recursive append_mutex deadlock");
+    return;
+  }
+  writer.join();
+
+  bool reset_rejected = false;
+  bool append_succeeded = false;
+  {
+    std::lock_guard lock(reset_state->mutex);
+    reset_rejected = reset_state->reset_result && !*reset_state->reset_result &&
+                     reset_state->reset_result->error().message() == "cannot reset persistence from a session append observer";
+    append_succeeded = reset_state->append_result && *reset_state->append_result;
+  }
+  auto second = owner(append_entry("observer-reset-next"));
+  expect(reset_rejected && append_succeeded && second && controller->inspect_admission({.request_id = "healthy"}) == ava::app::AdmissionDisposition::Admit,
+         "observer persistence reset gets a stable immediate reentrancy error while the current append and later appends remain healthy");
+  controller->shutdown();
+}
+
+void test_session_run_controller_failure_drains_tickets_with_exact_accounting()
+{
+  std::error_code error;
+  auto const root = temp_root() / "session-run-controller-failure-tickets";
+  std::filesystem::remove_all(root, error);
+  auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+  auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                     : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+  if (!store || !lease)
+    return;
+  expect(store->append(*lease, append_entry("ticket-prefix")).has_value(), "failure ticket fixture seeds a framed record");
+
+  std::mutex gate_mutex;
+  std::condition_variable gate_changed;
+  bool entered = false;
+  bool release = false;
+  store->set_before_append_identity_check_for_test([&] {
+    std::unique_lock lock(gate_mutex);
+    if (entered)
+      return;
+    entered = true;
+    gate_changed.notify_all();
+    static_cast<void>(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return release; }));
+  });
+  auto control = std::make_shared<PartialAppendControl>();
+  store->set_append_write_for_test([control](int fd, std::string_view bytes) { return control->write(fd, bytes); });
+  auto target = persistent_controller_target(*store, *lease);
+  if (!target)
+    return;
+  ava::app::SessionRunController controller(std::move(*target));
+  auto admitted = controller.admit({.request_id = "failure-tickets"});
+  if (!admitted)
+    return;
+  auto guard = std::move(*admitted);
+  auto route = guard.append_route();
+
+  auto first_entry = append_entry("ticket-first");
+  auto second_entry = append_entry("ticket-second");
+  auto third_entry = append_entry("ticket-third");
+  auto bytes = [](ava::session::SessionEntry const& entry) {
+    return entry.id.size() + entry.parent_id.size() + entry.timestamp.size() + entry.data_json.size() + 32;
+  };
+  auto const expected_bytes = bytes(first_entry) + bytes(second_entry) + bytes(third_entry);
+  std::optional<ava::core::VoidResult> first_result;
+  std::optional<ava::core::VoidResult> second_result;
+  std::optional<ava::core::VoidResult> third_result;
+  std::jthread first([&] { first_result.emplace(route(std::move(first_entry))); });
+  {
+    std::unique_lock lock(gate_mutex);
+    expect(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return entered; }), "failure ticket first append reaches its write gate");
+  }
+  std::jthread second([&] { second_result.emplace(route(std::move(second_entry))); });
+  std::jthread third([&] { third_result.emplace(route(std::move(third_entry))); });
+  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  auto queued = controller.snapshot();
+  while (queued.queued_appends < 3 && std::chrono::steady_clock::now() < deadline)
+  {
+    std::this_thread::yield();
+    queued = controller.snapshot();
+  }
+  expect(queued.queued_appends == 3 && queued.queued_append_bytes == expected_bytes,
+         "accepted append tickets expose exact aggregate queue byte accounting before persistence");
+  {
+    std::lock_guard lock(gate_mutex);
+    release = true;
+  }
+  gate_changed.notify_all();
+  first.join();
+  second.join();
+  third.join();
+
+  auto same_failure = [&] {
+    return first_result && second_result && third_result && !*first_result && !*second_result && !*third_result &&
+           first_result->error().format() == second_result->error().format() && first_result->error().format() == third_result->error().format() &&
+           first_result->error().format().find("append_commit_state: partial_or_unknown") != std::string::npos;
+  };
+  auto drained = controller.snapshot();
+  auto outcome = guard.complete({.run_id = {}, .reason = ava::app::StopReason::ProviderError});
+  control->fail.store(false, std::memory_order_release);
+  auto recovered = controller.reset_persistence_failure();
+  auto next = controller.append(append_entry("ticket-after-recovery"));
+  auto entries = store->load();
+  expect(same_failure() && control->calls.load(std::memory_order_acquire) == 2 && drained.queued_appends == 0 && drained.queued_append_bytes == 0 && outcome &&
+             outcome->reason == ava::app::StopReason::PersistenceError && recovered && next && entries && entries->size() == 2,
+         "one immutable partial failure terminally drains every accepted ticket, prevents queued writes, and recovers without byte-account drift");
+}
+
 void test_session_run_controller_concurrent_fifo_appends()
 {
   std::error_code error;
@@ -725,6 +1009,9 @@ void run_session_run_controller_tests()
   test_session_run_controller_recovers_persistent_and_ephemeral_targets();
   test_session_run_controller_failed_and_inflight_recovery();
   test_session_run_controller_shutdown_during_recovery_and_queued_append();
+  test_session_run_controller_observer_shutdown_is_deferred();
+  test_session_run_controller_observer_reset_reentrancy_is_rejected();
+  test_session_run_controller_failure_drains_tickets_with_exact_accounting();
   test_session_run_controller_concurrent_fifo_appends();
   test_session_run_controller_routes_release_target_on_shutdown();
   test_session_run_controller_bounds_and_reentrant_snapshot();

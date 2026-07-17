@@ -5,6 +5,7 @@
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
 #include "ava/config/model_config.h"
+#include "ava/session/record.h"
 #include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
 #include "ava/session/validation.h"
@@ -214,6 +215,7 @@ void test_agent_loop_text_only_turn()
       .openai_oauth = true,
       .openai_account_id = "acct_123",
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("hi", store, provider, transport);
   expect(result && result->final_text == "hello user" && result->tool_calls == 0 && result->initial_context_messages == 1 && !result->used_compacted_context &&
@@ -254,6 +256,7 @@ void test_agent_loop_model_capability_gating()
       .model_supports_tools = false,
       .model_supports_streaming = false,
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("hi", store, provider, transport);
   expect(result && result->final_text == "plain", "agent loop accepts text-only model response");
@@ -284,6 +287,54 @@ void test_agent_loop_rejects_persistent_store_without_append_route()
   expect(!result && result.error().message().find("append authority route") != std::string::npos && transport.requests().empty() &&
              !std::filesystem::exists(store.session_path()),
          "persistent AgentLoop without a bound append route fails before provider work or session mutation");
+}
+
+void test_agent_loop_rejects_replaced_history_before_provider_use()
+{
+  auto const root = temp_root() / "agent-history-path-replacement";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "history-replacement"});
+
+  auto replacement = ava::session::serialize_session_entry_line(ava::session::SessionEntry{.id = "replacement",
+                                                                                           .parent_id = "",
+                                                                                           .type = ava::session::EntryType::UserMessage,
+                                                                                           .timestamp = "2026-05-08T00:00:00Z",
+                                                                                           .data_json = "{\"text\":\"REPLACEMENT_CANARY\"}"});
+  expect(replacement.has_value(), "agent replacement fixture serializes a valid session record");
+  if (!replacement)
+    return;
+  bool replaced = false;
+  store.set_after_lease_bound_read_for_test([&] {
+    if (replaced)
+      return;
+    replaced = true;
+    std::filesystem::rename(store.session_path(), store.session_path().string() + ".parked");
+    std::ofstream file(store.session_path(), std::ios::binary | std::ios::trunc);
+    file << *replacement << '\n';
+  });
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"must not run\"}\n\ndata: [DONE]\n\n")});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+  });
+  auto result = loop.run_turn("do not mix history", store, provider, transport);
+  store.set_after_lease_bound_read_for_test({});
+  auto pathname_entries = store.load();
+  expect(replaced && !result && transport.requests().empty() && pathname_entries && pathname_entries->size() == 1 &&
+             pathname_entries->front().data_json.find("REPLACEMENT_CANARY") != std::string::npos,
+         "provider history fails closed after authority binding when the live session pathname is replaced and never consumes replacement content");
 }
 
 void test_agent_loop_image_attachment_load_failure_records_error()
@@ -321,6 +372,7 @@ void test_agent_loop_image_attachment_load_failure_records_error()
       .access_token = "token",
       .model_input_modalities = {"text", "image"},
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("continue", store, provider, transport);
   expect(!result && result.error().message().find("image attachment") != std::string::npos, "agent loop returns attachment load errors before provider calls");
@@ -359,6 +411,7 @@ void test_agent_loop_usage_and_cost_persistence()
                                                                 .system_prompt = "system prompt",
                                                                 .access_token = "token",
                                                                 .append_entry = append_route_for_test(exact_store),
+                                                                .session_read_authority = read_authority_for_test(exact_store),
                                                                 .model_pricing = pricing});
   auto exact_result = exact_loop.run_turn("hi", exact_store, provider, exact_transport);
   expect(exact_result && exact_result->usage && !exact_result->usage->estimated && exact_result->cost_usd && *exact_result->cost_usd > 0.049L &&
@@ -383,6 +436,7 @@ void test_agent_loop_usage_and_cost_persistence()
       .system_prompt = "system prompt",
       .access_token = "token",
       .append_entry = append_route_for_test(unknown_price_store),
+      .session_read_authority = read_authority_for_test(unknown_price_store),
   });
   auto unknown_price_result = unknown_price_loop.run_turn("hi", unknown_price_store, provider, unknown_price_transport);
   auto unknown_price_entries = unknown_price_store.load();
@@ -401,6 +455,7 @@ void test_agent_loop_usage_and_cost_persistence()
                                                                     .system_prompt = "system prompt",
                                                                     .access_token = "token",
                                                                     .append_entry = append_route_for_test(estimated_store),
+                                                                    .session_read_authority = read_authority_for_test(estimated_store),
                                                                     .model_pricing = pricing});
   auto estimated_result = estimated_loop.run_turn("hi", estimated_store, provider, estimated_transport);
   auto estimated_entries = estimated_store.load();
@@ -449,6 +504,7 @@ void test_agent_loop_tool_turn_and_continuation()
                                                           .access_token = "token",
                                                           .on_tool_event = [&tool_events](auto const& entry) { tool_events.push_back(entry); },
                                                           .append_entry = append_route_for_test(store),
+                                                          .session_read_authority = read_authority_for_test(store),
                                                           .model_pricing = pricing});
   auto result = loop.run_turn("read note", store, provider, transport);
   expect(result && result->final_text == "read it" && result->tool_calls == 1 && result->provider_iterations == 2 && result->initial_context_messages == 1 &&
@@ -531,6 +587,7 @@ void test_agent_loop_task_subagent_runs_child_session()
                                                             return ava::permissions::PermissionResolution::Allow;
                                                           },
                                                           .append_entry = append_route_for_test(store),
+                                                          .session_read_authority = read_authority_for_test(store),
                                                           .observation = observation});
 
   auto result = loop.run_turn("delegate", store, provider, transport);
@@ -666,6 +723,7 @@ void test_agent_loop_task_subagent_recovers_torn_child_before_resume()
         return ava::permissions::PermissionResolution::Allow;
       },
       .append_entry = append_route_for_test(parent),
+      .session_read_authority = read_authority_for_test(parent),
   });
 
   auto result = loop.run_turn("resume torn child", parent, provider, transport);
@@ -762,6 +820,7 @@ void test_agent_loop_custom_subagent_definition_controls_prompt_and_tools()
         return ava::permissions::PermissionResolution::Allow;
       },
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
 
   auto result = loop.run_turn("delegate custom", store, provider, transport);
@@ -825,6 +884,7 @@ void test_agent_loop_background_task_starts_child_session()
       .background_jobs = registry,
       .session_mutex = &session_mutex,
       .append_entry = parent_append,
+      .session_read_authority = read_authority_for_test(store),
       .parent_notification_sink = parent_append,
       .observation = observation});
 
@@ -873,6 +933,7 @@ void test_agent_loop_background_task_starts_child_session()
           return ava::permissions::PermissionResolution::Allow;
         },
         .append_entry = append_route_for_test(competing_parent),
+        .session_read_authority = read_authority_for_test(competing_parent),
     });
     auto competing_result = competing_loop.run_turn("resume running child", competing_parent, provider, competing_transport);
     foreground_resume_blocked = competing_result && competing_result->final_text == "resume was blocked" && competing_transport.requests().size() == 2 &&
@@ -966,6 +1027,7 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
       .background_jobs = registry,
       .session_mutex = &session_mutex,
       .append_entry = parent_append,
+      .session_read_authority = read_authority_for_test(store),
       .parent_notification_sink = parent_append,
   });
 
@@ -1055,6 +1117,7 @@ void test_agent_loop_background_task_cancel_requests_child_cancellation()
       },
       .background_jobs = registry,
       .append_entry = parent_append,
+      .session_read_authority = read_authority_for_test(store),
       .parent_notification_sink = parent_append,
   });
 
@@ -1126,6 +1189,7 @@ void test_agent_loop_background_task_requires_registry_owner()
         return transport;
       },
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
 
   auto result = loop.run_turn("delegate unavailable background", store, provider, transport);
@@ -1424,6 +1488,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
         return ava::permissions::PermissionResolution::Allow;
       },
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("read outside", store, provider, transport);
   expect(result && result->final_text == "used resolver" && prompts == 1 && result->tool_timeline.size() == 1 &&
@@ -1482,6 +1547,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
           return ava::permissions::PermissionResolution::Allow;
         },
         .append_entry = append_route_for_test(bash_store),
+        .session_read_authority = read_authority_for_test(bash_store),
     });
     auto bash_result = bash_loop.run_turn("run true", bash_store, provider, bash_transport);
     expect(bash_result && bash_result->final_text == "bash allowed" && bash_allow_prompts == 1 && bash_result->tool_timeline.size() == 1 &&
@@ -1518,6 +1584,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
           return ava::permissions::PermissionResolution::Deny;
         },
         .append_entry = append_route_for_test(bash_store),
+        .session_read_authority = read_authority_for_test(bash_store),
     });
     auto bash_result = bash_loop.run_turn("run true", bash_store, provider, bash_transport);
     expect(bash_result && bash_result->final_text == "bash denied" && bash_deny_prompts == 1 && bash_result->tool_timeline.size() == 1 &&
@@ -1560,6 +1627,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
         },
         .append_entry = append_route_for_test(bash_store),
+        .session_read_authority = read_authority_for_test(bash_store),
     });
     auto bash_result = bash_loop.run_turn("run true", bash_store, provider, bash_transport);
     expect(bash_result && bash_result->final_text == "bash resolver failed" && bash_fail_prompts == 1 && bash_result->tool_timeline.size() == 1 &&
@@ -1599,6 +1667,7 @@ void test_agent_loop_question_resolver_threads_to_tools()
         return ava::agent::QuestionAnswer{.selected_options = {"B"}, .custom_text = ""};
       },
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("ask", store, provider, transport);
   expect(result && result->final_text == "question answered" && prompts == 1 && result->tool_timeline.size() == 1 &&
@@ -1628,6 +1697,7 @@ void test_agent_loop_non_stream_response()
       .access_token = "token",
       .stream = false,
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("hi", store, provider, transport);
   expect(result && result->final_text == "plain response with data: literal", "agent loop parses non-stream response without sniffing data text");
@@ -1662,6 +1732,7 @@ void test_agent_loop_compaction_status_metadata()
       .system_prompt = "system prompt",
       .access_token = "token",
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("continue", store, provider, transport);
   expect(result && result->used_compacted_context && result->initial_context_messages == 2 && result->outcome == ava::core::RuntimeTerminalOutcome::Completed,
@@ -1693,6 +1764,10 @@ void test_agent_loop_replays_steering_after_mid_turn_auto_compaction()
   expect(append_target.has_value(), "steering compaction fixture creates its append target");
   if (!append_target)
     return;
+  auto read_authority = (*append_target)->read_authority();
+  expect(read_authority.has_value(), "steering compaction fixture creates its read authority");
+  if (!read_authority)
+    return;
   auto append_route = [target = std::move(*append_target)](ava::session::SessionEntry entry) { return target->append(entry); };
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
@@ -1707,16 +1782,16 @@ void test_agent_loop_replays_steering_after_mid_turn_auto_compaction()
         steering_taken = true;
         return std::vector<std::string>{"mid-turn steering"};
       },
-      .compact_context = [&compact_calls, &append_lease](ava::session::SessionStore& compact_store, std::string_view trigger,
-                                                         std::vector<std::string> const&) -> ava::core::Result<bool> {
+      .compact_context = [&compact_calls, &append_lease, &store](ava::session::SessionReadAuthority, std::string_view trigger,
+                                                                 std::vector<std::string> const&) -> ava::core::Result<bool> {
         ++compact_calls;
         if (trigger == "auto" && compact_calls == 2)
         {
-          auto appended = compact_store.append(*append_lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                                         .parent_id = "",
-                                                                                         .type = ava::session::EntryType::Compaction,
-                                                                                         .timestamp = ava::session::now_timestamp(),
-                                                                                         .data_json = "{\"summary\":\"mid turn\"}"});
+          auto appended = store.append(*append_lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                                 .parent_id = "",
+                                                                                 .type = ava::session::EntryType::Compaction,
+                                                                                 .timestamp = ava::session::now_timestamp(),
+                                                                                 .data_json = "{\"summary\":\"mid turn\"}"});
           if (!appended)
             return std::unexpected(std::move(appended.error()));
           return true;
@@ -1724,6 +1799,7 @@ void test_agent_loop_replays_steering_after_mid_turn_auto_compaction()
         return false;
       },
       .append_entry = append_route,
+      .session_read_authority = std::move(*read_authority),
   });
 
   auto result = loop.run_turn("initial prompt", store, provider, transport);
@@ -1756,6 +1832,10 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction()
   expect(append_target.has_value(), "overflow compaction fixture creates its append target");
   if (!append_target)
     return;
+  auto read_authority = (*append_target)->read_authority();
+  expect(read_authority.has_value(), "overflow compaction fixture creates its read authority");
+  if (!read_authority)
+    return;
   auto append_route = [target = std::move(*append_target)](ava::session::SessionEntry entry) { return target->append(entry); };
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
@@ -1764,28 +1844,28 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction()
       .model_id = "gpt-5.5",
       .system_prompt = "system prompt",
       .access_token = "token",
-      .compact_context = [&append_lease, &overflow_compacted, &triggers](ava::session::SessionStore& compact_store, std::string_view trigger,
-                                                                         std::vector<std::string> const&) -> ava::core::Result<bool> {
+      .compact_context = [&append_lease, &overflow_compacted, &triggers, &store](ava::session::SessionReadAuthority, std::string_view trigger,
+                                                                                 std::vector<std::string> const&) -> ava::core::Result<bool> {
         triggers.push_back(std::string(trigger));
         if (trigger == "context_overflow")
         {
           overflow_compacted = true;
-          auto appended = compact_store.append(*append_lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                                         .parent_id = "",
-                                                                                         .type = ava::session::EntryType::Compaction,
-                                                                                         .timestamp = ava::session::now_timestamp(),
-                                                                                         .data_json = "{\"summary\":\"overflow summary\"}"});
+          auto appended = store.append(*append_lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                                 .parent_id = "",
+                                                                                 .type = ava::session::EntryType::Compaction,
+                                                                                 .timestamp = ava::session::now_timestamp(),
+                                                                                 .data_json = "{\"summary\":\"overflow summary\"}"});
           if (!appended)
             return std::unexpected(std::move(appended.error()));
           return true;
         }
         if (trigger == "auto" && overflow_compacted)
         {
-          auto appended = compact_store.append(*append_lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                                         .parent_id = "",
-                                                                                         .type = ava::session::EntryType::Compaction,
-                                                                                         .timestamp = ava::session::now_timestamp(),
-                                                                                         .data_json = "{\"summary\":\"duplicate\"}"});
+          auto appended = store.append(*append_lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                                 .parent_id = "",
+                                                                                 .type = ava::session::EntryType::Compaction,
+                                                                                 .timestamp = ava::session::now_timestamp(),
+                                                                                 .data_json = "{\"summary\":\"duplicate\"}"});
           if (!appended)
             return std::unexpected(std::move(appended.error()));
           return true;
@@ -1793,6 +1873,7 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction()
         return false;
       },
       .append_entry = append_route,
+      .session_read_authority = std::move(*read_authority),
   });
 
   auto result = loop.run_turn("overflow prompt", store, provider, transport);
@@ -1850,6 +1931,7 @@ void test_agent_loop_multiple_tools_and_denied_continuation()
       .access_token = "token",
       .on_tool_event = [&tool_events](auto const& entry) { tool_events.push_back(entry); },
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("read both", store, provider, transport);
   expect(result && result->tool_calls == 2 && result->final_text == "done", "agent loop handles multiple tool calls before continuation");
@@ -1926,6 +2008,7 @@ void test_agent_loop_multiple_tools_and_denied_continuation()
       .openai_oauth = true,
       .openai_account_id = "acct_123",
       .append_entry = append_route_for_test(denied_store),
+      .session_read_authority = read_authority_for_test(denied_store),
   });
   auto denied_result = denied_loop.run_turn("write source", denied_store, provider, denied_transport);
   expect(denied_result && denied_result->final_text == "permission explained" && denied_result->provider_iterations == 2,
@@ -1976,6 +2059,7 @@ void test_agent_loop_parallel_read_search_preserves_provider_order_and_replay()
                                                             return {};
                                                           },
                                                           .append_entry = append_route_for_test(store),
+                                                          .session_read_authority = read_authority_for_test(store),
                                                           .parallel_read_search_tools = true,
                                                           .parallel_read_search_max_workers = 2});
   auto result = loop.run_turn("glob both", store, provider, transport);
@@ -2082,6 +2166,7 @@ void test_agent_loop_parallel_read_search_zero_max_workers_clamps_to_one()
                                                           .access_token = "token",
                                                           .on_tool_event = [&tool_events](auto const& entry) { tool_events.push_back(entry); },
                                                           .append_entry = append_route_for_test(store),
+                                                          .session_read_authority = read_authority_for_test(store),
                                                           .parallel_read_search_tools = true,
                                                           .parallel_read_search_max_workers = 0});
   auto result = loop.run_turn("read both with zero worker cap", store, provider, transport);
@@ -2144,6 +2229,7 @@ void test_agent_loop_parallel_read_search_falls_back_for_ask_preflight()
         return ava::permissions::PermissionResolution::Allow;
       },
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
       .parallel_read_search_tools = true,
       .parallel_read_search_max_workers = 2});
   auto result = loop.run_turn("read outside and inside", store, provider, transport);
@@ -2254,6 +2340,7 @@ void test_agent_loop_parallel_read_search_active_cancellation_stops_unstarted_sl
       },
       .cancel_requested = [&cancel_state] { return cancel_state(); },
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
       .parallel_read_search_tools = true,
       .parallel_read_search_max_workers = 2});
   auto result = loop.run_turn("read four then cancel during active epoch", store, provider, transport);
@@ -2347,6 +2434,7 @@ void test_agent_loop_parallel_read_search_cancellation_stops_later_barrier()
                                                               },
                                                           .cancel_requested = [&cancel_after_first_tool] { return cancel_after_first_tool; },
                                                           .append_entry = append_route_for_test(store),
+                                                          .session_read_authority = read_authority_for_test(store),
                                                           .parallel_read_search_tools = true,
                                                           .parallel_read_search_max_workers = 2});
   auto result = loop.run_turn("read both then cancel before bash", store, provider, transport);
@@ -2428,6 +2516,7 @@ void test_agent_loop_cancellation_stops_later_sequential_tools()
           },
       .cancel_requested = [&cancel_after_first_tool] { return cancel_after_first_tool; },
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
 
   auto result = loop.run_turn("read both but cancel after first", store, provider, transport);
@@ -2492,6 +2581,7 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
         .system_prompt = "system prompt",
         .access_token = "token",
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("read note", store, provider, transport);
     expect(result && result->tool_calls == 1 && result->tool_timeline.size() == 1 &&
@@ -2543,6 +2633,7 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
         .access_token = "token",
         .on_tool_event = [&tool_events](auto const& event) { tool_events.push_back(event); },
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("reuse a call id", store, provider, transport);
     auto entries = store.load();
@@ -2597,6 +2688,7 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
           return {};
         },
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     };
     ava::agent::AgentLoop first_loop(options);
     auto first = first_loop.run_turn("first prompt", store, provider, transport);
@@ -2641,6 +2733,7 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
         .system_prompt = "system prompt",
         .access_token = "token",
         .append_entry = append_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("read missing-id", store, provider, transport);
     auto entries = store.load();
@@ -2686,6 +2779,7 @@ void test_agent_loop_truncates_tool_context()
       .access_token = "token",
       .max_tool_result_context_bytes = 8 * 1024,
       .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("read large", store, provider, transport);
   expect(result && transport.requests().size() == 2 && transport.requests()[1].body.find("tool result context truncated") != std::string::npos,
@@ -2699,6 +2793,7 @@ void run_agent_loop_tests()
   test_agent_loop_text_only_turn();
   test_agent_loop_model_capability_gating();
   test_agent_loop_rejects_persistent_store_without_append_route();
+  test_agent_loop_rejects_replaced_history_before_provider_use();
   test_agent_loop_image_attachment_load_failure_records_error();
   test_agent_loop_usage_and_cost_persistence();
   test_agent_loop_tool_turn_and_continuation();

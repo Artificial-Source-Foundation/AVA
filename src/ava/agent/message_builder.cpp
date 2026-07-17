@@ -399,10 +399,10 @@ std::vector<std::string> next_tool_call_ids(std::vector<ava::session::SessionEnt
 
 }  // namespace
 
-ava::core::Result<BuiltProviderMessages> build_messages(ava::session::SessionStore const& store,
+ava::core::Result<BuiltProviderMessages> build_messages(ava::session::SessionReadAuthority read_authority,
                                                         std::size_t max_tool_result_context_bytes)
 {
-  auto entries = store.load();
+  auto entries = read_authority.load();
   if (!entries) return std::unexpected(entries.error());
   bool used_compacted_context = false;
   for (auto const& entry : *entries) {

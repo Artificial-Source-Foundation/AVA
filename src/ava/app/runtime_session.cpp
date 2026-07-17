@@ -124,6 +124,13 @@ ava::core::Result<std::pair<std::filesystem::path, std::filesystem::path>> resol
   return std::pair<std::filesystem::path, std::filesystem::path>{std::move(workspace_dir), std::move(current_dir)};
 }
 
+ava::core::Result<ava::session::SessionReadAuthority> bind_runtime_read_authority(ava::session::SessionStore const& store,
+                                                                                  ava::session::SessionLease const& lease)
+{
+  return store.is_ephemeral() ? ava::session::SessionReadAuthority::create_ephemeral(store)
+                              : ava::session::SessionReadAuthority::create_persistent(store, lease);
+}
+
 ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptions const& options, ava::session::SessionStore& store,
                                                               ava::session::SessionLease& lease, bool created, bool load_existing_entries,
                                                               bool append_session_start, bool append_initial_session_name)
@@ -158,7 +165,10 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
   std::optional<std::vector<ava::session::SessionEntry>> loaded_entries;
   if (load_existing_entries)
   {
-    auto entries = store.is_ephemeral() ? store.load_bounded(session_read_limits) : store.load_bounded(lease, session_read_limits);
+    auto read_authority = bind_runtime_read_authority(store, lease);
+    if (!read_authority)
+      return std::unexpected(std::move(read_authority.error()));
+    auto entries = read_authority->load_bounded(session_read_limits);
     if (!entries)
       return std::unexpected(std::move(entries.error()));
     if (!options.pin_model_override)
@@ -169,7 +179,7 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
     loaded_entries = std::move(*entries);
     if (options.expected_original_cwd)
     {
-      auto summary = store.is_ephemeral() ? store.inspect_bounded(session_read_limits) : store.inspect_bounded(lease, session_read_limits);
+      auto summary = read_authority->inspect_bounded(session_read_limits);
       if (!summary)
         return std::unexpected(std::move(summary.error()));
       auto const persisted_cwd = summary->original_cwd.empty() ? workspace_dir : summary->original_cwd;
@@ -211,7 +221,10 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
 
   if (append_initial_session_name && options.initial_session_name)
   {
-    auto entries = store.is_ephemeral() ? store.load() : store.load(lease);
+    auto read_authority = bind_runtime_read_authority(store, lease);
+    if (!read_authority)
+      return std::unexpected(std::move(read_authority.error()));
+    auto entries = read_authority->load();
     if (!entries)
       return std::unexpected(std::move(entries.error()));
     auto entry = ava::session::make_session_metadata_entry(ava::session::SessionMetadataUpdate{.name = options.initial_session_name, .actor = "cli"},
@@ -422,7 +435,10 @@ ava::core::VoidResult replace_runtime_session(runtime::Session& destination, run
 
 ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(runtime::Session& session, ava::session::SessionMetadataUpdate update)
 {
-  auto entries = session.sessionless ? session.store.load() : session.store.load(session.lease);
+  auto read_authority = session.read_authority();
+  if (!read_authority)
+    return std::unexpected(std::move(read_authority.error()));
+  auto entries = read_authority->load();
   if (!entries)
     return std::unexpected(std::move(entries.error()));
   auto entry = ava::session::make_session_metadata_entry(std::move(update), entries->empty() ? std::string{} : entries->back().id);

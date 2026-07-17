@@ -57,6 +57,7 @@ bool has_active_sgr_at_text(std::string_view line, std::string_view text, std::s
 // lease for the duration of one append; runtime tests instead use owner routes.
 ava::core::VoidResult append_session_entry_for_test(ava::session::SessionStore& store, ava::session::SessionEntry const& entry);
 std::function<ava::core::VoidResult(ava::session::SessionEntry const&)> append_route_for_test(ava::session::SessionStore const& store);
+ava::session::SessionReadAuthority read_authority_for_test(ava::session::SessionStore const& store);
 ava::core::Result<ava::session::SessionMetadataView> append_session_metadata_for_test(ava::session::SessionStore& store,
                                                                                       ava::session::SessionMetadataUpdate update);
 ava::core::VoidResult append_manual_compaction_for_test(ava::session::SessionStore& store, ava::session::ManualCompactionRequest request);

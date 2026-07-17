@@ -8,6 +8,10 @@
 #include <cwchar>
 #include <filesystem>
 #include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <sys/stat.h>
@@ -190,6 +194,9 @@ bool has_active_sgr_at_text(std::string_view line, std::string_view text, std::s
 
 namespace {
 
+std::mutex test_authority_mutex;
+std::map<std::string, std::weak_ptr<ava::session::SessionAppendTarget>> test_append_targets;
+
 ava::core::Result<ava::session::SessionLease> acquire_test_session_lease(ava::session::SessionStore const& store)
 {
   if (auto valid = ava::session::validate_session_id(store.session_id()); !valid)
@@ -230,12 +237,33 @@ std::function<ava::core::VoidResult(ava::session::SessionEntry const&)> append_r
   if (target)
   {
     auto retained_target = std::move(*target);
+    {
+      std::lock_guard lock(test_authority_mutex);
+      test_append_targets[store.session_path().string()] = retained_target;
+    }
     return [retained_target = std::move(retained_target)](ava::session::SessionEntry const& entry) { return retained_target->append(entry); };
   }
   auto const message = target.error().format();
   return [message](ava::session::SessionEntry const&) {
     return ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, message)));
   };
+}
+
+ava::session::SessionReadAuthority read_authority_for_test(ava::session::SessionStore const& store)
+{
+  std::shared_ptr<ava::session::SessionAppendTarget> target;
+  {
+    std::lock_guard lock(test_authority_mutex);
+    auto const found = test_append_targets.find(store.session_path().string());
+    if (found != test_append_targets.end())
+      target = found->second.lock();
+  }
+  if (!target)
+    throw std::runtime_error("test session read authority requires a retained append_route_for_test");
+  auto read_authority = target->read_authority();
+  if (!read_authority)
+    throw std::runtime_error(read_authority.error().format());
+  return std::move(*read_authority);
 }
 
 ava::core::Result<ava::session::SessionMetadataView> append_session_metadata_for_test(ava::session::SessionStore& store,

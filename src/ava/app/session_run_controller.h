@@ -83,6 +83,7 @@ struct RunSnapshot
   bool stop_requested = false;
   std::size_t queued_commands = 0;
   std::size_t queued_appends = 0;
+  std::size_t queued_append_bytes = 0;
   std::optional<RunOutcome> outcome = std::nullopt;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

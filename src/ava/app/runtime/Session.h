@@ -55,6 +55,13 @@ struct Session
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;
   bool offline = false;
 
+  // Bind a lifetime-safe history snapshot route to this session's exact lease
+  // (or to its shared in-memory state in sessionless mode).
+  [[nodiscard]] ava::core::Result<ava::session::SessionReadAuthority> read_authority() const
+  {
+    return sessionless ? ava::session::SessionReadAuthority::create_ephemeral(store) : ava::session::SessionReadAuthority::create_persistent(store, lease);
+  }
+
   // Append through the session owner so writes remain serialized with active runs.
   [[nodiscard]] ava::core::VoidResult append_owned(ava::session::SessionEntry entry)
   {

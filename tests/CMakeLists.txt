@@ -429,6 +429,13 @@ if(Python3_Interpreter_FOUND)
   set_tests_properties(ava_build.parallel_test_runner PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
+    NAME ava_tests.session_read_authority_inventory
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/session_read_authority_inventory_test.py
+            --source ${CMAKE_SOURCE_DIR})
+  set_tests_properties(ava_tests.session_read_authority_inventory PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
     NAME ava_tests.acp_interop_manifest
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/acp_interop_manifest_test.py

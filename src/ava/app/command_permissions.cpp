@@ -929,6 +929,14 @@ ava::core::Result<ParsedAddRule> parse_permission_add_rule(std::vector<std::stri
                                                                       .actor = "tui"}};
 }
 
+ava::core::Result<std::vector<ava::session::SessionEntry>> load_permission_history(runtime::Session const& session)
+{
+  auto read_authority = session.read_authority();
+  if (!read_authority)
+    return std::unexpected(std::move(read_authority.error()));
+  return read_authority->load();
+}
+
 ava::permissions::PersistentPermissionRule const* find_rule(std::vector<ava::permissions::PersistentPermissionRule> const& rules, std::string_view rule_id)
 {
   auto const found = std::ranges::find_if(rules, [&](auto const& rule) { return rule.rule_id == rule_id; });
@@ -974,7 +982,7 @@ ava::core::Result<CommandResult> run_permissions_command(runtime::Session& sessi
 
   if (subcommand == "audit" || subcommand == "history")
   {
-    auto entries = session.store.load();
+    auto entries = load_permission_history(session);
     if (!entries)
     {
       add_output(result, "Permission audit failed closed:\n" + entries.error().format());
@@ -1020,7 +1028,7 @@ ava::core::Result<CommandResult> run_permissions_command(runtime::Session& sessi
       add_output(result, "Permission rule diagnostics failed closed:\n" + rules.error().format());
       return result;
     }
-    auto entries = session.store.load();
+    auto entries = load_permission_history(session);
     if (!entries)
     {
       add_output(result, "Permission audit diagnostics failed closed:\n" + entries.error().format());

@@ -1,5 +1,6 @@
 #include "ava/core/json.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
@@ -9,7 +10,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-
 #include <signal.h>
 #include <unistd.h>
 
@@ -33,6 +33,7 @@ enum class Mode
   TermIgnoringDescendantDiagnostics,
   LeaderExitsFirstDiagnostics,
   LeaderExitsAfterMarkerDiagnostics,
+  SlowDidOpenDefinition,
 };
 
 struct Options
@@ -41,6 +42,7 @@ struct Options
   std::string marker_path;
   std::string descendant_marker_path;
   std::string launch_marker_path;
+  std::string environment_marker_path;
 };
 
 ssize_t read_retry(char* data, std::size_t size)
@@ -54,16 +56,19 @@ ssize_t read_retry(char* data, std::size_t size)
   }
 }
 
-std::optional<std::string> read_exact(std::size_t size)
+std::optional<std::string> read_exact(std::size_t size, bool slow)
 {
   std::string result(size, '\0');
   std::size_t offset = 0;
   while (offset < size)
   {
-    auto const bytes = read_retry(result.data() + offset, size - offset);
+    auto const requested = slow ? std::min<std::size_t>(4096, size - offset) : size - offset;
+    auto const bytes = read_retry(result.data() + offset, requested);
     if (bytes <= 0)
       return std::nullopt;
     offset += static_cast<std::size_t>(bytes);
+    if (slow)
+      usleep(1000);
   }
   return result;
 }
@@ -83,7 +88,7 @@ std::optional<std::size_t> content_length(std::string_view header)
   return static_cast<std::size_t>(std::stoull(std::string(header.substr(index, end - index))));
 }
 
-std::optional<std::string> read_message()
+std::optional<std::string> read_message(Options const& options)
 {
   std::string header;
   char ch = '\0';
@@ -97,7 +102,7 @@ std::optional<std::string> read_message()
   auto const length = content_length(header);
   if (!length)
     return std::nullopt;
-  return read_exact(*length);
+  return read_exact(*length, options.mode == Mode::SlowDidOpenDefinition);
 }
 
 void write_message(std::string_view body)
@@ -164,6 +169,10 @@ Options parse_options(int argc, char** argv)
       options.marker_path = argv[++index];
       options.descendant_marker_path = argv[++index];
     }
+    if (std::strcmp(argv[index], "--slow-did-open-definition") == 0)
+      options.mode = Mode::SlowDidOpenDefinition;
+    if (std::strcmp(argv[index], "--environment-marker") == 0 && index + 1 < argc)
+      options.environment_marker_path = argv[++index];
   }
   return options;
 }
@@ -202,6 +211,18 @@ void write_launch_marker(std::string const& path)
   file << "started\n";
 }
 
+void write_environment_marker(std::string const& path)
+{
+  if (path.empty())
+    return;
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  for (auto const* name : {"HOME", "LANG", "LC_ALL", "OPENAI_API_KEY", "AVA_LSP_TEST_SECRET", "AVA_UNRELATED"})
+  {
+    auto const* value = std::getenv(name);
+    file << name << '=' << (value == nullptr ? "<unset>" : value) << '\n';
+  }
+}
+
 void write_cwd_marker(std::string const& path)
 {
   if (path.empty())
@@ -216,9 +237,9 @@ void write_cwd_marker(std::string const& path)
 void respond_initialize(long long id)
 {
   std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
-                            ",\"result\":{\"capabilities\":{\"diagnosticProvider\":{\"interFileDependencies\":false,"
-                            "\"workspaceDiagnostics\":false},\"documentSymbolProvider\":true,"
-                            "\"workspaceSymbolProvider\":true,\"definitionProvider\":true,\"referencesProvider\":true}}}";
+                           ",\"result\":{\"capabilities\":{\"diagnosticProvider\":{\"interFileDependencies\":false,"
+                           "\"workspaceDiagnostics\":false},\"documentSymbolProvider\":true,"
+                           "\"workspaceSymbolProvider\":true,\"definitionProvider\":true,\"referencesProvider\":true}}}";
   write_message(body);
 }
 
@@ -301,8 +322,7 @@ void respond_document_symbols(long long id, Options const& options)
 {
   if (options.mode == Mode::MalformedSymbols)
   {
-    std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
-                             ",\"result\":[{\"name\":\"broken\",\"kind\":12}]}";
+    std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) + ",\"result\":[{\"name\":\"broken\",\"kind\":12}]}";
     write_message(body);
     return;
   }
@@ -321,7 +341,8 @@ void respond_workspace_symbols(long long id)
   auto const uri = workspace_main_uri();
   std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
                            ",\"result\":[{\"name\":\"main\",\"kind\":12,\"containerName\":\"global\","
-                           "\"location\":{\"uri\":\"" + ava::core::json::escape(uri) +
+                           "\"location\":{\"uri\":\"" +
+                           ava::core::json::escape(uri) +
                            "\",\"range\":{\"start\":{\"line\":0,\"character\":4},\"end\":{\"line\":0,"
                            "\"character\":8}}}}]}";
   write_message(body);
@@ -330,8 +351,7 @@ void respond_workspace_symbols(long long id)
 void respond_definition(long long id)
 {
   auto const uri = workspace_main_uri();
-  std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
-                           ",\"result\":{\"uri\":\"" + ava::core::json::escape(uri) +
+  std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) + ",\"result\":{\"uri\":\"" + ava::core::json::escape(uri) +
                            "\",\"range\":{\"start\":{\"line\":0,\"character\":4},\"end\":{\"line\":0,"
                            "\"character\":8}}}}";
   write_message(body);
@@ -346,10 +366,10 @@ void respond_references(long long id, bool did_open)
     return;
   }
   auto const uri = workspace_main_uri();
-  std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
-                           ",\"result\":[{\"uri\":\"" + ava::core::json::escape(uri) +
+  std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) + ",\"result\":[{\"uri\":\"" + ava::core::json::escape(uri) +
                            "\",\"range\":{\"start\":{\"line\":0,\"character\":4},\"end\":{\"line\":0,"
-                           "\"character\":8}}},{\"uri\":\"" + ava::core::json::escape(uri) +
+                           "\"character\":8}}},{\"uri\":\"" +
+                           ava::core::json::escape(uri) +
                            "\",\"range\":{\"start\":{\"line\":0,\"character\":13},\"end\":{\"line\":0,"
                            "\"character\":17}}}]}";
   write_message(body);
@@ -361,9 +381,10 @@ int main(int argc, char** argv)
 {
   auto const options = parse_options(argc, argv);
   write_launch_marker(options.launch_marker_path);
+  write_environment_marker(options.environment_marker_path);
   bool did_open = false;
   bool initialized = false;
-  while (auto message = read_message())
+  while (auto message = read_message(options))
   {
     auto const method = ava::core::json::string_field(*message, "method");
     auto const id = ava::core::json::integer_field(*message, "id");
@@ -406,6 +427,8 @@ int main(int argc, char** argv)
     else if (*method == "textDocument/didOpen")
     {
       did_open = true;
+      if (options.mode == Mode::SlowDidOpenDefinition)
+        usleep(250000);
     }
     else if (*method == "textDocument/references" && id)
     {

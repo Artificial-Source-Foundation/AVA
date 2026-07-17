@@ -121,6 +121,7 @@ class SubprocessLspClient final : public DiagnosticsProvider {
                                                         std::chrono::milliseconds timeout, std::string_view phase,
                                                         CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult send_did_open(std::filesystem::path const& path,
+                                                    std::chrono::steady_clock::time_point deadline,
                                                     CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<std::string> request_response(std::string_view method, std::string_view params_json,
                                                                 std::chrono::steady_clock::time_point deadline,

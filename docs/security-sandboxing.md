@@ -198,7 +198,13 @@ See [mcp.md](mcp.md).
 Configured LSP servers are also local subprocesses. Global LSP config must use
 absolute paths or trusted `PATH` command names; project LSP config is trust
 gated. LSP queries and server launch are permissioned, but the language server
-itself is still local code once launched.
+itself is still local code once launched. AVA launches it with only the documented
+LSP environment allowlist and a fixed trusted `PATH`, not the parent process's
+provider/cloud/API/token/secret or arbitrary `AVA_*` environment. Cancellation,
+timeout, and client teardown signal the verified LSP process group with TERM and
+then KILL when needed. That covers members which remain in the verified group; a
+descendant that calls `setsid` can escape that group and needs an external OS
+sandbox if it must be contained. AVA does not claim cgroup containment.
 
 ## No Built-In OS Or Container Sandbox Guarantee
 

@@ -1,6 +1,6 @@
 #include "sys.h"
+#include "ava/lsp/bounded_file_reader.h"
 #include "ava/lsp/lsp_client.h"
-
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -8,16 +8,14 @@
 #include <cctype>
 #include <cerrno>
 #include <chrono>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <optional>
 #include <string_view>
-#include <system_error>
 #include <thread>
 #include <utility>
-
+#include <vector>
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
@@ -172,6 +170,60 @@ void close_nonstandard_fds()
   for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) close(fd);
 }
 
+bool allowlisted_lsp_environment_name(std::string_view name)
+{
+  constexpr std::array<std::string_view, 15> names{
+      "HOME",           "USER",          "LOGNAME",        "TMPDIR", "TMP",       "TEMP", "LANG", "LANGUAGE", "LC_ALL", "XDG_CONFIG_HOME",
+      "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "TERM",   "COLORTERM",
+  };
+  return std::ranges::find(names, name) != names.end() || (name.starts_with("LC_") && name.size() > 3);
+}
+
+std::vector<std::string> lsp_environment()
+{
+  // LSP servers are arbitrary local programs. Retain only terminal, locale,
+  // temporary-directory, XDG, and identity compatibility variables. AVA has no
+  // configured/tested toolchain home requirement, so no compiler/runtime home
+  // is inherited. In particular, provider/cloud/token variables and AVA_*
+  // variables are never forwarded.
+  std::vector<std::string> values;
+  std::vector<std::string_view> names;
+  for (char** inherited = ::environ; inherited != nullptr && *inherited != nullptr; ++inherited)
+  {
+    std::string_view const variable(*inherited);
+    auto const separator = variable.find('=');
+    if (separator == std::string_view::npos || separator == 0)
+      continue;
+    auto const name = variable.substr(0, separator);
+    if (!allowlisted_lsp_environment_name(name) || std::ranges::find(names, name) != names.end())
+      continue;
+    names.push_back(name);
+    values.emplace_back(variable);
+  }
+  values.emplace_back(std::string("PATH=") + kTrustedExecPath);
+  return values;
+}
+
+std::vector<std::string> trusted_executable_candidates(std::string_view command)
+{
+  if (command.find('/') != std::string_view::npos)
+    return {std::string(command)};
+
+  std::vector<std::string> candidates;
+  std::string_view remaining(kTrustedExecPath);
+  while (!remaining.empty())
+  {
+    auto const separator = remaining.find(':');
+    auto const directory = remaining.substr(0, separator);
+    if (!directory.empty())
+      candidates.emplace_back(std::string(directory) + "/" + std::string(command));
+    if (separator == std::string_view::npos)
+      break;
+    remaining.remove_prefix(separator + 1);
+  }
+  return candidates;
+}
+
 std::string percent_encoded_file_path(std::filesystem::path const& path)
 {
   auto const value = std::filesystem::absolute(path).lexically_normal().generic_string();
@@ -250,54 +302,31 @@ std::string json_string(std::string_view value)
   return "\"" + ava::core::json::escape(value) + "\"";
 }
 
-ava::core::Result<std::string> read_text_document(std::filesystem::path const& path, ServerConfig const& config)
+ava::core::Result<std::string> read_text_document(std::filesystem::path const& path, ServerConfig const& config, std::chrono::steady_clock::time_point deadline,
+                                                  CancelCallback const& cancel_requested)
 {
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (status_error) {
-    auto error = lsp_error(ava::core::ErrorCategory::Io, "failed to inspect LSP document", config);
-    error.with_context("path", path.string());
-    error.with_context("cause", status_error.message());
+  auto content = read_bounded_lsp_file(BoundedFileReadOptions{
+      .path = path,
+      .workspace_root = config.workspace_root,
+      .max_bytes = kMaxDidOpenBytes,
+      .scope = BoundedFileReadScope::Workspace,
+      .deadline = deadline,
+      .cancel_requested = cancel_requested,
+  });
+  if (!content)
+  {
+    auto error = std::move(content.error());
+    error.with_context("command", command_label(config.argv));
+    error.with_context("workspace", config.workspace_root.string());
     return std::unexpected(std::move(error));
   }
-  if (std::filesystem::is_symlink(status)) {
-    auto error = lsp_error(ava::core::ErrorCategory::PermissionDenied, "LSP document must not be a symlink", config);
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
-  if (!std::filesystem::is_regular_file(status)) {
-    auto error = lsp_error(ava::core::ErrorCategory::InvalidArgument, "LSP document is not a regular file", config);
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
-  std::error_code size_error;
-  auto const size = std::filesystem::file_size(path, size_error);
-  if (size_error) {
-    auto error = lsp_error(ava::core::ErrorCategory::Io, "failed to inspect LSP document size", config);
-    error.with_context("path", path.string());
-    error.with_context("cause", size_error.message());
-    return std::unexpected(std::move(error));
-  }
-  if (size > kMaxDidOpenBytes) {
-    auto error = lsp_error(ava::core::ErrorCategory::InvalidArgument, "LSP document exceeds didOpen size cap", config);
-    error.with_context("path", path.string());
-    error.with_context("max_bytes", std::to_string(kMaxDidOpenBytes));
-    return std::unexpected(std::move(error));
-  }
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
-    auto error = lsp_error(ava::core::ErrorCategory::Io, "failed to open LSP document", config);
+  if (!*content)
+  {
+    auto error = lsp_error(ava::core::ErrorCategory::NotFound, "LSP document was not found", config);
     error.with_context("path", path.string());
     return std::unexpected(std::move(error));
   }
-  std::string content(static_cast<std::size_t>(size), '\0');
-  if (!content.empty()) file.read(content.data(), static_cast<std::streamsize>(content.size()));
-  if (file.bad() || file.gcount() != static_cast<std::streamsize>(content.size())) {
-    auto error = lsp_error(ava::core::ErrorCategory::Io, "failed to read LSP document", config);
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
-  return content;
+  return std::move(**content);
 }
 
 std::size_t remaining_ms(std::chrono::steady_clock::time_point deadline)
@@ -665,6 +694,21 @@ ava::core::VoidResult SubprocessLspClient::launch()
     return std::unexpected(std::move(error));
   }
 
+  // Prepare all storage used by exec before fork. The child only performs
+  // async-signal-safe descriptor/process operations before execve.
+  auto const child_cwd_path = config_.process_cwd.empty() ? config_.workspace_root : config_.process_cwd;
+  auto const child_cwd = child_cwd_path.string();
+  auto executable_candidates = trusted_executable_candidates(config_.argv.front());
+  auto environment_strings = lsp_environment();
+  std::vector<char*> environment;
+  environment.reserve(environment_strings.size() + 1);
+  for (auto& value : environment_strings) environment.push_back(value.data());
+  environment.push_back(nullptr);
+  std::vector<char*> argv;
+  argv.reserve(config_.argv.size() + 1);
+  for (auto& argument : config_.argv) argv.push_back(argument.data());
+  argv.push_back(nullptr);
+
   pid_t const parent_pgid = getpgrp();
   pid_t const pid = fork();
   if (pid < 0)
@@ -696,25 +740,17 @@ ava::core::VoidResult SubprocessLspClient::launch()
       _exit(127);
     if (dup2((*stdout_pipe)[1], STDOUT_FILENO) < 0)
       _exit(127);
-    int const dev_null = open("/dev/null", O_WRONLY);
+    int const dev_null = open("/dev/null", O_WRONLY | O_CLOEXEC);
     if (dev_null < 0 || dup2(dev_null, STDERR_FILENO) < 0)
       _exit(127);
     if (dev_null != STDERR_FILENO)
       close(dev_null);
     close((*stdin_pipe)[0]);
     close((*stdout_pipe)[1]);
-    auto const child_cwd = config_.process_cwd.empty() ? config_.workspace_root : config_.process_cwd;
-    if (chdir(child_cwd.string().c_str()) != 0)
+    if (chdir(child_cwd.c_str()) != 0)
       _exit(127);
-    if (setenv("PATH", kTrustedExecPath, 1) != 0)
-      _exit(127);
-
-    std::vector<char*> argv;
-    argv.reserve(config_.argv.size() + 1);
-    for (auto& arg : config_.argv) argv.push_back(arg.data());
-    argv.push_back(nullptr);
     close_nonstandard_fds();
-    execvp(argv[0], argv.data());
+    for (auto const& executable : executable_candidates) execve(executable.c_str(), argv.data(), environment.data());
     _exit(127);
   }
 
@@ -817,38 +853,45 @@ ava::core::Result<std::vector<Symbol>> SubprocessLspClient::workspace_symbols(st
   return parse_workspace_symbols_response(*response, config_);
 }
 
-ava::core::Result<std::vector<Location>> SubprocessLspClient::definitions(std::filesystem::path const& path, int line,
-                                                                           int column, CancelCallback cancel_requested)
+ava::core::Result<std::vector<Location>> SubprocessLspClient::definitions(std::filesystem::path const& path, int line, int column,
+                                                                          CancelCallback cancel_requested)
 {
-  if (is_canceled(cancel_requested)) return std::unexpected(canceled_error("LSP definition canceled", config_));
-  if (line < 0 || column < 0) {
+  if (is_canceled(cancel_requested))
+    return std::unexpected(canceled_error("LSP definition canceled", config_));
+  if (line < 0 || column < 0)
+  {
     return std::unexpected(lsp_error(ava::core::ErrorCategory::InvalidArgument, "LSP definition position is invalid", config_));
   }
-  if (auto opened = send_did_open(path, cancel_requested); !opened) return std::unexpected(std::move(opened.error()));
   auto const deadline = std::chrono::steady_clock::now() + config_.request_timeout;
+  if (auto opened = send_did_open(path, deadline, cancel_requested); !opened)
+    return std::unexpected(std::move(opened.error()));
   auto const uri = file_uri(path);
-  std::string const params = "{\"textDocument\":{\"uri\":" + json_string(uri) + "},\"position\":{\"line\":" +
-                             std::to_string(line) + ",\"character\":" + std::to_string(column) + "}}";
+  std::string const params =
+      "{\"textDocument\":{\"uri\":" + json_string(uri) + "},\"position\":{\"line\":" + std::to_string(line) + ",\"character\":" + std::to_string(column) + "}}";
   auto response = request_response("textDocument/definition", params, deadline, config_.request_timeout, "request", cancel_requested);
-  if (!response) return std::unexpected(std::move(response.error()));
+  if (!response)
+    return std::unexpected(std::move(response.error()));
   return parse_definition_response(*response, config_);
 }
 
-ava::core::Result<std::vector<Location>> SubprocessLspClient::references(std::filesystem::path const& path, int line,
-                                                                          int column, CancelCallback cancel_requested)
+ava::core::Result<std::vector<Location>> SubprocessLspClient::references(std::filesystem::path const& path, int line, int column,
+                                                                         CancelCallback cancel_requested)
 {
-  if (is_canceled(cancel_requested)) return std::unexpected(canceled_error("LSP references canceled", config_));
-  if (line < 0 || column < 0) {
+  if (is_canceled(cancel_requested))
+    return std::unexpected(canceled_error("LSP references canceled", config_));
+  if (line < 0 || column < 0)
+  {
     return std::unexpected(lsp_error(ava::core::ErrorCategory::InvalidArgument, "LSP references position is invalid", config_));
   }
-  if (auto opened = send_did_open(path, cancel_requested); !opened) return std::unexpected(std::move(opened.error()));
   auto const deadline = std::chrono::steady_clock::now() + config_.request_timeout;
+  if (auto opened = send_did_open(path, deadline, cancel_requested); !opened)
+    return std::unexpected(std::move(opened.error()));
   auto const uri = file_uri(path);
-  std::string const params = "{\"textDocument\":{\"uri\":" + json_string(uri) + "},\"position\":{\"line\":" +
-                             std::to_string(line) + ",\"character\":" + std::to_string(column) +
-                             "},\"context\":{\"includeDeclaration\":true}}";
+  std::string const params = "{\"textDocument\":{\"uri\":" + json_string(uri) + "},\"position\":{\"line\":" + std::to_string(line) +
+                             ",\"character\":" + std::to_string(column) + "},\"context\":{\"includeDeclaration\":true}}";
   auto response = request_response("textDocument/references", params, deadline, config_.request_timeout, "request", cancel_requested);
-  if (!response) return std::unexpected(std::move(response.error()));
+  if (!response)
+    return std::unexpected(std::move(response.error()));
   return parse_definition_response(*response, config_);
 }
 
@@ -867,20 +910,55 @@ bool SubprocessLspClient::is_alive()
   return check_child_running().has_value();
 }
 
-ava::core::VoidResult SubprocessLspClient::send_did_open(std::filesystem::path const& path,
+ava::core::VoidResult SubprocessLspClient::send_did_open(std::filesystem::path const& path, std::chrono::steady_clock::time_point deadline,
                                                          CancelCallback cancel_requested)
 {
-  if (is_canceled(cancel_requested)) return std::unexpected(canceled_error("LSP didOpen canceled", config_));
-  auto content = read_text_document(path, config_);
-  if (!content) return std::unexpected(std::move(content.error()));
+  if (is_canceled(cancel_requested))
+  {
+    terminate_child();
+    return std::unexpected(canceled_error("LSP didOpen canceled", config_));
+  }
+  auto content = read_text_document(path, config_, deadline, cancel_requested);
+  if (!content)
+  {
+    if (is_canceled(cancel_requested))
+    {
+      terminate_child();
+      return std::unexpected(canceled_error("LSP didOpen canceled", config_));
+    }
+    if (std::chrono::steady_clock::now() >= deadline)
+    {
+      auto error = lsp_error(ava::core::ErrorCategory::Tool, "timed out reading LSP document", config_);
+      error.with_context("timeout_ms", std::to_string(config_.request_timeout.count()));
+      error.with_context("phase", "request");
+      error.with_context("method", "textDocument/didOpen");
+      terminate_child();
+      return std::unexpected(std::move(error));
+    }
+    return std::unexpected(std::move(content.error()));
+  }
+  if (is_canceled(cancel_requested))
+  {
+    terminate_child();
+    return std::unexpected(canceled_error("LSP didOpen canceled", config_));
+  }
+  if (std::chrono::steady_clock::now() >= deadline)
+  {
+    auto error = lsp_error(ava::core::ErrorCategory::Tool, "timed out reading LSP document", config_);
+    error.with_context("timeout_ms", std::to_string(config_.request_timeout.count()));
+    error.with_context("phase", "request");
+    error.with_context("method", "textDocument/didOpen");
+    terminate_child();
+    return std::unexpected(std::move(error));
+  }
   auto const uri = file_uri(path);
-  if (open_documents_.contains(uri)) return {};
-  auto const deadline = std::chrono::steady_clock::now() + config_.request_timeout;
-  std::string const params = "{\"textDocument\":{\"uri\":" + json_string(uri) +
-                             ",\"languageId\":" + json_string(config_.language_id) +
+  if (open_documents_.contains(uri))
+    return {};
+  std::string const params = "{\"textDocument\":{\"uri\":" + json_string(uri) + ",\"languageId\":" + json_string(config_.language_id) +
                              ",\"version\":1,\"text\":" + json_string(*content) + "}}";
   auto sent = send_notification("textDocument/didOpen", params, deadline, config_.request_timeout, "request", cancel_requested);
-  if (!sent) return sent;
+  if (!sent)
+    return sent;
   open_documents_.insert(uri);
   return {};
 }

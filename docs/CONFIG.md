@@ -232,6 +232,10 @@ Both files use the same explicit schema. Global servers are loaded before worksp
 
 Using an LSP tool first requests `lsp.query` for the target file or workspace. Starting the configured subprocess separately requests high-risk `lsp.server.launch`; persistent permission rules match the exact JSON-array encoded argv string, not a shell command line. Project-local LSP server code should be declared only in `$WORKSPACE/.ava/lsp.json` and becomes available only after `/trust project`. `/context lsp` parses the global and trusted-project config files and reports load errors without launching configured servers.
 
+AVA reads a document or config through one nonblocking, close-on-exec descriptor after it has verified that descriptor is a bounded regular file. Workspace documents and project config are resolved below the workspace without symlink, magic-link, or `..` traversal; global config remains an external absolute-path compatibility input and is resolved from the filesystem root without following symlink components. FIFO, symlink, nonregular, missing, and over-limit inputs fail instead of being treated as text.
+
+An approved LSP server inherits only a compatibility allowlist: `HOME`, `USER`, `LOGNAME`, `TMPDIR`/`TMP`/`TEMP`, `LANG`, `LANGUAGE`, `LC_ALL` and `LC_*`, XDG config/cache/data/state homes, `TERM`, `COLORTERM`, and AVA's fixed trusted `PATH`. Provider, cloud, API-key, token, secret, arbitrary `AVA_*`, and unlisted toolchain variables are not forwarded. AVA uses the request's one total timeout budget for `didOpen` plus definition/reference work and terminates its verified server process group on cancellation or timeout.
+
 ## Compaction
 
 Optional compaction config file: `$XDG_CONFIG_HOME/ava/compaction.json`.

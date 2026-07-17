@@ -1,4 +1,5 @@
 add_library(ava_lsp
+  "bounded_file_reader.cpp"
   "configured_provider.cpp"
   "lsp_client.cpp"
 )

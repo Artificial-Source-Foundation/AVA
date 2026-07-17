@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/lsp/bounded_file_reader.h"
 #include "ava/lsp/configured_provider.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -9,7 +10,6 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -316,61 +316,30 @@ std::optional<std::vector<std::string>> strict_object_array_field(std::string_vi
   return values;
 }
 
-ava::core::Result<std::string> read_config_file(std::filesystem::path const& path)
+ava::core::Result<std::optional<std::string>> read_global_config_file(std::filesystem::path const& path)
 {
-  std::error_code exists_error;
-  if (!std::filesystem::exists(path, exists_error))
-    return std::string{};
-  if (exists_error)
-  {
-    auto error = config_error(ava::core::ErrorCategory::Io, "failed to inspect LSP config", path);
-    error.with_context("cause", exists_error.message());
-    return std::unexpected(std::move(error));
-  }
+  // Global configuration intentionally has no workspace anchor: an absolute
+  // XDG path outside the workspace remains supported. The final descriptor is
+  // still opened exactly once with O_NOFOLLOW|O_NONBLOCK by the shared reader,
+  // which anchors its component resolution at the filesystem root.
+  return read_bounded_lsp_file(BoundedFileReadOptions{
+      .path = path,
+      .workspace_root = {},
+      .max_bytes = kMaxLspConfigBytes,
+      .scope = BoundedFileReadScope::External,
+      .missing_ok = true,
+  });
+}
 
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (status_error)
-  {
-    auto error = config_error(ava::core::ErrorCategory::Io, "failed to inspect LSP config", path);
-    error.with_context("cause", status_error.message());
-    return std::unexpected(std::move(error));
-  }
-  if (std::filesystem::is_symlink(status))
-  {
-    return std::unexpected(config_error(ava::core::ErrorCategory::PermissionDenied, "LSP config must not be a symlink", path));
-  }
-  if (!std::filesystem::is_regular_file(status))
-  {
-    return std::unexpected(config_error(ava::core::ErrorCategory::InvalidArgument, "LSP config must be a regular file", path));
-  }
-
-  std::error_code size_error;
-  auto const size = std::filesystem::file_size(path, size_error);
-  if (size_error)
-  {
-    auto error = config_error(ava::core::ErrorCategory::Io, "failed to stat LSP config", path);
-    error.with_context("cause", size_error.message());
-    return std::unexpected(std::move(error));
-  }
-  if (size > kMaxLspConfigBytes)
-  {
-    auto error = config_error(ava::core::ErrorCategory::InvalidArgument, "LSP config exceeds maximum size", path);
-    error.with_context("max_bytes", std::to_string(kMaxLspConfigBytes));
-    return std::unexpected(std::move(error));
-  }
-
-  std::ifstream file(path, std::ios::binary);
-  if (!file)
-    return std::unexpected(config_error(ava::core::ErrorCategory::Io, "failed to open LSP config", path));
-  std::string content(static_cast<std::size_t>(size), '\0');
-  if (!content.empty())
-    file.read(content.data(), static_cast<std::streamsize>(content.size()));
-  if (file.bad() || file.gcount() != static_cast<std::streamsize>(content.size()))
-  {
-    return std::unexpected(config_error(ava::core::ErrorCategory::Io, "failed to read LSP config", path));
-  }
-  return content;
+ava::core::Result<std::optional<std::string>> read_project_config_file(std::filesystem::path const& path, std::filesystem::path const& workspace_root)
+{
+  return read_bounded_lsp_file(BoundedFileReadOptions{
+      .path = path,
+      .workspace_root = workspace_root,
+      .max_bytes = kMaxLspConfigBytes,
+      .scope = BoundedFileReadScope::Workspace,
+      .missing_ok = true,
+  });
 }
 
 ava::core::Result<void> parse_config(std::filesystem::path const& path, std::string_view json, std::vector<ConfiguredServer>& servers, bool project_scoped)
@@ -686,26 +655,22 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
 };
 
 ConfiguredLspConfigDiagnostic inspect_config_source(std::string scope, std::filesystem::path const& path, bool project_scoped,
-                                                    std::vector<ConfiguredServer>& servers)
+                                                    std::filesystem::path const& workspace_root, std::vector<ConfiguredServer>& servers)
 {
   ConfiguredLspConfigDiagnostic diagnostic{.scope = std::move(scope), .path = path};
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (!status_error)
-    diagnostic.exists = std::filesystem::exists(status);
-
-  auto content = read_config_file(path);
+  auto content = project_scoped ? read_project_config_file(path, workspace_root) : read_global_config_file(path);
   if (!content)
   {
     diagnostic.error = std::move(content.error());
     return diagnostic;
   }
-  if (!diagnostic.exists && content->empty())
+  if (!*content)
     return diagnostic;
 
-  diagnostic.byte_count = content->size();
+  diagnostic.exists = true;
+  diagnostic.byte_count = (*content)->size();
   auto candidate_servers = servers;
-  auto parsed = parse_config(path, *content, candidate_servers, project_scoped);
+  auto parsed = parse_config(path, **content, candidate_servers, project_scoped);
   if (!parsed)
   {
     diagnostic.error = std::move(parsed.error());
@@ -725,21 +690,27 @@ ava::core::Result<std::shared_ptr<DiagnosticsProvider>> make_configured_lsp_prov
   std::vector<ConfiguredServer> servers;
   if (!files.global_config_file.empty())
   {
-    auto content = read_config_file(files.global_config_file);
+    auto content = read_global_config_file(files.global_config_file);
     if (!content)
       return std::unexpected(std::move(content.error()));
-    auto parsed = parse_config(files.global_config_file, *content, servers, false);
-    if (!parsed)
-      return std::unexpected(std::move(parsed.error()));
+    if (*content)
+    {
+      auto parsed = parse_config(files.global_config_file, **content, servers, false);
+      if (!parsed)
+        return std::unexpected(std::move(parsed.error()));
+    }
   }
   if (!files.project_config_file.empty())
   {
-    auto content = read_config_file(files.project_config_file);
+    auto content = read_project_config_file(files.project_config_file, files.workspace_root);
     if (!content)
       return std::unexpected(std::move(content.error()));
-    auto parsed = parse_config(files.project_config_file, *content, servers, true);
-    if (!parsed)
-      return std::unexpected(std::move(parsed.error()));
+    if (*content)
+    {
+      auto parsed = parse_config(files.project_config_file, **content, servers, true);
+      if (!parsed)
+        return std::unexpected(std::move(parsed.error()));
+    }
   }
   if (servers.empty())
     return std::shared_ptr<DiagnosticsProvider>{};
@@ -752,11 +723,11 @@ ConfiguredLspProviderInspection inspect_configured_lsp_provider(ConfiguredLspPro
   std::vector<ConfiguredServer> servers;
   if (!files.global_config_file.empty())
   {
-    inspection.configs.push_back(inspect_config_source("global", files.global_config_file, false, servers));
+    inspection.configs.push_back(inspect_config_source("global", files.global_config_file, false, files.workspace_root, servers));
   }
   if (!files.project_config_file.empty())
   {
-    inspection.configs.push_back(inspect_config_source("project", files.project_config_file, true, servers));
+    inspection.configs.push_back(inspect_config_source("project", files.project_config_file, true, files.workspace_root, servers));
   }
   inspection.server_count = servers.size();
   inspection.error_count = static_cast<std::size_t>(

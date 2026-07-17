@@ -113,7 +113,7 @@ ava::core::VoidResult SessionUpdateGateway::send(std::string_view session_id, st
   return sender(session_id, update_json);
 }
 
-ava::core::Result<std::filesystem::path> canonical_acp_cwd(std::filesystem::path const& launch_root, std::string_view requested)
+ava::core::Result<std::filesystem::path> resolve_session_cwd(std::filesystem::path const& launch_root, std::string_view requested)
 {
   if (requested.empty())
     return std::unexpected(protocol_error("cwd is required"));
@@ -135,24 +135,19 @@ ava::core::Result<std::filesystem::path> canonical_acp_cwd(std::filesystem::path
     return std::unexpected(std::move(error));
   }
 
-  std::error_code canonical_error;
-  auto canonical = std::filesystem::canonical(path, canonical_error);
-  if (canonical_error || canonical != path)
-  {
-    auto error = protocol_error("cwd must be canonical and must not traverse symlinks");
-    error.with_context("cwd", path.string());
-    if (canonical_error)
-      error.with_context("cause", canonical_error.message());
-    return std::unexpected(std::move(error));
-  }
-  if (!path_is_within(launch_root, canonical))
+  // Containment is checked lexically against the launch root so a workspace
+  // configured through a symlink matches the paths the client and model use.
+  // The descriptor-anchored SecureWorkspace enforces the actual filesystem
+  // containment when the path is opened, so this check only needs to keep the
+  // cwd within the configured workspace rather than re-resolve symlinks.
+  if (!path_is_within(launch_root, path))
   {
     auto error = protocol_error("cwd is outside the launch-approved workspace root");
-    error.with_context("cwd", canonical.string());
+    error.with_context("cwd", path.string());
     error.with_context("workspace_root", launch_root.string());
     return std::unexpected(std::move(error));
   }
-  return canonical;
+  return path;
 }
 
 ava::core::Result<std::string_view> acp_stop_reason(ava::core::RuntimeTerminalOutcome outcome)

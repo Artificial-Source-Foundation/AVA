@@ -1129,6 +1129,54 @@ void test_secure_workspace_file_tools()
          "retargeting a parent symlink after a grant fails closed at descriptor-anchored I/O");
 }
 
+void test_secure_workspace_symlinked_root()
+{
+  // Regression for a workspace whose configured path traverses an absolute
+  // symlink (e.g. /home/user/projects/github -> /usr/src/projects_github).
+  // The anchor descriptor is opened at startup and must follow such symlinks;
+  // only the relative paths resolved against the anchor are contained.
+  auto const root = temp_root() / "symlinked-root";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  auto const real_target = root / "real-projects-github";
+  auto const projects = root / "projects";
+  auto const real_workspace = real_target / "ai-cli" / "AVA";
+  std::filesystem::create_directories(real_workspace / "src");
+  std::filesystem::create_directories(projects);
+  {
+    std::ofstream file(real_workspace / "src" / "main.cpp", std::ios::binary | std::ios::trunc);
+    file << "int main()\n";
+  }
+  std::error_code link_error;
+  std::filesystem::create_directory_symlink(real_target, projects / "github", link_error);
+  expect(!link_error, "test creates absolute symlink in workspace path");
+  if (link_error)
+    return;
+  auto const workspace_via_link = projects / "github" / "ai-cli" / "AVA";
+
+  auto secure = ava::tools::SecureWorkspace::open(workspace_via_link);
+  expect(secure.has_value(), "secure workspace opens a root path that traverses an absolute symlink");
+  if (!secure)
+    return;
+  ava::tools::ToolContext context{.workspace_dir = workspace_via_link, .mode = ava::agent::Mode::Build, .secure_workspace = *secure};
+
+  auto read_back = ava::tools::read_file(context, workspace_via_link / "src" / "main.cpp");
+  expect(read_back.has_value() && read_back->content == "int main()\n", "contained read works through a symlinked workspace root");
+
+  auto const outside = root / "outside";
+  std::filesystem::create_directories(outside);
+  {
+    std::ofstream file(outside / "secret.txt", std::ios::binary | std::ios::trunc);
+    file << "outside secret";
+  }
+  std::filesystem::create_directory_symlink(outside, real_workspace / "linked-parent", link_error);
+  if (!link_error)
+  {
+    auto escaping_read = ava::tools::read_file(context, workspace_via_link / "linked-parent" / "secret.txt");
+    expect(!escaping_read, "contained reads still reject a symlink that escapes the anchored workspace");
+  }
+}
+
 }  // namespace
 
 void run_tools_file_tests()
@@ -1139,4 +1187,5 @@ void run_tools_file_tests()
   test_secure_workspace_staged_write_contracts();
   test_injected_exact_file_access();
   test_secure_workspace_file_tools();
+  test_secure_workspace_symlinked_root();
 }

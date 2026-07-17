@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -248,7 +249,7 @@ ava::core::VoidResult validate_pinned_provider(AgentServiceOptions const& option
 
 AgentServiceOptions default_options(std::string agent_version)
 {
-  auto root = canonical_launch_root();
+  auto root = launch_workspace_root();
   AgentServiceOptions options;
   options.agent_version = std::move(agent_version);
   options.launch_root = root ? *root : std::filesystem::current_path();
@@ -257,8 +258,20 @@ AgentServiceOptions default_options(std::string agent_version)
 
 }  // namespace
 
-ava::core::Result<std::filesystem::path> canonical_launch_root()
+ava::core::Result<std::filesystem::path> launch_workspace_root()
 {
+  // Return the launch directory in the lexical form the user works with,
+  // preserving any symlinked components, so session paths match the paths the
+  // client and model use. std::filesystem::current_path() returns the kernel-
+  // resolved (canonical) path, which would leak the resolved location and break
+  // a workspace whose configured path traverses a symlink; prefer the PWD
+  // environment variable that the launching shell sets to the lexical path.
+  if (char const* pwd = std::getenv("PWD"); pwd != nullptr && *pwd != '\0')
+  {
+    std::filesystem::path lexical(pwd);
+    if (lexical.is_absolute())
+      return lexical;
+  }
   std::error_code current_error;
   auto current = std::filesystem::current_path(current_error);
   if (current_error)
@@ -267,16 +280,7 @@ ava::core::Result<std::filesystem::path> canonical_launch_root()
     error.with_context("cause", current_error.message());
     return std::unexpected(std::move(error));
   }
-  std::error_code canonical_error;
-  auto canonical = std::filesystem::canonical(current, canonical_error);
-  if (canonical_error)
-  {
-    auto error = protocol_error("failed to canonicalize launch-approved workspace root");
-    error.with_context("path", current.string());
-    error.with_context("cause", canonical_error.message());
-    return std::unexpected(std::move(error));
-  }
-  return canonical;
+  return current;
 }
 
 ava::core::Result<AgentServiceOptions> pin_agent_service_model(AgentServiceOptions options)
@@ -535,7 +539,7 @@ RequestResult AgentService::handle_request(Request const& request, std::stop_tok
     auto cwd_text = required_string(*params, "cwd", request.method);
     if (!cwd_text)
       return std::unexpected(std::move(cwd_text.error()));
-    auto cwd = canonical_acp_cwd(registry_->launch_root(), *cwd_text);
+    auto cwd = resolve_session_cwd(registry_->launch_root(), *cwd_text);
     if (!cwd)
       return core_error(cwd.error(), -32602);
     auto committed = commit_request_terminal(request.id);
@@ -602,7 +606,7 @@ RequestResult AgentService::handle_request(Request const& request, std::stop_tok
       return std::unexpected(std::move(session_id.error()));
     if (!cwd_text)
       return std::unexpected(std::move(cwd_text.error()));
-    auto cwd = canonical_acp_cwd(registry_->launch_root(), *cwd_text);
+    auto cwd = resolve_session_cwd(registry_->launch_root(), *cwd_text);
     if (!cwd)
       return core_error(cwd.error(), -32602);
     auto committed = commit_request_terminal(request.id);
@@ -626,10 +630,10 @@ RequestResult AgentService::handle_request(Request const& request, std::stop_tok
     {
       if (!field->is_string())
         return service_error(-32602, "session/list cwd must be a string or null");
-      auto canonical = canonical_acp_cwd(registry_->launch_root(), field->get_ref<std::string const&>());
-      if (!canonical)
-        return core_error(canonical.error(), -32602);
-      cwd = std::move(*canonical);
+      auto resolved_cwd = resolve_session_cwd(registry_->launch_root(), field->get_ref<std::string const&>());
+      if (!resolved_cwd)
+        return core_error(resolved_cwd.error(), -32602);
+      cwd = std::move(*resolved_cwd);
     }
     std::optional<std::string> cursor;
     if (auto field = params->find("cursor"); field != params->end() && !field->is_null())

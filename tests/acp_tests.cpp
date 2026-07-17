@@ -3999,6 +3999,63 @@ void test_acp_peer_write_failure_wakes_reader_and_shutdown_race()
 
 }  // namespace
 
+void test_acp_session_cwd_allows_symlinked_workspace_path()
+{
+  using namespace ava::app::acp;
+  auto const root = std::filesystem::temp_directory_path() / ava::core::make_id("acp-symlinked-cwd");
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  // Mirror a workspace configured through an absolute symlink, e.g.
+  // /home/user/projects/github -> /usr/src/projects_github.
+  auto const real_target = root / "real-target";
+  auto const projects = root / "projects";
+  auto const real_workspace = real_target / "ai-cli" / "AVA";
+  std::filesystem::create_directories(real_workspace);
+  std::filesystem::create_directories(projects);
+  std::error_code link_error;
+  std::filesystem::create_directory_symlink(real_target, projects / "github", link_error);
+  expect(!link_error, "test creates absolute symlink in workspace path");
+  if (link_error)
+    return;
+  auto const workspace_via_link = projects / "github" / "ai-cli" / "AVA";
+
+  configure_acp_test_model(root);
+  auto const paths = ava::tests::app_test_paths(root);
+  AgentServiceOptions options;
+  options.agent_version = "1";
+  options.launch_root = workspace_via_link;
+  options.paths = paths;
+  AgentService service(options);
+  service.bind_request_terminal_committer([](JsonRpcId const&) { return true; });
+  static_cast<void>(service.handle_request(initialize_request(), {}));
+
+  // A session cwd whose path traverses the absolute symlink must be accepted;
+  // only the resolved location must stay within the launch-approved root.
+  auto created = service.handle_request(
+      Request{.id = std::int64_t(1), .method = "session/new",
+              .params_json = std::string("{\"cwd\":\"") + workspace_via_link.string() + "\",\"mcpServers\":[]}"}, {});
+  auto session_id = created ? ava::core::json::string_field(*created, "sessionId") : std::nullopt;
+  expect(session_id.has_value(), "session/new accepts a cwd whose path traverses an absolute symlink");
+
+  // Containment is still enforced against the resolved launch root.
+  auto const outside = root / "outside";
+  std::filesystem::create_directories(outside);
+  auto outside_new = service.handle_request(
+      Request{.id = std::int64_t(2), .method = "session/new",
+              .params_json = std::string("{\"cwd\":\"") + outside.string() + "\",\"mcpServers\":[]}"}, {});
+  expect(!outside_new && outside_new.error().code == -32602, "session/new still rejects a cwd outside the launch root");
+
+  // A cwd that is itself a symlink is still rejected.
+  std::filesystem::create_directory_symlink(real_workspace, projects / "linked-workspace", link_error);
+  if (!link_error)
+  {
+    auto linked_new = service.handle_request(
+        Request{.id = std::int64_t(3), .method = "session/new",
+                .params_json = std::string("{\"cwd\":\"") + (projects / "linked-workspace").string() + "\",\"mcpServers\":[]}"}, {});
+    expect(!linked_new && linked_new.error().code == -32602, "session/new still rejects a cwd that is itself a symlink");
+  }
+}
+
 void run_acp_tests()
 {
   test_acp_prompt_content_capabilities_and_strict_validation();
@@ -4024,6 +4081,7 @@ void run_acp_tests()
   test_acp_negotiated_client_filesystem_and_terminal_routing();
   test_acp_builtin_permission_gateway_one_shot_mutations_and_updates();
   test_acp_session_grant_cannot_follow_retargeted_parent_symlink();
+  test_acp_session_cwd_allows_symlinked_workspace_path();
   test_acp_permission_once_always_reject_cancel_invalid_and_hard_policy_matrix();
   test_acp_close_timeout_is_internal_error_with_eventual_cleanup();
   test_acp_peer_prompt_terminal_commit_arbitration();

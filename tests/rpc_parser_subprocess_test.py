@@ -31,6 +31,12 @@ def main():
         # has no developer libcwd configuration.
         "LIBCWD_RCFILE_NAME": str(libcwd_rcfile),
     })
+    # LIBCWD_RCFILE_OVERRIDE_NAME is read by libcwd *after* LIBCWD_RCFILE_NAME
+    # and overrides its channel settings. A developer host may have it set to
+    # a file that turns NOTICE on, which would leak debug output to stderr and
+    # fail the protocol-quiet assertion below. Strip it so the silent rcfile
+    # above is the final word.
+    env.pop("LIBCWD_RCFILE_OVERRIDE_NAME", None)
     process = subprocess.Popen(
         [args.ava, "--rpc", "--no-session", "--offline"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,

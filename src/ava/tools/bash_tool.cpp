@@ -432,17 +432,13 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
         error.with_context("cause", status_error.message());
       return std::unexpected(std::move(error));
     }
-    std::error_code canonical_error;
-    auto canonical_cwd = std::filesystem::canonical(context.workspace_dir, canonical_error);
-    if (canonical_error)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to canonicalize command workspace");
-      error.with_context("path", context.workspace_dir.string());
-      error.with_context("cause", canonical_error.message());
-      return std::unexpected(std::move(error));
-    }
+    // Use the workspace directory in its lexical (configured) form, preserving
+    // any symlinked components, so the terminal cwd matches the path the user
+    // works with. The symlink_status check above already verified the directory
+    // exists; canonicalizing here would leak the resolved location and break a
+    // workspace whose path traverses a symlink.
     auto executed = context.command_executor->execute(CommandExecutionRequest{.argv = std::move(*argv_strings),
-                                                                              .cwd = std::move(canonical_cwd),
+                                                                              .cwd = context.workspace_dir,
                                                                               .timeout = options.timeout,
                                                                               .output_byte_limit = options.max_bytes,
                                                                               .cancel_requested = context.cancel_requested});

@@ -3,6 +3,7 @@ add_library(ava_core
   "error.cpp"
   "ids.cpp"
   "json.cpp"
+  "open_beneath.cpp"
   "process_args.cpp"
   "strict_json.cpp"
 )

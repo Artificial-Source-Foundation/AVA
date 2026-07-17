@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/provider/gemini_provider.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/core/ids.h"

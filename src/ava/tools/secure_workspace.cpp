@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/tools/secure_workspace.h"
 #include "ava/core/ids.h"
+#include "ava/core/open_beneath.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -14,11 +15,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#ifdef __linux__
-#include <linux/openat2.h>
-#include <sys/syscall.h>
-#endif
-
 #ifndef O_PATH
 #define O_PATH O_RDONLY
 #endif
@@ -26,12 +22,7 @@
 namespace ava::tools {
 namespace {
 
-constexpr unsigned int kResolveFlags =
-#ifdef __linux__
-    RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
-#else
-    0;
-#endif
+using ava::core::open_beneath;
 
 ava::core::Error workspace_error(ava::core::ErrorCategory category, std::string message, std::filesystem::path const& root, std::filesystem::path const& path,
                                  int error_number = 0)
@@ -82,59 +73,6 @@ ava::core::Result<SecureWorkspacePath> lexical_workspace_path(std::filesystem::p
           workspace_error(ava::core::ErrorCategory::PermissionDenied, "secure workspace path contains traversal or redundant components", root, absolute));
   }
   return SecureWorkspacePath{.absolute = std::move(absolute), .relative = std::move(relative)};
-}
-
-int fallback_open_beneath(int base_fd, std::filesystem::path const& relative, int flags)
-{
-  int current = ::dup(base_fd);
-  if (current < 0)
-    return -1;
-  if (relative.empty())
-  {
-    if ((flags & O_DIRECTORY) != 0)
-    {
-      int const directory = ::openat(current, ".", flags | O_CLOEXEC | O_NOFOLLOW);
-      int const saved = errno;
-      ::close(current);
-      errno = saved;
-      return directory;
-    }
-    return current;
-  }
-
-  std::vector<std::string> components;
-  for (auto const& component : relative) components.push_back(component.string());
-  for (std::size_t index = 0; index < components.size(); ++index)
-  {
-    bool const final = index + 1 == components.size();
-    int const open_flags = final ? flags | O_CLOEXEC | O_NOFOLLOW : O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
-    int const next = ::openat(current, components[index].c_str(), open_flags);
-    int const saved = errno;
-    ::close(current);
-    if (next < 0)
-    {
-      errno = saved;
-      return -1;
-    }
-    current = next;
-  }
-  return current;
-}
-
-int open_beneath(int base_fd, std::filesystem::path const& relative, int flags)
-{
-  auto const text = relative.empty() ? std::string(".") : relative.generic_string();
-#ifdef __linux__
-  struct open_how how{};
-  how.flags = static_cast<std::uint64_t>(flags | O_CLOEXEC);
-  how.resolve = kResolveFlags;
-  int const opened = static_cast<int>(::syscall(SYS_openat2, base_fd, text.c_str(), &how, sizeof(how)));
-  if (opened >= 0)
-    return opened;
-  if (errno != ENOSYS && errno != EINVAL && errno != E2BIG)
-    return -1;
-#endif
-  return fallback_open_beneath(base_fd, relative, flags);
 }
 
 ava::core::Error lookup_error(std::filesystem::path const& root, std::filesystem::path const& path, int error_number, std::string_view operation)
@@ -443,19 +381,18 @@ ava::core::Result<std::shared_ptr<SecureWorkspace>> SecureWorkspace::open(std::f
   auto absolute = std::filesystem::absolute(root, absolute_error).lexically_normal();
   if (absolute_error || !absolute.is_absolute())
     return std::unexpected(workspace_error(ava::core::ErrorCategory::Io, "failed to resolve secure workspace root", root, root, absolute_error.value()));
-  std::error_code canonical_error;
-  auto canonical = std::filesystem::canonical(absolute, canonical_error);
-  if (canonical_error || canonical != absolute)
-  {
-    auto error = workspace_error(ava::core::ErrorCategory::PermissionDenied, "secure workspace root must be an existing canonical non-symlink directory",
-                                 absolute, absolute, canonical_error.value());
-    return std::unexpected(std::move(error));
-  }
-
+  // The anchor descriptor is opened at startup, before any untrusted input is
+  // processed, so symlinked components in the workspace root path are followed
+  // rather than rejected. The root is opened directly with a plain openat
+  // (no containment) because the configured path is trusted; open_beneath is
+  // reserved for the untrusted relative paths resolved against this anchor.
+  // openat2(RESOLVE_BENEATH) cannot be used here because it rejects absolute
+  // symlink components unconditionally, which would break a workspace whose
+  // configured path traverses an absolute symlink.
   int slash = ::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
   if (slash < 0)
     return std::unexpected(lookup_error(absolute, absolute, errno, "root anchor open"));
-  int anchored = absolute == "/" ? ::dup(slash) : open_beneath(slash, absolute.relative_path(), O_PATH | O_DIRECTORY);
+  int anchored = absolute == "/" ? ::dup(slash) : ::openat(slash, absolute.relative_path().c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC);
   int const open_error = errno;
   ::close(slash);
   if (anchored < 0)

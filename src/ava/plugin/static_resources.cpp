@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/plugin/static_resources.h"
 #include "ava/core/error.h"
 

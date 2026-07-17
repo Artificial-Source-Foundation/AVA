@@ -83,6 +83,12 @@ def signal_cleanup(signum, _frame):
 
 def start(ava, root, cwd=None, extra_env=None):
     env = environment(root)
+    # Mimic the launching shell, which exports PWD as the lexical path the user
+    # works with (including symlinked components). ava uses PWD rather than the
+    # kernel-resolved current_path() so a workspace configured through a symlink
+    # keeps its configured path throughout the session.
+    if cwd is not None:
+        env["PWD"] = str(cwd)
     if extra_env:
         env.update(extra_env)
     return owned_popen(
@@ -524,7 +530,7 @@ def main():
             client_fs_methods.append(method)
             assert record["params"] == {
                 "sessionId": client_fs_session,
-                "path": str(client_fs_target.resolve()),
+                "path": str(client_fs_target),
                 "line": 1,
                 "limit": 201,
             }
@@ -580,7 +586,7 @@ def main():
                 assert record["params"]["command"] == "touch"
                 assert record["params"]["args"] == ["terminal-e2e-marker"]
                 assert record["params"]["env"] == []
-                assert record["params"]["cwd"] == str(workspace.resolve())
+                assert record["params"]["cwd"] == str(workspace)
                 result = {"terminalId": "subprocess-terminal"}
             elif method == "terminal/wait_for_exit":
                 result = {"exitCode": 0, "signal": None}

@@ -18,6 +18,25 @@
 
 namespace ava::observability {
 namespace {
+struct RunObserverCallbackFrame
+{
+  RunObserverCallbackFrame* previous = nullptr;
+};
+
+thread_local RunObserverCallbackFrame* active_run_observer_callback = nullptr;
+
+class RunObserverCallbackScope final
+{
+ public:
+  RunObserverCallbackScope() noexcept : frame_{.previous = active_run_observer_callback} { active_run_observer_callback = &frame_; }
+  ~RunObserverCallbackScope() { active_run_observer_callback = frame_.previous; }
+  RunObserverCallbackScope(RunObserverCallbackScope const&) = delete;
+  RunObserverCallbackScope& operator=(RunObserverCallbackScope const&) = delete;
+
+ private:
+  RunObserverCallbackFrame frame_;
+};
+
 constexpr std::size_t kMaxIdentifierBytes = 256, kMaxMetadataKeyBytes = 128, kMaxMetadataValueBytes = 1024;
 constexpr std::string_view kFieldsTruncatedKey = "fields_truncated";
 std::string bounded(std::string_view value, std::size_t limit)
@@ -314,6 +333,15 @@ RunObservation::RunObservation(std::shared_ptr<RunObserver> observer, std::share
 bool RunObservation::enabled() const noexcept
 {
   return state_ && state_->observer;
+}
+bool in_run_observer_callback() noexcept
+{
+  return active_run_observer_callback != nullptr;
+}
+void RunObservation::invoke_observer(TraceEvent const& event) const
+{
+  RunObserverCallbackScope callback_scope;
+  state_->observer->on_event(event);
 }
 void RunObservation::account_failure() const noexcept
 {

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/observability/run_observer.h"
 #include "ava/app/session_run_controller.h"
 #include "ava/core/error.h"
 
@@ -7,7 +8,6 @@
 #include <deque>
 #include <exception>
 #include <limits>
-#include <thread>
 #include <utility>
 #include "debug.h"
 
@@ -84,31 +84,35 @@ bool legal_transition(RunPhase from, RunPhase to)
   AI_NEVER_REACHED
 }
 
-thread_local void const* append_in_progress = nullptr;
-thread_local void const* append_driver_in_progress = nullptr;
-
-class AppendMarker final
+struct ActiveControllerFrame
 {
- public:
-  explicit AppendMarker(void const* state) : previous_(std::exchange(append_in_progress, state)) { }
-  ~AppendMarker() { append_in_progress = previous_; }
-  AppendMarker(AppendMarker const&) = delete;
-  AppendMarker& operator=(AppendMarker const&) = delete;
-
- private:
-  void const* previous_;
+  void const* state = nullptr;
+  ActiveControllerFrame* previous = nullptr;
 };
 
-class AppendDriverMarker final
+thread_local ActiveControllerFrame* active_controller_frame = nullptr;
+
+[[nodiscard]] bool controller_active_on_this_thread(void const* state) noexcept
+{
+  for (auto frame = active_controller_frame; frame; frame = frame->previous)
+    if (frame->state == state)
+      return true;
+  return false;
+}
+
+class ActiveControllerMarker final
 {
  public:
-  explicit AppendDriverMarker(void const* state) : previous_(std::exchange(append_driver_in_progress, state)) { }
-  ~AppendDriverMarker() { append_driver_in_progress = previous_; }
-  AppendDriverMarker(AppendDriverMarker const&) = delete;
-  AppendDriverMarker& operator=(AppendDriverMarker const&) = delete;
+  explicit ActiveControllerMarker(void const* state) noexcept : frame_{.state = state, .previous = active_controller_frame}
+  {
+    active_controller_frame = &frame_;
+  }
+  ~ActiveControllerMarker() { active_controller_frame = frame_.previous; }
+  ActiveControllerMarker(ActiveControllerMarker const&) = delete;
+  ActiveControllerMarker& operator=(ActiveControllerMarker const&) = delete;
 
  private:
-  void const* previous_;
+  ActiveControllerFrame frame_;
 };
 
 ava::core::Error reentrant_reset_error()
@@ -177,8 +181,6 @@ struct ActiveRunGuard::State
   std::uint64_t persistence_failure_generation = 0;
   std::shared_ptr<ava::core::Error const> append_exception_fallback = make_append_exception_fallback();
   std::shared_ptr<ava::session::SessionAppendTarget> append_target;
-  bool append_driver_active = false;
-  std::thread::id append_driver_thread;
   std::deque<RunCommand> commands;
   std::deque<std::shared_ptr<AppendItem>> appends;
   std::size_t append_bytes = 0;
@@ -201,11 +203,11 @@ void SessionRunController::shutdown() noexcept
     return;
   try
   {
+    auto const observer_callback = ava::observability::in_run_observer_callback();
+    auto const active_controller = controller_active_on_this_thread(state.get());
     std::stop_source source;
-    bool called_by_append_driver = false;
     {
       std::lock_guard lock(state->mutex);
-      called_by_append_driver = state->append_driver_active && state->append_driver_thread == std::this_thread::get_id();
       if (!state->shutting_down)
       {
         state->shutting_down = true;
@@ -215,30 +217,42 @@ void SessionRunController::shutdown() noexcept
       }
     }
     // Stop callbacks can reenter controller APIs and therefore run without the
-    // state mutex. A callback reached from SessionStore::append must not try to
-    // reacquire append_mutex; the active driver performs deferred cleanup.
+    // state mutex. An active driver owns finalization after its callback returns.
     static_cast<void>(source.request_stop());
     state->outcome_changed.notify_all();
-    if (called_by_append_driver || append_driver_in_progress == state.get())
+    if (active_controller)
       return;
+
+    std::unique_lock driver_lock(state->append_mutex, std::defer_lock);
+    if (observer_callback)
+    {
+      // A user observer may own emit_mutex while another thread's append driver
+      // owns append_mutex and waits to emit. Never complete that ABBA edge.
+      if (!driver_lock.try_lock())
+        return;
+    }
+    else
+    {
+      // Ordinary cross-thread teardown remains synchronous: the current driver
+      // finishes first, then this call terminally drains every accepted ticket.
+      driver_lock.lock();
+    }
+    ActiveControllerMarker finalizer_marker(state.get());
 
     std::shared_ptr<ava::session::SessionAppendTarget> released_target;
     {
-      std::lock_guard driver_lock(state->append_mutex);
+      std::lock_guard lock(state->mutex);
+      released_target = std::move(state->append_target);
+      while (!state->appends.empty())
       {
-        std::lock_guard lock(state->mutex);
-        released_target = std::move(state->append_target);
-        while (!state->appends.empty())
-        {
-          auto pending = state->appends.front();
-          state->appends.pop_front();
-          state->append_bytes -= pending->bytes;
-          pending->completion = ActiveRunGuard::State::AppendItem::Completion::Closing;
-        }
+        auto pending = state->appends.front();
+        state->appends.pop_front();
+        state->append_bytes -= pending->bytes;
+        pending->completion = ActiveRunGuard::State::AppendItem::Completion::Closing;
       }
-      state->appends_drained.notify_all();
-      released_target.reset();
     }
+    state->appends_drained.notify_all();
+    released_target.reset();
   }
   catch (...)
   {
@@ -381,8 +395,15 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
 {
   if (!state)
     return std::unexpected(inactive_error());
-  if (append_in_progress == state.get())
+  if (controller_active_on_this_thread(state.get()))
     return std::unexpected(reentrant_append_error());
+
+  // Observer callbacks must never wait behind a driver that may itself be
+  // waiting for the callback's emit mutex. They may drive an idle controller.
+  std::unique_lock driver_lock(state->append_mutex, std::defer_lock);
+  if (ava::observability::in_run_observer_callback() && !driver_lock.try_lock())
+    return std::unexpected(reentrant_append_error());
+
   auto bytes = entry_byte_count(entry);
   if (!bytes)
     return std::unexpected(std::move(bytes.error()));
@@ -419,13 +440,9 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
     }
   };
 
-  std::unique_lock driver_lock(state->append_mutex);
-  AppendDriverMarker driver_marker(state.get());
-  {
-    std::lock_guard lock(state->mutex);
-    state->append_driver_active = true;
-    state->append_driver_thread = std::this_thread::get_id();
-  }
+  if (!driver_lock.owns_lock())
+    driver_lock.lock();
+  ActiveControllerMarker driver_marker(state.get());
 
   std::shared_ptr<ava::session::SessionAppendTarget> released_target;
   while (true)
@@ -464,7 +481,6 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
     std::shared_ptr<ava::core::Error const> failure;
     try
     {
-      AppendMarker marker(state.get());
       auto persisted = target->append(head->entry);
       if (!persisted)
       {
@@ -565,12 +581,20 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
   std::shared_ptr<ava::core::Error const> failure;
   {
     std::lock_guard lock(state->mutex);
-    state->append_driver_active = false;
-    state->append_driver_thread = {};
+    // An observer-side shutdown can lose its try-lock race to any append_mutex
+    // holder, including a caller whose ticket was already terminal. Every
+    // holder therefore owns this final deferred-shutdown check.
+    if (state->shutting_down)
+    {
+      if (!state->persistence_failure)
+        drain_locked(ActiveRunGuard::State::AppendItem::Completion::Closing);
+      released_target = std::move(state->append_target);
+    }
     completion = item->completion;
     failure = item->failure;
   }
   state->appends_drained.notify_all();
+  released_target.reset();
   driver_lock.unlock();
 
   if (completion == ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed)
@@ -596,42 +620,76 @@ std::function<ava::core::VoidResult(ava::session::SessionEntry)> SessionRunContr
 ava::core::VoidResult SessionRunController::reset_persistence_failure()
 {
   auto state = state_;
-  if (append_driver_in_progress == state.get())
+  if (ava::observability::in_run_observer_callback() || controller_active_on_this_thread(state.get()))
     return std::unexpected(reentrant_reset_error());
-  std::unique_lock driver_lock(state->append_mutex);
 
+  std::unique_lock driver_lock(state->append_mutex);
+  ActiveControllerMarker recovery_marker(state.get());
   std::shared_ptr<ava::session::SessionAppendTarget> target;
   std::uint64_t failure_generation = 0;
+  ava::core::VoidResult result;
   {
     std::lock_guard lock(state->mutex);
     if (state->active || !state->appends.empty())
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot recover append failure during active run"));
-    if (state->shutting_down || !state->append_target)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot recover persistence for a closing runtime session"));
-    if (!state->persistence_failure)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session has no latched persistence failure to recover"));
-    target = state->append_target;
-    failure_generation = state->persistence_failure_generation;
+      result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot recover append failure during active run"));
+    else if (state->shutting_down || !state->append_target)
+      result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot recover persistence for a closing runtime session"));
+    else if (!state->persistence_failure)
+      result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session has no latched persistence failure to recover"));
+    else
+    {
+      target = state->append_target;
+      failure_generation = state->persistence_failure_generation;
+    }
   }
 
-  // Recovery can scan, quarantine, sync, and truncate. Never hold the state
-  // mutex across it; append_mutex alone excludes append drivers and serializes
-  // shutdown's authority release.
-  auto recovered = target->recover();
-  if (!recovered)
-    return std::unexpected(std::move(recovered.error()));
+  if (target)
+  {
+    // Recovery can scan, quarantine, sync, and truncate. Never hold the state
+    // mutex across it; append_mutex alone excludes append drivers and serializes
+    // shutdown's authority release.
+    auto recovered = target->recover();
+    if (!recovered)
+    {
+      result = std::unexpected(std::move(recovered.error()));
+    }
+    else
+    {
+      std::lock_guard lock(state->mutex);
+      if (state->active || !state->appends.empty() || state->shutting_down || state->append_target != target || !state->persistence_failure ||
+          state->persistence_failure_generation != failure_generation)
+      {
+        result = std::unexpected(
+            ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistence recovery completed after runtime session authority changed"));
+      }
+      else
+      {
+        state->persistence_failure.reset();
+      }
+    }
+  }
 
+  // Observer-side shutdown cannot wait for a concurrent recovery. The recovery
+  // holder therefore performs the same terminal drain and authority release on
+  // every exit, including failed recovery and precondition paths.
+  std::shared_ptr<ava::session::SessionAppendTarget> released_target;
   {
     std::lock_guard lock(state->mutex);
-    if (state->active || !state->appends.empty() || state->shutting_down || state->append_target != target || !state->persistence_failure ||
-        state->persistence_failure_generation != failure_generation)
+    if (state->shutting_down)
     {
-      return std::unexpected(
-          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistence recovery completed after runtime session authority changed"));
+      while (!state->appends.empty())
+      {
+        auto pending = state->appends.front();
+        state->appends.pop_front();
+        state->append_bytes -= pending->bytes;
+        pending->completion = ActiveRunGuard::State::AppendItem::Completion::Closing;
+      }
+      released_target = std::move(state->append_target);
     }
-    state->persistence_failure.reset();
   }
-  return {};
+  state->appends_drained.notify_all();
+  released_target.reset();
+  return result;
 }
 
 ActiveRunGuard::ActiveRunGuard(std::shared_ptr<State> state, std::uint64_t generation) : state_(std::move(state)), generation_(generation)

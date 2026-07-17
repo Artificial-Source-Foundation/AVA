@@ -150,11 +150,13 @@ class ReentrantObserver final : public ava::observability::RunObserver
  public:
   void on_event(ava::observability::TraceEvent const& event) override
   {
+    callback_context_preserved = callback_context_preserved && ava::observability::in_run_observer_callback();
     events.push_back(event);
     if (!reentered)
     {
       reentered = true;
       observation->emit(ava::observability::TraceEventType::ProviderStreamEvent, context);
+      callback_context_preserved = callback_context_preserved && ava::observability::in_run_observer_callback();
     }
   }
 
@@ -162,6 +164,7 @@ class ReentrantObserver final : public ava::observability::RunObserver
   ava::observability::TraceContext context{
       .run_id = "run", .turn_id = "turn", .session_id = {}, .provider_id = {}, .parent_run_id = {}, .parent_turn_id = {}, .parent_session_id = {}};
   std::vector<ava::observability::TraceEvent> events;
+  bool callback_context_preserved = true;
 
  private:
   bool reentered = false;
@@ -1382,9 +1385,12 @@ void test_concurrent_observation_ordering_and_reentrancy()
   auto reentrant_observer = std::make_shared<ReentrantObserver>();
   ava::observability::RunObservation reentrant(reentrant_observer, std::make_shared<FixedClock>(1), std::make_shared<ava::observability::CounterIdGenerator>());
   reentrant_observer->observation = &reentrant;
-  reentrant.emit(ava::observability::TraceEventType::AgentRunStart, reentrant_observer->context);
-  expect(reentrant_observer->events.size() == 2 && reentrant_observer->events[0].sequence == 1 && reentrant_observer->events[1].sequence == 2,
-         "an observer may re-enter emit once without deadlock and nested delivery preserves sequence order");
+  bool enricher_had_callback_context = true;
+  reentrant.emit(ava::observability::TraceEventType::AgentRunStart, reentrant_observer->context,
+                 [&](ava::observability::TraceEvent&) { enricher_had_callback_context = ava::observability::in_run_observer_callback(); });
+  expect(reentrant_observer->events.size() == 2 && reentrant_observer->events[0].sequence == 1 && reentrant_observer->events[1].sequence == 2 &&
+             reentrant_observer->callback_context_preserved && !enricher_had_callback_context && !ava::observability::in_run_observer_callback(),
+         "observer callback context is stack-aware, excludes enrichment, and restores after nested delivery");
 
   class DelayedFirstObserver final : public ava::observability::RunObserver
   {

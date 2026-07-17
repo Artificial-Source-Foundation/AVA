@@ -170,6 +170,10 @@ class RunObserver
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
+// True only while the current thread is inside a user RunObserver callback.
+// Nested observation restores the outer callback context on return.
+[[nodiscard]] bool in_run_observer_callback() noexcept;
+
 // The sole production emission boundary. Factories, clocks, IDs, enrichment,
 // serialization and callbacks are all isolated here; observation can never
 // alter the observed operation, including from noexcept destructors.
@@ -196,7 +200,7 @@ class RunObservation final
       std::lock_guard<std::recursive_mutex> lock(state_->emit_mutex);
       TraceEvent event = make_event(type, context);
       std::forward<Enricher>(enrich)(event);
-      state_->observer->on_event(event);
+      invoke_observer(event);
       state_->emitted.fetch_add(1, std::memory_order_relaxed);
     }
     catch (...)
@@ -223,6 +227,7 @@ class RunObservation final
     AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
   [[nodiscard]] TraceEvent make_event(TraceEventType type, TraceContext const& context) const;
+  void invoke_observer(TraceEvent const& event) const;
   void account_failure() const noexcept;
   std::shared_ptr<State> state_;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

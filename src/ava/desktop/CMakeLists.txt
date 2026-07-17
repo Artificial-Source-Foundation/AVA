@@ -30,8 +30,10 @@ target_link_libraries(ava-desktop
     Qt6::QuickControls2
 )
 
+get_target_property(CWDS_INTERFACE_INCLUDE_DIRECTORIES AICxx::cwds INTERFACE_INCLUDE_DIRECTORIES)
 target_include_directories(ava-desktop
   PRIVATE
+    "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}"     # For sys.h and debug.h.
     "${CMAKE_SOURCE_DIR}/src"
     "${AVA_GENERATED_INCLUDE_DIR}"
 )

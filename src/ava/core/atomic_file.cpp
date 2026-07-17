@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/core/atomic_file.h"
 
 #include <cerrno>

@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/core/json.h"

@@ -13,6 +13,7 @@
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/session/session_store.h"
+#include "ava/core/AnchorSet.h"
 #include "ava/core/error.h"
 
 #include <filesystem>
@@ -38,6 +39,13 @@ struct Session
   ava::config::XdgPaths paths;
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
+  // Additional writable directories beyond workspace_dir (e.g., user-configured
+  // paths). These are opened as anchor descriptors at startup and made
+  // available to tools via ToolContext::anchor_set.
+  std::vector<std::filesystem::path> additional_writable_dirs = {};
+  // Pre-opened anchor descriptors for all writable directories. Opened once
+  // at session creation and shared across all prompts and subagent loops.
+  std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
   ProjectTrustState project_trust;
   PromptOverrides prompt_overrides;
   ava::agent::ToolVisibilityOptions tool_visibility;

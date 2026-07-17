@@ -9,6 +9,7 @@
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 #include "ava/core/ids.h"
+#include "ava/core/AnchorSet.h"
 
 #include <filesystem>
 #include <memory>
@@ -21,13 +22,7 @@ namespace {
 
 ava::core::Result<std::filesystem::path> current_path_result()
 {
-  std::error_code error;
-  auto path = std::filesystem::current_path(error);
-  if (!error)
-    return path;
-  auto result_error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to resolve current directory");
-  result_error.with_context("cause", error.message());
-  return std::unexpected(std::move(result_error));
+  return ava::core::launch_workspace_root();
 }
 
 ava::core::Result<std::string> resolve_session_id(std::filesystem::path const& workspace_dir, std::filesystem::path const& root_dir,
@@ -292,6 +287,27 @@ ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions co
       return std::unexpected(metadata.error());
   }
 
+  // Open the AnchorSet once for the session lifetime. The workspace, spill
+  // directory, and any additional writable directories are opened as anchor
+  // descriptors and shared across all prompts and subagent loops.
+  std::shared_ptr<ava::core::AnchorSet> anchor_set;
+  {
+    std::vector<std::filesystem::path> anchor_roots;
+    anchor_roots.push_back(workspace_dir);
+    auto const spill_dir = store->session_path().parent_path() / "spill";
+    // Create the spill directory now so it can be opened as an anchor.
+    // spill_files.cpp also creates it on first use, but we need it to exist
+    // before AnchorSet::open so the anchor descriptor is pre-opened.
+    std::error_code spill_error;
+    std::filesystem::create_directories(spill_dir, spill_error);
+    anchor_roots.push_back(spill_dir);
+    for (auto const& dir : options.additional_writable_dirs)
+      anchor_roots.push_back(dir);
+    auto opened = ava::core::AnchorSet::open(anchor_roots);
+    if (opened)
+      anchor_set = std::move(*opened);
+  }
+
   runtime::Session session{.store = std::move(*store),
                          .lease = std::move(lease),
                          .mode = options.mode,
@@ -300,6 +316,8 @@ ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions co
                          .paths = options.paths,
                          .workspace_dir = workspace_dir,
                          .current_dir = current_dir,
+                         .additional_writable_dirs = options.additional_writable_dirs,
+                         .anchor_set = std::move(anchor_set),
                          .project_trust = std::move(project_trust),
                          .prompt_overrides = options.prompt_overrides,
                          .tool_visibility = options.tool_visibility,

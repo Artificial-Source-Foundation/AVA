@@ -5,6 +5,8 @@
 #include "ava/tools/file_tools.h"
 #include "ava/tools/mutation_queue.h"
 #include "ava/tools/secure_workspace.h"
+#include "ava/core/AnchorSet.h"
+#include "ava/core/open_beneath.h"
 #include "ava/session/export.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
@@ -1289,6 +1291,192 @@ void test_secure_workspace_symlink_containment()
   expect(!escape_resolved, "resolve AllowMissing through escaping symlinked parent is rejected");
 }
 
+// Verify that AnchorSet correctly resolves candidate paths to the right anchor
+// when multiple writable directories are configured. Tests cover:
+//   - Basic multi-anchor resolution (longest prefix wins)
+//   - Paths outside all anchors are rejected
+//   - Relative paths resolve against the first (primary) anchor
+//   - Non-existent directories are silently skipped
+//   - contains() is consistent with find_anchor()
+//   - Cross-anchor symlink escape is rejected by open_beneath
+//   - Non-escaping symlinks within an anchor are followed
+void test_anchor_set_multi_anchor()
+{
+  auto const root = temp_root() / "anchor-set";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  std::filesystem::create_directories(root);
+
+  // Create two anchor directories.
+  auto const ws_a = root / "workspace-a";
+  auto const ws_b = root / "workspace-b";
+  std::filesystem::create_directories(ws_a / "subdir");
+  std::filesystem::create_directories(ws_b / "subdir");
+  {
+    std::ofstream file(ws_a / "subdir" / "file_a.txt", std::ios::binary | std::ios::trunc);
+    file << "anchor A content";
+  }
+  {
+    std::ofstream file(ws_b / "subdir" / "file_b.txt", std::ios::binary | std::ios::trunc);
+    file << "anchor B content";
+  }
+
+  // Open an AnchorSet with both directories.
+  auto opened = ava::core::AnchorSet::open({ws_a, ws_b});
+  expect(opened.has_value(), "AnchorSet::open succeeds with two existing directories");
+  if (!opened)
+    return;
+  auto const& anchors = **opened;
+
+  // find_anchor for a path beneath anchor A.
+  auto ref_a = anchors.find_anchor(ws_a / "subdir" / "file_a.txt");
+  expect(ref_a.has_value(), "find_anchor resolves path beneath anchor A");
+  expect(ref_a->root == ws_a, "find_anchor selects anchor A for A's path");
+  expect(ref_a->relative == "subdir/file_a.txt", "find_anchor returns correct relative path for anchor A");
+
+  // find_anchor for a path beneath anchor B.
+  auto ref_b = anchors.find_anchor(ws_b / "subdir" / "file_b.txt");
+  expect(ref_b.has_value(), "find_anchor resolves path beneath anchor B");
+  expect(ref_b->root == ws_b, "find_anchor selects anchor B for B's path");
+  expect(ref_b->relative == "subdir/file_b.txt", "find_anchor returns correct relative path for anchor B");
+
+  // find_anchor for a path outside all anchors.
+  auto ref_outside = anchors.find_anchor(root / "outside.txt");
+  expect(!ref_outside, "find_anchor rejects path outside all anchors");
+
+  // find_anchor for a relative path resolves against the first anchor.
+  auto ref_rel = anchors.find_anchor("subdir/file_a.txt");
+  expect(ref_rel.has_value(), "find_anchor resolves relative path against primary anchor");
+  expect(ref_rel->root == ws_a, "relative path resolves to anchor A (first/primary)");
+  expect(ref_rel->relative == "subdir/file_a.txt", "relative path produces correct relative component");
+
+  // contains() is consistent with find_anchor().
+  expect(anchors.contains_lexical(ws_a / "subdir" / "file_a.txt"), "contains_lexical returns true for path in anchor A");
+  expect(anchors.contains_lexical(ws_b / "subdir" / "file_b.txt"), "contains_lexical returns true for path in anchor B");
+  expect(!anchors.contains_lexical(root / "outside.txt"), "contains_lexical returns false for path outside all anchors");
+
+  // Longest prefix wins: create a nested directory structure.
+  auto const ws_nested = ws_a / "nested";
+  std::filesystem::create_directories(ws_nested / "deep");
+  auto opened_nested = ava::core::AnchorSet::open({ws_a, ws_nested});
+  expect(opened_nested.has_value(), "AnchorSet::open succeeds with nested anchors");
+  if (!opened_nested)
+    return;
+  auto ref_nested = (*opened_nested)->find_anchor(ws_a / "nested" / "deep" / "file.txt");
+  expect(ref_nested.has_value(), "find_anchor resolves path in nested anchor");
+  expect(ref_nested->root == ws_nested, "find_anchor selects the longest prefix (nested) anchor");
+
+  // Non-existent directories are silently skipped.
+  auto opened_skip = ava::core::AnchorSet::open({ws_a, root / "does-not-exist", ws_b});
+  expect(opened_skip.has_value(), "AnchorSet::open skips non-existent directories");
+  if (!opened_skip)
+    return;
+  expect((*opened_skip)->number_of_anchors() == 2, "AnchorSet skips non-existent anchor, keeping two");
+  expect((*opened_skip)->contains_lexical(ws_a / "subdir" / "file_a.txt"), "AnchorSet with skipped dir still contains A");
+  expect((*opened_skip)->contains_lexical(ws_b / "subdir" / "file_b.txt"), "AnchorSet with skipped dir still contains B");
+
+  // Cross-anchor symlink escape is rejected by open_beneath.
+  // Create a relative symlink in anchor A that escapes to anchor B.
+  // RESOLVE_BENEATH rejects absolute symlinks unconditionally, so we use a
+  // relative target with ".." to test the actual escape detection.
+  std::error_code link_error;
+  std::filesystem::create_directory_symlink("../workspace-b", ws_a / "link-to-b", link_error);
+  expect(!link_error, "test creates cross-anchor symlink");
+  if (!link_error)
+  {
+    // The symlink is inside anchor A but points to anchor B. open_beneath
+    // with RESOLVE_BENEATH should reject it (EXDEV) because the target is
+    // outside anchor A's directory tree.
+    auto ref_cross = anchors.find_anchor(ws_a / "link-to-b" / "subdir" / "file_b.txt");
+    expect(ref_cross.has_value(), "find_anchor selects anchor A for cross-anchor symlink path");
+    if (ref_cross)
+    {
+      int probe = ava::core::open_beneath(ref_cross->fd, ref_cross->relative, O_PATH | O_CLOEXEC);
+      expect(probe < 0, "open_beneath rejects cross-anchor symlink escape (EXDEV/ELOOP)");
+      if (probe >= 0)
+        ::close(probe);
+    }
+  }
+
+  // Non-escaping symlink within an anchor is followed.
+  // Create a relative symlink in anchor A pointing to another directory in
+  // anchor A. RESOLVE_BENEATH rejects absolute symlinks unconditionally, so
+  // the target must be relative for the symlink to be followed.
+  std::filesystem::create_directory_symlink("subdir", ws_a / "link-to-subdir", link_error);
+  expect(!link_error, "test creates non-escaping symlink");
+  if (!link_error)
+  {
+    auto ref_internal = anchors.find_anchor(ws_a / "link-to-subdir" / "file_a.txt");
+    expect(ref_internal.has_value(), "find_anchor resolves non-escaping symlink path");
+    if (ref_internal)
+    {
+      int probe = ava::core::open_beneath(ref_internal->fd, ref_internal->relative, O_PATH | O_CLOEXEC);
+      expect(probe >= 0, "open_beneath follows non-escaping symlink within anchor");
+      if (probe >= 0)
+        ::close(probe);
+    }
+  }
+}
+
+// Verify that AnchorSet stores the lexically-normalized anchor root path,
+// not the canonical (symlink-resolved) path. The anchor fd follows symlinks
+// (opened with openat), but the stored root must remain the configured path
+// so that find_anchor matches candidate paths expressed in terms of the
+// configured path, not the resolved target.
+void test_anchor_set_symlinked_root()
+{
+  auto const root = temp_root() / "anchor-set-symlinked-root";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  std::filesystem::create_directories(root);
+
+  // Create a real directory with content, and a symlink pointing to it.
+  auto const real_target = root / "real-projects";
+  auto const symlinked_root = root / "projects";
+  std::filesystem::create_directories(real_target / "src");
+  {
+    std::ofstream file(real_target / "src" / "main.cpp", std::ios::binary | std::ios::trunc);
+    file << "int main()\n";
+  }
+  std::error_code link_error;
+  std::filesystem::create_directory_symlink(real_target, symlinked_root, link_error);
+  expect(!link_error, "test creates symlink for anchor root");
+  if (link_error)
+    return;
+
+  // Open an AnchorSet using the symlinked path.
+  auto opened = ava::core::AnchorSet::open({symlinked_root});
+  expect(opened.has_value(), "AnchorSet::open succeeds through a symlinked root");
+  if (!opened)
+    return;
+  auto const& anchors = **opened;
+
+  // The stored root must be the lexically-normalized symlinked path, not
+  // the canonical resolved path.
+  auto ref = anchors.find_anchor(symlinked_root / "src" / "main.cpp");
+  expect(ref.has_value(), "find_anchor resolves path through symlinked root");
+  expect(ref->root == symlinked_root, "stored root is the lexical (symlinked) path, not the resolved target");
+  expect(ref->relative == "src/main.cpp", "relative path is correct through symlinked root");
+
+  // open_beneath through the symlinked anchor fd works (the fd follows the
+  // symlink at open time; subsequent open_beneath resolves relative to the
+  // real directory).
+  int probe = ava::core::open_beneath(ref->fd, ref->relative, O_RDONLY | O_CLOEXEC);
+  expect(probe >= 0, "open_beneath reads through symlinked anchor fd");
+  if (probe >= 0)
+    ::close(probe);
+
+  // A path expressed through the resolved target must NOT match, because the
+  // stored root is the symlinked path, not the canonical one. This ensures
+  // that the anchor set only accepts paths in terms of the configured path.
+  auto ref_resolved = anchors.find_anchor(real_target / "src" / "main.cpp");
+  expect(!ref_resolved, "find_anchor rejects resolved path that does not lexically match the stored root");
+
+  // contains_lexical is consistent.
+  expect(anchors.contains_lexical(symlinked_root / "src" / "main.cpp"), "contains_lexical accepts symlinked root path");
+  expect(!anchors.contains_lexical(real_target / "src" / "main.cpp"), "contains_lexical rejects resolved target path");
+}
+
 }  // namespace
 
 void run_tools_file_tests()
@@ -1301,4 +1489,6 @@ void run_tools_file_tests()
   test_secure_workspace_file_tools();
   test_secure_workspace_symlinked_root();
   test_secure_workspace_symlink_containment();
+  test_anchor_set_multi_anchor();
+  test_anchor_set_symlinked_root();
 }

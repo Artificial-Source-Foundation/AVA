@@ -16,6 +16,7 @@
 #include <variant>
 #include <vector>
 #include <nlohmann/json.hpp>
+#include "debug.h"
 
 namespace ava::app::acp {
 namespace {
@@ -249,39 +250,17 @@ ava::core::VoidResult validate_pinned_provider(AgentServiceOptions const& option
 
 AgentServiceOptions default_options(std::string agent_version)
 {
-  auto root = launch_workspace_root();
+  auto root = ava::core::launch_workspace_root();
   AgentServiceOptions options;
   options.agent_version = std::move(agent_version);
+  // If we can't use PWD then `launch_root` becomes the cannonical path returned by std::filesystem::current_path(), and later we'll
+  // try to compare that against logical paths... so, basically everything will break if this path contains symbolic links.
+  Dout(dc::warning(!root), "Failed to resolve a logical workspace launch root from PWD. Symbolic links that are part of the launch directory will not work.");
   options.launch_root = root ? *root : std::filesystem::current_path();
   return options;
 }
 
 }  // namespace
-
-ava::core::Result<std::filesystem::path> launch_workspace_root()
-{
-  // Return the launch directory in the lexical form the user works with,
-  // preserving any symlinked components, so session paths match the paths the
-  // client and model use. std::filesystem::current_path() returns the kernel-
-  // resolved (canonical) path, which would leak the resolved location and break
-  // a workspace whose configured path traverses a symlink; prefer the PWD
-  // environment variable that the launching shell sets to the lexical path.
-  if (char const* pwd = std::getenv("PWD"); pwd != nullptr && *pwd != '\0')
-  {
-    std::filesystem::path lexical(pwd);
-    if (lexical.is_absolute())
-      return lexical;
-  }
-  std::error_code current_error;
-  auto current = std::filesystem::current_path(current_error);
-  if (current_error)
-  {
-    auto error = protocol_error("failed to resolve launch-approved workspace root");
-    error.with_context("cause", current_error.message());
-    return std::unexpected(std::move(error));
-  }
-  return current;
-}
 
 ava::core::Result<AgentServiceOptions> pin_agent_service_model(AgentServiceOptions options)
 {

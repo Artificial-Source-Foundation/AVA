@@ -898,6 +898,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = session.workspace_dir,
       .current_dir = session.current_dir,
+      .additional_writable_dirs = session.additional_writable_dirs,
+      .anchor_set = session.anchor_set,
       .mode = session.mode,
       .provider_id = session.model.provider_id,
       .model_id = session.model.model_id,

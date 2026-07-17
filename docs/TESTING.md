@@ -5,7 +5,7 @@
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
 cmake --build build
-ctest --test-dir build --output-on-failure
+scripts/run-tests.sh --build-dir build
 ```
 
 Preset equivalent:
@@ -13,8 +13,10 @@ Preset equivalent:
 ```sh
 cmake --preset dev
 cmake --build --preset dev
-ctest --preset dev
+scripts/run-tests.sh
 ```
+
+The runner defaults to the `build` tree, detects the available logical cores, and supplies that positive job count to CTest. Use `--jobs N` or `CTEST_PARALLEL_LEVEL=N` to cap concurrency, and append CTest options such as `-R`. It locks the selected build tree so concurrent full runs cannot collide through fixed integration-test roots or CTest's logs. Direct `ctest --preset dev` remains available as a sequential diagnostic fallback.
 
 The test suite is built as one `ava_tests` CTest target from focused test sources under `tests/`. The LSP and MCP tests also build and use fake servers from `tests/support/`.
 
@@ -81,7 +83,7 @@ The live coding dogfood script creates an isolated workspace, trusts a project-l
 ```sh
 cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
 cmake --build build-sanitize
-ctest --test-dir build-sanitize --output-on-failure
+scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 
 Preset equivalent:
@@ -89,8 +91,10 @@ Preset equivalent:
 ```sh
 cmake --preset sanitize
 cmake --build --preset sanitize
-ctest --preset sanitize
+scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
+
+The explicit sanitizer cap avoids multiplying ASan/UBSan memory demand on smaller CI and developer hosts; raise it locally after measuring available memory.
 
 The sanitizer preset enables AddressSanitizer and UndefinedBehaviorSanitizer for supported non-MSVC builds.
 
@@ -214,8 +218,8 @@ Before treating a 0.90 release-candidate audit as complete, run and record:
 
 ```sh
 cmake --build build --target ava ava_tests
-ctest --test-dir build --output-on-failure
-ctest --test-dir build --output-on-failure -R "ava_tests\.(session|agent_loop|agent_loop_resilience|app_print|app_runtime|app_command_classification|config_context_auth_oauth|provider_openai|provider_anthropic|provider_gemini|app_command_registry|app_compaction|core_json_permission|plugin|mcp)|ava_cli\.headless_rpc_"
+scripts/run-tests.sh
+scripts/run-tests.sh -R "ava_tests\.(session|agent_loop|agent_loop_resilience|app_print|app_runtime|app_command_classification|config_context_auth_oauth|provider_openai|provider_anthropic|provider_gemini|app_command_registry|app_compaction|core_json_permission|plugin|mcp)|ava_cli\.headless_rpc_"
 git --no-pager diff --check
 ```
 
@@ -223,7 +227,7 @@ When C++ or CTest behavior changed, also run a sanitizer build/test, using the p
 
 ```sh
 cmake --build build-sanitize --target ava_tests
-ctest --test-dir build-sanitize --output-on-failure
+scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 
 Run `clang-format` on changed C++ files and `clang-tidy <changed-cpp-files> -p build` when `clang-tidy` is available in PATH. If it is unavailable, record that environment limitation in the release journal.

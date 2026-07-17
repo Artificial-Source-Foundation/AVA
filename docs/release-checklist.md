@@ -71,7 +71,7 @@ Build-only dependencies are not packaged. Building from this checkout needs CMak
 ```sh
 cmake --preset dev
 cmake --build --preset dev
-ctest --preset dev --output-on-failure
+scripts/run-tests.sh
 ```
 
 Focused release-closure coverage uses the registered CTest names. Python 3 and built `ava`, `ava_fake_provider_server`, and `ava_fake_mcp_server` executables are prerequisites for `ava_cli.acp_subprocess`.
@@ -95,7 +95,7 @@ No command above opts into live-provider calls.
 ```sh
 cmake --preset sanitize
 cmake --build --preset sanitize
-ctest --preset sanitize --output-on-failure
+scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 
 If the host cannot run ASan/UBSan, record the exact environment blocker rather than claiming a pass.

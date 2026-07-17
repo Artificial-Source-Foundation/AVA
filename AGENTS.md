@@ -32,7 +32,7 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
 cmake --build build
-ctest --test-dir build --output-on-failure
+scripts/run-tests.sh --build-dir build
 ```
 
 Preset equivalent:
@@ -40,7 +40,7 @@ Preset equivalent:
 ```sh
 cmake --preset dev
 cmake --build --preset dev
-ctest --preset dev
+scripts/run-tests.sh
 ```
 
 Sanitizers:
@@ -48,8 +48,10 @@ Sanitizers:
 ```sh
 cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
 cmake --build build-sanitize
-ctest --test-dir build-sanitize --output-on-failure
+scripts/run-tests.sh --build-dir build-sanitize
 ```
+
+The test runner uses the available logical cores, rejects concurrent runs in the same build tree, and accepts `--jobs N` plus ordinary CTest filters such as `-R`.
 
 Before handing work off, also run:
 

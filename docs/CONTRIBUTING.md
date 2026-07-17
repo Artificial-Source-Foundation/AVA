@@ -29,7 +29,7 @@ If you want to compile with debug output then you need to have:
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
 cmake --build build
-ctest --test-dir build --output-on-failure
+scripts/run-tests.sh --build-dir build
 ```
 
 Preset equivalent:
@@ -37,7 +37,7 @@ Preset equivalent:
 ```sh
 cmake --preset dev
 cmake --build --preset dev
-ctest --preset dev
+scripts/run-tests.sh
 ```
 
 Sanitizer pass:
@@ -45,7 +45,7 @@ Sanitizer pass:
 ```sh
 cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
 cmake --build build-sanitize
-ctest --test-dir build-sanitize --output-on-failure
+scripts/run-tests.sh --build-dir build-sanitize
 ```
 
 Preset equivalent:
@@ -53,8 +53,10 @@ Preset equivalent:
 ```sh
 cmake --preset sanitize
 cmake --build --preset sanitize
-ctest --preset sanitize
+scripts/run-tests.sh --build-dir build-sanitize
 ```
+
+The repository test runner detects the available logical cores and passes an explicit positive parallel level to CTest. Use `--jobs N` or `CTEST_PARALLEL_LEVEL=N` to cap it, and append normal CTest options such as `-R`. It rejects concurrent invocations for one build tree because several integration tests and CTest's own logs use fixed paths there.
 
 Tests currently build into one `ava_tests` CTest target from focused test sources under `tests/`. LSP coverage uses the `ava_fake_lsp_server` support executable.
 

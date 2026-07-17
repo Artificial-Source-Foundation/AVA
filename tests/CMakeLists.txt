@@ -421,6 +421,14 @@ if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
 endif()
 if(Python3_Interpreter_FOUND)
   add_test(
+    NAME ava_build.parallel_test_runner
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/parallel_test_runner_test.py
+            --script ${CMAKE_SOURCE_DIR}/scripts/run-tests.sh
+            --root ${CMAKE_BINARY_DIR}/parallel-test-runner)
+  set_tests_properties(ava_build.parallel_test_runner PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
     NAME ava_tests.acp_interop_manifest
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/acp_interop_manifest_test.py

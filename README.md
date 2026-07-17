@@ -34,7 +34,7 @@ The optional Qt Quick desktop prototype additionally requires Qt 6.5+ with QML, 
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
 cmake --build build
-ctest --test-dir build --output-on-failure
+scripts/run-tests.sh --build-dir build
 ```
 
 Equivalent CMake presets are available for local development:
@@ -42,7 +42,7 @@ Equivalent CMake presets are available for local development:
 ```sh
 cmake --preset dev
 cmake --build --preset dev
-ctest --preset dev
+scripts/run-tests.sh
 ```
 
 Sanitizer build:
@@ -50,7 +50,7 @@ Sanitizer build:
 ```sh
 cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
 cmake --build build-sanitize
-ctest --test-dir build-sanitize --output-on-failure
+scripts/run-tests.sh --build-dir build-sanitize
 ```
 
 Or with presets:
@@ -58,8 +58,10 @@ Or with presets:
 ```sh
 cmake --preset sanitize
 cmake --build --preset sanitize
-ctest --preset sanitize
+scripts/run-tests.sh --build-dir build-sanitize
 ```
+
+`scripts/run-tests.sh` defaults to the `build` tree and all available logical cores. Pass `--jobs N` (or set `CTEST_PARALLEL_LEVEL`) to cap concurrency; CTest filters such as `-R` are forwarded. The runner locks its build tree so two full runs cannot overwrite each other's fixed test roots and CTest logs.
 
 GitHub Actions runs both the normal and sanitizer test jobs on pushes and pull requests targeting `develop`. Dependabot is enabled for GitHub Actions updates on `develop`.
 

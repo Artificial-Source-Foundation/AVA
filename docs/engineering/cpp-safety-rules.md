@@ -97,7 +97,7 @@ These rules define the C++ subset we will use.
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
 cmake --build build
-ctest --test-dir build --output-on-failure
+scripts/run-tests.sh --build-dir build
 ```
 
 ### Sanitizer Builds
@@ -105,7 +105,7 @@ ctest --test-dir build --output-on-failure
 ```sh
 cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
 cmake --build build-sanitize
-ctest --test-dir build-sanitize --output-on-failure
+scripts/run-tests.sh --build-dir build-sanitize
 ```
 
 ## Review Checklist

@@ -64,7 +64,7 @@ jobs:
         run: cmake --build build --parallel
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure --parallel
+        run: scripts/run-tests.sh --build-dir build
 
   tsan:
     name: ThreadSanitizer coordinator and ACP peer
@@ -124,7 +124,7 @@ jobs:
         run: cmake --build build-sanitize --parallel
 
       - name: Test
-        run: ctest --test-dir build-sanitize --output-on-failure --parallel
+        run: scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 
   acp-sdk-interop:
     name: Official ACP SDK interoperability (Release)

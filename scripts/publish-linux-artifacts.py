@@ -147,17 +147,61 @@ def is_executable_by_effective_user(status: os.stat_result) -> bool:
     return bool(mode & stat.S_IXOTH)
 
 
-def open_snapshot_source(source: pathlib.Path) -> tuple[int, os.stat_result]:
+def open_regular_source(
+    source: pathlib.Path,
+    *,
+    subject: str,
+    regular_file_error: str,
+) -> tuple[int, os.stat_result]:
+    """Classify without opening a FIFO, then reopen the exact regular inode."""
+    path_flags = getattr(os, "O_PATH", None)
+    if path_flags is None:
+        fail(f"Linux O_PATH is required to classify {subject} without blocking: {source}")
+
     try:
-        source_fd = os.open(source, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        path_fd = os.open(source, path_flags | os.O_CLOEXEC | os.O_NOFOLLOW)
     except OSError as exc:
-        if exc.errno == errno.ELOOP:
-            fail(f"snapshot source must not be a symlink: {source}")
-        fail(f"unable to open executable snapshot source {source}: {exc}")
-    source_status = os.fstat(source_fd)
-    if not stat.S_ISREG(source_status.st_mode):
-        os.close(source_fd)
-        fail(f"snapshot source must name an executable regular file: {source}")
+        fail(f"unable to classify {subject} without blocking: {source}: {exc}")
+
+    source_fd = -1
+    try:
+        classified = os.fstat(path_fd)
+        if stat.S_ISLNK(classified.st_mode):
+            fail(f"{subject} must not be a symlink: {source}")
+        if not stat.S_ISREG(classified.st_mode):
+            fail(regular_file_error)
+
+        proc_source = f"/proc/self/fd/{path_fd}"
+        try:
+            # O_NOFOLLOW would reject procfs's descriptor link. O_NONBLOCK is
+            # retained defensively so this reopen never waits if the namespace
+            # changes in an unexpected kernel/filesystem implementation.
+            source_fd = os.open(proc_source, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        except OSError as exc:
+            fail(
+                f"unable to reopen {subject} through {proc_source}: {exc}; "
+                "procfs must be available for safe source snapshots"
+            )
+        reopened = os.fstat(source_fd)
+        if identity_of(classified) != identity_of(reopened):
+            fail(f"{subject} changed while reopening through procfs: {source}")
+        if not stat.S_ISREG(reopened.st_mode):
+            fail(f"{subject} is no longer a regular file after procfs reopen: {source}")
+        result = source_fd
+        source_fd = -1
+        return result, reopened
+    finally:
+        if source_fd >= 0:
+            os.close(source_fd)
+        os.close(path_fd)
+
+
+def open_snapshot_source(source: pathlib.Path) -> tuple[int, os.stat_result]:
+    source_fd, source_status = open_regular_source(
+        source,
+        subject="snapshot source",
+        regular_file_error=f"snapshot source must name an executable regular file: {source}",
+    )
     if not is_executable_by_effective_user(source_status):
         os.close(source_fd)
         fail(f"snapshot source must name an executable regular file: {source}")
@@ -244,13 +288,14 @@ def copy_to_temporary(
     temporary_name: str,
     temporary_files: list[tuple[str, DirectoryIdentity]],
 ) -> DirectoryIdentity:
-    source_fd = os.open(source, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    source_fd, _source_status = open_regular_source(
+        source,
+        subject="publication source",
+        regular_file_error=f"publication source is not a regular file: {source}",
+    )
     target_fd = -1
     target_created = False
     try:
-        source_status = os.fstat(source_fd)
-        if not stat.S_ISREG(source_status.st_mode):
-            fail(f"publication source is not a regular file: {source}")
         target_fd = os.open(
             temporary_name,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,

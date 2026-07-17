@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
 import hashlib
 import importlib.util
 import os
 import pathlib
 import platform
 import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -15,6 +18,7 @@ import sys
 import tarfile
 import tempfile
 import time
+from typing import Callable
 
 
 def run(
@@ -363,6 +367,580 @@ pathlib.Path(os.environ["AVA_PACKAGE_TEST_BUILD_MODEL_MARKER"]).write_text("smok
     return fake_repo, wrapper_dir
 
 
+RENAME_NOREPLACE = 1
+DirectoryIdentity = tuple[int, int]
+OwnedDirectoryIdentity = tuple[int, int, int, int]
+
+
+def directory_identity(status: os.stat_result) -> DirectoryIdentity:
+    return status.st_dev, status.st_ino
+
+
+def owned_directory_identity(status: os.stat_result) -> OwnedDirectoryIdentity:
+    return status.st_dev, status.st_ino, status.st_uid, stat.S_IMODE(status.st_mode)
+
+
+def rename_no_replace(directory_fd: int, source_name: str, destination_name: str) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise RuntimeError("Linux renameat2 is required for safe package-test cleanup")
+    renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    renameat2.restype = ctypes.c_int
+    result = renameat2(
+        directory_fd,
+        os.fsencode(source_name),
+        directory_fd,
+        os.fsencode(destination_name),
+        RENAME_NOREPLACE,
+    )
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number), source_name, destination_name)
+
+
+def checked_final_directory(path: pathlib.Path, description: str) -> os.stat_result | None:
+    try:
+        status = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(status.st_mode):
+        raise RuntimeError(f"{description} must not be a symlink: {path}")
+    if not stat.S_ISDIR(status.st_mode):
+        raise RuntimeError(f"{description} must be a directory: {path}")
+    return status
+
+
+def open_final_directory(path: pathlib.Path, description: str) -> tuple[int, os.stat_result]:
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    try:
+        directory_fd = os.open(path, flags)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise RuntimeError(f"{description} must not be a symlink: {path}") from exc
+        raise RuntimeError(f"unable to open {description}: {path}: {exc}") from exc
+    return directory_fd, os.fstat(directory_fd)
+
+
+def create_unique_owned_child(base_fd: int, base_path: pathlib.Path) -> tuple[str, OwnedDirectoryIdentity]:
+    for _ in range(32):
+        name = f".ava-package-linux-tests.{os.getpid()}.{secrets.token_hex(12)}"
+        try:
+            os.mkdir(name, 0o700, dir_fd=base_fd)
+        except FileExistsError:
+            continue
+        try:
+            child_fd = os.open(
+                name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=base_fd,
+            )
+        except OSError as exc:
+            raise RuntimeError(f"unable to open private package-test child {base_path / name}: {exc}") from exc
+        try:
+            os.fchmod(child_fd, 0o700)
+            opened = os.fstat(child_fd)
+            listed = os.stat(name, dir_fd=base_fd, follow_symlinks=False)
+        finally:
+            os.close(child_fd)
+        expected = owned_directory_identity(opened)
+        if (
+            expected != owned_directory_identity(listed)
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != 0o700
+            or not stat.S_ISDIR(opened.st_mode)
+        ):
+            raise RuntimeError(f"private package-test child changed while opening: {base_path / name}")
+        return name, expected
+    raise RuntimeError(f"could not allocate a unique private package-test child under {base_path}")
+
+
+def make_quarantine_name(prefix: str) -> str:
+    return f".{prefix}.quarantine.{os.getpid()}.{secrets.token_hex(12)}"
+
+
+def detach_no_replace(base_fd: int, child_name: str, prefix: str) -> str:
+    for _ in range(32):
+        quarantine_name = make_quarantine_name(prefix)
+        try:
+            rename_no_replace(base_fd, child_name, quarantine_name)
+        except FileExistsError:
+            continue
+        return quarantine_name
+    raise RuntimeError(f"could not allocate a unique cleanup quarantine for {child_name}")
+
+
+def restore_or_preserve(
+    base_fd: int,
+    quarantine_name: str,
+    child_name: str,
+    base_path: pathlib.Path,
+    reason: str,
+) -> str:
+    try:
+        rename_no_replace(base_fd, quarantine_name, child_name)
+    except OSError as exc:
+        return (
+            f"{reason}; preserved untrusted cleanup quarantine at {base_path / quarantine_name} "
+            f"because it could not be restored to {base_path / child_name}: {exc}"
+        )
+    return f"{reason}; restored it to {base_path / child_name} without deleting it"
+
+
+def remove_verified_tree(
+    parent_fd: int,
+    name: str,
+    expected: OwnedDirectoryIdentity,
+    *,
+    before_rmdir: Callable[[int, str, DirectoryIdentity], None] | None = None,
+) -> None:
+    """Remove a held, verified directory without following any child symlink."""
+    try:
+        directory_fd = os.open(
+            name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            dir_fd=parent_fd,
+        )
+    except OSError as exc:
+        raise RuntimeError(f"cleanup refused to open quarantined directory {name}: {exc}") from exc
+    try:
+        opened = os.fstat(directory_fd)
+        if owned_directory_identity(opened) != expected or not stat.S_ISDIR(opened.st_mode):
+            raise RuntimeError(f"cleanup refused replaced quarantined directory {name}")
+        remove_verified_tree_contents(directory_fd, before_rmdir=before_rmdir)
+        if before_rmdir is not None:
+            before_rmdir(parent_fd, name, directory_identity(opened))
+        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            directory_identity(current) != directory_identity(opened)
+            or not stat.S_ISDIR(current.st_mode)
+            or stat.S_ISLNK(current.st_mode)
+        ):
+            raise RuntimeError(f"cleanup refused changed directory entry before rmdir: {name}")
+        os.rmdir(name, dir_fd=parent_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def remove_verified_tree_contents(
+    directory_fd: int,
+    *,
+    before_rmdir: Callable[[int, str, DirectoryIdentity], None] | None = None,
+) -> None:
+    for name in os.listdir(directory_fd):
+        listed = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if stat.S_ISDIR(listed.st_mode) and not stat.S_ISLNK(listed.st_mode):
+            try:
+                child_fd = os.open(
+                    name,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                    dir_fd=directory_fd,
+                )
+            except OSError as exc:
+                raise RuntimeError(f"cleanup refused to open nested directory {name}: {exc}") from exc
+            try:
+                opened = os.fstat(child_fd)
+                if (
+                    directory_identity(opened) != directory_identity(listed)
+                    or not stat.S_ISDIR(opened.st_mode)
+                ):
+                    raise RuntimeError(f"cleanup refused replaced nested directory {name}")
+                remove_verified_tree_contents(child_fd, before_rmdir=before_rmdir)
+                if before_rmdir is not None:
+                    before_rmdir(directory_fd, name, directory_identity(opened))
+                current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if (
+                    directory_identity(current) != directory_identity(opened)
+                    or not stat.S_ISDIR(current.st_mode)
+                    or stat.S_ISLNK(current.st_mode)
+                ):
+                    raise RuntimeError(f"cleanup refused changed directory entry before rmdir: {name}")
+                os.rmdir(name, dir_fd=directory_fd)
+            finally:
+                os.close(child_fd)
+            continue
+
+        current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if directory_identity(current) != directory_identity(listed):
+            raise RuntimeError(f"cleanup refused changed non-directory entry: {name}")
+        # unlinkat removes a symbolic link itself; it never follows its target.
+        os.unlink(name, dir_fd=directory_fd)
+
+
+class PackageTestWorkspace:
+    def __init__(
+        self,
+        *,
+        base_path: pathlib.Path,
+        base_fd: int,
+        base_identity: OwnedDirectoryIdentity,
+        child_name: str,
+        child_identity: OwnedDirectoryIdentity,
+        owns_base: bool,
+        base_parent_fd: int = -1,
+    ) -> None:
+        self.base_path = base_path
+        self.base_fd = base_fd
+        self.base_identity = base_identity
+        self.child_name = child_name
+        self.child_identity = child_identity
+        self.owns_base = owns_base
+        self.base_parent_fd = base_parent_fd
+        self.quarantine_name: str | None = None
+
+    @property
+    def root(self) -> pathlib.Path:
+        return self.base_path / self.child_name
+
+    def cleanup(
+        self,
+        *,
+        after_detach: Callable[[int, str], None] | None = None,
+        before_rmdir: Callable[[int, str, DirectoryIdentity], None] | None = None,
+    ) -> str | None:
+        try:
+            try:
+                quarantine_name = detach_no_replace(self.base_fd, self.child_name, "ava-package-linux-tests")
+            except OSError as exc:
+                return f"cleanup refused to detach expected private child {self.root}: {exc}"
+            self.quarantine_name = quarantine_name
+
+            if after_detach is not None:
+                after_detach(self.base_fd, quarantine_name)
+            try:
+                quarantined = os.stat(quarantine_name, dir_fd=self.base_fd, follow_symlinks=False)
+            except OSError as exc:
+                return restore_or_preserve(
+                    self.base_fd,
+                    quarantine_name,
+                    self.child_name,
+                    self.base_path,
+                    f"cleanup could not inspect the detached child: {exc}",
+                )
+            if (
+                owned_directory_identity(quarantined) != self.child_identity
+                or not stat.S_ISDIR(quarantined.st_mode)
+                or stat.S_ISLNK(quarantined.st_mode)
+            ):
+                return restore_or_preserve(
+                    self.base_fd,
+                    quarantine_name,
+                    self.child_name,
+                    self.base_path,
+                    "cleanup refused detached child whose identity, owner, or mode changed",
+                )
+
+            try:
+                remove_verified_tree(
+                    self.base_fd,
+                    quarantine_name,
+                    self.child_identity,
+                    before_rmdir=before_rmdir,
+                )
+                os.fsync(self.base_fd)
+            except OSError as exc:
+                return f"cleanup preserved verified quarantine {self.base_path / quarantine_name}: {exc}"
+            except RuntimeError as exc:
+                return f"cleanup preserved verified quarantine {self.base_path / quarantine_name}: {exc}"
+
+            if self.owns_base:
+                return self.remove_owned_empty_base()
+            return None
+        finally:
+            os.close(self.base_fd)
+            self.base_fd = -1
+            if self.base_parent_fd >= 0:
+                os.close(self.base_parent_fd)
+                self.base_parent_fd = -1
+
+    def remove_owned_empty_base(self) -> str | None:
+        if self.base_parent_fd < 0:
+            return f"cleanup preserved private temporary base {self.base_path}: its parent descriptor is unavailable"
+        try:
+            if os.listdir(self.base_fd):
+                return f"cleanup preserved nonempty private temporary base {self.base_path}"
+            quarantine_name = detach_no_replace(self.base_parent_fd, self.base_path.name, "ava-package-linux-tests-base")
+            quarantined = os.stat(quarantine_name, dir_fd=self.base_parent_fd, follow_symlinks=False)
+            if (
+                owned_directory_identity(quarantined) != self.base_identity
+                or not stat.S_ISDIR(quarantined.st_mode)
+                or stat.S_ISLNK(quarantined.st_mode)
+            ):
+                return restore_or_preserve(
+                    self.base_parent_fd,
+                    quarantine_name,
+                    self.base_path.name,
+                    self.base_path.parent,
+                    "cleanup refused private temporary base whose identity, owner, or mode changed",
+                )
+            if os.listdir(self.base_fd):
+                return restore_or_preserve(
+                    self.base_parent_fd,
+                    quarantine_name,
+                    self.base_path.name,
+                    self.base_path.parent,
+                    "cleanup found a nonempty private temporary base after detaching it",
+                )
+            current = os.stat(quarantine_name, dir_fd=self.base_parent_fd, follow_symlinks=False)
+            if directory_identity(current) != directory_identity(quarantined):
+                return restore_or_preserve(
+                    self.base_parent_fd,
+                    quarantine_name,
+                    self.base_path.name,
+                    self.base_path.parent,
+                    "cleanup refused changed private temporary base before rmdir",
+                )
+            os.rmdir(quarantine_name, dir_fd=self.base_parent_fd)
+            return None
+        except OSError as exc:
+            return f"cleanup preserved private temporary base {self.base_path}: {exc}"
+
+
+def create_private_base() -> tuple[pathlib.Path, int, OwnedDirectoryIdentity, int]:
+    base_path = pathlib.Path(tempfile.mkdtemp(prefix="ava-package-linux-tests-"))
+    parent_fd = -1
+    base_fd = -1
+    try:
+        parent_fd, _parent_status = open_final_directory(base_path.parent, "private package-test base parent")
+        base_fd = os.open(
+            base_path.name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            dir_fd=parent_fd,
+        )
+        # chmod the held inode, never the just-created pathname.
+        os.fchmod(base_fd, 0o700)
+        opened = os.fstat(base_fd)
+        listed = os.stat(base_path.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            owned_directory_identity(opened) != owned_directory_identity(listed)
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != 0o700
+            or not stat.S_ISDIR(opened.st_mode)
+        ):
+            raise RuntimeError(f"private package-test base changed while opening: {base_path}")
+        return base_path, base_fd, owned_directory_identity(opened), parent_fd
+    except BaseException:
+        if base_fd >= 0:
+            os.close(base_fd)
+        if parent_fd >= 0:
+            os.close(parent_fd)
+        # The base was created by this harness, but do not recursively delete it
+        # if descriptor setup fails; preserving it is safer than a path walk.
+        raise
+
+
+def prepare_workspace(requested_root: pathlib.Path, repo: pathlib.Path) -> PackageTestWorkspace:
+    # Inspect the final component before resolve() so a caller-controlled final
+    # symlink is refused rather than silently redirected through its target.
+    existing = checked_final_directory(requested_root, "package-test root")
+    resolved_root = requested_root.resolve(strict=False)
+    redirected = resolved_root == repo or repo in resolved_root.parents
+
+    if redirected:
+        base_path, base_fd, base_identity, parent_fd = create_private_base()
+        try:
+            child_name, child_identity = create_unique_owned_child(base_fd, base_path)
+        except BaseException:
+            os.close(base_fd)
+            os.close(parent_fd)
+            raise
+        return PackageTestWorkspace(
+            base_path=base_path,
+            base_fd=base_fd,
+            base_identity=base_identity,
+            child_name=child_name,
+            child_identity=child_identity,
+            owns_base=True,
+            base_parent_fd=parent_fd,
+        )
+
+    if existing is None:
+        try:
+            os.mkdir(resolved_root, 0o700)
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise RuntimeError(f"unable to create package-test root {resolved_root}: {exc}") from exc
+
+    base_fd, opened = open_final_directory(resolved_root, "package-test root")
+    if existing is not None and directory_identity(existing) != directory_identity(opened):
+        os.close(base_fd)
+        raise RuntimeError(f"package-test root changed while opening: {resolved_root}")
+    if opened.st_uid != os.geteuid():
+        os.close(base_fd)
+        raise RuntimeError(f"package-test root is not owned by effective user {os.geteuid()}: {resolved_root}")
+    if stat.S_IMODE(opened.st_mode) & 0o022:
+        os.close(base_fd)
+        raise RuntimeError(f"package-test root must not be group- or other-writable: {resolved_root}")
+    try:
+        child_name, child_identity = create_unique_owned_child(base_fd, resolved_root)
+    except BaseException:
+        os.close(base_fd)
+        raise
+    return PackageTestWorkspace(
+        base_path=resolved_root,
+        base_fd=base_fd,
+        base_identity=owned_directory_identity(opened),
+        child_name=child_name,
+        child_identity=child_identity,
+        owns_base=False,
+    )
+
+
+def write_fd_text(directory_fd: int, name: str, content: bytes) -> None:
+    file_fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600, dir_fd=directory_fd)
+    try:
+        os.write(file_fd, content)
+    finally:
+        os.close(file_fd)
+
+
+def require_workspace_cleanup(workspace: PackageTestWorkspace, context: str, **kwargs: object) -> None:
+    error = workspace.cleanup(**kwargs)
+    if error is not None:
+        raise RuntimeError(f"{context}: {error}")
+
+
+def run_workspace_safety_regressions(repo: pathlib.Path) -> None:
+    """Exercise root ownership and cleanup races without touching caller roots."""
+    in_repo_request = repo / "build" / f".ava-package-linux-tests-in-repo-root.{secrets.token_hex(12)}"
+    in_repo_workspace = prepare_workspace(in_repo_request, repo)
+    if not in_repo_workspace.owns_base or in_repo_workspace.root.parent == in_repo_request.parent:
+        raise RuntimeError("in-repository CTest root was not redirected to a private system-temporary base")
+    private_base = in_repo_workspace.base_path
+    require_workspace_cleanup(in_repo_workspace, "in-repository workspace cleanup")
+    if private_base.exists() or in_repo_request.exists():
+        raise RuntimeError("in-repository workspace cleanup changed the requested root or retained its private base")
+
+    with tempfile.TemporaryDirectory(prefix="ava-package-linux-tests-regressions-") as temporary:
+        sandbox = pathlib.Path(temporary)
+
+        symlink_target = sandbox / "symlink-target"
+        symlink_target.mkdir(mode=0o700)
+        target_sentinel = symlink_target / "preserve"
+        target_sentinel.write_text("preserve\n", encoding="utf-8")
+        symlink_root = sandbox / "symlink-root"
+        symlink_root.symlink_to(symlink_target, target_is_directory=True)
+        try:
+            prepare_workspace(symlink_root, repo)
+        except RuntimeError as exc:
+            if "must not be a symlink" not in str(exc):
+                raise RuntimeError(f"final root symlink was refused for the wrong reason: {exc}") from exc
+        else:
+            raise RuntimeError("final root symlink was accepted")
+        if target_sentinel.read_text(encoding="utf-8") != "preserve\n" or not symlink_root.is_symlink():
+            raise RuntimeError("final root symlink refusal modified its target or link")
+
+        non_directory_root = sandbox / "non-directory-root"
+        non_directory_root.write_text("preserve\n", encoding="utf-8")
+        try:
+            prepare_workspace(non_directory_root, repo)
+        except RuntimeError as exc:
+            if "must be a directory" not in str(exc):
+                raise RuntimeError(f"final non-directory root was refused for the wrong reason: {exc}") from exc
+        else:
+            raise RuntimeError("final non-directory root was accepted")
+        if non_directory_root.read_text(encoding="utf-8") != "preserve\n":
+            raise RuntimeError("final non-directory root refusal modified caller content")
+
+        external_base = sandbox / "external-base"
+        external_base.mkdir(mode=0o700)
+        external_sentinel = external_base / "preexisting"
+        external_sentinel.write_text("preserve\n", encoding="utf-8")
+        external_workspace = prepare_workspace(external_base, repo)
+        (external_workspace.root / "work").write_text("private\n", encoding="utf-8")
+        require_workspace_cleanup(external_workspace, "external root cleanup")
+        if external_sentinel.read_text(encoding="utf-8") != "preserve\n":
+            raise RuntimeError("external caller root content was removed or modified")
+
+        swap_base = sandbox / "top-level-swap"
+        swap_base.mkdir(mode=0o700)
+        swap_workspace = prepare_workspace(swap_base, repo)
+        saved_child = swap_base / "expected-child"
+        os.rename(swap_workspace.child_name, saved_child.name, src_dir_fd=swap_workspace.base_fd, dst_dir_fd=swap_workspace.base_fd)
+        os.mkdir(swap_workspace.child_name, 0o700, dir_fd=swap_workspace.base_fd)
+        replacement_fd = os.open(
+            swap_workspace.child_name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            dir_fd=swap_workspace.base_fd,
+        )
+        try:
+            write_fd_text(replacement_fd, "replacement", b"preserve\n")
+        finally:
+            os.close(replacement_fd)
+        swap_error = swap_workspace.cleanup()
+        if swap_error is None or "restored" not in swap_error:
+            raise RuntimeError(f"top-level swap cleanup did not conservatively restore the replacement: {swap_error}")
+        if not (swap_base / swap_workspace.child_name / "replacement").is_file() or not saved_child.is_dir():
+            raise RuntimeError("top-level swap cleanup removed a replacement or the original child")
+
+        quarantine_base = sandbox / "quarantine-mismatch"
+        quarantine_base.mkdir(mode=0o700)
+        quarantine_workspace = prepare_workspace(quarantine_base, repo)
+
+        def replace_quarantine(base_fd: int, quarantine_name: str) -> None:
+            os.rename(quarantine_name, "stolen-expected-child", src_dir_fd=base_fd, dst_dir_fd=base_fd)
+            os.mkdir(quarantine_name, 0o700, dir_fd=base_fd)
+            replacement_fd = os.open(
+                quarantine_name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=base_fd,
+            )
+            try:
+                write_fd_text(replacement_fd, "replacement", b"preserve\n")
+            finally:
+                os.close(replacement_fd)
+
+        quarantine_error = quarantine_workspace.cleanup(after_detach=replace_quarantine)
+        if quarantine_error is None or "restored" not in quarantine_error:
+            raise RuntimeError(f"quarantine mismatch was not restored safely: {quarantine_error}")
+        if not (quarantine_base / quarantine_workspace.child_name / "replacement").is_file():
+            raise RuntimeError("quarantine mismatch cleanup removed the replacement")
+        if not (quarantine_base / "stolen-expected-child").is_dir():
+            raise RuntimeError("quarantine mismatch cleanup removed the expected child after it was moved")
+
+        nested_base = sandbox / "nested-replacement"
+        nested_base.mkdir(mode=0o700)
+        nested_workspace = prepare_workspace(nested_base, repo)
+        nested = nested_workspace.root / "nested"
+        nested.mkdir(mode=0o700)
+        (nested / "original").write_text("remove only the original\n", encoding="utf-8")
+
+        def replace_nested(parent_fd: int, name: str, _expected: DirectoryIdentity) -> None:
+            if name != "nested":
+                return
+            os.rename(name, "nested-original", src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+            os.mkdir(name, 0o700, dir_fd=parent_fd)
+            replacement_fd = os.open(
+                name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=parent_fd,
+            )
+            try:
+                write_fd_text(replacement_fd, "replacement", b"preserve\n")
+            finally:
+                os.close(replacement_fd)
+
+        nested_error = nested_workspace.cleanup(before_rmdir=replace_nested)
+        if nested_error is None or "changed directory entry before rmdir" not in nested_error:
+            raise RuntimeError(f"nested replacement cleanup did not refuse the changed entry: {nested_error}")
+        if nested_workspace.quarantine_name is None:
+            raise RuntimeError("nested replacement cleanup did not retain a quarantine name")
+        retained_nested = nested_base / nested_workspace.quarantine_name / "nested" / "replacement"
+        if retained_nested.read_bytes() != b"preserve\n":
+            raise RuntimeError("nested replacement cleanup removed or traversed the replacement")
+
+        link_base = sandbox / "symlink-cleanup"
+        link_base.mkdir(mode=0o700)
+        link_workspace = prepare_workspace(link_base, repo)
+        external_target = sandbox / "outside-link-target"
+        external_target.write_text("preserve\n", encoding="utf-8")
+        (link_workspace.root / "link").symlink_to(external_target)
+        require_workspace_cleanup(link_workspace, "symlink cleanup")
+        if external_target.read_text(encoding="utf-8") != "preserve\n":
+            raise RuntimeError("cleanup followed a symbolic link target")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--script", type=pathlib.Path, required=True)
@@ -376,22 +954,16 @@ def main() -> int:
         print("skipping Linux package tests on non-Linux host")
         return 77
 
-    requested_root = args.root.resolve()
     repo = args.repo.resolve()
+    run_workspace_safety_regressions(repo)
+    workspace = prepare_workspace(args.root, repo)
+    root = workspace.root
     script = args.script.resolve()
     publisher = script.parent / "publish-linux-artifacts.py"
     version = project_version(repo)
     package_name = f"ava-{version}-linux-{package_architecture()}"
     archive_name = f"{package_name}.tar.gz"
     checksum_name = f"{archive_name}.sha256"
-
-    temporary_root = requested_root == repo or repo in requested_root.parents
-    if temporary_root:
-        root = pathlib.Path(tempfile.mkdtemp(prefix="ava-package-linux-tests-"))
-    else:
-        root = requested_root
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True, mode=0o700)
     temp = root / "tmp"
     temp.mkdir(mode=0o700)
     env = os.environ.copy()
@@ -494,6 +1066,66 @@ def main() -> int:
         "must name an executable regular file",
         "non-executable accepted --binary was not rejected",
     )
+
+    # Both publisher source paths must classify a FIFO without opening it for
+    # reading. Run direct Python children with finite timeouts (never a shell)
+    # so a regression cannot leave a blocked descendant behind.
+    fifo_source = root / "publisher-source-fifo"
+    os.mkfifo(fifo_source, 0o600)
+    fifo_snapshot_destination = root / "publisher-source-fifo-snapshot"
+    try:
+        fifo_snapshot_result = run(
+            [
+                sys.executable,
+                str(publisher),
+                "--snapshot-executable",
+                str(fifo_source),
+                str(fifo_snapshot_destination),
+            ],
+            env=env,
+            check=False,
+            timeout=5.0,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("FIFO snapshot-source classification blocked instead of failing promptly") from exc
+    require_failure(
+        fifo_snapshot_result,
+        "must name an executable regular file",
+        "FIFO snapshot-source classification did not fail promptly",
+    )
+    if fifo_snapshot_destination.exists():
+        raise RuntimeError("FIFO snapshot-source classification created a destination")
+
+    fifo_publication_output = root / "publisher-fifo-output"
+    fifo_publication_output.mkdir(mode=0o700)
+    fifo_output_identity = run(
+        [sys.executable, str(publisher), "--check", str(fifo_publication_output)], env=env
+    ).stdout.strip()
+    try:
+        fifo_publication_result = run(
+            [
+                sys.executable,
+                str(publisher),
+                "--output",
+                str(fifo_publication_output),
+                "--expected-directory-identity",
+                fifo_output_identity,
+                "--file",
+                str(fifo_source),
+                "fifo.bin",
+            ],
+            env=env,
+            check=False,
+            timeout=5.0,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("FIFO publication-source classification blocked instead of failing promptly") from exc
+    require_failure(
+        fifo_publication_result,
+        "publication source is not a regular file",
+        "FIFO publication-source classification did not fail promptly",
+    )
+    assert_output_empty(fifo_publication_output, "FIFO publication-source classification created output")
 
     # Mutating an already-open source inode during its copy must invalidate and
     # remove the private snapshot, even when the source pathname never changes.
@@ -856,8 +1488,9 @@ raise SystemExit(91)
         raise RuntimeError("publication removed an existing destination symlink")
 
     print("Linux package snapshot, identity, rollback, allowlist, checksum, and smoke tests passed")
-    if temporary_root:
-        shutil.rmtree(root)
+    cleanup_error = workspace.cleanup()
+    if cleanup_error is not None:
+        raise RuntimeError(f"package-test workspace cleanup failed: {cleanup_error}")
     return 0
 
 

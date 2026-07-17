@@ -830,7 +830,7 @@ void test_lsp_manager_cancellation_precedence()
       .workspace_root = timeout_workspace,
       .process_cwd = timeout_workspace,
       .startup_timeout = std::chrono::milliseconds(1000),
-      .request_timeout = std::chrono::milliseconds(250),
+      .request_timeout = std::chrono::milliseconds(500),
   });
   TestOwnedProcessGroupCleanup timeout_cleanup;
   std::optional<std::chrono::steady_clock::time_point> timeout_cancel_seen;

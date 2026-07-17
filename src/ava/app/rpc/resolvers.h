@@ -79,7 +79,9 @@ struct PendingResolverState
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-[[nodiscard]] bool cancel_pending_resolvers(PendingResolverState& pending_state);
+// Acquires the output mutex before the pending-state mutex. This is the only cancellation entry
+// point for resolver requests so publication and cancellation have one global linearization order.
+[[nodiscard]] bool cancel_pending_resolvers(output_ts& output, PendingResolverState& pending_state);
 [[nodiscard]] std::string permission_session_grants_result_json(PendingResolverState& pending_state);
 [[nodiscard]] ava::core::Result<std::string> permission_session_grant_revoke_result_json(PendingResolverState& pending_state, std::string_view grant_id);
 [[nodiscard]] std::string permission_session_grants_clear_result_json(PendingResolverState& pending_state);

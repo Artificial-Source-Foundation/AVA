@@ -26,7 +26,7 @@ class BlockingInputBuf final : public std::streambuf
 {
  public:
   void push(std::string text);
-  void close();
+  void close() noexcept;
   bool wait_until_blocked(std::chrono::milliseconds timeout);
   bool wait_until_eof_observed(std::chrono::milliseconds timeout);
 

@@ -37,6 +37,7 @@
 #include <ranges>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -140,21 +141,58 @@ class TerminalPublicationStreamBuf final : public std::streambuf
   bool released_ = false;
 };
 
+class WakeBadInputBuf final : public std::streambuf
+{
+ public:
+  bool wait_until_blocked(std::chrono::milliseconds timeout)
+  {
+    std::unique_lock lock(mutex_);
+    return cv_.wait_for(lock, timeout, [&] { return blocked_; });
+  }
+
+  void wake() noexcept
+  {
+    {
+      std::lock_guard lock(mutex_);
+      woken_ = true;
+    }
+    cv_.notify_all();
+  }
+
+ protected:
+  int underflow() override
+  {
+    std::unique_lock lock(mutex_);
+    blocked_ = true;
+    cv_.notify_all();
+    cv_.wait(lock, [&] { return woken_; });
+    throw std::runtime_error("wake-induced stream failure");
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  bool blocked_ = false;
+  bool woken_ = false;
+};
+
 class PausingTerminalCallbackLineReader final : public ava::app::rpc::RpcLineReader
 {
  public:
-  explicit PausingTerminalCallbackLineReader(std::istream& input) : input_(input) { }
+  explicit PausingTerminalCallbackLineReader(std::istream& input, ava::app::rpc::RpcInputWake wake) : input_(input, std::move(wake)) { }
 
   ava::core::Result<bool> read_line(std::string& line, ava::app::rpc::RpcInputTerminalCallback const& on_terminal) override
   {
     return input_.read_line(line, [this, &on_terminal](ava::app::rpc::RpcInputTerminalOutcome outcome) {
-      if (on_terminal)
-        on_terminal(outcome);
+      // Signal that the reader reached a terminal boundary before forwarding it. Forwarding can
+      // legitimately wait for the output mutex while a terminal response is flushing.
       {
         std::lock_guard lock(mutex_);
         terminal_callback_observed_ = true;
       }
       cv_.notify_all();
+      if (on_terminal)
+        on_terminal(outcome);
       std::unique_lock lock(mutex_);
       cv_.wait(lock, [&] { return terminal_callback_released_; });
     });
@@ -615,7 +653,8 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello rpc\"}\n");
   bool const completed = output_buffer.wait_contains("rpc answer", std::chrono::seconds(2));
   input_buffer.close();
@@ -659,7 +698,8 @@ void test_app_rpc_offline_allows_local_protocol_and_rejects_prompt_before_provid
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
   input_buffer.push("{\"id\":\"proto\",\"type\":\"get_protocol\"}\n");
   bool const protocol_completed = output_buffer.wait_contains("\"id\":\"proto\"", std::chrono::seconds(2));
   input_buffer.push("{\"id\":\"p-offline\",\"type\":\"prompt\",\"message\":\"hello offline rpc\"}\n");
@@ -711,7 +751,8 @@ void test_app_rpc_prompt_imports_image_attachments()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
   input_buffer.push("{\"id\":\"p-img\",\"type\":\"prompt\",\"message\":\"describe\",\"attachments\":[\"" + ava::core::json::escape(image_path.string()) +
                     "\"]}\n");
   bool const completed = output_buffer.wait_contains("rpc image answer", std::chrono::seconds(2));
@@ -766,7 +807,8 @@ void test_app_rpc_prompt_imports_inline_image_uploads()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
   input_buffer.push("{\"id\":\"p-upload\",\"type\":\"prompt\",\"message\":\"describe\",\"images\":[{\"type\":\"image\",\"data\":\"" +
                     ava::provider::base64_encode(rpc_tiny_png_bytes()) + "\",\"mimeType\":\"image/png\"}]}\n");
   bool const completed = output_buffer.wait_contains("rpc upload answer", std::chrono::seconds(2));
@@ -816,7 +858,7 @@ void test_app_rpc_prompt_rejects_inline_image_upload_mime_mismatch()
                         ava::provider::base64_encode(rpc_tiny_png_bytes()) + "\",\"mimeType\":\"image/jpeg\"}]}\n");
   std::ostringstream out;
 
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC inline image MIME mismatch loop completes after error response");
   expect(jsonl.find("\"id\":\"p-upload-bad\"") != std::string::npos && jsonl.find("\"success\":false") != std::string::npos &&
@@ -854,7 +896,8 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello rpc stream\"}\n");
   bool const completed = output_buffer.wait_contains("\"success\":true", std::chrono::seconds(2));
   input_buffer.close();
@@ -901,7 +944,8 @@ void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
   input_buffer.push("{\"id\":\"p-cancel\",\"type\":\"prompt\",\"message\":\"cancel during retry\"}\n");
   bool const retry_started = output_buffer.wait_contains("\"name\":\"retry\"", std::chrono::seconds(2));
   input_buffer.push("{\"id\":\"cancel\",\"type\":\"cancel\"}\n");
@@ -952,7 +996,8 @@ void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
   input_buffer.push("{\"id\":\"cancel-idle\",\"type\":\"cancel\"}\n");
   bool const canceled = output_buffer.wait_contains("\"id\":\"cancel-idle\"", std::chrono::seconds(2));
   input_buffer.push("{\"id\":\"p-after\",\"type\":\"prompt\",\"message\":\"run after idle cancel\"}\n");
@@ -1013,7 +1058,10 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out); });
+  std::jthread rpc_thread([&] {
+    result =
+        ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, [&] noexcept { input_buffer.close(); });
+  });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello refreshed rpc\"}\n");
   bool const completed = output_buffer.wait_contains("\"success\":true", std::chrono::seconds(2));
   input_buffer.close();
@@ -1055,7 +1103,7 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command()
       "not json\n{\"id\":\"s1\",\"type\":\"get_state\"}\n"
       "{\"id\":\"u1\",\"type\":\"unknown\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC loop continues after malformed and unknown commands");
   expect(std::count(jsonl.begin(), jsonl.end(), '\n') == 3 && jsonl.find("\"id\":\"\"") != std::string::npos &&
@@ -1095,7 +1143,7 @@ void test_app_rpc_state_list_sessions_and_open_session()
       "{\"id\":\"open\",\"type\":\"open_session\",\"session_id\":\"" +
       first_id + "\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*second, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*second, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC state/list/open loop completes successfully");
   expect(jsonl.find("\"id\":\"state\"") != std::string::npos && jsonl.find(second_id) != std::string::npos &&
@@ -1132,7 +1180,7 @@ void test_app_rpc_session_metadata_name_and_labels()
       "{\"id\":\"after\",\"type\":\"session_metadata\"}\n"
       "{\"id\":\"bad\",\"type\":\"set_session_labels\",\"labels\":[\"dup\",\"dup\"]}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto metadata = ava::session::load_session_metadata(session->store);
   auto entries = session->store.load();
@@ -1199,7 +1247,7 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
                         parent_id + "\"}\n" + "{\"id\":\"tree2\",\"type\":\"session_tree\"}\n";
   std::istringstream in(requests);
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*child, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*child, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC session_tree loop completes successfully");
   expect(jsonl.find("\"id\":\"tree\"") != std::string::npos && jsonl.find("\"current_session_id\":\"" + child_id + "\"") != std::string::npos &&
@@ -1258,7 +1306,7 @@ void test_app_rpc_session_fork_and_clone_commands()
                         "{\"id\":\"clone_meta\",\"type\":\"session_metadata\"}\n";
   std::istringstream in(requests);
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
   bool source_unchanged = false;
@@ -1327,7 +1375,7 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
   ava::tests::FakeTransport transport({});
   std::istringstream in("{\"id\":\"fork-rollback\",\"type\":\"fork_session\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*source, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*source, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto const marker = std::string("created_session_id: ");
   auto const marker_offset = jsonl.find(marker);
@@ -1391,7 +1439,7 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   ava::tests::FakeTransport transport({});
   std::istringstream in("{\"id\":\"clone\",\"type\":\"clone_session\",\"session_id\":\"" + source_id + "\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*current, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*current, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto cloned_entries = current->store.load();
   auto cloned_metadata = ava::session::load_session_metadata(current->store);
   expect(result && out.str().find("\"id\":\"clone\"") != std::string::npos && current->store.session_id() != source_id && cloned_entries &&
@@ -1438,7 +1486,7 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
                         "{\"id\":\"stats\",\"type\":\"get_session_stats\"}\n";
   std::istringstream in(requests);
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
   bool source_has_summary = false;
@@ -1484,7 +1532,7 @@ void test_app_rpc_model_commands()
       "{\"id\":\"stats\",\"type\":\"get_session_stats\"}\n"
       "{\"id\":\"cycle\",\"type\":\"cycle_model\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC model command loop completes successfully");
   expect(jsonl.find("\"id\":\"list\"") != std::string::npos && jsonl.find("\"models\"") != std::string::npos &&
@@ -1546,7 +1594,7 @@ void test_app_rpc_reasoning_commands()
       "{\"id\":\"state-off\",\"type\":\"get_state\"}\n"
       "{\"id\":\"clear\",\"type\":\"clear_reasoning\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC reasoning command loop completes successfully");
   expect(jsonl.find("\"id\":\"set\"") != std::string::npos && jsonl.find("\"reasoning_enabled\":true") != std::string::npos &&
@@ -1598,7 +1646,7 @@ void test_app_rpc_reasoning_model_serialization_exposes_resolved_maps()
       "{\"id\":\"set\",\"type\":\"set_reasoning\",\"reasoning_level\":\"xhigh\"}\n"
       "{\"id\":\"state\",\"type\":\"get_state\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
 
   expect(result.has_value(), "RPC reasoning serialization loop completes successfully");
@@ -1733,7 +1781,7 @@ void test_app_rpc_protocol_version_and_session_commands()
   std::ostringstream out;
   ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto const current_entry_version = std::string("\"version\":") + std::to_string(ava::session::kCurrentSessionEntryVersion);
   expect(result.has_value(), "RPC protocol/session loop completes successfully");
@@ -1799,7 +1847,7 @@ void test_app_rpc_protocol_version_and_resolver_reply_errors()
       "{\"id\":\"state\",\"type\":\"get_state\",\"protocol_version\":1}\n";
   std::istringstream in(input);
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC protocol error loop recovers after unsupported commands");
   expect(jsonl.find("unsupported RPC protocol version") != std::string::npos && jsonl.find("RPC protocol_version must be an integer") != std::string::npos &&
@@ -1852,7 +1900,7 @@ void test_app_rpc_mcp_command_responses()
       "{\"id\":\"mcp-tools\",\"type\":\"list_mcp_tools\",\"server_id\":\"demo\"}\n"
       "{\"id\":\"mcp-restart\",\"type\":\"restart_mcp_server\",\"server_id\":\"demo\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
 
   auto const has_id = [&jsonl](std::string_view id) { return jsonl.find("\"id\":\"" + std::string(id) + "\"") != std::string::npos; };
@@ -1916,7 +1964,8 @@ void test_app_rpc_command_responses_for_context_compact_export()
     return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Allow, "test export write"};
   };
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
   input_buffer.push(std::string("{\"id\":\"plugins\",\"type\":\"list_plugins\"}\n") +
                     "{\"id\":\"plugin-enable\",\"type\":\"enable_plugin\",\"plugin_id\":\"com.example.rpc\"}\n"
                     "{\"id\":\"plugin-inspect\",\"type\":\"inspect_plugin\",\"plugin_id\":\"com.example.rpc\"}\n"
@@ -1988,7 +2037,10 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out); });
+  std::jthread rpc_thread([&] {
+    result =
+        ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, [&] noexcept { input_buffer.close(); });
+  });
 
   input_buffer.push(R"JSON({"id":"cmd-allow","type":"run_command","command":"printf rpc-direct"})JSON"
                     "\n");
@@ -2046,7 +2098,10 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out); });
+  std::jthread rpc_thread([&] {
+    result =
+        ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, [&] noexcept { input_buffer.close(); });
+  });
 
   input_buffer.push(R"JSON({"id":"cmd-deny","type":"run_bash","command":"touch denied.txt"})JSON"
                     "\n");
@@ -2106,7 +2161,8 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
   runtime_options.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Allow;
   };
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push(R"JSON({"id":"cmd-sleep","type":"run_command","command":"sleep 5"})JSON"
                     "\n");
@@ -2156,7 +2212,8 @@ void test_app_rpc_compact_provider_failure_is_error_response()
   runtime_options.access_token = "token";
 
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
   input_buffer.push("{\"id\":\"cmp-fail\",\"type\":\"compact\"}\n");
   bool const failed = output_buffer.wait_contains("compaction summary request failed with status 500", std::chrono::seconds(2));
   input_buffer.close();
@@ -2346,7 +2403,7 @@ void test_app_rpc_utf8_recovery_and_framing()
   std::ostringstream out;
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, {}, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, {}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result && jsonl.find("\"id\":\"\",\"type\":\"response\",\"success\":false") != std::string::npos &&
              jsonl.find("RPC request is not valid UTF-8") != std::string::npos && jsonl.find("\"id\":\"state-after\"") != std::string::npos &&
@@ -2380,7 +2437,8 @@ void test_app_rpc_terminal_publication_gates_prompt_id_reuse()
   TerminalPublicationStreamBuf output_buffer("\"id\":\"same\",\"type\":\"response\"");
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"same\",\"type\":\"prompt\",\"message\":\"first\"}\n");
   bool const terminal_observable = output_buffer.wait_until_terminal(std::chrono::seconds(2));
@@ -2426,7 +2484,8 @@ void test_app_rpc_parent_terminal_precedes_queued_follow_up_start()
   TerminalPublicationStreamBuf output_buffer("\"id\":\"parent\",\"type\":\"response\"");
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"parent\",\"type\":\"prompt\",\"message\":\"parent\"}\n");
   bool const permission_requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
@@ -2474,7 +2533,7 @@ void test_app_rpc_eof_during_blocked_parent_publication_skips_follow_up()
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
-  PausingTerminalCallbackLineReader input(in);
+  PausingTerminalCallbackLineReader input(in, [&] noexcept { input_buffer.close(); });
   TerminalPublicationStreamBuf output_buffer("\"id\":\"parent\",\"type\":\"response\"");
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
@@ -2537,7 +2596,9 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
       TerminalPublicationStreamBuf output_buffer("\"id\":\"direct\",\"type\":\"response\"");
       std::ostream out(&output_buffer);
       ava::core::VoidResult result;
-      std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+      std::jthread rpc_thread([&] {
+        result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+      });
       input_buffer.push("{\"id\":\"direct\",\"type\":\"run_bash\",\"command\":\"printf direct\"}\n");
       bool const terminal_observable = output_buffer.wait_until_terminal(std::chrono::seconds(2));
       input_buffer.push("{\"id\":\"next\",\"type\":\"prompt\",\"message\":\"after direct\"}\n");
@@ -2576,7 +2637,9 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
       TerminalPublicationStreamBuf output_buffer("\"id\":\"compact\",\"type\":\"response\"");
       std::ostream out(&output_buffer);
       ava::core::VoidResult result;
-      std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+      std::jthread rpc_thread([&] {
+        result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+      });
       input_buffer.push("{\"id\":\"compact\",\"type\":\"compact\"}\n");
       bool const terminal_observable = output_buffer.wait_until_terminal(std::chrono::seconds(2));
       input_buffer.push("{\"id\":\"compact\",\"type\":\"compact\"}\n");
@@ -2615,29 +2678,51 @@ void test_app_rpc_worker_output_failure_wakes_blocked_input()
   runtime_options.access_token = "token";
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
-  ava::app::rpc::StreamRpcLineReader input(in, [&] { input_buffer.close(); });
   TerminalPublicationStreamBuf output_buffer("\"id\":\"p1\",\"type\":\"response\"", true);
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::atomic_bool done = false;
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(*session, open_options, provider, transport, transport, runtime_options, input, out);
-    done.store(true, std::memory_order_release);
+    result = ava::app::run_rpc_loop(*session, open_options, provider, transport, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"fail output\"}\n");
   bool const request_started = transport.wait_for_request(std::chrono::seconds(2));
   bool const input_blocked = input_buffer.wait_until_blocked(std::chrono::seconds(2));
   transport.release();
-  for (int attempt = 0; attempt < 200 && !done.load(std::memory_order_acquire); ++attempt) std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  bool const exited_without_more_input = done.load(std::memory_order_acquire);
-  if (!exited_without_more_input)
-    input_buffer.close();
+  bool const exited_without_more_input = input_buffer.wait_until_eof_observed(std::chrono::seconds(2));
   rpc_thread.join();
 
   expect(request_started && input_blocked && exited_without_more_input,
-         "RPC worker output failure wakes a blocked generic input reader without another stdin record");
+         "public std::istream RPC loop wakes a blocked input reader after worker output failure without another stdin record");
   expect(!result && result.error().category() == ava::core::ErrorCategory::Io && result.error().message() == "failed to write RPC JSONL record",
          "RPC output-failure wake returns the original worker output I/O error after joining");
+}
+
+void test_app_rpc_mode_forwards_nonstdin_wake()
+{
+  auto const root = temp_root() / "app-rpc-mode-stream-wake";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::app::RpcModeOptions options;
+  options.open_options.workspace_dir = workspace;
+  options.open_options.current_dir = workspace;
+  options.open_options.paths = app_test_paths(root);
+  options.open_options.offline = true;
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  std::ostringstream out;
+  out.setstate(std::ios::badbit);
+  std::ostringstream err;
+  bool wake_called = false;
+  input_buffer.push("{\"id\":\"protocol\",\"type\":\"get_protocol\"}\n");
+  auto const status = ava::app::run_rpc_mode(options, in, out, err, [&] noexcept {
+    wake_called = true;
+    input_buffer.close();
+  });
+
+  expect(status == 1 && wake_called && err.str().find("failed to write RPC JSONL record") != std::string::npos,
+         "run_rpc_mode forwards an explicit wake callback for a non-std::cin stream on output failure");
 }
 
 void test_app_rpc_posix_line_reader_wake_eof_and_fd_lifetime()
@@ -2735,24 +2820,24 @@ void test_app_rpc_stream_line_reader_terminal_outcomes()
   std::vector<RpcInputTerminalOutcome> outcomes;
   std::string line;
   std::istringstream empty_input;
-  ava::app::rpc::StreamRpcLineReader empty_reader(empty_input);
+  ava::app::rpc::StreamRpcLineReader empty_reader(empty_input, ava::app::rpc::RpcInputWake{});
   auto empty_eof = empty_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
 
   std::istringstream final_input("final record");
-  ava::app::rpc::StreamRpcLineReader final_reader(final_input);
+  ava::app::rpc::StreamRpcLineReader final_reader(final_input, ava::app::rpc::RpcInputWake{});
   auto final_record = final_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
   bool const final_record_read = final_record && *final_record && line == "final record";
   auto final_eof = final_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
 
   std::istringstream newline_input("complete\n");
-  ava::app::rpc::StreamRpcLineReader newline_reader(newline_input);
+  ava::app::rpc::StreamRpcLineReader newline_reader(newline_input, ava::app::rpc::RpcInputWake{});
   auto complete_record = newline_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
   bool const normal_record_silent = complete_record && *complete_record && line == "complete" && outcomes.size() == 3;
 
   BlockingInputBuf canceled_input_buffer;
   canceled_input_buffer.push("partial final record");
   std::istream canceled_input(&canceled_input_buffer);
-  ava::app::rpc::StreamRpcLineReader canceled_reader(canceled_input, [&] { canceled_input_buffer.close(); });
+  ava::app::rpc::StreamRpcLineReader canceled_reader(canceled_input, [&] noexcept { canceled_input_buffer.close(); });
   ava::core::Result<bool> canceled = true;
   std::jthread canceled_read(
       [&] { canceled = canceled_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
@@ -2762,7 +2847,7 @@ void test_app_rpc_stream_line_reader_terminal_outcomes()
 
   std::istringstream error_input("unread");
   error_input.setstate(std::ios::badbit);
-  ava::app::rpc::StreamRpcLineReader error_reader(error_input);
+  ava::app::rpc::StreamRpcLineReader error_reader(error_input, ava::app::rpc::RpcInputWake{});
   auto read_error = error_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); });
 
   expect(empty_eof && !*empty_eof && final_record_read && final_eof && !*final_eof && normal_record_silent && canceled_while_partial && canceled &&
@@ -2770,6 +2855,25 @@ void test_app_rpc_stream_line_reader_terminal_outcomes()
              outcomes == std::vector<RpcInputTerminalOutcome>{RpcInputTerminalOutcome::Eof, RpcInputTerminalOutcome::EofWithFinalRecord,
                                                               RpcInputTerminalOutcome::Eof, RpcInputTerminalOutcome::Canceled, RpcInputTerminalOutcome::Error},
          "RPC stream line reader synchronously classifies empty EOF, final records, cancellation, and input errors");
+}
+
+void test_app_rpc_stream_reader_wake_badbit_is_canceled()
+{
+  using ava::app::rpc::RpcInputTerminalOutcome;
+
+  WakeBadInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ava::app::rpc::StreamRpcLineReader reader(in, [&] noexcept { input_buffer.wake(); });
+  std::vector<RpcInputTerminalOutcome> outcomes;
+  std::string line;
+  ava::core::Result<bool> result = true;
+  std::jthread reader_thread([&] { result = reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
+  bool const blocked = input_buffer.wait_until_blocked(std::chrono::seconds(2));
+  reader.cancel();
+  reader_thread.join();
+
+  expect(blocked && in.bad() && result && !*result && outcomes == std::vector<RpcInputTerminalOutcome>{RpcInputTerminalOutcome::Canceled},
+         "RPC stream reader classifies a wake-induced bad stream as canceled rather than an input I/O error");
 }
 
 void test_app_rpc_unterminated_final_command_executes()
@@ -2794,7 +2898,7 @@ void test_app_rpc_unterminated_final_command_executes()
   ava::app::runtime::RunOptions runtime_options;
   std::istringstream in("{\"id\":\"protocol\",\"type\":\"get_protocol\"}");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
 
   expect(result && jsonl.find("\"id\":\"protocol\",\"type\":\"response\",\"success\":true") != std::string::npos,
@@ -2825,7 +2929,7 @@ void test_app_rpc_newline_terminated_oversized_line_recovers()
   input += "\n{\"id\":\"protocol\",\"type\":\"get_protocol\"}\n";
   std::istringstream in(std::move(input));
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
 
   expect(result && count_substrings(jsonl, "\"id\":\"\",\"type\":\"response\",\"success\":false") == 1 &&
@@ -2860,7 +2964,7 @@ void test_app_rpc_compact_cancellation_is_error_response_without_provider_reques
   runtime_options.access_token = "token";
   runtime_options.cancel_requested = [] { return true; };
 
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto entries = session->store.load();
   expect(result.has_value(), "RPC compact cancellation loop completes after error response");
@@ -2915,8 +3019,10 @@ void run_app_rpc_tests()
   test_app_rpc_eof_during_blocked_parent_publication_skips_follow_up();
   test_app_rpc_terminal_publication_gates_direct_and_compaction_runs();
   test_app_rpc_worker_output_failure_wakes_blocked_input();
+  test_app_rpc_mode_forwards_nonstdin_wake();
   test_app_rpc_posix_line_reader_wake_eof_and_fd_lifetime();
   test_app_rpc_stream_line_reader_terminal_outcomes();
+  test_app_rpc_stream_reader_wake_badbit_is_canceled();
   test_app_rpc_unterminated_final_command_executes();
   test_app_rpc_newline_terminated_oversized_line_recovers();
   test_app_rpc_compact_cancellation_is_error_response_without_provider_request();

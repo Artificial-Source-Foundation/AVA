@@ -14,6 +14,7 @@
 #include "ava/core/json.h"
 
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -27,6 +28,75 @@
 namespace {
 
 using namespace ava::tests;
+
+class ResolverPublicationStreamBuf final : public std::streambuf
+{
+ public:
+  explicit ResolverPublicationStreamBuf(bool block_first_write = false, bool fail_after_release = false)
+      : block_first_write_(block_first_write), fail_after_release_(fail_after_release)
+  {
+  }
+
+  bool wait_until_write_started(std::chrono::milliseconds timeout)
+  {
+    std::unique_lock lock(mutex_);
+    return cv_.wait_for(lock, timeout, [&] { return write_started_; });
+  }
+
+  void release_write()
+  {
+    {
+      std::lock_guard lock(mutex_);
+      write_released_ = true;
+    }
+    cv_.notify_all();
+  }
+
+  std::string str() const
+  {
+    std::lock_guard lock(mutex_);
+    return text_;
+  }
+
+ protected:
+  int overflow(int ch) override
+  {
+    if (ch == traits_type::eof())
+      return traits_type::not_eof(ch);
+    char const value = static_cast<char>(ch);
+    return write(&value, 1) == 1 ? ch : traits_type::eof();
+  }
+
+  std::streamsize xsputn(char const* data, std::streamsize count) override { return write(data, count); }
+
+  int sync() override
+  {
+    std::lock_guard lock(mutex_);
+    return fail_after_release_ ? -1 : 0;
+  }
+
+ private:
+  std::streamsize write(char const* data, std::streamsize count)
+  {
+    std::unique_lock lock(mutex_);
+    text_.append(data, static_cast<std::size_t>(count));
+    if (block_first_write_ && !write_started_)
+    {
+      write_started_ = true;
+      cv_.notify_all();
+      cv_.wait(lock, [&] { return write_released_; });
+    }
+    return count;
+  }
+
+  bool block_first_write_ = false;
+  bool fail_after_release_ = false;
+  mutable std::mutex mutex_;
+  std::condition_variable cv_;
+  std::string text_;
+  bool write_started_ = false;
+  bool write_released_ = false;
+};
 
 void test_app_rpc_resolver_payload_builders_preserve_wire_shapes()
 {
@@ -59,7 +129,7 @@ void test_app_rpc_resolver_payload_builders_preserve_wire_shapes()
          "typed queue resolver envelope keeps payload family and top-level aliases");
 }
 
-void test_app_rpc_resolver_write_failure_releases_waiters()
+void test_app_rpc_resolver_output_failure_callback_preserves_lock_order()
 {
   auto const root = temp_root() / "app-rpc-resolver-write-failure";
   std::error_code remove_error;
@@ -80,7 +150,7 @@ void test_app_rpc_resolver_write_failure_releases_waiters()
   std::mutex session_mutex;
   std::ostringstream stream;
   stream.setstate(std::ios::badbit);
-  ava::app::rpc::output_ts output(stream, [&] { static_cast<void>(ava::app::rpc::cancel_pending_resolvers(pending_state)); });
+  ava::app::rpc::output_ts output(stream, [&] { static_cast<void>(ava::app::rpc::cancel_pending_resolvers(output, pending_state)); });
   auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session, session_mutex, nullptr, "prompt-write-fail");
   auto result = resolver(ava::permissions::PermissionPrompt{.permission_request_id = "permreq_write_fail",
                                                             .operation = ava::permissions::Operation::ReadFile,
@@ -99,7 +169,205 @@ void test_app_rpc_resolver_write_failure_releases_waiters()
     no_pending = pending_state.permission_requests.empty() && pending_state.question_requests.empty();
   }
   expect(!result && result.error().category() == ava::core::ErrorCategory::Io && no_pending,
-         "RPC resolver output failure cancels and removes pending waits without a user timeout");
+         "RPC resolver output-failure callback acquires output before pending state and releases waiters without a user timeout");
+}
+
+enum class ResolverRaceKind
+{
+  Permission,
+  Question,
+};
+
+struct ResolverRaceObservation
+{
+  bool pending_inserted = false;
+  bool publication_started = false;
+  bool cancellation_applied = false;
+  bool resolver_canceled = false;
+  bool request_published = false;
+};
+
+ResolverRaceObservation run_resolver_cancellation_race(ResolverRaceKind kind, bool cancellation_wins)
+{
+  ResolverRaceObservation observed;
+  ava::app::rpc::PendingResolverState pending_state;
+  ResolverPublicationStreamBuf output_buffer(!cancellation_wins);
+  std::ostream out(&output_buffer);
+  ava::app::rpc::output_ts output(out, [] { });
+  std::string const request_id = kind == ResolverRaceKind::Permission ? "permission-race" : "question-race";
+  std::string const record = kind == ResolverRaceKind::Permission ? "permission_requested\n" : "question_requested\n";
+
+  if (kind == ResolverRaceKind::Permission)
+  {
+    auto pending = std::make_shared<ava::app::rpc::PendingPermissionRequest>();
+    {
+      std::lock_guard lock(pending_state.mutex);
+      pending_state.permission_requests.emplace(request_id, pending);
+      observed.pending_inserted = true;
+    }
+
+    auto gate = [&] {
+      std::lock_guard lock(pending_state.mutex);
+      auto const found = pending_state.permission_requests.find(request_id);
+      return found != pending_state.permission_requests.end() && found->second == pending;
+    };
+    if (cancellation_wins)
+    {
+      observed.cancellation_applied = ava::app::rpc::cancel_pending_resolvers(output, pending_state);
+      auto written = ava::app::rpc::Output::write_record_if(output, record, gate);
+      observed.resolver_canceled = written && *written == ava::app::rpc::OutputWriteResult::Skipped && pending->resolved && pending->error;
+    }
+    else
+    {
+      ava::core::Result<ava::app::rpc::OutputWriteResult> written = ava::app::rpc::OutputWriteResult::Skipped;
+      std::jthread publisher([&] { written = ava::app::rpc::Output::write_record_if(output, record, gate); });
+      observed.publication_started = output_buffer.wait_until_write_started(std::chrono::seconds(2));
+      std::jthread canceler([&] { observed.cancellation_applied = ava::app::rpc::cancel_pending_resolvers(output, pending_state); });
+      output_buffer.release_write();
+      publisher.join();
+      canceler.join();
+      observed.resolver_canceled = written && *written == ava::app::rpc::OutputWriteResult::Written && pending->resolved && pending->error;
+    }
+  }
+  else
+  {
+    auto pending = std::make_shared<ava::app::rpc::PendingQuestionRequest>();
+    {
+      std::lock_guard lock(pending_state.mutex);
+      pending_state.question_requests.emplace(request_id, pending);
+      observed.pending_inserted = true;
+    }
+
+    auto gate = [&] {
+      std::lock_guard lock(pending_state.mutex);
+      auto const found = pending_state.question_requests.find(request_id);
+      return found != pending_state.question_requests.end() && found->second == pending;
+    };
+    if (cancellation_wins)
+    {
+      observed.cancellation_applied = ava::app::rpc::cancel_pending_resolvers(output, pending_state);
+      auto written = ava::app::rpc::Output::write_record_if(output, record, gate);
+      observed.resolver_canceled = written && *written == ava::app::rpc::OutputWriteResult::Skipped && pending->resolved && pending->error;
+    }
+    else
+    {
+      ava::core::Result<ava::app::rpc::OutputWriteResult> written = ava::app::rpc::OutputWriteResult::Skipped;
+      std::jthread publisher([&] { written = ava::app::rpc::Output::write_record_if(output, record, gate); });
+      observed.publication_started = output_buffer.wait_until_write_started(std::chrono::seconds(2));
+      std::jthread canceler([&] { observed.cancellation_applied = ava::app::rpc::cancel_pending_resolvers(output, pending_state); });
+      output_buffer.release_write();
+      publisher.join();
+      canceler.join();
+      observed.resolver_canceled = written && *written == ava::app::rpc::OutputWriteResult::Written && pending->resolved && pending->error;
+    }
+  }
+  observed.request_published =
+      output_buffer.str().find(kind == ResolverRaceKind::Permission ? "permission_requested" : "question_requested") != std::string::npos;
+  return observed;
+}
+
+void test_app_rpc_resolver_publication_linearizes_permission_and_question_cancellation()
+{
+  for (auto const kind : {ResolverRaceKind::Permission, ResolverRaceKind::Question})
+  {
+    auto const canceled = run_resolver_cancellation_race(kind, true);
+    auto const published = run_resolver_cancellation_race(kind, false);
+    auto const kind_name = kind == ResolverRaceKind::Permission ? std::string("permission") : std::string("question");
+    expect(canceled.pending_inserted && canceled.cancellation_applied && canceled.resolver_canceled && !canceled.request_published,
+           "RPC " + kind_name + " resolver cancellation wins before publication without emitting a stale request");
+    expect(published.pending_inserted && published.publication_started && published.cancellation_applied && published.resolver_canceled &&
+               published.request_published,
+           "RPC " + kind_name + " resolver publication wins once its gated record enters the output stream");
+  }
+}
+
+void test_app_rpc_resolver_exact_request_identity_gates_publication_and_cleanup()
+{
+  ava::app::rpc::PendingResolverState gate_state;
+  auto original = std::make_shared<ava::app::rpc::PendingPermissionRequest>();
+  auto gate_replacement = std::make_shared<ava::app::rpc::PendingPermissionRequest>();
+  {
+    std::lock_guard lock(gate_state.mutex);
+    gate_state.permission_requests.emplace("permission-replaced", original);
+    gate_state.permission_requests["permission-replaced"] = gate_replacement;
+  }
+  std::ostringstream gate_stream;
+  ava::app::rpc::output_ts gate_output(gate_stream, [] { });
+  auto skipped = ava::app::rpc::Output::write_record_if(gate_output, "permission_requested\n", [&] {
+    std::lock_guard lock(gate_state.mutex);
+    auto const found = gate_state.permission_requests.find("permission-replaced");
+    return found != gate_state.permission_requests.end() && found->second == original;
+  });
+  bool gate_preserved_replacement = false;
+  {
+    std::lock_guard lock(gate_state.mutex);
+    auto const found = gate_state.permission_requests.find("permission-replaced");
+    gate_preserved_replacement = found != gate_state.permission_requests.end() && found->second == gate_replacement;
+  }
+
+  auto const root = temp_root() / "app-rpc-resolver-exact-identity";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = app_test_paths(root);
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC resolver exact-identity test opens runtime session");
+  if (!session)
+    return;
+
+  ava::app::rpc::PendingResolverState pending_state;
+  ava::app::rpc::RpcRunState run_state;
+  std::mutex session_mutex;
+  ResolverPublicationStreamBuf output_buffer(true, true);
+  std::ostream out(&output_buffer);
+  ava::app::rpc::output_ts output(out, [] { });
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session, session_mutex, nullptr, "prompt-identity");
+  ava::core::Result<ava::permissions::PermissionResolutionDecision> result = ava::permissions::PermissionResolution::Deny;
+  std::jthread resolver_thread([&] {
+    result = resolver(ava::permissions::PermissionPrompt{.permission_request_id = "permreq-identity",
+                                                         .operation = ava::permissions::Operation::ReadFile,
+                                                         .mode = ava::agent::Mode::Build,
+                                                         .workspace_dir = workspace,
+                                                         .target_path = workspace / "note.txt",
+                                                         .command = "",
+                                                         .tool_name = "read_file",
+                                                         .reason = "identity test",
+                                                         .risk = ava::permissions::PermissionRisk::Low,
+                                                         .diff_preview = "",
+                                                         .diff_truncated = false});
+  });
+
+  bool const write_started = output_buffer.wait_until_write_started(std::chrono::seconds(2));
+  bool request_inserted = false;
+  std::string request_id;
+  auto replacement = std::make_shared<ava::app::rpc::PendingPermissionRequest>();
+  bool replaced = false;
+  {
+    std::lock_guard lock(pending_state.mutex);
+    request_inserted = !pending_state.permission_requests.empty();
+    if (request_inserted)
+    {
+      request_id = pending_state.permission_requests.begin()->first;
+      pending_state.permission_requests.begin()->second = replacement;
+      replaced = true;
+    }
+  }
+  output_buffer.release_write();
+  resolver_thread.join();
+
+  bool replacement_retained = false;
+  {
+    std::lock_guard lock(pending_state.mutex);
+    auto const found = pending_state.permission_requests.find(request_id);
+    replacement_retained = found != pending_state.permission_requests.end() && found->second == replacement;
+  }
+  expect(skipped && *skipped == ava::app::rpc::OutputWriteResult::Skipped && gate_stream.str().empty() && gate_preserved_replacement && request_inserted &&
+             write_started && replaced && !result && result.error().category() == ava::core::ErrorCategory::Io && replacement_retained,
+         "RPC resolver publication gates and output-failure cleanup preserve an exact shared request replacement");
 }
 
 void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
@@ -138,7 +406,8 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read outside\"}\n");
   bool const completed = output_buffer.wait_contains("after policy allow", std::chrono::seconds(2));
@@ -190,7 +459,9 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
     ThreadSafeStringBuf output_buffer;
     std::ostream out(&output_buffer);
     ava::core::VoidResult result;
-    std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+    std::jthread rpc_thread([&] {
+      result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    });
 
     input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read note\"}\n");
     bool const requested = output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
@@ -257,7 +528,8 @@ void test_app_rpc_permission_reply_session_grant_flow()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read outside once\"}\n");
   bool const requested = output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
@@ -308,7 +580,8 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
   ava::app::rpc::PendingResolverState pending_state;
   ava::app::rpc::RpcRunState run_state;
   std::mutex session_mutex;
-  std::ostringstream output_stream;
+  ThreadSafeStringBuf output_buffer;
+  std::ostream output_stream(&output_buffer);
   ava::app::rpc::output_ts output(output_stream, [] { });
   ava::permissions::PermissionPrompt const prompt{.permission_request_id = "permreq_build_test",
                                                   .operation = ava::permissions::Operation::RunCommand,
@@ -339,23 +612,19 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
   expect(matched && *matched == ava::permissions::PermissionResolution::AllowSessionGrant,
          "a session grant authorizes only its exact repository test invocation");
 
+  auto wait_for_permission_request = [&] {
+    bool const published = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(5));
+    std::lock_guard lock(pending_state.mutex);
+    return published && !pending_state.permission_requests.empty() ? pending_state.permission_requests.begin()->first : std::string();
+  };
+
   {
     std::lock_guard lock(pending_state.mutex);
     pending_state.permission_session_grants.front().session_id = "session_other";
   }
   std::optional<ava::core::Result<ava::permissions::PermissionResolutionDecision>> mismatched;
   std::jthread resolver_thread([&] { mismatched = resolver(prompt); });
-  std::string resolver_request_id;
-  for (int attempt = 0; attempt < 100 && resolver_request_id.empty(); ++attempt)
-  {
-    {
-      std::lock_guard lock(pending_state.mutex);
-      if (!pending_state.permission_requests.empty())
-        resolver_request_id = pending_state.permission_requests.begin()->first;
-    }
-    if (resolver_request_id.empty())
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
+  auto const resolver_request_id = wait_for_permission_request();
   auto denied = resolver_request_id.empty()
                     ? ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing permission request")))
                     : ava::app::rpc::resolve_permission_reply(pending_state, resolver_request_id, "prompt_1", "deny");
@@ -369,17 +638,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
   }
   std::optional<ava::core::Result<ava::permissions::PermissionResolutionDecision>> one_shot;
   std::jthread one_shot_thread([&] { one_shot = resolver(prompt); });
-  std::string one_shot_request_id;
-  for (int attempt = 0; attempt < 100 && one_shot_request_id.empty(); ++attempt)
-  {
-    {
-      std::lock_guard lock(pending_state.mutex);
-      if (!pending_state.permission_requests.empty())
-        one_shot_request_id = pending_state.permission_requests.begin()->first;
-    }
-    if (one_shot_request_id.empty())
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
+  auto const one_shot_request_id = wait_for_permission_request();
   auto one_shot_allowed = one_shot_request_id.empty()
                               ? ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing permission request")))
                               : ava::app::rpc::resolve_permission_reply(pending_state, one_shot_request_id, "prompt_1", "allow");
@@ -444,7 +703,8 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"write outside\"}\n");
   bool const requested = output_buffer.wait_contains("\"diff_preview\"", std::chrono::seconds(2));
@@ -503,7 +763,8 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
   auto const rpc_timeout = std::chrono::seconds(30);
 
   input_buffer.push(
@@ -581,7 +842,8 @@ void test_app_rpc_question_reply_flow()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"ask question\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));
@@ -628,7 +890,8 @@ void test_app_rpc_question_reply_selected_option_flow()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"ask question\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));
@@ -680,7 +943,8 @@ void test_app_rpc_question_reply_selected_options_flow()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"ask multi question\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));
@@ -712,7 +976,9 @@ void test_app_rpc_question_reply_selected_options_flow()
 void run_app_rpc_resolver_tests()
 {
   test_app_rpc_resolver_payload_builders_preserve_wire_shapes();
-  test_app_rpc_resolver_write_failure_releases_waiters();
+  test_app_rpc_resolver_output_failure_callback_preserves_lock_order();
+  test_app_rpc_resolver_publication_linearizes_permission_and_question_cancellation();
+  test_app_rpc_resolver_exact_request_identity_gates_publication_and_cleanup();
   test_app_rpc_permission_policy_auto_allows_before_resolver_event();
   test_app_rpc_permission_reply_allow_and_deny_flows();
   test_app_rpc_permission_reply_session_grant_flow();

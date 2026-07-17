@@ -75,27 +75,49 @@ std::string permission_session_grant_json(PermissionSessionGrant const& grant)
   return json;
 }
 
+template <typename Request>
+bool request_is_pending(std::map<std::string, std::shared_ptr<Request>> const& requests, std::string_view request_id, std::shared_ptr<Request> const& request)
+{
+  auto const found = requests.find(std::string(request_id));
+  return found != requests.end() && found->second == request;
+}
+
+template <typename Request>
+void erase_pending_request_if_matches(std::map<std::string, std::shared_ptr<Request>>& requests, std::string_view request_id,
+                                      std::shared_ptr<Request> const& request)
+{
+  auto const found = requests.find(std::string(request_id));
+  if (found != requests.end() && found->second == request)
+    requests.erase(found);
+}
+
 }  // namespace
 
-bool cancel_pending_resolvers(PendingResolverState& pending_state)
+bool cancel_pending_resolvers(output_ts& output, PendingResolverState& pending_state)
 {
-  std::lock_guard lock(pending_state.mutex);
-  bool const had_pending = !pending_state.permission_requests.empty() || !pending_state.question_requests.empty();
-  for (auto& [request_id, request] : pending_state.permission_requests)
+  bool had_pending = false;
   {
-    static_cast<void>(request_id);
-    request->resolved = true;
-    request->resolution = ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Deny, "canceled"};
-    request->error = canceled_error();
+    // Resolver publication gates acquire these locks in this order too. Never acquire pending_state
+    // before output here, otherwise a canceled request could still publish after its cancellation.
+    [[maybe_unused]] output_ts::wat output_w(output);
+    std::lock_guard pending_lock(pending_state.mutex);
+    had_pending = !pending_state.permission_requests.empty() || !pending_state.question_requests.empty();
+    for (auto& [request_id, request] : pending_state.permission_requests)
+    {
+      static_cast<void>(request_id);
+      request->resolved = true;
+      request->resolution = ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Deny, "canceled"};
+      request->error = canceled_error();
+    }
+    for (auto& [request_id, request] : pending_state.question_requests)
+    {
+      static_cast<void>(request_id);
+      request->resolved = true;
+      request->error = canceled_error();
+    }
+    pending_state.permission_requests.clear();
+    pending_state.question_requests.clear();
   }
-  for (auto& [request_id, request] : pending_state.question_requests)
-  {
-    static_cast<void>(request_id);
-    request->resolved = true;
-    request->error = canceled_error();
-  }
-  pending_state.permission_requests.clear();
-  pending_state.question_requests.clear();
   pending_state.cv.notify_all();
   return had_pending;
 }
@@ -223,18 +245,27 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolve
     if (cancel_requested(run_state) || input_closed(run_state))
     {
       std::lock_guard lock(pending_state.mutex);
-      pending_state.permission_requests.erase(request_id);
+      erase_pending_request_if_matches(pending_state.permission_requests, request_id, pending);
       return std::unexpected(canceled_error());
     }
 
+    // Build the complete record before taking either publication lock. write_record_if then takes
+    // output first and briefly checks the exact map entry under pending_state before stream I/O.
     auto envelope = resolver_event_envelope("permission_requested", prompt_request_id, prompt_request_id, session_id_snapshot(session, session_mutex),
                                             permission_request_payload_json(request_id, prompt));
-    if (auto written = Output::write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
+    auto const record = serialize_event_envelope_jsonl(envelope);
+    auto written = Output::write_record_if(output, record, [&pending_state, &request_id, &pending] {
+      std::lock_guard lock(pending_state.mutex);
+      return request_is_pending(pending_state.permission_requests, request_id, pending);
+    });
+    if (!written)
     {
       std::lock_guard lock(pending_state.mutex);
-      pending_state.permission_requests.erase(request_id);
+      erase_pending_request_if_matches(pending_state.permission_requests, request_id, pending);
       return std::unexpected(std::move(written.error()));
     }
+    if (*written == OutputWriteResult::Skipped)
+      return std::unexpected(canceled_error());
 
     std::unique_lock lock(pending_state.mutex);
     pending_state.cv.wait(lock, [&pending] { return pending->resolved; });
@@ -271,18 +302,26 @@ ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pe
     if (cancel_requested(run_state) || input_closed(run_state))
     {
       std::lock_guard lock(pending_state.mutex);
-      pending_state.question_requests.erase(request_id);
+      erase_pending_request_if_matches(pending_state.question_requests, request_id, pending);
       return std::unexpected(canceled_error());
     }
 
+    // Serialize before locking. The gate establishes whether publication or cancellation won.
     auto envelope = resolver_event_envelope("question_requested", prompt_request_id, prompt_request_id, session_id_snapshot(session, session_mutex),
                                             question_request_payload_json(request_id, prompt));
-    if (auto written = Output::write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
+    auto const record = serialize_event_envelope_jsonl(envelope);
+    auto written = Output::write_record_if(output, record, [&pending_state, &request_id, &pending] {
+      std::lock_guard lock(pending_state.mutex);
+      return request_is_pending(pending_state.question_requests, request_id, pending);
+    });
+    if (!written)
     {
       std::lock_guard lock(pending_state.mutex);
-      pending_state.question_requests.erase(request_id);
+      erase_pending_request_if_matches(pending_state.question_requests, request_id, pending);
       return std::unexpected(std::move(written.error()));
     }
+    if (*written == OutputWriteResult::Skipped)
+      return std::unexpected(canceled_error());
 
     std::unique_lock lock(pending_state.mutex);
     pending_state.cv.wait(lock, [&pending] { return pending->resolved; });

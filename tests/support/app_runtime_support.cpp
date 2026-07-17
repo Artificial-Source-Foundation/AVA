@@ -74,7 +74,7 @@ void BlockingInputBuf::push(std::string text)
   cv_.notify_all();
 }
 
-void BlockingInputBuf::close()
+void BlockingInputBuf::close() noexcept
 {
   {
     std::lock_guard lock(mutex_);

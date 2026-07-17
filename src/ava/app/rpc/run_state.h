@@ -26,6 +26,12 @@ class Output;
 // Output sink for RPC JSONL records.
 using output_ts = threadsafe::Unlocked<Output, threadsafe::policy::Primitive<std::mutex>>;
 
+enum class OutputWriteResult
+{
+  Written,
+  Skipped,
+};
+
 class Output
 {
  private:
@@ -45,6 +51,11 @@ class Output
   //
   // Calls on_write_failure_ (if set) and returns an IO error when the stream is left in a bad state.
   [[nodiscard]] static ava::core::VoidResult write_record(output_ts& output, std::string_view record);
+
+  // Evaluate `gate` and, only when it returns true, write one record while the output lock is held.
+  // The gate must not retain the output lock or perform stream I/O. Failure callbacks are invoked after
+  // releasing the output lock.
+  [[nodiscard]] static ava::core::Result<OutputWriteResult> write_record_if(output_ts& output, std::string_view record, std::function<bool()> const& gate);
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

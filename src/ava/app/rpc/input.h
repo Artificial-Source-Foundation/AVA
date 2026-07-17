@@ -20,6 +20,7 @@ enum class RpcInputTerminalOutcome
 };
 
 using RpcInputTerminalCallback = std::function<void(RpcInputTerminalOutcome)>;
+using RpcInputWake = std::function<void()>;
 
 class RpcLineReader
 {
@@ -29,6 +30,8 @@ class RpcLineReader
   // `on_terminal` is invoked synchronously for terminal input boundaries only and is never retained.
   // It must not throw.
   [[nodiscard]] virtual ava::core::Result<bool> read_line(std::string& line, RpcInputTerminalCallback const& on_terminal = {}) = 0;
+
+  // Thread-safe, idempotent, and nonthrowing. Implementations must promptly unblock an active read_line call.
   virtual void cancel() noexcept = 0;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -36,14 +39,14 @@ class RpcLineReader
 class StreamRpcLineReader final : public RpcLineReader
 {
  public:
-  explicit StreamRpcLineReader(std::istream& input, std::function<void()> wake = {});
+  explicit StreamRpcLineReader(std::istream& input, RpcInputWake wake = {});
 
   [[nodiscard]] ava::core::Result<bool> read_line(std::string& line, RpcInputTerminalCallback const& on_terminal = {}) override;
   void cancel() noexcept override;
 
  private:
   std::istream& input_;
-  std::function<void()> wake_;
+  RpcInputWake wake_;
   std::atomic_bool canceled_ = false;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

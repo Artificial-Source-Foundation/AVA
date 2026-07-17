@@ -321,9 +321,11 @@ ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptio
   rpc::RpcRunState run_state;
   rpc::PendingResolverState pending_state;
   rpc::output_ts output(out, [&] {
+    // Request run cancellation and wake input before resolving pending requests. The resolver
+    // cancellation then obtains output -> pending_state, matching publication gates.
     static_cast<void>(rpc::close_input_and_cancel(run_state));
-    static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
     input.cancel();
+    static_cast<void>(rpc::cancel_pending_resolvers(output, pending_state));
   });
   std::mutex session_mutex;
   std::optional<std::jthread> prompt_worker;
@@ -345,10 +347,10 @@ ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptio
   std::optional<ava::core::Error> input_read_error;
   while (true)
   {
-    auto read_line = input.read_line(line, [&run_state, &pending_state](rpc::RpcInputTerminalOutcome outcome) {
+    auto read_line = input.read_line(line, [&run_state, &pending_state, &output](rpc::RpcInputTerminalOutcome outcome) {
       rpc::observe_input_terminal(run_state, outcome);
       if (outcome != rpc::RpcInputTerminalOutcome::EofWithFinalRecord)
-        static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
+        static_cast<void>(rpc::cancel_pending_resolvers(output, pending_state));
     });
     if (!read_line)
     {
@@ -743,7 +745,7 @@ ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptio
     if (command->type == "cancel")
     {
       auto cancellation = rpc::begin_cancellation(run_state);
-      static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
+      static_cast<void>(rpc::cancel_pending_resolvers(output, pending_state));
       if (session.run_controller)
         static_cast<void>(session.run_controller->request_stop(StopReason::UserCanceled));
       if (cancellation.deferred_to_terminal_publication)
@@ -997,7 +999,7 @@ ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptio
   if (prompt_worker)
   {
     auto cleared = rpc::close_input_and_cancel(run_state);
-    static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
+    static_cast<void>(rpc::cancel_pending_resolvers(output, pending_state));
     if (auto written = rpc::write_skipped_queue_events(output, session, session_mutex, cleared, "canceled"); !written)
     {
       return written;
@@ -1018,19 +1020,33 @@ ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptio
 
 ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
                                    ava::provider::Transport& transport, ava::provider::Transport& auth_transport, runtime::RunOptions runtime_options,
+                                   std::istream& in, std::ostream& out, rpc::RpcInputWake wake)
+{
+  rpc::StreamRpcLineReader input(in, std::move(wake));
+  return run_rpc_loop(session, open_options, provider, transport, auth_transport, std::move(runtime_options), input, out);
+}
+
+ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
+                                   ava::provider::Transport& transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out,
+                                   rpc::RpcInputWake wake)
+{
+  return run_rpc_loop(session, open_options, provider, transport, transport, std::move(runtime_options), in, out, std::move(wake));
+}
+
+ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
+                                   ava::provider::Transport& transport, ava::provider::Transport& auth_transport, runtime::RunOptions runtime_options,
                                    std::istream& in, std::ostream& out)
 {
-  rpc::StreamRpcLineReader input(in);
-  return run_rpc_loop(session, open_options, provider, transport, auth_transport, std::move(runtime_options), input, out);
+  return run_rpc_loop(session, open_options, provider, transport, auth_transport, std::move(runtime_options), in, out, rpc::RpcInputWake{});
 }
 
 ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
                                    ava::provider::Transport& transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out)
 {
-  return run_rpc_loop(session, open_options, provider, transport, transport, std::move(runtime_options), in, out);
+  return run_rpc_loop(session, open_options, provider, transport, transport, std::move(runtime_options), in, out, rpc::RpcInputWake{});
 }
 
-int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err)
+int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err, rpc::RpcInputWake wake)
 {
   ScopedRpcSignalIgnore const ignore_sigpipe(SIGPIPE);
   if (!ignore_sigpipe.installed())
@@ -1075,7 +1091,7 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
   }
   else
   {
-    result = run_rpc_loop(*session, options.open_options, **provider, transport, transport, std::move(runtime_options), in, out);
+    result = run_rpc_loop(*session, options.open_options, **provider, transport, transport, std::move(runtime_options), in, out, std::move(wake));
   }
   if (!result)
   {
@@ -1083,6 +1099,11 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
     return 1;
   }
   return 0;
+}
+
+int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err)
+{
+  return run_rpc_mode(options, in, out, err, rpc::RpcInputWake{});
 }
 
 }  // namespace ava::app

@@ -20,14 +20,29 @@ struct RpcModeOptions
 };
 
 [[nodiscard]] ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
-                                                 ava::provider::Transport& transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out);
+                                                 ava::provider::Transport& transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out,
+                                                 rpc::RpcInputWake wake);
 [[nodiscard]] ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
                                                  ava::provider::Transport& transport, ava::provider::Transport& auth_transport,
-                                                 runtime::RunOptions runtime_options, std::istream& in, std::ostream& out);
+                                                 runtime::RunOptions runtime_options, std::istream& in, std::ostream& out, rpc::RpcInputWake wake);
+
+// Finite streams only. Supply an explicit wake callback for any stream that can block.
+[[deprecated("finite streams only; pass an explicit rpc::RpcInputWake for blocking input")]] [[nodiscard]] ava::core::VoidResult run_rpc_loop(
+    runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider, ava::provider::Transport& transport,
+    runtime::RunOptions runtime_options, std::istream& in, std::ostream& out);
+// Finite streams only. Supply an explicit wake callback for any stream that can block.
+[[deprecated("finite streams only; pass an explicit rpc::RpcInputWake for blocking input")]] [[nodiscard]] ava::core::VoidResult run_rpc_loop(
+    runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider, ava::provider::Transport& transport,
+    ava::provider::Transport& auth_transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out);
 [[nodiscard]] ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
                                                  ava::provider::Transport& transport, ava::provider::Transport& auth_transport,
                                                  runtime::RunOptions runtime_options, rpc::RpcLineReader& input, std::ostream& out);
 
-[[nodiscard]] int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err);
+[[nodiscard]] int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err, rpc::RpcInputWake wake);
+
+// Finite streams only. Supply an explicit wake callback for any stream that can block.
+[[deprecated("finite streams only; pass an explicit rpc::RpcInputWake for blocking input")]] [[nodiscard]] int run_rpc_mode(RpcModeOptions const& options,
+                                                                                                                            std::istream& in, std::ostream& out,
+                                                                                                                            std::ostream& err);
 
 }  // namespace ava::app

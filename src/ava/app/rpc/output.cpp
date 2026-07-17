@@ -35,6 +35,18 @@ std::string payload_type_for_resolver_event(std::string_view name)
   return {};
 }
 
+std::string normalized_record(std::string_view record)
+{
+  auto safe_record = ava::core::json::is_valid_utf8(record) ? std::string(record) : ava::core::json::replace_invalid_utf8(record);
+  if (!ava::core::json::is_valid_utf8(safe_record))
+  {
+    safe_record =
+        "{\"id\":\"\",\"type\":\"response\",\"success\":false,\"error\":{\"category\":\"unknown\",\"code\":\"internal_error\","
+        "\"message\":\"RPC output encoding failure\",\"details\":\"RPC output encoding failure\"}}\n";
+  }
+  return safe_record;
+}
+
 }  // namespace
 
 ResolverEventPayload resolver_permission_payload(std::string payload_json)
@@ -53,36 +65,38 @@ ResolverEventPayload resolver_queue_payload(std::string payload_json)
 }
 
 // static
-ava::core::VoidResult Output::write_record(output_ts& output, std::string_view record)
+ava::core::Result<OutputWriteResult> Output::write_record_if(output_ts& output, std::string_view record, std::function<bool()> const& gate)
 {
-  DoutEntering(dc::rpc, "Output::write_record(output [" << (void*)&output << "], bytes=" << record.size() << ")");
+  DoutEntering(dc::rpc, "Output::write_record_if(output [" << (void*)&output << "], bytes=" << record.size() << ")");
 
-  auto safe_record = ava::core::json::is_valid_utf8(record) ? std::string(record) : ava::core::json::replace_invalid_utf8(record);
-  if (!ava::core::json::is_valid_utf8(safe_record))
-  {
-    safe_record =
-        "{\"id\":\"\",\"type\":\"response\",\"success\":false,\"error\":{\"category\":\"unknown\",\"code\":\"internal_error\","
-        "\"message\":\"RPC output encoding failure\",\"details\":\"RPC output encoding failure\"}}\n";
-  }
-
+  // UTF-8 normalization may allocate, so complete it before serializing on the output mutex.
+  auto safe_record = normalized_record(record);
+  std::function<void()> on_write_failure;
   {
     output_ts::wat output_w(output);
+    if (!gate())
+      return OutputWriteResult::Skipped;
 
     if (output_w->out_ << safe_record << std::flush)
-      return {};
+      return OutputWriteResult::Written;
 
-    if (output_w->on_write_failure_)
-    {
-      // The on_write_failure handler touches run_state/pending_state mutexes; running it under the
-      // output lock would invert lock order against paths that hold those mutexes and then write.
-      // Copy the handler out while still locked, drop the output lock, then invoke the handler lock-free.
-      auto on_write_failure_copy = output_w->on_write_failure_;
-      output_w.unlock();
-      on_write_failure_copy();
-    }
+    // The handler can acquire output and pending-state mutexes. Copy it while locked, then invoke it
+    // only after releasing the output lock to preserve output -> pending lock ordering.
+    on_write_failure = output_w->on_write_failure_;
   }
 
+  if (on_write_failure)
+    on_write_failure();
   return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write RPC JSONL record"));
+}
+
+// static
+ava::core::VoidResult Output::write_record(output_ts& output, std::string_view record)
+{
+  auto written = write_record_if(output, record, [] { return true; });
+  if (!written)
+    return std::unexpected(std::move(written.error()));
+  return {};
 }
 
 ava::core::VoidResult write_success(output_ts& output, std::string_view id, std::string_view result_json)

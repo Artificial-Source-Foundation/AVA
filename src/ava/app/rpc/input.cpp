@@ -159,7 +159,7 @@ class PosixRpcLineReader final : public RpcLineReader
 
 }  // namespace
 
-StreamRpcLineReader::StreamRpcLineReader(std::istream& input, std::function<void()> wake) : input_(input), wake_(std::move(wake))
+StreamRpcLineReader::StreamRpcLineReader(std::istream& input, RpcInputWake wake) : input_(input), wake_(std::move(wake))
 {
 }
 
@@ -176,17 +176,19 @@ ava::core::Result<bool> StreamRpcLineReader::read_line(std::string& line, RpcInp
     }
 
     auto const next = input_.get();
+    // A wake callback can cause get() to return with badbit rather than eofbit. Cancellation takes
+    // precedence over stream classification so output failure always has a prompt, stable terminal outcome.
+    if (canceled_.load(std::memory_order_acquire))
+    {
+      notify_terminal(on_terminal, RpcInputTerminalOutcome::Canceled);
+      return false;
+    }
     if (next == std::istream::traits_type::eof())
     {
       if (!input_.eof())
       {
         notify_terminal(on_terminal, RpcInputTerminalOutcome::Error);
         return std::unexpected(input_io_error("failed to read RPC stdin"));
-      }
-      if (canceled_.load(std::memory_order_acquire))
-      {
-        notify_terminal(on_terminal, RpcInputTerminalOutcome::Canceled);
-        return false;
       }
       if (oversized)
       {

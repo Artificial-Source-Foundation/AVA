@@ -718,7 +718,7 @@ int run(int argc, char** argv)
   if (rpc_mode)
   {
     return ava::app::run_rpc_mode(ava::app::RpcModeOptions{.open_options = open_options, .permission_policy = std::move(headless_permission_policy)}, std::cin,
-                                  std::cout, std::cerr);
+                                  std::cout, std::cerr, ava::app::rpc::RpcInputWake{});
   }
 
   auto session = ava::app::open_runtime_session(open_options);

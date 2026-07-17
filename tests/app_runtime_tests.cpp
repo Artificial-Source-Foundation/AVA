@@ -3504,7 +3504,8 @@ void test_app_runtime_model_switch_persists_and_reopens()
     ava::tests::FakeTransport transport({});
     std::istringstream in("{\"id\":\"list\",\"type\":\"list_models\"}\n");
     std::ostringstream out;
-    auto result = ava::app::run_rpc_loop(*reopened, reopen_options, provider, transport, ava::app::runtime::RunOptions{}, in, out);
+    auto result = ava::app::run_rpc_loop(*reopened, reopen_options, provider, transport, ava::app::runtime::RunOptions{}, in, out,
+                                             ava::app::rpc::RpcInputWake{});
     auto const jsonl = out.str();
     auto const restored_position = jsonl.find("\"model\":\"claude-test\"");
     expect(result.has_value() && restored_position != std::string::npos, "RPC list_models includes restored removed current model");

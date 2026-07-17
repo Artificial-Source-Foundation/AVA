@@ -138,7 +138,8 @@ void test_app_rpc_cancel_affects_subsequent_prompt()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
   input_buffer.push("{\"id\":\"cancel\",\"type\":\"cancel\"}\n");
   bool const canceled = output_buffer.wait_contains("\"id\":\"cancel\"", std::chrono::seconds(2));
   input_buffer.push("{\"id\":\"state\",\"type\":\"get_state\"}\n");
@@ -193,7 +194,8 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read note\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
@@ -244,7 +246,8 @@ void test_app_rpc_steer_applies_before_next_provider_request()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read before steer\"}\n");
   bool const requested = output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
@@ -300,7 +303,8 @@ void test_app_rpc_follow_up_runs_after_active_prompt()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"first prompt\"}\n");
   bool const requested = output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
@@ -357,7 +361,8 @@ void test_app_rpc_prompt_start_failure_cleans_queued_messages()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, {}, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, {}, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"will fail before run\"}\n");
   bool const refresh_requested = transport.wait_for_request(std::chrono::seconds(2));
@@ -414,7 +419,8 @@ void test_app_rpc_steer_after_follow_up_started_targets_follow_up()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"first prompt\"}\n");
   bool const parent_requested = output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
@@ -476,7 +482,8 @@ void test_app_rpc_queue_limit_rejects_new_items()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read before limit\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
@@ -531,7 +538,8 @@ void test_app_rpc_eof_clears_queued_follow_up_without_running()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read before eof\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
@@ -582,7 +590,8 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read before cancel\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
@@ -643,7 +652,8 @@ void test_app_rpc_direct_command_rejects_prompt_only_queue_commands()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"bash\",\"type\":\"run_bash\",\"command\":\"printf direct\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
@@ -693,7 +703,8 @@ void test_app_rpc_duplicate_outstanding_id_does_not_replace_original()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"same\",\"type\":\"prompt\",\"message\":\"original\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
@@ -749,7 +760,8 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read note\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));

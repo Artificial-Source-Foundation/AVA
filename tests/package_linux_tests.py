@@ -531,6 +531,28 @@ while True:
     )
 
 
+def write_signal_guard_fixture(path: pathlib.Path) -> None:
+    write_executable(
+        path,
+        """#!/usr/bin/env python3
+import pathlib
+import signal
+import sys
+import time
+
+ready, stop, signaled = (pathlib.Path(value) for value in sys.argv[1:])
+
+def record_signal(_signal_number, _frame):
+    signaled.write_text("unexpected signal\\n", encoding="utf-8")
+
+signal.signal(signal.SIGTERM, record_signal)
+ready.write_text("ready\\n", encoding="utf-8")
+while not stop.exists():
+    time.sleep(0.01)
+""",
+    )
+
+
 def assert_owned_group_disappeared(pgid: int, context: str) -> None:
     deadline = time.monotonic() + PROCESS_KILL_GRACE
     while True:
@@ -549,27 +571,41 @@ def assert_cleanup_bounded(start_time: float, context: str) -> None:
         raise RuntimeError(f"{context}: cleanup exceeded its finite {maximum:.2f}s bound ({elapsed:.2f}s)")
 
 
-def wait_for_group_disappearance(pgid: int, timeout: float) -> bool:
-    deadline = time.monotonic() + timeout
-    while True:
-        if not owned_group_alive(pgid):
-            return True
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+def cleanup_signal_regression_backstop(
+    harness: subprocess.Popen[str],
+    published_group: int | None,
+    *,
+    disappearance_confirmed: bool,
+) -> bool:
+    """Delegate failed-regression cleanup to its still-owned harness.
+
+    ``published_group`` is assertion-only data from a child.  In particular, it
+    is never sent to killpg(): after an observed disappearance its numeric value
+    may already identify an unrelated process group.
+    """
+    if disappearance_confirmed:
+        return False
+    if harness not in VERIFIED_OWNED_GROUPS:
+        if published_group is None:
             return False
-        time.sleep(min(PROCESS_POLL_INTERVAL, remaining))
-
-
-def cleanup_signal_regression_group(pgid: int) -> None:
-    """Failure-only backstop for the subprocess regression's published group."""
+        raise RuntimeError(
+            "signal-cleanup regression cannot safely clean an unconfirmed child group: "
+            "its owning harness is no longer registered"
+        )
+    if harness.poll() is not None:
+        # The leader's group number may now be reusable too.  Do not let later
+        # broad cleanup turn this failed delegation into a numeric-PGID signal.
+        VERIFIED_OWNED_GROUPS.pop(harness, None)
+        ASYNC_PACKAGE_PROCESSES.discard(harness)
+        close_process_pipes(harness)
+        raise RuntimeError(
+            "signal-cleanup regression cannot safely clean an unconfirmed child group: "
+            "its owning harness already exited"
+        )
     with PackageTestTerminationDeferral():
-        if owned_group_alive(pgid):
-            signal_owned_group(pgid, signal.SIGTERM)
-            if not wait_for_group_disappearance(pgid, PROCESS_TERM_GRACE):
-                signal_owned_group(pgid, signal.SIGKILL)
-                if not wait_for_group_disappearance(pgid, PROCESS_KILL_GRACE):
-                    raise RuntimeError(f"signal-cleanup regression group {pgid} survived SIGKILL")
+        cleanup_owned_process(harness)
     raise_deferred_package_test_termination()
+    return True
 
 
 def run_process_cleanup_regressions(root: pathlib.Path, env: dict[str, str]) -> None:
@@ -655,7 +691,74 @@ def run_process_cleanup_regressions(root: pathlib.Path, env: dict[str, str]) -> 
         int(abandoned_leader.read_text(encoding="utf-8")), "exceptional package-process abandonment"
     )
 
+    run_signal_regression_backstop_safety_regressions(regression_root, fixture, env)
     run_harness_signal_cleanup_regression(regression_root, fixture, env)
+
+
+def run_signal_regression_backstop_safety_regressions(
+    regression_root: pathlib.Path,
+    fixture: pathlib.Path,
+    env: dict[str, str],
+) -> None:
+    """A recycled published PGID must not receive a regression backstop signal."""
+    guard_fixture = regression_root / "signal-regression-guard.py"
+    write_signal_guard_fixture(guard_fixture)
+    guard_ready = regression_root / "signal-regression-guard.ready"
+    guard_stop = regression_root / "signal-regression-guard.stop"
+    guard_signaled = regression_root / "signal-regression-guard.signaled"
+    guard = start(
+        [sys.executable, str(guard_fixture), str(guard_ready), str(guard_stop), str(guard_signaled)],
+        env=env,
+    )
+    try:
+        wait_for_path(guard_ready, guard, timeout=1.0)
+        # Treat this live, unrelated group as the stale numeric value a child
+        # could have published before its original group disappeared.
+        simulated_reused_group = owned_group_id(guard)
+
+        def start_backstop_harness(name: str) -> subprocess.Popen[str]:
+            ready = regression_root / f"{name}.ready"
+            leader = regression_root / f"{name}.leader"
+            harness = start(
+                [sys.executable, str(fixture), "stall", str(ready), str(leader)], env=env
+            )
+            wait_for_path(ready, harness, timeout=1.0)
+            return harness
+
+        confirmed_harness = start_backstop_harness("confirmed-disappearance-backstop")
+        try:
+            if cleanup_signal_regression_backstop(
+                confirmed_harness,
+                simulated_reused_group,
+                disappearance_confirmed=True,
+            ):
+                raise RuntimeError("confirmed disappearance unexpectedly ran the signal-regression backstop")
+            if confirmed_harness.poll() is not None:
+                raise RuntimeError("confirmed disappearance unexpectedly terminated its harness")
+        finally:
+            if confirmed_harness in VERIFIED_OWNED_GROUPS:
+                result_after_cleanup(confirmed_harness)
+
+        delegated_harness = start_backstop_harness("reused-identity-backstop")
+        try:
+            if not cleanup_signal_regression_backstop(
+                delegated_harness,
+                simulated_reused_group,
+                disappearance_confirmed=False,
+            ):
+                raise RuntimeError("unconfirmed signal-regression cleanup was not delegated to its harness")
+        finally:
+            if delegated_harness in VERIFIED_OWNED_GROUPS:
+                result_after_cleanup(delegated_harness)
+
+        if guard_signaled.exists() or guard.poll() is not None:
+            raise RuntimeError("signal-regression backstop signaled an unrelated simulated-reused process group")
+    finally:
+        guard_stop.write_text("stop\n", encoding="utf-8")
+        if guard in VERIFIED_OWNED_GROUPS:
+            finish(guard, timeout=1.0)
+    if guard_signaled.exists():
+        raise RuntimeError("signal-regression backstop signaled the unrelated guard during cleanup")
 
 
 def run_harness_signal_cleanup_regression(
@@ -694,6 +797,7 @@ def run_harness_signal_cleanup_regression(
         env=env,
     )
     descendant_group: int | None = None
+    descendant_group_disappeared = False
     try:
         wait_for_path(harness_ready, harness, timeout=5.0)
         if not descendant_ready.is_file() or not leader.is_file():
@@ -713,11 +817,13 @@ def run_harness_signal_cleanup_regression(
             )
         assert_cleanup_bounded(started, "SIGTERM-cleaned package harness")
         assert_owned_group_disappeared(descendant_group, "SIGTERM-cleaned package harness")
+        descendant_group_disappeared = True
     finally:
-        if harness in VERIFIED_OWNED_GROUPS:
-            cleanup_owned_process(harness)
-        if descendant_group is not None:
-            cleanup_signal_regression_group(descendant_group)
+        cleanup_signal_regression_backstop(
+            harness,
+            descendant_group,
+            disappearance_confirmed=descendant_group_disappeared,
+        )
 
 
 def run_signal_cleanup_regression_child(args: argparse.Namespace) -> int:
@@ -1025,6 +1131,47 @@ def open_final_directory(path: pathlib.Path, description: str) -> tuple[int, os.
     return directory_fd, os.fstat(directory_fd)
 
 
+def open_owned_directory_entry(
+    parent_fd: int,
+    name: str,
+    description: str,
+    *,
+    expected_identity: OwnedDirectoryIdentity | None = None,
+) -> tuple[int, OwnedDirectoryIdentity]:
+    """Open one private directory entry without trusting its pathname."""
+    if not name or name in (".", "..") or "/" in name:
+        raise RuntimeError(f"{description} must name one directory entry: {name!r}")
+    try:
+        listed = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError as exc:
+        raise RuntimeError(f"unable to inspect {description}: {name}: {exc}") from exc
+    if stat.S_ISLNK(listed.st_mode) or not stat.S_ISDIR(listed.st_mode):
+        raise RuntimeError(f"{description} must be a directory, not a link: {name}")
+    try:
+        directory_fd = os.open(
+            name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            dir_fd=parent_fd,
+        )
+    except OSError as exc:
+        raise RuntimeError(f"unable to open {description}: {name}: {exc}") from exc
+    try:
+        opened = os.fstat(directory_fd)
+        identity = owned_directory_identity(opened)
+        if (
+            directory_identity(opened) != directory_identity(listed)
+            or not stat.S_ISDIR(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != 0o700
+            or (expected_identity is not None and identity != expected_identity)
+        ):
+            raise RuntimeError(f"{description} changed identity, ownership, or mode while opening: {name}")
+        return directory_fd, identity
+    except BaseException:
+        os.close(directory_fd)
+        raise
+
+
 def create_unique_owned_child(base_fd: int, base_path: pathlib.Path) -> tuple[str, OwnedDirectoryIdentity]:
     for _ in range(32):
         name = f".ava-package-linux-tests.{os.getpid()}.{secrets.token_hex(12)}"
@@ -1299,6 +1446,82 @@ class PackageTestWorkspace:
             return f"cleanup preserved private temporary base {self.base_path}: {exc}"
 
 
+def private_workspace_directory_identity(
+    workspace: PackageTestWorkspace,
+    path: pathlib.Path,
+    description: str,
+    *,
+    expected_identity: OwnedDirectoryIdentity | None = None,
+) -> OwnedDirectoryIdentity:
+    """Verify a private direct child of the descriptor-owned test workspace."""
+    if path.parent != workspace.root:
+        raise RuntimeError(f"{description} is not a direct package-test workspace child: {path}")
+    root_fd, _root_identity = open_owned_directory_entry(
+        workspace.base_fd,
+        workspace.child_name,
+        "package-test workspace",
+        expected_identity=workspace.child_identity,
+    )
+    try:
+        child_fd, child_identity = open_owned_directory_entry(
+            root_fd,
+            path.name,
+            description,
+            expected_identity=expected_identity,
+        )
+    finally:
+        os.close(root_fd)
+    os.close(child_fd)
+    return child_identity
+
+
+def validate_default_package_output(
+    workspace: PackageTestWorkspace,
+    temp: pathlib.Path,
+    temp_identity: OwnedDirectoryIdentity,
+    artifact: pathlib.Path,
+    checksum: pathlib.Path,
+    archive_name: str,
+    checksum_name: str,
+) -> pathlib.Path:
+    """Accept only the publisher's private direct child of our recorded TMPDIR."""
+    output = artifact.parent
+    if (
+        output.parent != temp
+        or not output.name.startswith("ava-release-output.")
+        or len(output.name) == len("ava-release-output.")
+        or artifact != output / archive_name
+        or checksum != output / checksum_name
+    ):
+        raise RuntimeError(f"default output was not a private TMPDIR child: {output}")
+
+    root_fd, _root_identity = open_owned_directory_entry(
+        workspace.base_fd,
+        workspace.child_name,
+        "package-test workspace",
+        expected_identity=workspace.child_identity,
+    )
+    try:
+        temp_fd, _temp_identity = open_owned_directory_entry(
+            root_fd,
+            temp.name,
+            "package-test TMPDIR",
+            expected_identity=temp_identity,
+        )
+        try:
+            output_fd, _output_identity = open_owned_directory_entry(
+                temp_fd,
+                output.name,
+                "default package output",
+            )
+        finally:
+            os.close(temp_fd)
+    finally:
+        os.close(root_fd)
+    os.close(output_fd)
+    return output
+
+
 def create_private_base() -> tuple[pathlib.Path, int, OwnedDirectoryIdentity, int]:
     base_path = pathlib.Path(tempfile.mkdtemp(prefix="ava-package-linux-tests-"))
     parent_fd = -1
@@ -1558,6 +1781,7 @@ def run_package_tests(
     checksum_name = f"{archive_name}.sha256"
     temp = root / "tmp"
     temp.mkdir(mode=0o700)
+    temp_identity = private_workspace_directory_identity(workspace, temp, "package-test TMPDIR")
     env = os.environ.copy()
     env["TMPDIR"] = str(temp)
     run_process_cleanup_regressions(root, env)
@@ -1604,12 +1828,20 @@ def run_package_tests(
 
     default_result = run(package_command(script, fixture), env=env)
     default_artifact = parse_path(default_result.stdout, "artifact")
-    default_output = default_artifact.parent
-    if default_output == output or not default_output.name.startswith("ava-release-output."):
-        raise RuntimeError(f"default output was not unpredictable and distinct: {default_output}")
-    if stat.S_IMODE(default_output.stat().st_mode) != 0o700:
-        raise RuntimeError(f"default output is not private mode 0700: {oct(stat.S_IMODE(default_output.stat().st_mode))}")
-    shutil.rmtree(default_output)
+    default_checksum = parse_path(default_result.stdout, "checksum")
+    default_output = validate_default_package_output(
+        workspace,
+        temp,
+        temp_identity,
+        default_artifact,
+        default_checksum,
+        archive_name,
+        checksum_name,
+    )
+    if default_output == output:
+        raise RuntimeError(f"default output was not distinct from the requested output: {default_output}")
+    # The descriptor-anchored workspace cleanup owns this directory.  Never
+    # recursively delete a pathname whose spelling arrived via child stdout.
 
     insecure = root / "insecure-output"
     insecure.mkdir(mode=0o700)
@@ -2120,7 +2352,11 @@ def run_main_package_tests(args: argparse.Namespace) -> int:
         try:
             repo = args.repo.resolve()
             run_workspace_safety_regressions(repo)
-            workspace = prepare_workspace(args.root, repo)
+            # Keep a terminal signal from landing after prepare_workspace()
+            # creates its private child but before this finally block can own it.
+            with PackageTestTerminationDeferral():
+                workspace = prepare_workspace(args.root, repo)
+            raise_deferred_package_test_termination()
             return run_package_tests(args, workspace, repo)
         finally:
             if workspace is None:

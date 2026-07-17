@@ -108,6 +108,9 @@ class SessionLease
   [[nodiscard]] static ava::core::Result<SessionLease> acquire(std::filesystem::path const& session_path);
   [[nodiscard]] bool active() const noexcept;
   [[nodiscard]] std::filesystem::path const& canonical_path() const noexcept;
+  // Test-only observation used to prove lease-bound pread snapshots do not
+  // mutate the shared open-file-description offset.
+  [[nodiscard]] off_t offset_for_test() const noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 
@@ -155,6 +158,8 @@ class SessionStore
   // Test-only deterministic race seams. Production callers must not install them.
   void set_before_append_identity_check_for_test(std::function<void()> hook);
   void set_after_append_write_for_test(std::function<void()> hook);
+  void set_after_lease_bound_read_for_test(std::function<void()> hook);
+  void fail_persistent_append_target_allocation_for_test(bool fail = true) noexcept;
   // Test-only write seam. A negative result is treated like write(2) failure
   // with errno supplied by the hook, allowing deterministic torn-tail tests.
   void set_append_write_for_test(std::function<ssize_t(int, std::string_view)> hook);
@@ -168,10 +173,17 @@ class SessionStore
   [[nodiscard]] ava::core::Result<std::optional<std::filesystem::path>> recover_torn_tail(SessionLease const& lease, SessionReadLimits limits,
                                                                                           SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load() const;
+  // Authority-sensitive persistent reads are pinned to the active leased inode
+  // and to the exact canonical parent/name publication for their full snapshot.
+  [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load(SessionLease const& lease) const;
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested = nullptr) const;
+  [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load_bounded(SessionLease const& lease, SessionReadLimits limits,
+                                                                          SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::VoidResult visit_entries(SessionReadLimits limits, SessionEntryVisitor const& visitor,
                                                     SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::Result<SessionSummary> inspect_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested = nullptr) const;
+  [[nodiscard]] ava::core::Result<SessionSummary> inspect_bounded(SessionLease const& lease, SessionReadLimits limits,
+                                                                  SessionCancelCallback cancel_requested = nullptr) const;
 
   [[nodiscard]] static ava::core::Result<SessionStore> create(std::filesystem::path const& workspace_dir,
                                                               std::filesystem::path const& root_dir = default_root_dir());
@@ -188,11 +200,14 @@ class SessionStore
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
+  friend class SessionAppendTarget;
   struct EphemeralState;
   struct ObservationAttachment;
 
   [[nodiscard]] ava::core::Result<SessionSummary> inspect_bounded_for_listing(SessionReadLimits limits, bool inspect_metadata,
                                                                               SessionCancelCallback cancel_requested = nullptr) const;
+  [[nodiscard]] ava::core::VoidResult visit_entries_leased(SessionLease const& lease, SessionReadLimits limits, SessionEntryVisitor const& visitor,
+                                                           SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::VoidResult append_impl(SessionLease const* lease, SessionEntry const& entry);
   explicit SessionStore(SessionStoreOptions options, std::shared_ptr<EphemeralState> ephemeral_state);
 
@@ -201,7 +216,9 @@ class SessionStore
   std::shared_ptr<ObservationAttachment> observation_attachment_;
   std::function<void()> before_append_identity_check_for_test_;
   std::function<void()> after_append_write_for_test_;
+  std::function<void()> after_lease_bound_read_for_test_;
   std::function<ssize_t(int, std::string_view)> append_write_for_test_;
+  bool fail_persistent_append_target_allocation_for_test_ = false;
   std::function<void()> after_recovery_quarantine_publication_for_test_;
   std::function<void()> before_created_file_rollback_detach_for_test_;
   std::function<void()> after_created_file_rollback_detach_for_test_;
@@ -214,11 +231,13 @@ class SessionStore
 class SessionAppendTarget
 {
  public:
-  [[nodiscard]] static ava::core::Result<std::shared_ptr<SessionAppendTarget>> create_persistent(SessionStore const& store,
-                                                                                                  SessionLease const& lease);
+  [[nodiscard]] static ava::core::Result<std::shared_ptr<SessionAppendTarget>> create_persistent(SessionStore const& store, SessionLease const& lease);
   [[nodiscard]] static ava::core::Result<std::shared_ptr<SessionAppendTarget>> create_ephemeral(SessionStore const& store);
 
   [[nodiscard]] ava::core::VoidResult append(SessionEntry const& entry);
+  // Persistent targets repair through their private duplicated lease. Recovery
+  // is deliberately a successful no-op for an ephemeral target.
+  [[nodiscard]] ava::core::VoidResult recover();
   [[nodiscard]] bool is_ephemeral() const noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_ON

@@ -97,12 +97,12 @@ void test_session_store_round_trip()
     return;
 
   auto append = append_session_entry_for_test(*store, ava::session::SessionEntry{
-      .id = "entry_1",
-      .parent_id = "",
-      .type = ava::session::EntryType::SessionStart,
-      .timestamp = "2026-04-27T00:00:00Z",
-      .data_json = "{\"mode\":\"build\"}",
-  });
+                                                          .id = "entry_1",
+                                                          .parent_id = "",
+                                                          .type = ava::session::EntryType::SessionStart,
+                                                          .timestamp = "2026-04-27T00:00:00Z",
+                                                          .data_json = "{\"mode\":\"build\"}",
+                                                      });
   expect(append.has_value(), "session entry appends");
 
   struct stat session_stat{};
@@ -132,32 +132,32 @@ void test_session_store_round_trip()
   if (!text_store)
     return;
   auto const text_append = append_session_entry_for_test(*text_store, ava::session::SessionEntry{
-      .id = "entry_2\n",
-      .parent_id = "",
-      .type = ava::session::EntryType::UserMessage,
-      .timestamp = "2026-04-27T00:00:00Z",
-      .data_json = "{\"text\":\"hello\"}",
-  });
+                                                                          .id = "entry_2\n",
+                                                                          .parent_id = "",
+                                                                          .type = ava::session::EntryType::UserMessage,
+                                                                          .timestamp = "2026-04-27T00:00:00Z",
+                                                                          .data_json = "{\"text\":\"hello\"}",
+                                                                      });
   expect(text_append.has_value(), "session entry with escaped newline appends");
   auto text_loaded = text_store->load();
   expect(text_loaded && !text_loaded->empty() && (*text_loaded)[0].id == "entry_2\n", "session escaped strings round trip");
 
   auto const raw_newline_append = append_session_entry_for_test(*text_store, ava::session::SessionEntry{
-      .id = "entry_raw_newline",
-      .parent_id = "",
-      .type = ava::session::EntryType::UserMessage,
-      .timestamp = "2026-04-27T00:00:00Z",
-      .data_json = "{\"text\":\"bad\nsplit\"}",
-  });
+                                                                                 .id = "entry_raw_newline",
+                                                                                 .parent_id = "",
+                                                                                 .type = ava::session::EntryType::UserMessage,
+                                                                                 .timestamp = "2026-04-27T00:00:00Z",
+                                                                                 .data_json = "{\"text\":\"bad\nsplit\"}",
+                                                                             });
   expect(!raw_newline_append, "session data_json rejects raw newlines to preserve JSONL entries");
 
   auto const raw_carriage_return_append = append_session_entry_for_test(*text_store, ava::session::SessionEntry{
-      .id = "entry_raw_carriage_return",
-      .parent_id = "",
-      .type = ava::session::EntryType::UserMessage,
-      .timestamp = "2026-04-27T00:00:00Z",
-      .data_json = "{\"text\":\"bad\rsplit\"}",
-  });
+                                                                                         .id = "entry_raw_carriage_return",
+                                                                                         .parent_id = "",
+                                                                                         .type = ava::session::EntryType::UserMessage,
+                                                                                         .timestamp = "2026-04-27T00:00:00Z",
+                                                                                         .data_json = "{\"text\":\"bad\rsplit\"}",
+                                                                                     });
   expect(!raw_carriage_return_append, "session data_json rejects raw carriage returns to preserve JSONL entries");
 
   auto large_store = ava::session::SessionStore::create(std::filesystem::current_path(), temp_root());
@@ -165,12 +165,12 @@ void test_session_store_round_trip()
   if (large_store)
   {
     auto const large_append = append_session_entry_for_test(*large_store, ava::session::SessionEntry{
-        .id = std::string(600000, '"'),
-        .parent_id = "",
-        .type = ava::session::EntryType::UserMessage,
-        .timestamp = "2026-04-27T00:00:00Z",
-        .data_json = "{\"text\":\"hello\"}",
-    });
+                                                                              .id = std::string(600000, '"'),
+                                                                              .parent_id = "",
+                                                                              .type = ava::session::EntryType::UserMessage,
+                                                                              .timestamp = "2026-04-27T00:00:00Z",
+                                                                              .data_json = "{\"text\":\"hello\"}",
+                                                                          });
     expect(!large_append, "session append rejects entries whose escaped JSONL line is too large");
     auto large_loaded = large_store->load();
     expect(large_loaded && large_loaded->empty(), "oversized rejected session entry does not corrupt later loads");
@@ -198,12 +198,12 @@ void test_session_store_round_trip()
         .session_id = bad_session_id,
     });
     auto const bad_append = append_session_entry_for_test(bad_store, ava::session::SessionEntry{
-        .id = "entry_bad_session",
-        .parent_id = "",
-        .type = ava::session::EntryType::UserMessage,
-        .timestamp = "2026-04-27T00:00:00Z",
-        .data_json = "{\"text\":\"hello\"}",
-    });
+                                                                         .id = "entry_bad_session",
+                                                                         .parent_id = "",
+                                                                         .type = ava::session::EntryType::UserMessage,
+                                                                         .timestamp = "2026-04-27T00:00:00Z",
+                                                                         .data_json = "{\"text\":\"hello\"}",
+                                                                     });
     expect(!bad_append, "session append rejects invalid externally supplied session ids");
     expect(!bad_store.load(), "session load rejects invalid externally supplied session ids");
   }
@@ -217,12 +217,12 @@ void test_session_store_round_trip()
   std::error_code cleanup_error;
   std::filesystem::remove(attempted_traversal_path, cleanup_error);
   auto const traversal_append = append_session_entry_for_test(traversal_store, ava::session::SessionEntry{
-      .id = "entry_traversal",
-      .parent_id = "",
-      .type = ava::session::EntryType::UserMessage,
-      .timestamp = "2026-04-27T00:00:00Z",
-      .data_json = "{\"text\":\"hello\"}",
-  });
+                                                                                   .id = "entry_traversal",
+                                                                                   .parent_id = "",
+                                                                                   .type = ava::session::EntryType::UserMessage,
+                                                                                   .timestamp = "2026-04-27T00:00:00Z",
+                                                                                   .data_json = "{\"text\":\"hello\"}",
+                                                                               });
   expect(!traversal_append && !std::filesystem::exists(attempted_traversal_path), "session traversal id append is rejected before creating attempted path");
 
   ava::session::SessionStore unicode_store(ava::session::SessionStoreOptions{
@@ -336,10 +336,10 @@ void test_session_store_round_trip()
          "session loader rejects unsafe parent_id values without requiring parent existence");
 
   auto invalid_parent_append = append_session_entry_for_test(*text_store, ava::session::SessionEntry{.id = "entry_invalid_parent",
-                                                                             .parent_id = "bad/parent",
-                                                                             .type = ava::session::EntryType::UserMessage,
-                                                                             .timestamp = "2026-04-27T00:00:00Z",
-                                                                             .data_json = "{\"text\":\"hello\"}"});
+                                                                                                     .parent_id = "bad/parent",
+                                                                                                     .type = ava::session::EntryType::UserMessage,
+                                                                                                     .timestamp = "2026-04-27T00:00:00Z",
+                                                                                                     .data_json = "{\"text\":\"hello\"}"});
   expect(!invalid_parent_append, "session append rejects unsafe parent_id values");
 }
 
@@ -394,12 +394,12 @@ void test_ephemeral_session_store_stays_in_memory()
     session_path = store->session_path();
     scratch_root = session_path.parent_path().parent_path();
     auto append = append_session_entry_for_test(*store, ava::session::SessionEntry{
-        .id = "entry_ephemeral",
-        .parent_id = "",
-        .type = ava::session::EntryType::UserMessage,
-        .timestamp = "2026-04-27T00:00:00Z",
-        .data_json = "{\"text\":\"hello\"}",
-    });
+                                                            .id = "entry_ephemeral",
+                                                            .parent_id = "",
+                                                            .type = ava::session::EntryType::UserMessage,
+                                                            .timestamp = "2026-04-27T00:00:00Z",
+                                                            .data_json = "{\"text\":\"hello\"}",
+                                                        });
     expect(append.has_value(), "ephemeral session store accepts valid entries");
     expect(!std::filesystem::exists(session_path), "ephemeral session store does not create a JSONL history file");
 
@@ -658,10 +658,10 @@ void test_session_tree_index_derives_branches()
   };
   auto append_start = [](ava::session::SessionStore& store, std::string_view entry_id) {
     return append_session_entry_for_test(store, ava::session::SessionEntry{.id = std::string(entry_id),
-                                                   .parent_id = "",
-                                                   .type = ava::session::EntryType::SessionStart,
-                                                   .timestamp = "2026-04-27T00:00:00Z",
-                                                   .data_json = "{\"mode\":\"build\"}"});
+                                                                           .parent_id = "",
+                                                                           .type = ava::session::EntryType::SessionStart,
+                                                                           .timestamp = "2026-04-27T00:00:00Z",
+                                                                           .data_json = "{\"mode\":\"build\"}"});
   };
 
   auto root_store = make_store("session_root");
@@ -707,10 +707,10 @@ void test_session_tree_index_derives_branches()
   orphan_metadata.actor = "test";
   auto orphan_meta = append_session_metadata_for_test(orphan_store, std::move(orphan_metadata));
   auto corrupt_meta = append_session_entry_for_test(corrupt_metadata_store, ava::session::SessionEntry{.id = "entry_corrupt_metadata",
-                                                                               .parent_id = "entry_corrupt_start",
-                                                                               .type = ava::session::EntryType::SessionMetadata,
-                                                                               .timestamp = "2026-04-27T00:00:01Z",
-                                                                               .data_json = "{\"schema_version\":1,\"name\":123}"});
+                                                                                                       .parent_id = "entry_corrupt_start",
+                                                                                                       .type = ava::session::EntryType::SessionMetadata,
+                                                                                                       .timestamp = "2026-04-27T00:00:01Z",
+                                                                                                       .data_json = "{\"schema_version\":1,\"name\":123}"});
   expect(root_meta && child_meta && grandchild_meta && orphan_meta && corrupt_meta, "session tree index test persists branch metadata");
 
   auto tree = ava::session::build_session_tree(workspace, sessions_dir, "session_grandchild");
@@ -766,10 +766,10 @@ void test_session_tree_index_handles_parent_cycles()
   };
   auto append_start = [](ava::session::SessionStore& store, std::string_view entry_id) {
     return append_session_entry_for_test(store, ava::session::SessionEntry{.id = std::string(entry_id),
-                                                   .parent_id = "",
-                                                   .type = ava::session::EntryType::SessionStart,
-                                                   .timestamp = "2026-04-27T00:00:00Z",
-                                                   .data_json = "{\"mode\":\"build\"}"});
+                                                                           .parent_id = "",
+                                                                           .type = ava::session::EntryType::SessionStart,
+                                                                           .timestamp = "2026-04-27T00:00:00Z",
+                                                                           .data_json = "{\"mode\":\"build\"}"});
   };
 
   auto first_store = make_store("session_cycle_a");
@@ -823,28 +823,30 @@ void test_session_branch_fork_and_clone_copy_source_safely()
 
   auto source_store =
       ava::session::SessionStore(ava::session::SessionStoreOptions{.root_dir = sessions_dir, .workspace_dir = workspace, .session_id = "session_source"});
-  expect(append_session_entry_for_test(source_store, ava::session::SessionEntry{.id = "entry_start",
-                                                        .parent_id = "",
-                                                        .type = ava::session::EntryType::SessionStart,
-                                                        .timestamp = "2026-04-27T00:00:00Z",
-                                                        .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-test\","
-                                                                     "\"context_sources\":0,\"context_window_tokens\":128000,\"max_output_tokens\":4096,"
-                                                                     "\"prompt_override\":false,\"supports_tools\":true,\"supports_streaming\":true,"
-                                                                     "\"supports_reasoning\":true,\"reports_usage\":true}"}) &&
-             append_session_entry_for_test(source_store, ava::session::SessionEntry{.id = "entry_user",
-                                                            .parent_id = "entry_start",
-                                                            .type = ava::session::EntryType::UserMessage,
-                                                            .timestamp = "2026-04-27T00:00:01Z",
-                                                            .data_json = "{\"text\":\"question\",\"attachments\":[{\"id\":\"branch_img\","
-                                                                         "\"type\":\"image\",\"mime_type\":\"image/png\",\"byte_size\":5,"
-                                                                         "\"sha256\":\"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\","
-                                                                         "\"storage_path\":\"attachments/branch_img.txt\"}]}",
-                                                            .version = 2}) &&
+  expect(append_session_entry_for_test(
+             source_store, ava::session::SessionEntry{.id = "entry_start",
+                                                      .parent_id = "",
+                                                      .type = ava::session::EntryType::SessionStart,
+                                                      .timestamp = "2026-04-27T00:00:00Z",
+                                                      .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-test\","
+                                                                   "\"context_sources\":0,\"context_window_tokens\":128000,\"max_output_tokens\":4096,"
+                                                                   "\"prompt_override\":false,\"supports_tools\":true,\"supports_streaming\":true,"
+                                                                   "\"supports_reasoning\":true,\"reports_usage\":true}"}) &&
+             append_session_entry_for_test(
+                 source_store, ava::session::SessionEntry{.id = "entry_user",
+                                                          .parent_id = "entry_start",
+                                                          .type = ava::session::EntryType::UserMessage,
+                                                          .timestamp = "2026-04-27T00:00:01Z",
+                                                          .data_json = "{\"text\":\"question\",\"attachments\":[{\"id\":\"branch_img\","
+                                                                       "\"type\":\"image\",\"mime_type\":\"image/png\",\"byte_size\":5,"
+                                                                       "\"sha256\":\"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\","
+                                                                       "\"storage_path\":\"attachments/branch_img.txt\"}]}",
+                                                          .version = 2}) &&
              append_session_entry_for_test(source_store, ava::session::SessionEntry{.id = "entry_assistant",
-                                                            .parent_id = "entry_user",
-                                                            .type = ava::session::EntryType::AssistantMessage,
-                                                            .timestamp = "2026-04-27T00:00:02Z",
-                                                            .data_json = "{\"text\":\"answer\"}"}),
+                                                                                    .parent_id = "entry_user",
+                                                                                    .type = ava::session::EntryType::AssistantMessage,
+                                                                                    .timestamp = "2026-04-27T00:00:02Z",
+                                                                                    .data_json = "{\"text\":\"answer\"}"}),
          "session branch test creates source entries");
 
   ava::session::SessionMetadataUpdate source_metadata;
@@ -966,24 +968,25 @@ void test_session_branch_summary_appends_to_source_session()
 
   auto source_store =
       ava::session::SessionStore(ava::session::SessionStoreOptions{.root_dir = sessions_dir, .workspace_dir = workspace, .session_id = "session_source"});
-  expect(append_session_entry_for_test(source_store, ava::session::SessionEntry{.id = "entry_start",
-                                                        .parent_id = "",
-                                                        .type = ava::session::EntryType::SessionStart,
-                                                        .timestamp = "2026-04-27T00:00:00Z",
-                                                        .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-test\","
-                                                                     "\"context_sources\":0,\"context_window_tokens\":128000,\"max_output_tokens\":4096,"
-                                                                     "\"prompt_override\":false,\"supports_tools\":true,\"supports_streaming\":true,"
-                                                                     "\"supports_reasoning\":true,\"reports_usage\":true}"}) &&
+  expect(append_session_entry_for_test(
+             source_store, ava::session::SessionEntry{.id = "entry_start",
+                                                      .parent_id = "",
+                                                      .type = ava::session::EntryType::SessionStart,
+                                                      .timestamp = "2026-04-27T00:00:00Z",
+                                                      .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-test\","
+                                                                   "\"context_sources\":0,\"context_window_tokens\":128000,\"max_output_tokens\":4096,"
+                                                                   "\"prompt_override\":false,\"supports_tools\":true,\"supports_streaming\":true,"
+                                                                   "\"supports_reasoning\":true,\"reports_usage\":true}"}) &&
              append_session_entry_for_test(source_store, ava::session::SessionEntry{.id = "entry_user",
-                                                            .parent_id = "entry_start",
-                                                            .type = ava::session::EntryType::UserMessage,
-                                                            .timestamp = "2026-04-27T00:00:01Z",
-                                                            .data_json = "{\"text\":\"question\"}"}) &&
+                                                                                    .parent_id = "entry_start",
+                                                                                    .type = ava::session::EntryType::UserMessage,
+                                                                                    .timestamp = "2026-04-27T00:00:01Z",
+                                                                                    .data_json = "{\"text\":\"question\"}"}) &&
              append_session_entry_for_test(source_store, ava::session::SessionEntry{.id = "entry_assistant",
-                                                            .parent_id = "entry_user",
-                                                            .type = ava::session::EntryType::AssistantMessage,
-                                                            .timestamp = "2026-04-27T00:00:02Z",
-                                                            .data_json = "{\"text\":\"answer\"}"}),
+                                                                                    .parent_id = "entry_user",
+                                                                                    .type = ava::session::EntryType::AssistantMessage,
+                                                                                    .timestamp = "2026-04-27T00:00:02Z",
+                                                                                    .data_json = "{\"text\":\"answer\"}"}),
          "branch summary test creates source entries");
   auto const source_entries_before = source_store.load();
   expect(source_entries_before && source_entries_before->size() == 3, "branch summary test loads source before append");
@@ -1694,11 +1697,11 @@ void test_session_lease_creation_and_link_safety()
          "create_and_acquire uses exclusive creation and leaves an existing fresh session unchanged");
 
   auto first_append = fresh_lease ? fresh_store.append(*fresh_lease, ava::session::SessionEntry{.id = "fresh_first",
-                                                                    .parent_id = "",
-                                                                    .type = ava::session::EntryType::SessionStart,
-                                                                    .timestamp = "2026-07-14T00:00:00Z",
-                                                                    .data_json = "{\"mode\":\"build\"}"})
-                                 : ava::core::VoidResult(std::unexpected(std::move(fresh_lease.error())));
+                                                                                                .parent_id = "",
+                                                                                                .type = ava::session::EntryType::SessionStart,
+                                                                                                .timestamp = "2026-07-14T00:00:00Z",
+                                                                                                .data_json = "{\"mode\":\"build\"}"})
+                                  : ava::core::VoidResult(std::unexpected(std::move(fresh_lease.error())));
   expect(first_append && read_binary_file(fresh_store.session_path()).ends_with('\n'),
          "the fresh owner can append the first framed record while retaining its lease");
   fresh_lease = ava::session::SessionLease{};
@@ -2006,8 +2009,8 @@ void test_session_torn_tail_recovery()
   auto append_lease = ava::session::SessionLease::acquire(append_store.session_path());
   auto append_recovered = append_lease ? append_store.recover_torn_tail(*append_lease, ava::session::legacy_unbounded_session_read_limits())
                                        : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(append_lease.error())));
-  auto append_after_recovery = append_recovered ? append_store.append(*append_lease, second_entry)
-                                                  : ava::core::VoidResult(std::unexpected(append_recovered.error()));
+  auto append_after_recovery =
+      append_recovered ? append_store.append(*append_lease, second_entry) : ava::core::VoidResult(std::unexpected(append_recovered.error()));
   expect(append_recovered && append_after_recovery && append_store.load() && append_store.load()->size() == 2,
          "append proceeds after the leased recovery restores JSONL framing");
 
@@ -2329,17 +2332,17 @@ void test_session_resume_and_listing()
     return;
 
   expect(append_session_entry_for_test(*first, ava::session::SessionEntry{.id = "entry_first",
-                                                 .parent_id = "",
-                                                 .type = ava::session::EntryType::UserMessage,
-                                                 .timestamp = "2026-04-27T00:00:00Z",
-                                                 .data_json = "{\"text\":\"first\"}"})
+                                                                          .parent_id = "",
+                                                                          .type = ava::session::EntryType::UserMessage,
+                                                                          .timestamp = "2026-04-27T00:00:00Z",
+                                                                          .data_json = "{\"text\":\"first\"}"})
              .has_value(),
          "first resume test session appends");
   expect(append_session_entry_for_test(*second, ava::session::SessionEntry{.id = "entry_second",
-                                                 .parent_id = "",
-                                                 .type = ava::session::EntryType::UserMessage,
-                                                 .timestamp = "2026-04-27T00:01:00Z",
-                                                 .data_json = "{\"text\":\"second\"}"})
+                                                                           .parent_id = "",
+                                                                           .type = ava::session::EntryType::UserMessage,
+                                                                           .timestamp = "2026-04-27T00:01:00Z",
+                                                                           .data_json = "{\"text\":\"second\"}"})
              .has_value(),
          "second resume test session appends");
 
@@ -2422,10 +2425,10 @@ void test_session_resume_and_listing()
     auto symlink_load = symlink_store.load();
     expect(!symlink_load && symlink_load.error().category() == ava::core::ErrorCategory::PermissionDenied, "session load rejects symlink session files");
     auto symlink_append = append_session_entry_for_test(symlink_store, ava::session::SessionEntry{.id = "entry_symlink",
-                                                                          .parent_id = "",
-                                                                          .type = ava::session::EntryType::UserMessage,
-                                                                          .timestamp = "2026-04-27T00:04:00Z",
-                                                                          .data_json = "{\"text\":\"bad\"}"});
+                                                                                                  .parent_id = "",
+                                                                                                  .type = ava::session::EntryType::UserMessage,
+                                                                                                  .timestamp = "2026-04-27T00:04:00Z",
+                                                                                                  .data_json = "{\"text\":\"bad\"}"});
     expect(!symlink_append && symlink_append.error().category() == ava::core::ErrorCategory::PermissionDenied &&
                read_binary_file(first->session_path()) == symlink_target_bytes,
            "session append rejects symlink session files without mutating the target");
@@ -2458,12 +2461,12 @@ void test_session_compaction_entry_round_trip()
   config.max_summary_bytes = 1024;
 
   auto appended = append_manual_compaction_for_test(store, ava::session::ManualCompactionRequest{.summary = "Prior work summary",
-                                                                                                      .instructions = "Keep the recent plan.",
-                                                                                                      .config = config,
-                                                                                                      .estimated_tokens = 1300,
-                                                                                                      .threshold_tokens = 0,
-                                                                                                      .trigger = "manual",
-                                                                                                      .recent_context = ""});
+                                                                                                 .instructions = "Keep the recent plan.",
+                                                                                                 .config = config,
+                                                                                                 .estimated_tokens = 1300,
+                                                                                                 .threshold_tokens = 0,
+                                                                                                 .trigger = "manual",
+                                                                                                 .recent_context = ""});
   expect(appended.has_value(), "manual compaction entry appends");
 
   auto loaded = store.load();
@@ -3664,6 +3667,115 @@ void test_created_session_rollback_is_identity_safe_and_preserves_attachments()
   }
 }
 
+std::size_t error_context_count(ava::core::Error const& error, std::string_view key)
+{
+  return static_cast<std::size_t>(std::ranges::count_if(error.context(), [&](ava::core::ErrorContext const& item) { return item.key == key; }));
+}
+
+std::optional<std::string> error_context_value(ava::core::Error const& error, std::string_view key)
+{
+  auto const item = std::ranges::find_if(error.context(), [&](ava::core::ErrorContext const& context) { return context.key == key; });
+  return item == error.context().end() ? std::nullopt : std::optional<std::string>(item->value);
+}
+
+void test_lease_bound_session_reads_hold_exact_authority()
+{
+  auto const root = temp_root() / "lease-bound-session-reads";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+
+  auto entry = [](std::string id, std::string text = "snapshot") {
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::UserMessage,
+                                      .timestamp = ava::session::now_timestamp(),
+                                      .data_json = "{\"text\":\"" + text + "\"}"};
+  };
+  auto make_owned = [&](std::string id) -> std::pair<ava::session::SessionStore, ava::session::SessionLease> {
+    ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / id, .workspace_dir = workspace, .session_id = std::move(id)});
+    auto lease = ava::session::SessionLease::create_and_acquire(store.session_path());
+    if (!lease)
+      return {std::move(store), ava::session::SessionLease{}};
+    auto seeded = store.append(*lease, entry("seed"));
+    expect(seeded.has_value(), "lease-bound read fixture seeds a framed session record");
+    return {std::move(store), std::move(*lease)};
+  };
+
+  {
+    auto [store, lease] = make_owned("static-replacement");
+    if (lease.active())
+    {
+      auto const parked = store.session_path().string() + ".parked";
+      std::filesystem::rename(store.session_path(), parked);
+      write_binary_file(store.session_path(), "replacement\n");
+      auto loaded = store.load(lease);
+      expect(!loaded, "lease-bound load rejects a basename replaced before snapshot validation");
+    }
+  }
+
+  {
+    auto [store, lease] = make_owned("read-swap");
+    if (lease.active())
+    {
+      auto const parked = store.session_path().string() + ".parked";
+      store.set_after_lease_bound_read_for_test([&] {
+        std::filesystem::rename(store.session_path(), parked);
+        write_binary_file(store.session_path(), "replacement\n");
+      });
+      auto loaded = store.load_bounded(lease, ava::session::legacy_unbounded_session_read_limits());
+      store.set_after_lease_bound_read_for_test({});
+      expect(!loaded, "lease-bound load rejects a basename swap after its exact-offset read begins");
+    }
+  }
+
+  {
+    auto [store, lease] = make_owned("parent-swap");
+    if (lease.active())
+    {
+      auto const parent = store.session_path().parent_path();
+      auto const moved_parent = parent.string() + ".moved";
+      store.set_after_lease_bound_read_for_test([&] {
+        std::filesystem::rename(parent, moved_parent);
+        std::filesystem::create_directories(parent);
+        write_binary_file(store.session_path(), "replacement\n");
+      });
+      auto inspected = store.inspect_bounded(lease, ava::session::legacy_unbounded_session_read_limits());
+      store.set_after_lease_bound_read_for_test({});
+      expect(!inspected, "lease-bound inspection rejects replacement of its canonical parent publication during the read");
+    }
+  }
+
+  {
+    auto [store, lease] = make_owned("shrink");
+    if (lease.active())
+    {
+      store.set_after_lease_bound_read_for_test([&] { std::filesystem::resize_file(store.session_path(), 1); });
+      auto loaded = store.load(lease);
+      store.set_after_lease_bound_read_for_test({});
+      expect(!loaded, "lease-bound load rejects shrink of the leased inode during its initial-size snapshot");
+    }
+  }
+
+  {
+    auto [store, lease] = make_owned("growth");
+    if (lease.active())
+    {
+      bool growth_appended = false;
+      auto const initial_offset = lease.offset_for_test();
+      store.set_after_lease_bound_read_for_test([&] { growth_appended = store.append(lease, entry("growth")).has_value(); });
+      auto snapshot = store.load(lease);
+      store.set_after_lease_bound_read_for_test({});
+      auto complete = store.load(lease);
+      expect(growth_appended && snapshot && snapshot->size() == 1 && snapshot->front().id == "seed" && complete && complete->size() == 2,
+             "lease-bound load permits concurrent valid append growth while returning only its captured initial-size snapshot");
+      expect(initial_offset >= 0 && lease.offset_for_test() == initial_offset,
+             "lease-bound exact-offset pread leaves the shared lease open-file-description offset unchanged");
+    }
+  }
+}
+
 void test_session_append_authority_and_commit_state()
 {
   auto const root = temp_root() / "session-append-authority";
@@ -3680,25 +3792,46 @@ void test_session_append_authority_and_commit_state()
                                       .timestamp = ava::session::now_timestamp(),
                                       .data_json = "{\"text\":\"authority\"}"};
   };
-  ava::session::SessionStore store(
-      ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "persistent"});
-  expect(!store.append_ephemeral(entry("wrong-mode")).has_value(), "persistent stores reject the explicitly ephemeral append path");
-  expect(!store.append(ava::session::SessionLease{}, entry("no-lease")).has_value(), "persistent stores reject missing append authority");
+  auto has_one_state = [](ava::core::VoidResult const& result, std::string_view expected) {
+    return !result && error_context_count(result.error(), "append_commit_state") == 1 && error_context_value(result.error(), "append_commit_state") == expected;
+  };
+
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "persistent"});
+  auto wrong_mode = store.append_ephemeral(entry("wrong-mode"));
+  auto no_lease = store.append(ava::session::SessionLease{}, entry("no-lease"));
+  expect(!wrong_mode && error_context_count(wrong_mode.error(), "append_commit_state") == 0,
+         "ephemeral append API failures remain free of persistent disk commit state");
+  expect(has_one_state(no_lease, "not_started"), "persistent stores reject missing append authority with exactly one not-started state");
 
   auto lease = ava::session::SessionLease::create_and_acquire(store.session_path());
   expect(lease.has_value(), "append authority fixture creates its exact lease");
   if (!lease)
     return;
+  auto invalid_data = entry("invalid-data");
+  invalid_data.data_json.clear();
+  auto invalid_data_result = store.append(*lease, invalid_data);
+  auto invalid_parent = entry("invalid-parent");
+  invalid_parent.parent_id = ".";
+  auto invalid_parent_result = store.append(*lease, invalid_parent);
+  auto oversized = entry("oversized");
+  oversized.data_json = "{\"text\":\"" + std::string(ava::session::kMaxSessionLineBytes, 'x') + "\"}";
+  auto oversized_result = store.append(*lease, oversized);
+  ava::session::SessionStore invalid_session(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "../invalid"});
+  auto invalid_session_result = invalid_session.append(*lease, entry("invalid-session"));
+  expect(has_one_state(invalid_data_result, "not_started") && has_one_state(invalid_parent_result, "not_started") &&
+             has_one_state(oversized_result, "not_started") && has_one_state(invalid_session_result, "not_started"),
+         "persistent invalid data, parent, serialization, and session failures each expose exactly one not-started commit state");
+
   auto first = store.append(*lease, entry("first"));
   auto second = store.append(*lease, entry("second"));
-  expect(first && second && store.load() && store.load()->size() == 2, "one matching active lease authorizes multiple persistent appends");
+  auto loaded = store.load();
+  expect(first && second && loaded && loaded->size() == 2, "one matching active lease authorizes multiple persistent appends");
 
-  ava::session::SessionStore other(
-      ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "other"});
+  ava::session::SessionStore other(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "other"});
   auto other_lease = ava::session::SessionLease::create_and_acquire(other.session_path());
-  auto wrong = other_lease ? store.append(*other_lease, entry("wrong-lease"))
-                           : ava::core::VoidResult(std::unexpected(std::move(other_lease.error())));
-  expect(!wrong && store.load() && store.load()->size() == 2, "persistent append rejects an active lease for another exact path");
+  auto wrong = other_lease ? store.append(*other_lease, entry("wrong-lease")) : ava::core::VoidResult(std::unexpected(std::move(other_lease.error())));
+  expect(has_one_state(wrong, "not_started") && store.load() && store.load()->size() == 2,
+         "persistent append rejects an active lease for another exact path with exactly one not-started state");
 
   auto target = ava::session::SessionAppendTarget::create_persistent(store, *lease);
   expect(target.has_value(), "persistent append target duplicates a matching lease");
@@ -3710,14 +3843,14 @@ void test_session_append_authority_and_commit_state()
            "persistent append target retains duplicated same-description lease authority after caller release");
   }
 
-  ava::session::SessionStore moved_store(
-      ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "moved"});
+  ava::session::SessionStore moved_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "moved"});
   auto movable = ava::session::SessionLease::create_and_acquire(moved_store.session_path());
   if (movable)
   {
     auto moved_to = std::move(*movable);
     auto moved_from_append = moved_store.append(*movable, entry("moved-from"));
-    expect(!moved_from_append && !movable->active() && moved_to.active(), "a moved-from lease cannot authorize a persistent append");
+    expect(has_one_state(moved_from_append, "not_started") && !movable->active() && moved_to.active(),
+           "a moved-from lease cannot authorize a persistent append and reports one not-started state");
   }
 
   auto ephemeral = ava::session::SessionStore::create_ephemeral(workspace);
@@ -3726,13 +3859,33 @@ void test_session_append_authority_and_commit_state()
     auto ephemeral_target = ava::session::SessionAppendTarget::create_ephemeral(*ephemeral);
     auto direct = ephemeral->append_ephemeral(entry("ephemeral"));
     auto persistent_target = ava::session::SessionAppendTarget::create_persistent(*ephemeral, ava::session::SessionLease{});
+    auto ephemeral_with_lease = ephemeral->append(ava::session::SessionLease{}, entry("ephemeral-with-lease"));
+    auto invalid_ephemeral = entry("invalid-ephemeral");
+    invalid_ephemeral.data_json.clear();
+    auto invalid_ephemeral_result = ephemeral->append_ephemeral(invalid_ephemeral);
     expect(direct && ephemeral_target && (*ephemeral_target)->append(entry("ephemeral-target")) && !persistent_target &&
-               !ephemeral->append(ava::session::SessionLease{}, entry("ephemeral-with-lease")),
-           "ephemeral stores and targets accept only explicitly ephemeral append authority");
+               has_one_state(ephemeral_with_lease, "not_started") && !invalid_ephemeral_result &&
+               error_context_count(invalid_ephemeral_result.error(), "append_commit_state") == 0,
+           "ephemeral stores and targets accept only explicit in-memory authority without leaking disk commit state");
   }
 
-  ava::session::SessionStore partial_store(
-      ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "partial"});
+  {
+    ava::session::SessionStore allocation_store(
+        ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "target-allocation"});
+    auto allocation_lease = ava::session::SessionLease::create_and_acquire(allocation_store.session_path());
+    if (allocation_lease)
+    {
+      allocation_store.fail_persistent_append_target_allocation_for_test();
+      auto failed_target = ava::session::SessionAppendTarget::create_persistent(allocation_store, *allocation_lease);
+      allocation_store.fail_persistent_append_target_allocation_for_test(false);
+      *allocation_lease = ava::session::SessionLease{};
+      auto reacquired = ava::session::SessionLease::acquire(allocation_store.session_path());
+      expect(!failed_target && reacquired,
+             "persistent append target allocation failure closes its immediately adopted duplicate descriptor and releases flock with the caller lease");
+    }
+  }
+
+  ava::session::SessionStore partial_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "partial"});
   auto partial_lease = ava::session::SessionLease::create_and_acquire(partial_store.session_path());
   if (partial_lease)
   {
@@ -3746,19 +3899,17 @@ void test_session_append_authority_and_commit_state()
     });
     auto partial = partial_store.append(*partial_lease, entry("partial"));
     partial_store.set_append_write_for_test({});
-    expect(!partial && partial.error().format().find("append_commit_state: partial_or_unknown") != std::string::npos &&
-               partial.error().format().find("recover_torn_tail") != std::string::npos,
+    expect(has_one_state(partial, "partial_or_unknown") && partial.error().format().find("recover_torn_tail") != std::string::npos,
            "partial append failures carry stable recovery-required commit state");
     auto recovered = partial_store.recover_torn_tail(*partial_lease, ava::session::legacy_unbounded_session_read_limits());
-    auto recovered_append = recovered ? partial_store.append(*partial_lease, entry("after-recovery"))
-                                      : ava::core::VoidResult(std::unexpected(std::move(recovered.error())));
+    auto recovered_append =
+        recovered ? partial_store.append(*partial_lease, entry("after-recovery")) : ava::core::VoidResult(std::unexpected(std::move(recovered.error())));
     expect(recovered && recovered_append, "the same retained lease repairs a partial append tail before a later append");
 
     partial_store.set_after_append_write_for_test([] { throw 1; });
     auto committed = partial_store.append(*partial_lease, entry("committed"));
     partial_store.set_after_append_write_for_test({});
-    expect(!committed && committed.error().format().find("append_commit_state: committed_to_leased_inode") != std::string::npos &&
-               read_binary_file(partial_store.session_path()).find("committed") != std::string::npos,
+    expect(has_one_state(committed, "committed_to_leased_inode") && read_binary_file(partial_store.session_path()).find("committed") != std::string::npos,
            "post-write failures report committed-to-leased-inode state without retrying");
   }
 
@@ -3778,14 +3929,12 @@ void test_session_append_authority_and_commit_state()
     });
     auto parent_swap = parent_swap_store.append(*parent_swap_lease, entry("parent-race"));
     parent_swap_store.set_before_append_identity_check_for_test({});
-    expect(!parent_swap && parent_swap.error().format().find("append_commit_state: not_started") != std::string::npos &&
-               read_binary_file(moved_parent / parent_swap_store.session_path().filename()) == original_bytes &&
+    expect(has_one_state(parent_swap, "not_started") && read_binary_file(moved_parent / parent_swap_store.session_path().filename()) == original_bytes &&
                read_binary_file(parent_swap_store.session_path()) == "replacement\\n",
            "persistent append rejects a parent-directory replacement before mutating either original or replacement name");
   }
 
-  ava::session::SessionStore fifo_store(
-      ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "fifo"});
+  ava::session::SessionStore fifo_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "fifo"});
   auto fifo_lease = ava::session::SessionLease::create_and_acquire(fifo_store.session_path());
   if (fifo_lease)
   {
@@ -3838,6 +3987,7 @@ void run_session_tests()
   test_image_attachment_storage_boundary();
   test_image_attachment_import();
   test_created_session_rollback_is_identity_safe_and_preserves_attachments();
+  test_lease_bound_session_reads_hold_exact_authority();
   test_session_append_authority_and_commit_state();
   test_provider_base64_encoding();
 }

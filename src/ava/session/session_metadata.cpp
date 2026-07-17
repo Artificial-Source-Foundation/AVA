@@ -263,6 +263,14 @@ ava::core::Result<SessionMetadataView> load_session_metadata(SessionStore const&
   return session_metadata_from_entries(*entries);
 }
 
+ava::core::Result<SessionMetadataView> load_session_metadata(SessionStore const& store, SessionLease const& lease)
+{
+  auto entries = store.load(lease);
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  return session_metadata_from_entries(*entries);
+}
+
 ava::core::Result<SessionEntry> make_session_metadata_entry(SessionMetadataUpdate update, std::string parent_entry_id)
 {
   if (auto valid = validate_update(update); !valid)
@@ -307,9 +315,9 @@ ava::core::Result<SessionEntry> make_session_metadata_entry(SessionMetadataUpdat
 namespace {
 
 template <typename Append>
-ava::core::Result<SessionMetadataView> append_session_metadata_impl(SessionStore& store, SessionMetadataUpdate update, Append&& append)
+ava::core::Result<SessionMetadataView> append_session_metadata_impl(ava::core::Result<std::vector<SessionEntry>> entries, SessionMetadataUpdate update,
+                                                                    Append&& append)
 {
-  auto entries = store.load();
   if (!entries)
     return std::unexpected(std::move(entries.error()));
   auto parent_entry_id = entries->empty() ? std::string{} : entries->back().id;
@@ -326,12 +334,12 @@ ava::core::Result<SessionMetadataView> append_session_metadata_impl(SessionStore
 
 ava::core::Result<SessionMetadataView> append_session_metadata(SessionStore& store, SessionLease const& lease, SessionMetadataUpdate update)
 {
-  return append_session_metadata_impl(store, std::move(update), [&](SessionEntry const& entry) { return store.append(lease, entry); });
+  return append_session_metadata_impl(store.load(lease), std::move(update), [&](SessionEntry const& entry) { return store.append(lease, entry); });
 }
 
 ava::core::Result<SessionMetadataView> append_session_metadata_ephemeral(SessionStore& store, SessionMetadataUpdate update)
 {
-  return append_session_metadata_impl(store, std::move(update), [&](SessionEntry const& entry) { return store.append_ephemeral(entry); });
+  return append_session_metadata_impl(store.load(), std::move(update), [&](SessionEntry const& entry) { return store.append_ephemeral(entry); });
 }
 
 std::string session_metadata_json(std::string_view session_id, SessionMetadataView const& metadata)

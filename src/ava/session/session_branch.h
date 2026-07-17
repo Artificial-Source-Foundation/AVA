@@ -78,6 +78,10 @@ struct BranchSummaryResult
 void rollback_created_session_with_context(SessionStore const& store, SessionLease const& lease, ava::core::Error& error);
 
 [[nodiscard]] ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOptions options);
+// Builds and validates a summary from two lease-bound source snapshots without
+// mutating the source. Runtime owners use this to append through their owner route.
+[[nodiscard]] ava::core::Result<BranchSummaryResult> prepare_branch_summary(BranchSummaryOptions options);
+// Non-runtime sources retain direct append through their temporary source lease.
 [[nodiscard]] ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOptions options);
 
 }  // namespace ava::session

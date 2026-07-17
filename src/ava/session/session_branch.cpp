@@ -322,7 +322,7 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
     error.with_context("source_session_id", options.source_session_id);
     return std::unexpected(std::move(error));
   }
-  auto source_entries = source->load_bounded(options.read_limits.value_or(legacy_unbounded_session_read_limits()));
+  auto source_entries = source->load_bounded(*source_lease, options.read_limits.value_or(legacy_unbounded_session_read_limits()));
   if (!source_entries)
     return std::unexpected(std::move(source_entries.error()));
 
@@ -386,7 +386,7 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
                              .metadata = std::move(*metadata)};
 }
 
-ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOptions options)
+ava::core::Result<BranchSummaryResult> prepare_branch_summary(BranchSummaryOptions options)
 {
   if (options.source_session_id.empty())
   {
@@ -437,7 +437,7 @@ ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOption
     error.with_context("source_session_id", options.source_session_id);
     return std::unexpected(std::move(error));
   }
-  auto entries = source->load();
+  auto entries = source->load(*source_lease);
   if (!entries)
     return std::unexpected(std::move(entries.error()));
   if (entries->empty())
@@ -448,10 +448,10 @@ ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOption
   if (!range)
     return std::unexpected(std::move(range.error()));
 
-  // Best-effort guard for concurrent appenders. SessionStore appends are not an
-  // atomic read-modify-write transaction, so a writer after this check can still
-  // win; the summary append remains safe for the single-runtime path this API uses.
-  auto latest_entries = source->load();
+  // Validate a second complete snapshot before constructing the owner-routed
+  // append. Concurrent valid growth is visible here without weakening inode or
+  // namespace authority checks.
+  auto latest_entries = source->load(*source_lease);
   if (!latest_entries)
     return std::unexpected(std::move(latest_entries.error()));
   if (latest_entries->empty())
@@ -485,11 +485,33 @@ ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOption
                             .type = EntryType::BranchSummary,
                             .timestamp = now_timestamp(),
                             .data_json = std::move(data)};
-  if (auto appended = source->append(*source_lease, entry); !appended)
-  {
-    return std::unexpected(std::move(appended.error()));
-  }
   return BranchSummaryResult{.source_session_id = std::move(options.source_session_id), .entry = std::move(entry)};
+}
+
+ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOptions options)
+{
+  auto source = SessionStore::open(options.workspace_dir, options.source_session_id, options.root_dir);
+  if (!source)
+    return std::unexpected(std::move(source.error()));
+
+  std::optional<SessionLease> owned_source_lease;
+  SessionLease const* source_lease = options.source_lease;
+  if (source_lease == nullptr)
+  {
+    auto acquired = SessionLease::acquire(source->session_path());
+    if (!acquired)
+      return std::unexpected(std::move(acquired.error()));
+    owned_source_lease.emplace(std::move(*acquired));
+    source_lease = &*owned_source_lease;
+    options.source_lease = source_lease;
+  }
+
+  auto prepared = prepare_branch_summary(std::move(options));
+  if (!prepared)
+    return std::unexpected(std::move(prepared.error()));
+  if (auto appended = source->append(*source_lease, prepared->entry); !appended)
+    return std::unexpected(std::move(appended.error()));
+  return prepared;
 }
 
 }  // namespace ava::session

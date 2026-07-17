@@ -310,7 +310,8 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
   if (command.type == "session_metadata")
   {
     std::lock_guard lock(context.session_mutex);
-    auto metadata = ava::session::load_session_metadata(context.session.store);
+    auto metadata = context.session.sessionless ? ava::session::load_session_metadata(context.session.store)
+                                                : ava::session::load_session_metadata(context.session.store, context.session.lease);
     if (!metadata)
       return handled(write_error(context.output, command.id, metadata.error()));
     return handled(write_success(context.output, command.id, ava::session::session_metadata_json(context.session.store.session_id(), *metadata)));
@@ -559,25 +560,46 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, invalid_rpc("summarize_branch requires reason")));
     }
 
-    std::lock_guard lock(context.session_mutex);
+    std::unique_lock lock(context.session_mutex);
     auto source_session_id = resolve_branch_source_session_id(context.session, context.open_options, command);
     if (!source_session_id)
       return handled(write_error(context.output, command.id, source_session_id.error()));
+    bool const current_source = *source_session_id == context.session.store.session_id();
     std::optional<ava::session::SessionLease> temporary_source_lease;
     if (auto recovered = recover_source_session_for_mutation(context.session, *source_session_id, temporary_source_lease); !recovered)
       return handled(write_error(context.output, command.id, recovered.error()));
-    auto const* source_lease = *source_session_id == context.session.store.session_id() ? &context.session.lease : &*temporary_source_lease;
-    auto summary = ava::session::append_branch_summary(ava::session::BranchSummaryOptions{.workspace_dir = context.session.workspace_dir,
-                                                                                          .root_dir = context.session.paths.sessions_dir,
-                                                                                          .source_session_id = *source_session_id,
-                                                                                          .branch_root_entry_id = *command.branch_root_entry_id,
-                                                                                          .branch_tip_entry_id = *command.branch_tip_entry_id,
-                                                                                          .summary = *command.summary,
-                                                                                          .provider = *command.provider,
-                                                                                          .model = *command.model,
-                                                                                          .reason = *command.reason,
-                                                                                          .source_lease = source_lease,
-                                                                                          .actor = "rpc"});
+    auto const* source_lease = current_source ? &context.session.lease : &*temporary_source_lease;
+    auto options = ava::session::BranchSummaryOptions{.workspace_dir = context.session.workspace_dir,
+                                                      .root_dir = context.session.paths.sessions_dir,
+                                                      .source_session_id = *source_session_id,
+                                                      .branch_root_entry_id = *command.branch_root_entry_id,
+                                                      .branch_tip_entry_id = *command.branch_tip_entry_id,
+                                                      .summary = *command.summary,
+                                                      .provider = *command.provider,
+                                                      .model = *command.model,
+                                                      .reason = *command.reason,
+                                                      .source_lease = source_lease,
+                                                      .actor = "rpc"};
+
+    if (current_source)
+    {
+      auto prepared = ava::session::prepare_branch_summary(std::move(options));
+      if (!prepared)
+        return handled(write_error(context.output, command.id, prepared.error()));
+      auto owner_append = context.session.owner_append_route();
+      lock.unlock();
+      if (!owner_append)
+        return handled(write_error(context.output, command.id,
+                                   ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session owner append route is unavailable")));
+      if (auto appended = owner_append(prepared->entry); !appended)
+        return handled(write_error(context.output, command.id, appended.error()));
+      return handled(write_success(context.output, command.id, branch_summary_result_json(*prepared)));
+    }
+
+    // The temporary lease remains local and active after releasing the runtime
+    // session mutex; noncurrent summaries intentionally append directly through it.
+    lock.unlock();
+    auto summary = ava::session::append_branch_summary(std::move(options));
     if (!summary)
       return handled(write_error(context.output, command.id, summary.error()));
     return handled(write_success(context.output, command.id, branch_summary_result_json(*summary)));

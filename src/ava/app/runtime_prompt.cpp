@@ -896,8 +896,6 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
 
   std::optional<ava::core::Error> sink_error;
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
-      .append_entry = append_route,
-      .parent_notification_sink = session.owner_append_route(),
       .workspace_dir = session.workspace_dir,
       .current_dir = session.current_dir,
       .mode = session.mode,
@@ -1048,6 +1046,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       },
       .background_jobs = session.background_jobs,
       .session_mutex = runtime_options.session_mutex,
+      .append_entry = append_route,
+      .parent_notification_sink = session.owner_append_route(),
       .on_phase = [&guard, &runtime_options](ava::agent::RunPhase phase) -> ava::core::VoidResult {
         if (phase == ava::agent::RunPhase::Completing && runtime_options.on_terminal_commit)
         {

@@ -5,12 +5,15 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
+#include <fstream>
 #include <thread>
 #include <utility>
 #include <vector>
+#include <unistd.h>
 
 namespace {
 
@@ -24,7 +27,7 @@ std::shared_ptr<ava::session::SessionAppendTarget> ephemeral_controller_target()
 }
 
 ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>> persistent_controller_target(ava::session::SessionStore const& store,
-                                                                                                    ava::session::SessionLease const& lease)
+                                                                                                   ava::session::SessionLease const& lease)
 {
   return ava::session::SessionAppendTarget::create_persistent(store, lease);
 }
@@ -189,26 +192,26 @@ void test_runtime_session_destroys_background_before_owner_route()
   std::atomic<bool> owner_append_succeeded = false;
   {
     ava::app::runtime::Session session{.store = std::move(*store),
-                                     .lease = std::move(*lease),
-                                     .mode = ava::agent::Mode::Build,
-                                     .model = {},
-                                     .base_prompt = {},
-                                     .paths = {},
-                                     .workspace_dir = {},
-                                     .current_dir = {},
-                                     .project_trust = {},
-                                     .prompt_overrides = {},
-                                     .tool_visibility = {},
-                                     .context_sources = {},
-                                     .freshness_sources = {},
-                                     .system_prompt = {},
-                                     .reasoning = std::nullopt,
-                                     .scoped_model_cycle = std::nullopt,
-                                     .created = false,
-                                     .sessionless = false,
-                                     .run_controller = std::make_unique<ava::app::SessionRunController>(std::move(*target)),
-                                     .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>(),
-                                     .offline = false};
+                                       .lease = std::move(*lease),
+                                       .mode = ava::agent::Mode::Build,
+                                       .model = {},
+                                       .base_prompt = {},
+                                       .paths = {},
+                                       .workspace_dir = {},
+                                       .current_dir = {},
+                                       .project_trust = {},
+                                       .prompt_overrides = {},
+                                       .tool_visibility = {},
+                                       .context_sources = {},
+                                       .freshness_sources = {},
+                                       .system_prompt = {},
+                                       .reasoning = std::nullopt,
+                                       .scoped_model_cycle = std::nullopt,
+                                       .created = false,
+                                       .sessionless = false,
+                                       .run_controller = std::make_unique<ava::app::SessionRunController>(std::move(*target)),
+                                       .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>(),
+                                       .offline = false};
     auto owner = session.owner_append_route();
     auto started = session.background_jobs->start(
         {.title = "blocked", .description = "blocked"},
@@ -334,6 +337,268 @@ void test_session_run_controller_effective_failure_and_stop_reentry()
   expect(recovered.has_value(), "admission resumes only after explicit recovery");
 }
 
+struct PartialAppendControl
+{
+  std::atomic_bool fail = true;
+  std::atomic_int calls = 0;
+
+  ssize_t write(int fd, std::string_view bytes)
+  {
+    if (!fail.load(std::memory_order_acquire))
+      return ::write(fd, bytes.data(), bytes.size());
+    if (calls.fetch_add(1, std::memory_order_acq_rel) == 0)
+      return ::write(fd, bytes.data(), std::min<std::size_t>(1, bytes.size()));
+    errno = EIO;
+    return -1;
+  }
+};
+
+void test_session_run_controller_recovers_persistent_and_ephemeral_targets()
+{
+  std::error_code error;
+  auto const root = temp_root() / "session-run-controller-recovery";
+  std::filesystem::remove_all(root, error);
+  auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+  auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                     : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+  expect(store && lease, "controller recovery fixture creates a persistent owned store");
+  if (store && lease)
+  {
+    expect(store->append(*lease, append_entry("recovery-prefix")).has_value(), "controller recovery fixture seeds a framed record");
+    auto control = std::make_shared<PartialAppendControl>();
+    store->set_append_write_for_test([control](int fd, std::string_view bytes) { return control->write(fd, bytes); });
+    auto target = persistent_controller_target(*store, *lease);
+    if (target)
+    {
+      ava::app::SessionRunController controller(std::move(*target));
+      auto owner = controller.owner_append_route();
+      auto torn = owner(append_entry("recovery-torn"));
+      expect(!torn, "partial persistent owner append latches a controller failure");
+      auto recovered = controller.reset_persistence_failure();
+      control->fail.store(false, std::memory_order_release);
+      auto next = owner(append_entry("recovery-next"));
+      auto entries = store->load();
+      expect(recovered && next && entries && entries->size() == 2 && entries->back().id == "recovery-next",
+             "controller recovery repairs a torn tail before clearing the latch so the next owner append succeeds");
+    }
+  }
+
+  auto ephemeral = ava::session::SessionStore::create_ephemeral(root / "ephemeral-workspace");
+  auto ephemeral_target = ephemeral ? ava::session::SessionAppendTarget::create_ephemeral(*ephemeral)
+                                    : ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>>(std::unexpected(ephemeral.error()));
+  if (ephemeral_target)
+  {
+    ava::app::SessionRunController controller(std::move(*ephemeral_target));
+    auto owner = controller.owner_append_route();
+    auto invalid = append_entry("ephemeral-invalid");
+    invalid.data_json.clear();
+    auto failed = owner(std::move(invalid));
+    auto recovered = controller.reset_persistence_failure();
+    auto next = owner(append_entry("ephemeral-next"));
+    expect(!failed && recovered && next, "ephemeral target recovery is an explicit no-op that clears only its controller latch");
+  }
+}
+
+void test_session_run_controller_failed_and_inflight_recovery()
+{
+  std::error_code error;
+  auto const root = temp_root() / "session-run-controller-recovery-races";
+  std::filesystem::remove_all(root, error);
+
+  {
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root / "failed");
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      expect(store->append(*lease, append_entry("failed-prefix")).has_value(), "failed recovery fixture seeds a framed record");
+      auto control = std::make_shared<PartialAppendControl>();
+      store->set_append_write_for_test([control](int fd, std::string_view bytes) { return control->write(fd, bytes); });
+      auto target = persistent_controller_target(*store, *lease);
+      if (target)
+      {
+        ava::app::SessionRunController controller(std::move(*target));
+        auto owner = controller.owner_append_route();
+        auto torn = owner(append_entry("failed-torn"));
+        auto const parked = store->session_path().string() + ".parked";
+        std::filesystem::rename(store->session_path(), parked);
+        std::ofstream replacement(store->session_path());
+        replacement << "replacement\n";
+        replacement.close();
+        auto recovered = controller.reset_persistence_failure();
+        auto blocked = owner(append_entry("must-remain-blocked"));
+        expect(!torn && !recovered && !blocked &&
+                   controller.inspect_admission({.request_id = "blocked"}) == ava::app::AdmissionDisposition::RejectPersistenceFailure,
+               "failed persistent recovery leaves the original latch authoritative and blocks later owner and run appends");
+      }
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root / "inflight");
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      expect(store->append(*lease, append_entry("inflight-prefix")).has_value(), "in-flight recovery fixture seeds a framed record");
+      auto control = std::make_shared<PartialAppendControl>();
+      std::mutex hook_mutex;
+      std::condition_variable hook_cv;
+      bool entered = false;
+      bool release = false;
+      store->set_before_append_identity_check_for_test([&] {
+        std::unique_lock lock(hook_mutex);
+        entered = true;
+        hook_cv.notify_all();
+        static_cast<void>(hook_cv.wait_for(lock, std::chrono::seconds(3), [&] { return release; }));
+      });
+      store->set_append_write_for_test([control](int fd, std::string_view bytes) { return control->write(fd, bytes); });
+      auto target = persistent_controller_target(*store, *lease);
+      if (target)
+      {
+        ava::app::SessionRunController controller(std::move(*target));
+        auto owner = controller.owner_append_route();
+        std::optional<ava::core::VoidResult> append_result;
+        std::optional<ava::core::VoidResult> reset_result;
+        std::jthread writer([&] { append_result.emplace(owner(append_entry("inflight-torn"))); });
+        {
+          std::unique_lock lock(hook_mutex);
+          expect(hook_cv.wait_for(lock, std::chrono::seconds(3), [&] { return entered; }), "in-flight append reaches deterministic write gate");
+        }
+        std::jthread resetter([&] { reset_result.emplace(controller.reset_persistence_failure()); });
+        {
+          std::lock_guard lock(hook_mutex);
+          release = true;
+        }
+        hook_cv.notify_all();
+        writer.join();
+        resetter.join();
+        control->fail.store(false, std::memory_order_release);
+        auto next = owner(append_entry("inflight-next"));
+        expect(append_result && !*append_result && reset_result && *reset_result && next,
+               "in-flight reset serializes behind the append driver, repairs its partial failure, and permits the next append");
+      }
+    }
+  }
+}
+
+void test_session_run_controller_shutdown_during_recovery_and_queued_append()
+{
+  std::error_code error;
+  auto const root = temp_root() / "session-run-controller-shutdown-races";
+  std::filesystem::remove_all(root, error);
+
+  {
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root / "reset");
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      expect(store->append(*lease, append_entry("reset-prefix")).has_value(), "shutdown/reset fixture seeds a framed record");
+      auto control = std::make_shared<PartialAppendControl>();
+      std::mutex hook_mutex;
+      std::condition_variable hook_cv;
+      bool recovery_entered = false;
+      bool release_recovery = false;
+      store->set_append_write_for_test([control](int fd, std::string_view bytes) { return control->write(fd, bytes); });
+      store->set_after_recovery_quarantine_publication_for_test([&] {
+        std::unique_lock lock(hook_mutex);
+        recovery_entered = true;
+        hook_cv.notify_all();
+        static_cast<void>(hook_cv.wait_for(lock, std::chrono::seconds(3), [&] { return release_recovery; }));
+      });
+      auto target = persistent_controller_target(*store, *lease);
+      if (target)
+      {
+        ava::app::SessionRunController controller(std::move(*target));
+        auto owner = controller.owner_append_route();
+        expect(!owner(append_entry("reset-torn")), "shutdown/reset fixture creates a partial persistence latch");
+        std::optional<ava::core::VoidResult> reset_result;
+        std::jthread resetter([&] { reset_result.emplace(controller.reset_persistence_failure()); });
+        {
+          std::unique_lock lock(hook_mutex);
+          expect(hook_cv.wait_for(lock, std::chrono::seconds(3), [&] { return recovery_entered; }), "recovery reaches deterministic publication gate");
+        }
+        std::jthread shutdown([&] { controller.shutdown(); });
+        auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (controller.inspect_admission({.request_id = "closing"}) != ava::app::AdmissionDisposition::RejectClosing &&
+               std::chrono::steady_clock::now() < deadline)
+          std::this_thread::yield();
+        {
+          std::lock_guard lock(hook_mutex);
+          release_recovery = true;
+        }
+        hook_cv.notify_all();
+        resetter.join();
+        shutdown.join();
+        expect(reset_result && !*reset_result && !owner(append_entry("stale-after-reset-shutdown")),
+               "shutdown racing recovery revokes authority, prevents latch clearing, and completes without lock inversion");
+      }
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root / "queued");
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      std::mutex hook_mutex;
+      std::condition_variable hook_cv;
+      bool active_entered = false;
+      bool release_active = false;
+      store->set_before_append_identity_check_for_test([&] {
+        std::unique_lock lock(hook_mutex);
+        if (active_entered)
+          return;
+        active_entered = true;
+        hook_cv.notify_all();
+        static_cast<void>(hook_cv.wait_for(lock, std::chrono::seconds(3), [&] { return release_active; }));
+      });
+      auto target = persistent_controller_target(*store, *lease);
+      if (target)
+      {
+        ava::app::SessionRunController controller(std::move(*target));
+        auto admitted = controller.admit({.request_id = "shutdown-queued"});
+        if (admitted)
+        {
+          auto guard = std::move(*admitted);
+          auto active = guard.append_route();
+          auto owner = controller.owner_append_route();
+          std::optional<ava::core::VoidResult> active_result;
+          std::optional<ava::core::VoidResult> queued_result;
+          std::jthread first([&] { active_result.emplace(active(append_entry("shutdown-active"))); });
+          {
+            std::unique_lock lock(hook_mutex);
+            expect(hook_cv.wait_for(lock, std::chrono::seconds(3), [&] { return active_entered; }), "active append reaches shutdown gate");
+          }
+          std::jthread second([&] { queued_result.emplace(owner(append_entry("shutdown-queued"))); });
+          auto const queue_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+          while (controller.snapshot().queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline) std::this_thread::yield();
+          std::jthread shutdown([&] { controller.shutdown(); });
+          auto const close_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+          while (controller.inspect_admission({.request_id = "closing"}) != ava::app::AdmissionDisposition::RejectClosing &&
+                 std::chrono::steady_clock::now() < close_deadline)
+            std::this_thread::yield();
+          {
+            std::lock_guard lock(hook_mutex);
+            release_active = true;
+          }
+          hook_cv.notify_all();
+          first.join();
+          second.join();
+          shutdown.join();
+          auto outcome = guard.complete({.run_id = {}, .reason = ava::app::StopReason::ProviderError});
+          auto entries = store->load();
+          expect(active_result && *active_result && queued_result && entries && entries->size() >= 1 && entries->size() <= 2 && outcome &&
+                     outcome->reason != ava::app::StopReason::PersistenceError && !owner(append_entry("shutdown-stale")),
+                 "shutdown preserves the accepted active append, completes a queued caller, releases authority, and never synthesizes a persistence latch");
+        }
+      }
+    }
+  }
+}
+
 void test_session_run_controller_concurrent_fifo_appends()
 {
   std::error_code error;
@@ -457,6 +722,9 @@ void run_session_run_controller_tests()
   test_session_run_controller_admission_inspection_and_join();
   test_session_run_controller_stable_join_and_command_kinds();
   test_session_run_controller_effective_failure_and_stop_reentry();
+  test_session_run_controller_recovers_persistent_and_ephemeral_targets();
+  test_session_run_controller_failed_and_inflight_recovery();
+  test_session_run_controller_shutdown_during_recovery_and_queued_append();
   test_session_run_controller_concurrent_fifo_appends();
   test_session_run_controller_routes_release_target_on_shutdown();
   test_session_run_controller_bounds_and_reentrant_snapshot();

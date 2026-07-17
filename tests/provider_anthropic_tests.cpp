@@ -1085,12 +1085,15 @@ void test_anthropic_agent_tool_loop_native_replay()
                                                     "event: message_stop\n"
                                                     "data: {\"type\":\"message_stop\"}\n\n")});
 
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "anthropic",
-                                                          .model_id = "claude-sonnet-4-5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "anthropic-key"});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "anthropic",
+      .model_id = "claude-sonnet-4-5",
+      .system_prompt = "system prompt",
+      .access_token = "anthropic-key",
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("read note", store, provider, transport);
   expect(result && result->final_text == "read it" && result->tool_calls == 1 && result->provider_iterations == 2,
          "Anthropic agent loop runs one native tool call then continues to final answer");
@@ -1146,12 +1149,15 @@ void test_anthropic_agent_reasoning_native_replay()
                                                     "event: message_stop\n"
                                                     "data: {\"type\":\"message_stop\"}\n\n")});
 
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "anthropic",
-                                                          .model_id = "claude-sonnet-4-5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "anthropic-key"});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "anthropic",
+      .model_id = "claude-sonnet-4-5",
+      .system_prompt = "system prompt",
+      .access_token = "anthropic-key",
+      .append_entry = append_route_for_test(store),
+  });
   auto first = loop.run_turn("first", store, provider, transport);
   expect(first && first->final_text == "first answer", "Anthropic agent loop stores first reasoning response");
   auto second = loop.run_turn("second", store, provider, transport);
@@ -1213,12 +1219,15 @@ void test_anthropic_agent_redacted_reasoning_native_replay()
                                                     "event: message_stop\n"
                                                     "data: {\"type\":\"message_stop\"}\n\n")});
 
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "anthropic",
-                                                          .model_id = "claude-sonnet-4-5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "anthropic-key"});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "anthropic",
+      .model_id = "claude-sonnet-4-5",
+      .system_prompt = "system prompt",
+      .access_token = "anthropic-key",
+      .append_entry = append_route_for_test(store),
+  });
   auto first = loop.run_turn("first", store, provider, transport);
   expect(first && first->final_text == "first answer", "Anthropic agent loop stores redacted reasoning response");
   auto second = loop.run_turn("second", store, provider, transport);
@@ -1251,17 +1260,20 @@ void test_anthropic_agent_non_stream_reasoning_events()
           R"({"content":[{"type":"thinking","thinking":"non-stream visible","signature":"sig-ns"},{"type":"text","text":"answer"}],"stop_reason":"end_turn"})"}});
 
   std::vector<ava::provider::StreamEvent> published_events;
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "anthropic",
-                                                          .model_id = "claude-sonnet-4-5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "anthropic-key",
-                                                          .stream = false,
-                                                          .on_stream_event = [&](ava::provider::StreamEvent const& event) -> ava::core::VoidResult {
-                                                            published_events.push_back(event);
-                                                            return {};
-                                                          }});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "anthropic",
+      .model_id = "claude-sonnet-4-5",
+      .system_prompt = "system prompt",
+      .access_token = "anthropic-key",
+      .stream = false,
+      .on_stream_event = [&](ava::provider::StreamEvent const& event) -> ava::core::VoidResult {
+        published_events.push_back(event);
+        return {};
+      },
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("first", store, provider, transport);
   expect(result && result->final_text == "answer" && result->outcome == ava::core::RuntimeTerminalOutcome::Completed,
          "Anthropic non-stream reasoning turn completes with normalized stop reason");
@@ -1322,12 +1334,15 @@ void test_anthropic_agent_multi_tool_native_replay()
                                                     "event: message_stop\n"
                                                     "data: {\"type\":\"message_stop\"}\n\n")});
 
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "anthropic",
-                                                          .model_id = "claude-sonnet-4-5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "anthropic-key"});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "anthropic",
+      .model_id = "claude-sonnet-4-5",
+      .system_prompt = "system prompt",
+      .access_token = "anthropic-key",
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("read both notes", store, provider, transport);
   expect(result && result->final_text == "read both" && result->tool_calls == 2 && result->provider_iterations == 2,
          "Anthropic agent loop runs multiple native tool calls then continues");
@@ -1374,13 +1389,16 @@ void test_anthropic_agent_non_stream_tool_loop_native_replay()
            .status_code = 200, .headers = {}, .body = R"({"content":[{"type":"tool_use","id":"toolu_1","name":"read_file","input":{"path":"note.txt"}}]})"},
        ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"content":[{"type":"text","text":"read non-stream"}]})"}});
 
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "anthropic",
-                                                          .model_id = "claude-sonnet-4-5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "anthropic-key",
-                                                          .stream = false});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "anthropic",
+      .model_id = "claude-sonnet-4-5",
+      .system_prompt = "system prompt",
+      .access_token = "anthropic-key",
+      .stream = false,
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("read note", store, provider, transport);
   expect(result && result->final_text == "read non-stream" && result->tool_calls == 1 && result->provider_iterations == 2,
          "Anthropic non-stream agent loop runs native tool call then continues");

@@ -1502,6 +1502,22 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
              jsonl.find("\"type\":\"branch_summary\"") != std::string::npos && jsonl.find("Abandoned path was not needed.") != std::string::npos &&
              jsonl.find("\"branch_summary\":1") != std::string::npos,
          "RPC summarize_branch returns the persisted branch summary entry and updated stats expose the count");
+
+  auto invalid = ava::session::SessionEntry{
+      .id = "summary-route-latch", .parent_id = "", .type = ava::session::EntryType::Error, .timestamp = ava::session::now_timestamp(), .data_json = ""};
+  auto latched = session->run_controller
+                     ? session->run_controller->append(std::move(invalid))
+                     : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "missing summary route controller")));
+  std::istringstream blocked_in(std::string("{\"id\":\"blocked-summary\",\"type\":\"summarize_branch\",") + "\"branch_root_entry_id\":\"" + root_entry_id +
+                                "\",\"branch_tip_entry_id\":\"" + tip_entry_id +
+                                "\",\"summary\":\"must not bypass latch\",\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}\n");
+  std::ostringstream blocked_out;
+  auto blocked_loop = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, blocked_in, blocked_out,
+                                             ava::app::rpc::RpcInputWake{});
+  auto blocked_entries = session->store.load();
+  expect(!latched && blocked_loop && blocked_entries && blocked_entries->size() == source_count + 1 &&
+             blocked_out.str().find("blocked-summary") != std::string::npos && blocked_out.str().find("append_commit_state") != std::string::npos,
+         "current-session RPC summaries perform lease-bound reads but append only through the owner route and cannot bypass its persistence latch");
 }
 
 void test_app_rpc_model_commands()

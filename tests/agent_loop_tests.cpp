@@ -204,14 +204,17 @@ void test_agent_loop_text_only_turn()
   ava::tests::FakeTransport transport(
       {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello user\"}\n\n"
                     "data: [DONE]\n\n")});
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "openai",
-                                                          .model_id = "gpt-5.5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "token",
-                                                          .openai_oauth = true,
-                                                          .openai_account_id = "acct_123"});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .openai_oauth = true,
+      .openai_account_id = "acct_123",
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("hi", store, provider, transport);
   expect(result && result->final_text == "hello user" && result->tool_calls == 0 && result->initial_context_messages == 1 && !result->used_compacted_context &&
              result->tool_iterations == 0 && result->outcome == ava::core::RuntimeTerminalOutcome::Completed,
@@ -240,15 +243,18 @@ void test_agent_loop_model_capability_gating()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"status\":\"completed\",\"output_text\":\"plain\"}"}});
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "openai",
-                                                          .model_id = "text-only-model",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "token",
-                                                          .stream = true,
-                                                          .model_supports_tools = false,
-                                                          .model_supports_streaming = false});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "text-only-model",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .stream = true,
+      .model_supports_tools = false,
+      .model_supports_streaming = false,
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("hi", store, provider, transport);
   expect(result && result->final_text == "plain", "agent loop accepts text-only model response");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("read_file") == std::string::npos &&
@@ -265,8 +271,7 @@ void test_agent_loop_rejects_persistent_store_without_append_route()
   std::filesystem::remove_all(root, remove_error);
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  ava::session::SessionStore store(
-      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "missing-route"});
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "missing-route"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
@@ -291,7 +296,9 @@ void test_agent_loop_image_attachment_load_failure_records_error()
   ava::session::SessionStore store(
       ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "image-load-failure"});
   expect(
-      append_session_entry_for_test(store, ava::session::SessionEntry{
+      append_session_entry_for_test(
+          store,
+          ava::session::SessionEntry{
               .id = "prior_image",
               .parent_id = "",
               .type = ava::session::EntryType::UserMessage,
@@ -305,13 +312,16 @@ void test_agent_loop_image_attachment_load_failure_records_error()
   ava::tests::FakeTransport transport(
       {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"should not call\"}\n\n"
                     "data: [DONE]\n\n")});
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "openai",
-                                                          .model_id = "gpt-image",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "token",
-                                                          .model_input_modalities = {"text", "image"}});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-image",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .model_input_modalities = {"text", "image"},
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("continue", store, provider, transport);
   expect(!result && result.error().message().find("image attachment") != std::string::npos, "agent loop returns attachment load errors before provider calls");
   expect(transport.requests().empty(), "agent loop does not call provider when attachment loading fails");
@@ -342,12 +352,13 @@ void test_agent_loop_usage_and_cost_persistence()
       {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"priced\"}\n\n"
                     "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1000,"
                     "\"output_tokens\":2000,\"total_tokens\":3000}}}\n\n")});
-  ava::agent::AgentLoop exact_loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(exact_store), .workspace_dir = workspace,
+  ava::agent::AgentLoop exact_loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                                 .mode = ava::agent::Mode::Build,
                                                                 .provider_id = "openai",
                                                                 .model_id = "gpt-5.5",
                                                                 .system_prompt = "system prompt",
                                                                 .access_token = "token",
+                                                                .append_entry = append_route_for_test(exact_store),
                                                                 .model_pricing = pricing});
   auto exact_result = exact_loop.run_turn("hi", exact_store, provider, exact_transport);
   expect(exact_result && exact_result->usage && !exact_result->usage->estimated && exact_result->cost_usd && *exact_result->cost_usd > 0.049L &&
@@ -364,12 +375,15 @@ void test_agent_loop_usage_and_cost_persistence()
       {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"unknown\"}\n\n"
                     "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,"
                     "\"output_tokens\":1,\"total_tokens\":2}}}\n\n")});
-  ava::agent::AgentLoop unknown_price_loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(unknown_price_store), .workspace_dir = workspace,
-                                                                        .mode = ava::agent::Mode::Build,
-                                                                        .provider_id = "openai",
-                                                                        .model_id = "unknown-model",
-                                                                        .system_prompt = "system prompt",
-                                                                        .access_token = "token"});
+  ava::agent::AgentLoop unknown_price_loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "unknown-model",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .append_entry = append_route_for_test(unknown_price_store),
+  });
   auto unknown_price_result = unknown_price_loop.run_turn("hi", unknown_price_store, provider, unknown_price_transport);
   auto unknown_price_entries = unknown_price_store.load();
   expect(unknown_price_result && unknown_price_entries && (*unknown_price_entries)[1].data_json.find("cost_usd") == std::string::npos,
@@ -380,12 +394,13 @@ void test_agent_loop_usage_and_cost_persistence()
   ava::tests::FakeTransport estimated_transport(
       {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"estimated\"}\n\n"
                     "data: [DONE]\n\n")});
-  ava::agent::AgentLoop estimated_loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(estimated_store), .workspace_dir = workspace,
+  ava::agent::AgentLoop estimated_loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                                     .mode = ava::agent::Mode::Build,
                                                                     .provider_id = "openai",
                                                                     .model_id = "gpt-5.5",
                                                                     .system_prompt = "system prompt",
                                                                     .access_token = "token",
+                                                                    .append_entry = append_route_for_test(estimated_store),
                                                                     .model_pricing = pricing});
   auto estimated_result = estimated_loop.run_turn("hi", estimated_store, provider, estimated_transport);
   auto estimated_entries = estimated_store.load();
@@ -426,13 +441,14 @@ void test_agent_loop_tool_turn_and_continuation()
                                                     "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":5,"
                                                     "\"output_tokens\":3,\"total_tokens\":8}}}\n\n")});
   std::vector<ava::agent::ToolTimelineEntry> tool_events;
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
                                                           .provider_id = "openai",
                                                           .model_id = "gpt-5.5",
                                                           .system_prompt = "system prompt",
                                                           .access_token = "token",
                                                           .on_tool_event = [&tool_events](auto const& entry) { tool_events.push_back(entry); },
+                                                          .append_entry = append_route_for_test(store),
                                                           .model_pricing = pricing});
   auto result = loop.run_turn("read note", store, provider, transport);
   expect(result && result->final_text == "read it" && result->tool_calls == 1 && result->provider_iterations == 2 && result->initial_context_messages == 1 &&
@@ -502,7 +518,7 @@ void test_agent_loop_task_subagent_runs_child_session()
   std::optional<ava::permissions::PermissionPrompt> captured_prompt;
   auto trace_collector = std::make_shared<TraceCollector>();
   auto observation = std::make_shared<ava::observability::RunObservation>(trace_collector);
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
                                                           .provider_id = "openai",
                                                           .model_id = "gpt-5.5",
@@ -514,6 +530,7 @@ void test_agent_loop_task_subagent_runs_child_session()
                                                             captured_prompt = prompt;
                                                             return ava::permissions::PermissionResolution::Allow;
                                                           },
+                                                          .append_entry = append_route_for_test(store),
                                                           .observation = observation});
 
   auto result = loop.run_turn("delegate", store, provider, transport);
@@ -638,7 +655,7 @@ void test_agent_loop_task_subagent_recovers_torn_child_before_resume()
                                                     "data: [DONE]\n\n"),
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent resumed child\"}\n\n"
                                                     "data: [DONE]\n\n")});
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(parent),
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .provider_id = "openai",
@@ -647,7 +664,9 @@ void test_agent_loop_task_subagent_recovers_torn_child_before_resume()
       .access_token = "token",
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
-      }});
+      },
+      .append_entry = append_route_for_test(parent),
+  });
 
   auto result = loop.run_turn("resume torn child", parent, provider, transport);
   std::ifstream repaired_file(child_path, std::ios::binary);
@@ -728,7 +747,7 @@ void test_agent_loop_custom_subagent_definition_controls_prompt_and_tools()
                                                     "data: [DONE]\n\n"),
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"custom done\"}\n\n"
                                                     "data: [DONE]\n\n")});
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .provider_id = "openai",
@@ -741,7 +760,9 @@ void test_agent_loop_custom_subagent_definition_controls_prompt_and_tools()
                                                    .tool_preset = ava::agent::SubagentToolPreset::ReadOnly}},
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
-      }});
+      },
+      .append_entry = append_route_for_test(store),
+  });
 
   auto result = loop.run_turn("delegate custom", store, provider, transport);
   expect(result && result->final_text == "custom done" && transport.requests().size() == 3, "agent loop runs configured custom subagents");
@@ -780,8 +801,7 @@ void test_agent_loop_background_task_starts_child_session()
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"queued\"}\n\n"
                                                     "data: [DONE]\n\n")});
   auto parent_append = append_route_for_test(store);
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = parent_append,
-      .parent_notification_sink = parent_append,
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .provider_id = "openai",
@@ -804,6 +824,8 @@ void test_agent_loop_background_task_starts_child_session()
       },
       .background_jobs = registry,
       .session_mutex = &session_mutex,
+      .append_entry = parent_append,
+      .parent_notification_sink = parent_append,
       .observation = observation});
 
   auto result = loop.run_turn("delegate background", store, provider, transport);
@@ -841,7 +863,6 @@ void test_agent_loop_background_task_starts_child_session()
          sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"resume was blocked\"}\n\n"
                       "data: [DONE]\n\n")});
     ava::agent::AgentLoop competing_loop(ava::agent::AgentLoopOptions{
-        .append_entry = append_route_for_test(competing_parent),
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
         .provider_id = "openai",
@@ -850,7 +871,9 @@ void test_agent_loop_background_task_starts_child_session()
         .access_token = "token",
         .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
           return ava::permissions::PermissionResolution::Allow;
-        }});
+        },
+        .append_entry = append_route_for_test(competing_parent),
+    });
     auto competing_result = competing_loop.run_turn("resume running child", competing_parent, provider, competing_transport);
     foreground_resume_blocked = competing_result && competing_result->final_text == "resume was blocked" && competing_transport.requests().size() == 2 &&
                                 competing_transport.requests()[1].body.find("already owned") != std::string::npos;
@@ -920,8 +943,7 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"queued failure\"}\n\n"
                                                     "data: [DONE]\n\n")});
   auto parent_append = append_route_for_test(store);
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = parent_append,
-      .parent_notification_sink = parent_append,
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .provider_id = "openai",
@@ -942,7 +964,10 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
         return transport;
       },
       .background_jobs = registry,
-      .session_mutex = &session_mutex});
+      .session_mutex = &session_mutex,
+      .append_entry = parent_append,
+      .parent_notification_sink = parent_append,
+  });
 
   auto result = loop.run_turn("delegate failing background", store, provider, transport);
   expect(result && result->final_text == "queued failure" && result->tool_calls == 1, "agent loop can queue a background task that later fails");
@@ -1008,8 +1033,7 @@ void test_agent_loop_background_task_cancel_requests_child_cancellation()
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"queued cancel\"}\n\n"
                                                     "data: [DONE]\n\n")});
   auto parent_append = append_route_for_test(store);
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = parent_append,
-      .parent_notification_sink = parent_append,
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .provider_id = "openai",
@@ -1029,7 +1053,10 @@ void test_agent_loop_background_task_cancel_requests_child_cancellation()
                                            "data: [DONE]\n\n"));
         return transport;
       },
-      .background_jobs = registry});
+      .background_jobs = registry,
+      .append_entry = parent_append,
+      .parent_notification_sink = parent_append,
+  });
 
   auto result = loop.run_turn("delegate cancelable background", store, provider, transport);
   expect(result && result->final_text == "queued cancel" && result->tool_calls == 1, "agent loop can queue a cancelable background task");
@@ -1080,7 +1107,7 @@ void test_agent_loop_background_task_requires_registry_owner()
                                                     "data: [DONE]\n\n"),
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"handled\"}\n\n"
                                                     "data: [DONE]\n\n")});
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .provider_id = "openai",
@@ -1097,7 +1124,9 @@ void test_agent_loop_background_task_requires_registry_owner()
       .background_transport_factory = []() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
         std::unique_ptr<ava::provider::Transport> transport = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::provider::HttpResponse>{});
         return transport;
-      }});
+      },
+      .append_entry = append_route_for_test(store),
+  });
 
   auto result = loop.run_turn("delegate unavailable background", store, provider, transport);
   expect(result && result->final_text == "handled" && transport.requests().size() == 2,
@@ -1381,18 +1410,21 @@ void test_agent_loop_permission_resolver_threads_to_tools()
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"used resolver\"}\n\n"
                                                     "data: [DONE]\n\n")});
   int prompts = 0;
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "openai",
-                                                          .model_id = "gpt-5.5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "token",
-                                                          .permission_resolver = [&prompts, &outside_path](ava::permissions::PermissionPrompt const& prompt)
-                                                              -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-                                                            ++prompts;
-                                                            expect(prompt.target_path == outside_path, "agent loop resolver sees tool target path");
-                                                            return ava::permissions::PermissionResolution::Allow;
-                                                          }});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .permission_resolver =
+          [&prompts, &outside_path](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++prompts;
+        expect(prompt.target_path == outside_path, "agent loop resolver sees tool target path");
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("read outside", store, provider, transport);
   expect(result && result->final_text == "used resolver" && prompts == 1 && result->tool_timeline.size() == 1 &&
              result->tool_timeline.front().status == ava::agent::ToolTimelineStatus::Success,
@@ -1436,7 +1468,6 @@ void test_agent_loop_permission_resolver_threads_to_tools()
                                                            "data: [DONE]\n\n")});
     int bash_allow_prompts = 0;
     ava::agent::AgentLoop bash_loop(ava::agent::AgentLoopOptions{
-        .append_entry = append_route_for_test(bash_store),
         .workspace_dir = bash_workspace,
         .mode = ava::agent::Mode::Build,
         .provider_id = "openai",
@@ -1449,7 +1480,9 @@ void test_agent_loop_permission_resolver_threads_to_tools()
           expect(prompt.operation == ava::permissions::Operation::RunCommand, "agent bash allow resolver sees run command");
           expect(prompt.command == "true", "agent bash allow resolver sees command text");
           return ava::permissions::PermissionResolution::Allow;
-        }});
+        },
+        .append_entry = append_route_for_test(bash_store),
+    });
     auto bash_result = bash_loop.run_turn("run true", bash_store, provider, bash_transport);
     expect(bash_result && bash_result->final_text == "bash allowed" && bash_allow_prompts == 1 && bash_result->tool_timeline.size() == 1 &&
                bash_result->tool_timeline.front().status == ava::agent::ToolTimelineStatus::Success,
@@ -1472,7 +1505,6 @@ void test_agent_loop_permission_resolver_threads_to_tools()
                                                            "data: [DONE]\n\n")});
     int bash_deny_prompts = 0;
     ava::agent::AgentLoop bash_loop(ava::agent::AgentLoopOptions{
-        .append_entry = append_route_for_test(bash_store),
         .workspace_dir = bash_workspace,
         .mode = ava::agent::Mode::Build,
         .provider_id = "openai",
@@ -1484,7 +1516,9 @@ void test_agent_loop_permission_resolver_threads_to_tools()
           ++bash_deny_prompts;
           expect(prompt.operation == ava::permissions::Operation::RunCommand, "agent bash deny resolver sees run command");
           return ava::permissions::PermissionResolution::Deny;
-        }});
+        },
+        .append_entry = append_route_for_test(bash_store),
+    });
     auto bash_result = bash_loop.run_turn("run true", bash_store, provider, bash_transport);
     expect(bash_result && bash_result->final_text == "bash denied" && bash_deny_prompts == 1 && bash_result->tool_timeline.size() == 1 &&
                bash_result->tool_timeline.front().status == ava::agent::ToolTimelineStatus::Error,
@@ -1513,7 +1547,6 @@ void test_agent_loop_permission_resolver_threads_to_tools()
                                                            "data: [DONE]\n\n")});
     int bash_fail_prompts = 0;
     ava::agent::AgentLoop bash_loop(ava::agent::AgentLoopOptions{
-        .append_entry = append_route_for_test(bash_store),
         .workspace_dir = bash_workspace,
         .mode = ava::agent::Mode::Build,
         .provider_id = "openai",
@@ -1525,7 +1558,9 @@ void test_agent_loop_permission_resolver_threads_to_tools()
           ++bash_fail_prompts;
           expect(prompt.operation == ava::permissions::Operation::RunCommand, "agent bash fail resolver sees run command");
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
-        }});
+        },
+        .append_entry = append_route_for_test(bash_store),
+    });
     auto bash_result = bash_loop.run_turn("run true", bash_store, provider, bash_transport);
     expect(bash_result && bash_result->final_text == "bash resolver failed" && bash_fail_prompts == 1 && bash_result->tool_timeline.size() == 1 &&
                bash_result->tool_timeline.front().status == ava::agent::ToolTimelineStatus::Error && bash_transport.requests().size() == 2,
@@ -1551,7 +1586,7 @@ void test_agent_loop_question_resolver_threads_to_tools()
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"question answered\"}\n\n"
                                                     "data: [DONE]\n\n")});
   int prompts = 0;
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .provider_id = "openai",
@@ -1562,7 +1597,9 @@ void test_agent_loop_question_resolver_threads_to_tools()
         ++prompts;
         expect(prompt.question == "Pick one?" && prompt.options.size() == 2, "agent loop question resolver receives provider prompt");
         return ava::agent::QuestionAnswer{.selected_options = {"B"}, .custom_text = ""};
-      }});
+      },
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("ask", store, provider, transport);
   expect(result && result->final_text == "question answered" && prompts == 1 && result->tool_timeline.size() == 1 &&
              result->tool_timeline.front().status == ava::agent::ToolTimelineStatus::Success,
@@ -1582,13 +1619,16 @@ void test_agent_loop_non_stream_response()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200, .headers = {}, .body = "{\"status\":\"completed\",\"output_text\":\"plain response with data: literal\"}"}});
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "openai",
-                                                          .model_id = "gpt-5.5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "token",
-                                                          .stream = false});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .stream = false,
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("hi", store, provider, transport);
   expect(result && result->final_text == "plain response with data: literal", "agent loop parses non-stream response without sniffing data text");
   expect(!transport.requests().empty() && transport.requests()[0].body.find("\"stream\":false") != std::string::npos,
@@ -1605,21 +1645,24 @@ void test_agent_loop_compaction_status_metadata()
   ava::session::SessionStore store(
       ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "compaction-status"});
   auto appended = append_session_entry_for_test(store, ava::session::SessionEntry{.id = "entry_compaction_status",
-                                                          .parent_id = "",
-                                                          .type = ava::session::EntryType::Compaction,
-                                                          .timestamp = ava::session::now_timestamp(),
-                                                          .data_json = "{\"summary\":\"older context\"}"});
+                                                                                  .parent_id = "",
+                                                                                  .type = ava::session::EntryType::Compaction,
+                                                                                  .timestamp = ava::session::now_timestamp(),
+                                                                                  .data_json = "{\"summary\":\"older context\"}"});
   expect(appended.has_value(), "agent loop compaction metadata test seeds compaction entry");
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"after compaction\"}\n\n"
                     "data: [DONE]\n\n")});
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "openai",
-                                                          .model_id = "gpt-5.5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "token"});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("continue", store, provider, transport);
   expect(result && result->used_compacted_context && result->initial_context_messages == 2 && result->outcome == ava::core::RuntimeTerminalOutcome::Completed,
          "agent loop status metadata reports compacted initial provider context");
@@ -1651,35 +1694,37 @@ void test_agent_loop_replays_steering_after_mid_turn_auto_compaction()
   if (!append_target)
     return;
   auto append_route = [target = std::move(*append_target)](ava::session::SessionEntry entry) { return target->append(entry); };
-  ava::agent::AgentLoop loop(
-      ava::agent::AgentLoopOptions{.append_entry = append_route,.workspace_dir = workspace,
-                                   .mode = ava::agent::Mode::Build,
-                                   .provider_id = "openai",
-                                   .model_id = "gpt-5.5",
-                                   .system_prompt = "system prompt",
-                                   .access_token = "token",
-                                   .take_steering_messages = [&steering_taken]() -> ava::core::Result<std::vector<std::string>> {
-                                     if (steering_taken)
-                                       return std::vector<std::string>{};
-                                     steering_taken = true;
-                                     return std::vector<std::string>{"mid-turn steering"};
-                                   },
-                                   .compact_context = [&compact_calls, &append_lease](ava::session::SessionStore& compact_store, std::string_view trigger,
-                                                                                      std::vector<std::string> const&) -> ava::core::Result<bool> {
-                                     ++compact_calls;
-                                     if (trigger == "auto" && compact_calls == 2)
-                                     {
-                                       auto appended = compact_store.append(*append_lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                                                       .parent_id = "",
-                                                                                                       .type = ava::session::EntryType::Compaction,
-                                                                                                       .timestamp = ava::session::now_timestamp(),
-                                                                                                       .data_json = "{\"summary\":\"mid turn\"}"});
-                                       if (!appended)
-                                         return std::unexpected(std::move(appended.error()));
-                                       return true;
-                                     }
-                                     return false;
-                                   }});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .take_steering_messages = [&steering_taken]() -> ava::core::Result<std::vector<std::string>> {
+        if (steering_taken)
+          return std::vector<std::string>{};
+        steering_taken = true;
+        return std::vector<std::string>{"mid-turn steering"};
+      },
+      .compact_context = [&compact_calls, &append_lease](ava::session::SessionStore& compact_store, std::string_view trigger,
+                                                         std::vector<std::string> const&) -> ava::core::Result<bool> {
+        ++compact_calls;
+        if (trigger == "auto" && compact_calls == 2)
+        {
+          auto appended = compact_store.append(*append_lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                                         .parent_id = "",
+                                                                                         .type = ava::session::EntryType::Compaction,
+                                                                                         .timestamp = ava::session::now_timestamp(),
+                                                                                         .data_json = "{\"summary\":\"mid turn\"}"});
+          if (!appended)
+            return std::unexpected(std::move(appended.error()));
+          return true;
+        }
+        return false;
+      },
+      .append_entry = append_route,
+  });
 
   auto result = loop.run_turn("initial prompt", store, provider, transport);
   expect(result && result->final_text == "ok", "agent loop succeeds after mid-turn auto compaction");
@@ -1712,7 +1757,7 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction()
   if (!append_target)
     return;
   auto append_route = [target = std::move(*append_target)](ava::session::SessionEntry entry) { return target->append(entry); };
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route,
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .provider_id = "openai",
@@ -1720,16 +1765,16 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction()
       .system_prompt = "system prompt",
       .access_token = "token",
       .compact_context = [&append_lease, &overflow_compacted, &triggers](ava::session::SessionStore& compact_store, std::string_view trigger,
-                                                                          std::vector<std::string> const&) -> ava::core::Result<bool> {
+                                                                         std::vector<std::string> const&) -> ava::core::Result<bool> {
         triggers.push_back(std::string(trigger));
         if (trigger == "context_overflow")
         {
           overflow_compacted = true;
           auto appended = compact_store.append(*append_lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                          .parent_id = "",
-                                                                          .type = ava::session::EntryType::Compaction,
-                                                                          .timestamp = ava::session::now_timestamp(),
-                                                                          .data_json = "{\"summary\":\"overflow summary\"}"});
+                                                                                         .parent_id = "",
+                                                                                         .type = ava::session::EntryType::Compaction,
+                                                                                         .timestamp = ava::session::now_timestamp(),
+                                                                                         .data_json = "{\"summary\":\"overflow summary\"}"});
           if (!appended)
             return std::unexpected(std::move(appended.error()));
           return true;
@@ -1737,16 +1782,18 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction()
         if (trigger == "auto" && overflow_compacted)
         {
           auto appended = compact_store.append(*append_lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                          .parent_id = "",
-                                                                          .type = ava::session::EntryType::Compaction,
-                                                                          .timestamp = ava::session::now_timestamp(),
-                                                                          .data_json = "{\"summary\":\"duplicate\"}"});
+                                                                                         .parent_id = "",
+                                                                                         .type = ava::session::EntryType::Compaction,
+                                                                                         .timestamp = ava::session::now_timestamp(),
+                                                                                         .data_json = "{\"summary\":\"duplicate\"}"});
           if (!appended)
             return std::unexpected(std::move(appended.error()));
           return true;
         }
         return false;
-      }});
+      },
+      .append_entry = append_route,
+  });
 
   auto result = loop.run_turn("overflow prompt", store, provider, transport);
   auto entries = store.load();
@@ -1794,13 +1841,16 @@ void test_agent_loop_multiple_tools_and_denied_continuation()
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n"
                                                     "data: [DONE]\n\n")});
   std::vector<ava::agent::ToolTimelineEntry> tool_events;
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "openai",
-                                                          .model_id = "gpt-5.5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "token",
-                                                          .on_tool_event = [&tool_events](auto const& entry) { tool_events.push_back(entry); }});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .on_tool_event = [&tool_events](auto const& entry) { tool_events.push_back(entry); },
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("read both", store, provider, transport);
   expect(result && result->tool_calls == 2 && result->final_text == "done", "agent loop handles multiple tool calls before continuation");
   expect(result && result->tool_timeline.size() == 2 && result->tool_timeline[0].call_id == "call_1" && result->tool_timeline[0].name == "read_file" &&
@@ -1866,14 +1916,17 @@ void test_agent_loop_multiple_tools_and_denied_continuation()
                     "data: [DONE]\n\n"),
        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"permission explained\"}\n\n"
                     "data: [DONE]\n\n")});
-  ava::agent::AgentLoop denied_loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(denied_store), .workspace_dir = denied_workspace,
-                                                                 .mode = ava::agent::Mode::Plan,
-                                                                 .provider_id = "openai",
-                                                                 .model_id = "gpt-5.5",
-                                                                 .system_prompt = "system prompt",
-                                                                 .access_token = "token",
-                                                                 .openai_oauth = true,
-                                                                 .openai_account_id = "acct_123"});
+  ava::agent::AgentLoop denied_loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = denied_workspace,
+      .mode = ava::agent::Mode::Plan,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .openai_oauth = true,
+      .openai_account_id = "acct_123",
+      .append_entry = append_route_for_test(denied_store),
+  });
   auto denied_result = denied_loop.run_turn("write source", denied_store, provider, denied_transport);
   expect(denied_result && denied_result->final_text == "permission explained" && denied_result->provider_iterations == 2,
          "agent loop continues after permission-denied tool results");
@@ -1911,7 +1964,7 @@ void test_agent_loop_parallel_read_search_preserves_provider_order_and_replay()
                                                     "data: [DONE]\n\n")});
   std::vector<ava::agent::ToolTimelineEntry> tool_events;
   std::vector<ava::agent::ToolProgressEntry> progress_events;
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
                                                           .provider_id = "openai",
                                                           .model_id = "gpt-5.5",
@@ -1922,6 +1975,7 @@ void test_agent_loop_parallel_read_search_preserves_provider_order_and_replay()
                                                             progress_events.push_back(entry);
                                                             return {};
                                                           },
+                                                          .append_entry = append_route_for_test(store),
                                                           .parallel_read_search_tools = true,
                                                           .parallel_read_search_max_workers = 2});
   auto result = loop.run_turn("glob both", store, provider, transport);
@@ -2020,13 +2074,14 @@ void test_agent_loop_parallel_read_search_zero_max_workers_clamps_to_one()
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n"
                                                     "data: [DONE]\n\n")});
   std::vector<ava::agent::ToolTimelineEntry> tool_events;
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
                                                           .provider_id = "openai",
                                                           .model_id = "gpt-5.5",
                                                           .system_prompt = "system prompt",
                                                           .access_token = "token",
                                                           .on_tool_event = [&tool_events](auto const& entry) { tool_events.push_back(entry); },
+                                                          .append_entry = append_route_for_test(store),
                                                           .parallel_read_search_tools = true,
                                                           .parallel_read_search_max_workers = 0});
   auto result = loop.run_turn("read both with zero worker cap", store, provider, transport);
@@ -2063,7 +2118,7 @@ void test_agent_loop_parallel_read_search_falls_back_for_ask_preflight()
   auto const main_thread = std::this_thread::get_id();
   std::thread::id resolver_thread;
   int prompts = 0;
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .provider_id = "openai",
@@ -2088,6 +2143,7 @@ void test_agent_loop_parallel_read_search_falls_back_for_ask_preflight()
         expect(entries && saw_tool_call_before_prompt, "Ask fallback appends the ToolCall before invoking the resolver");
         return ava::permissions::PermissionResolution::Allow;
       },
+      .append_entry = append_route_for_test(store),
       .parallel_read_search_tools = true,
       .parallel_read_search_max_workers = 2});
   auto result = loop.run_turn("read outside and inside", store, provider, transport);
@@ -2184,7 +2240,7 @@ void test_agent_loop_parallel_read_search_active_cancellation_stops_unstarted_sl
                     "data: [DONE]\n\n")});
   std::atomic<int> resolver_calls = 0;
   std::vector<ava::agent::ToolTimelineEntry> tool_events;
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .provider_id = "openai",
@@ -2197,6 +2253,7 @@ void test_agent_loop_parallel_read_search_active_cancellation_stops_unstarted_sl
         return ava::permissions::PermissionResolution::Allow;
       },
       .cancel_requested = [&cancel_state] { return cancel_state(); },
+      .append_entry = append_route_for_test(store),
       .parallel_read_search_tools = true,
       .parallel_read_search_max_workers = 2});
   auto result = loop.run_turn("read four then cancel during active epoch", store, provider, transport);
@@ -2274,7 +2331,7 @@ void test_agent_loop_parallel_read_search_cancellation_stops_later_barrier()
                     tool_call_sse("call_bash", "bash", R"({"command":"true"})") + "data: [DONE]\n\n")});
   bool cancel_after_first_tool = false;
   std::vector<ava::agent::ToolTimelineEntry> tool_events;
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
                                                           .provider_id = "openai",
                                                           .model_id = "gpt-5.5",
@@ -2289,6 +2346,7 @@ void test_agent_loop_parallel_read_search_cancellation_stops_later_barrier()
                                                                 }
                                                               },
                                                           .cancel_requested = [&cancel_after_first_tool] { return cancel_after_first_tool; },
+                                                          .append_entry = append_route_for_test(store),
                                                           .parallel_read_search_tools = true,
                                                           .parallel_read_search_max_workers = 2});
   auto result = loop.run_turn("read both then cancel before bash", store, provider, transport);
@@ -2353,21 +2411,24 @@ void test_agent_loop_cancellation_stops_later_sequential_tools()
                     "data: [DONE]\n\n")});
   bool cancel_after_first_tool = false;
   std::vector<ava::agent::ToolTimelineEntry> tool_events;
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "openai",
-                                                          .model_id = "gpt-5.5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "token",
-                                                          .on_tool_event =
-                                                              [&](ava::agent::ToolTimelineEntry const& entry) {
-                                                                tool_events.push_back(entry);
-                                                                if (entry.call_id == "call_1" && entry.status == ava::agent::ToolTimelineStatus::Success)
-                                                                {
-                                                                  cancel_after_first_tool = true;
-                                                                }
-                                                              },
-                                                          .cancel_requested = [&cancel_after_first_tool] { return cancel_after_first_tool; }});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .on_tool_event =
+          [&](ava::agent::ToolTimelineEntry const& entry) {
+            tool_events.push_back(entry);
+            if (entry.call_id == "call_1" && entry.status == ava::agent::ToolTimelineStatus::Success)
+            {
+              cancel_after_first_tool = true;
+            }
+          },
+      .cancel_requested = [&cancel_after_first_tool] { return cancel_after_first_tool; },
+      .append_entry = append_route_for_test(store),
+  });
 
   auto result = loop.run_turn("read both but cancel after first", store, provider, transport);
   expect(!result && result.error().message().find("canceled") != std::string::npos, "agent loop reports cancellation after the first sequential tool dispatch");
@@ -2423,12 +2484,15 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
                                                       "data: [DONE]\n\n"),
                                          sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n"
                                                       "data: [DONE]\n\n")});
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
-                                                            .mode = ava::agent::Mode::Build,
-                                                            .provider_id = "openai",
-                                                            .model_id = "gpt-5.5",
-                                                            .system_prompt = "system prompt",
-                                                            .access_token = "token"});
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .provider_id = "openai",
+        .model_id = "gpt-5.5",
+        .system_prompt = "system prompt",
+        .access_token = "token",
+        .append_entry = append_route_for_test(store),
+    });
     auto result = loop.run_turn("read note", store, provider, transport);
     expect(result && result->tool_calls == 1 && result->tool_timeline.size() == 1 &&
                result->tool_timeline.front().status == ava::agent::ToolTimelineStatus::Success && result->tool_timeline.front().name == "read_file",
@@ -2470,13 +2534,16 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
         "data: [DONE]\n\n");
     ava::tests::FakeTransport transport({repeated_call, repeated_call});
     std::vector<ava::agent::ToolTimelineEntry> tool_events;
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
-                                                            .mode = ava::agent::Mode::Build,
-                                                            .provider_id = "openai",
-                                                            .model_id = "gpt-5.5",
-                                                            .system_prompt = "system prompt",
-                                                            .access_token = "token",
-                                                            .on_tool_event = [&tool_events](auto const& event) { tool_events.push_back(event); }});
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .provider_id = "openai",
+        .model_id = "gpt-5.5",
+        .system_prompt = "system prompt",
+        .access_token = "token",
+        .on_tool_event = [&tool_events](auto const& event) { tool_events.push_back(event); },
+        .append_entry = append_route_for_test(store),
+    });
     auto result = loop.run_turn("reuse a call id", store, provider, transport);
     auto entries = store.load();
     std::size_t tool_calls = 0;
@@ -2518,16 +2585,19 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
                                                       "data: [DONE]\n\n"),
                                          tool_call});
     std::vector<ava::provider::StreamEvent> stream_events;
-    auto options = ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store), .workspace_dir = workspace,
-                                                .mode = ava::agent::Mode::Build,
-                                                .provider_id = "openai",
-                                                .model_id = "gpt-5.5",
-                                                .system_prompt = "system prompt",
-                                                .access_token = "token",
-                                                .on_stream_event = [&stream_events](auto const& event) -> ava::core::VoidResult {
-                                                  stream_events.push_back(event);
-                                                  return {};
-                                                }};
+    auto options = ava::agent::AgentLoopOptions{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .provider_id = "openai",
+        .model_id = "gpt-5.5",
+        .system_prompt = "system prompt",
+        .access_token = "token",
+        .on_stream_event = [&stream_events](auto const& event) -> ava::core::VoidResult {
+          stream_events.push_back(event);
+          return {};
+        },
+        .append_entry = append_route_for_test(store),
+    };
     ava::agent::AgentLoop first_loop(options);
     auto first = first_loop.run_turn("first prompt", store, provider, transport);
     auto const events_after_first = stream_events.size();
@@ -2563,12 +2633,15 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
     ava::tests::FakeTransport transport(
         {sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"\",\"name\":\"read_file\"}\n\n"
                       "data: [DONE]\n\n")});
-    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
-                                                            .mode = ava::agent::Mode::Build,
-                                                            .provider_id = "openai",
-                                                            .model_id = "gpt-5.5",
-                                                            .system_prompt = "system prompt",
-                                                            .access_token = "token"});
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .provider_id = "openai",
+        .model_id = "gpt-5.5",
+        .system_prompt = "system prompt",
+        .access_token = "token",
+        .append_entry = append_route_for_test(store),
+    });
     auto result = loop.run_turn("read missing-id", store, provider, transport);
     auto entries = store.load();
     bool saw_tool_entry = false;
@@ -2604,13 +2677,16 @@ void test_agent_loop_truncates_tool_context()
                                                     "data: [DONE]\n\n"),
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n"
                                                     "data: [DONE]\n\n")});
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.append_entry = append_route_for_test(store),.workspace_dir = workspace,
-                                                          .mode = ava::agent::Mode::Build,
-                                                          .provider_id = "openai",
-                                                          .model_id = "gpt-5.5",
-                                                          .system_prompt = "system prompt",
-                                                          .access_token = "token",
-                                                          .max_tool_result_context_bytes = 8 * 1024});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .max_tool_result_context_bytes = 8 * 1024,
+      .append_entry = append_route_for_test(store),
+  });
   auto result = loop.run_turn("read large", store, provider, transport);
   expect(result && transport.requests().size() == 2 && transport.requests()[1].body.find("tool result context truncated") != std::string::npos,
          "agent loop truncates tool results before provider continuation context");

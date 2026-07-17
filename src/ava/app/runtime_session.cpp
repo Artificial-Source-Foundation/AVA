@@ -158,7 +158,7 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
   std::optional<std::vector<ava::session::SessionEntry>> loaded_entries;
   if (load_existing_entries)
   {
-    auto entries = store.load_bounded(session_read_limits);
+    auto entries = store.is_ephemeral() ? store.load_bounded(session_read_limits) : store.load_bounded(lease, session_read_limits);
     if (!entries)
       return std::unexpected(std::move(entries.error()));
     if (!options.pin_model_override)
@@ -169,7 +169,7 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
     loaded_entries = std::move(*entries);
     if (options.expected_original_cwd)
     {
-      auto summary = store.inspect_bounded(session_read_limits);
+      auto summary = store.is_ephemeral() ? store.inspect_bounded(session_read_limits) : store.inspect_bounded(lease, session_read_limits);
       if (!summary)
         return std::unexpected(std::move(summary.error()));
       auto const persisted_cwd = summary->original_cwd.empty() ? workspace_dir : summary->original_cwd;
@@ -201,22 +201,21 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
         return std::unexpected(std::move(acquired.error()));
       lease = std::move(*acquired);
     }
-    auto appended = store.is_ephemeral()
-                        ? runtime::append_session_start_ephemeral(store, options.mode, model, prompt_state->base_prompt, prompt_state->context_sources.size(),
-                                                                  current_dir)
-                        : runtime::append_session_start(store, lease, options.mode, model, prompt_state->base_prompt,
-                                                        prompt_state->context_sources.size(), current_dir);
+    auto appended =
+        store.is_ephemeral()
+            ? runtime::append_session_start_ephemeral(store, options.mode, model, prompt_state->base_prompt, prompt_state->context_sources.size(), current_dir)
+            : runtime::append_session_start(store, lease, options.mode, model, prompt_state->base_prompt, prompt_state->context_sources.size(), current_dir);
     if (!appended)
       return std::unexpected(std::move(appended.error()));
   }
 
   if (append_initial_session_name && options.initial_session_name)
   {
-    auto entries = store.load();
+    auto entries = store.is_ephemeral() ? store.load() : store.load(lease);
     if (!entries)
       return std::unexpected(std::move(entries.error()));
-    auto entry = ava::session::make_session_metadata_entry(
-        ava::session::SessionMetadataUpdate{.name = options.initial_session_name, .actor = "cli"}, entries->empty() ? std::string{} : entries->back().id);
+    auto entry = ava::session::make_session_metadata_entry(ava::session::SessionMetadataUpdate{.name = options.initial_session_name, .actor = "cli"},
+                                                           entries->empty() ? std::string{} : entries->back().id);
     if (!entry)
       return std::unexpected(std::move(entry.error()));
     auto appended = store.is_ephemeral() ? store.append_ephemeral(*entry) : store.append(lease, *entry);
@@ -225,8 +224,8 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
   }
 
   bool const sessionless = store.is_ephemeral();
-  auto append_target = sessionless ? ava::session::SessionAppendTarget::create_ephemeral(store)
-                                   : ava::session::SessionAppendTarget::create_persistent(store, lease);
+  auto append_target =
+      sessionless ? ava::session::SessionAppendTarget::create_ephemeral(store) : ava::session::SessionAppendTarget::create_persistent(store, lease);
   if (!append_target)
     return std::unexpected(std::move(append_target.error()));
   runtime::Session session{.store = std::move(store),
@@ -423,7 +422,7 @@ ava::core::VoidResult replace_runtime_session(runtime::Session& destination, run
 
 ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(runtime::Session& session, ava::session::SessionMetadataUpdate update)
 {
-  auto entries = session.store.load();
+  auto entries = session.sessionless ? session.store.load() : session.store.load(session.lease);
   if (!entries)
     return std::unexpected(std::move(entries.error()));
   auto entry = ava::session::make_session_metadata_entry(std::move(update), entries->empty() ? std::string{} : entries->back().id);

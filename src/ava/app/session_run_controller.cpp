@@ -108,9 +108,17 @@ struct ActiveRunGuard::State
 {
   struct AppendItem
   {
+    enum class Completion
+    {
+      Pending,
+      Succeeded,
+      PersistenceFailed,
+      Closing,
+    };
+
     ava::session::SessionEntry entry;
     std::size_t bytes = 0;
-    bool done = false;
+    Completion completion = Completion::Pending;
     std::optional<ava::core::Error> error;
     std::condition_variable ready;
   };
@@ -133,14 +141,14 @@ struct ActiveRunGuard::State
   std::unordered_map<std::string, RunOutcome> outcomes;
   std::deque<std::string> outcome_order;
   std::optional<ava::core::Error> persistence_failure;
+  std::uint64_t persistence_failure_generation = 0;
   std::shared_ptr<ava::session::SessionAppendTarget> append_target;
   std::deque<RunCommand> commands;
   std::deque<std::shared_ptr<AppendItem>> appends;
   std::size_t append_bytes = 0;
 };
 
-SessionRunController::SessionRunController(std::shared_ptr<ava::session::SessionAppendTarget> append_target)
-    : state_(std::make_shared<ActiveRunGuard::State>())
+SessionRunController::SessionRunController(std::shared_ptr<ava::session::SessionAppendTarget> append_target) : state_(std::make_shared<ActiveRunGuard::State>())
 {
   state_->append_target = std::move(append_target);
 }
@@ -170,26 +178,40 @@ void SessionRunController::shutdown() noexcept
     }
     static_cast<void>(source.request_stop());
 
-    // Serialize with an active append driver before clearing the only target
-    // reference. Queued callers have either drained or are failed below.
-    std::lock_guard driver_lock(state->append_mutex);
-    std::lock_guard lock(state->mutex);
-    auto closing_error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session is closing");
-    while (!state->appends.empty())
+    // The active driver completes before shutdown takes this lock. Once
+    // serialized, revoke and move authority before any caller-side Error is
+    // synthesized. Closing completion itself is nonallocating.
+    std::shared_ptr<ava::session::SessionAppendTarget> released_target;
     {
-      auto pending = state->appends.front();
-      state->appends.pop_front();
-      state->append_bytes -= pending->bytes;
-      pending->error = closing_error;
-      pending->done = true;
-      pending->ready.notify_all();
+      std::lock_guard driver_lock(state->append_mutex);
+      std::lock_guard lock(state->mutex);
+      released_target = std::move(state->append_target);
+      while (!state->appends.empty())
+      {
+        auto pending = state->appends.front();
+        state->appends.pop_front();
+        state->append_bytes -= pending->bytes;
+        pending->completion = ActiveRunGuard::State::AppendItem::Completion::Closing;
+        pending->ready.notify_all();
+      }
+      state->appends_drained.notify_all();
     }
-    state->appends_drained.notify_all();
-    state->append_target.reset();
+    released_target.reset();
   }
   catch (...)
   {
-    // Destructors must not throw. Routes still fail closed through closing.
+    // Destructors must not throw. Best-effort revocation is nonallocating and
+    // active drivers retain their own temporary target until completion.
+    try
+    {
+      std::lock_guard lock(state->mutex);
+      state->shutting_down = true;
+      state->closing = true;
+      state->append_target.reset();
+    }
+    catch (...)
+    {
+    }
   }
 }
 
@@ -346,10 +368,12 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
     std::shared_ptr<ActiveRunGuard::State::AppendItem> head;
     {
       std::unique_lock lock(state->mutex);
-      if (item->done)
+      if (item->completion != ActiveRunGuard::State::AppendItem::Completion::Pending)
       {
-        if (item->error)
+        if (item->completion == ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed && item->error)
           return std::unexpected(*item->error);
+        if (item->completion == ActiveRunGuard::State::AppendItem::Completion::Closing)
+          return std::unexpected(inactive_error());
         return {};
       }
       if (state->appends.empty())
@@ -397,11 +421,12 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
       {
         auto error = persisted.error();
         state->persistence_failure = error;
+        ++state->persistence_failure_generation;
         state->requested_stop = StopReason::PersistenceError;
         source = state->stop_source;
         request_stop = true;
         head->error = error;
-        head->done = true;
+        head->completion = ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed;
         head->ready.notify_all();
         while (!state->appends.empty())
         {
@@ -409,14 +434,14 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
           state->appends.pop_front();
           state->append_bytes -= pending->bytes;
           pending->error = error;
-          pending->done = true;
+          pending->completion = ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed;
           pending->ready.notify_all();
         }
         state->appends_drained.notify_all();
       }
       else
       {
-        head->done = true;
+        head->completion = ActiveRunGuard::State::AppendItem::Completion::Succeeded;
         head->ready.notify_all();
         if (state->appends.empty())
           state->appends_drained.notify_all();
@@ -440,10 +465,40 @@ std::function<ava::core::VoidResult(ava::session::SessionEntry)> SessionRunContr
 
 ava::core::VoidResult SessionRunController::reset_persistence_failure()
 {
-  std::lock_guard lock(state_->mutex);
-  if (state_->active || !state_->appends.empty())
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot reset append failure during active run"));
-  state_->persistence_failure.reset();
+  auto state = state_;
+  std::unique_lock driver_lock(state->append_mutex);
+
+  std::shared_ptr<ava::session::SessionAppendTarget> target;
+  std::uint64_t failure_generation = 0;
+  {
+    std::lock_guard lock(state->mutex);
+    if (state->active || !state->appends.empty())
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot recover append failure during active run"));
+    if (state->shutting_down || !state->append_target)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot recover persistence for a closing runtime session"));
+    if (!state->persistence_failure)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session has no latched persistence failure to recover"));
+    target = state->append_target;
+    failure_generation = state->persistence_failure_generation;
+  }
+
+  // Recovery can scan, quarantine, sync, and truncate. Never hold the state
+  // mutex across it; append_mutex alone excludes append drivers and serializes
+  // shutdown's authority release.
+  auto recovered = target->recover();
+  if (!recovered)
+    return std::unexpected(std::move(recovered.error()));
+
+  {
+    std::lock_guard lock(state->mutex);
+    if (state->active || !state->appends.empty() || state->shutting_down || state->append_target != target || !state->persistence_failure ||
+        state->persistence_failure_generation != failure_generation)
+    {
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistence recovery completed after runtime session authority changed"));
+    }
+    state->persistence_failure.reset();
+  }
   return {};
 }
 

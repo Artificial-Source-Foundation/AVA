@@ -99,11 +99,6 @@ struct ToolProgressEntry
 
 struct AgentLoopOptions
 {
-  // Immutable generation route for records produced by this run.
-  SessionAppendSink append_entry = nullptr;
-  // Stable session-owner route for parent notices produced by background
-  // children. Unlike append_entry it remains valid between generations.
-  SessionAppendSink parent_notification_sink = nullptr;
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir = {};
   Mode mode = Mode::Build;
@@ -153,6 +148,11 @@ struct AgentLoopOptions
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Transport>>()> background_transport_factory = nullptr;
   std::shared_ptr<BackgroundJobRegistry> background_jobs = nullptr;
   std::mutex* session_mutex = nullptr;
+  // Immutable generation route for records produced by this run.
+  SessionAppendSink append_entry = nullptr;
+  // Stable session-owner route for parent notices produced by background
+  // children. Unlike append_entry it remains valid between generations.
+  SessionAppendSink parent_notification_sink = nullptr;
   // Called at real loop boundaries; errors abort the loop rather than being
   // swallowed as observer-only state.
   std::function<ava::core::VoidResult(RunPhase)> on_phase = nullptr;

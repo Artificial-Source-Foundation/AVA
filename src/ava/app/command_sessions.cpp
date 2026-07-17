@@ -776,7 +776,8 @@ ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& s
 
   if (parts.size() == 1)
   {
-    auto metadata = ava::session::load_session_metadata(target->store);
+    auto metadata =
+        target->sessionless ? ava::session::load_session_metadata(target->store) : ava::session::load_session_metadata(target->store, target->lease);
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
     auto text = metadata->labels.empty() ? std::string("session " + target->store.session_id() + " labels: <none>")
@@ -842,7 +843,8 @@ ava::core::Result<CommandResult> run_sessions_archive_command(runtime::Session& 
   if (!target)
     return std::unexpected(std::move(target.error()));
 
-  auto current_metadata = ava::session::load_session_metadata(target->store);
+  auto current_metadata =
+      target->sessionless ? ava::session::load_session_metadata(target->store) : ava::session::load_session_metadata(target->store, target->lease);
   if (!current_metadata)
     return std::unexpected(std::move(current_metadata.error()));
   if (current_metadata->archived == archived)
@@ -1040,8 +1042,8 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::Session& sessi
   auto const created_session_id = opened->store.session_id();
   if (!trimmed_name.empty())
   {
-    auto metadata = append_runtime_session_metadata(
-        *opened, ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
+    auto metadata =
+        append_runtime_session_metadata(*opened, ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
   }
@@ -1115,7 +1117,8 @@ ava::core::Result<CommandResult> run_labels_command(runtime::Session& session, s
   auto const parts = split_command_arguments(labels);
   if (parts.empty())
   {
-    auto metadata = ava::session::load_session_metadata(session.store);
+    auto metadata =
+        session.sessionless ? ava::session::load_session_metadata(session.store) : ava::session::load_session_metadata(session.store, session.lease);
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
     auto text = metadata->labels.empty() ? std::string("session labels: <none>") : std::string("session labels: ") + labels_text(metadata->labels);
@@ -1373,12 +1376,12 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
         return {};
       }
       auto entry = ava::session::make_manual_compaction_entry(ava::session::ManualCompactionRequest{.summary = *summary,
-                                                                                                      .instructions = instructions,
-                                                                                                      .config = *config,
-                                                                                                      .estimated_tokens = estimated_tokens,
-                                                                                                      .threshold_tokens = 0,
-                                                                                                      .trigger = "manual",
-                                                                                                      .recent_context = ""});
+                                                                                                    .instructions = instructions,
+                                                                                                    .config = *config,
+                                                                                                    .estimated_tokens = estimated_tokens,
+                                                                                                    .threshold_tokens = 0,
+                                                                                                    .trigger = "manual",
+                                                                                                    .recent_context = ""});
       if (!entry)
         return std::unexpected(std::move(entry.error()));
       return session.append_owned(std::move(*entry));
@@ -1606,7 +1609,7 @@ ava::core::Result<CommandResult> run_recover_persistence_command(runtime::Sessio
     add_output(result, recovered.error().format());
     return result;
   }
-  add_output(result, "persistence failure latch cleared after terminal append drain");
+  add_output(result, "session persistence recovered; append failure latch cleared");
   return result;
 }
 

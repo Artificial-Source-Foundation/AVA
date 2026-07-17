@@ -51,9 +51,9 @@ struct SessionMetadataUpdate
 
 [[nodiscard]] ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::vector<SessionEntry> const& entries);
 [[nodiscard]] ava::core::Result<SessionMetadataView> load_session_metadata(SessionStore const& store);
+[[nodiscard]] ava::core::Result<SessionMetadataView> load_session_metadata(SessionStore const& store, SessionLease const& lease);
 [[nodiscard]] ava::core::Result<SessionEntry> make_session_metadata_entry(SessionMetadataUpdate update, std::string parent_entry_id = {});
-[[nodiscard]] ava::core::Result<SessionMetadataView> append_session_metadata(SessionStore& store, SessionLease const& lease,
-                                                                              SessionMetadataUpdate update);
+[[nodiscard]] ava::core::Result<SessionMetadataView> append_session_metadata(SessionStore& store, SessionLease const& lease, SessionMetadataUpdate update);
 [[nodiscard]] ava::core::Result<SessionMetadataView> append_session_metadata_ephemeral(SessionStore& store, SessionMetadataUpdate update);
 
 [[nodiscard]] std::string session_metadata_json(std::string_view session_id, SessionMetadataView const& metadata);

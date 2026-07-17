@@ -3228,6 +3228,10 @@ void test_acp_peer_cancel_duplicate_inflight_and_saturation()
   auto null_cancellation = take_output(state);
   expect(output_has_code(null_cancellation, -32800) && null_cancellation->find("\"id\":null") != std::string::npos,
          "$/cancel_request correlates null and preserves it on the cancellation response");
+  auto null_release_barrier_sent = peer.send_notification("test/null_release_barrier", std::string("{}"));
+  auto null_release_barrier = take_output(state);
+  expect(null_release_barrier_sent && null_release_barrier && null_release_barrier->find("test/null_release_barrier") != std::string::npos,
+         "a writer barrier observes null cancellation after its in-flight slot is released");
   expect(peer.stats().duplicate_inbound_ids == 1 && peer.stats().canceled_inbound_requests == 1,
          "ACP peer records duplicate and cancellation routing outcomes");
 

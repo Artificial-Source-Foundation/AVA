@@ -9,6 +9,7 @@
 - Wide-character ncurses development headers/library (`ncurses-devel` on Fedora).
 - `clang-format` version 22 or newer.
 - `clang-tidy` when touching core logic or safety-sensitive paths.
+- Optional `sccache` or `ccache` for faster repeated compilation.
 - internet access to `github.com` is required during configuration.
 
 ## Cloning the repository
@@ -28,7 +29,7 @@ If you want to compile with debug output then you need to have:
 
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
-cmake --build build
+scripts/build.sh --build-dir build
 scripts/run-tests.sh --build-dir build
 ```
 
@@ -36,7 +37,7 @@ Preset equivalent:
 
 ```sh
 cmake --preset dev
-cmake --build --preset dev
+scripts/build.sh
 scripts/run-tests.sh
 ```
 
@@ -44,19 +45,21 @@ Sanitizer pass:
 
 ```sh
 cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
-cmake --build build-sanitize
-scripts/run-tests.sh --build-dir build-sanitize
+scripts/build.sh --build-dir build-sanitize --jobs 2
+scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 
 Preset equivalent:
 
 ```sh
 cmake --preset sanitize
-cmake --build --preset sanitize
-scripts/run-tests.sh --build-dir build-sanitize
+scripts/build.sh --build-dir build-sanitize --jobs 2
+scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 
-The repository test runner detects the available logical cores and passes an explicit positive parallel level to CTest. Use `--jobs N` or `CTEST_PARALLEL_LEVEL=N` to cap it, and append normal CTest options such as `-R`. It rejects concurrent invocations for one build tree because several integration tests and CTest's own logs use fixed paths there.
+The repository build and test runners detect the available logical cores and pass an explicit positive parallel level to CMake/CTest. Use `--jobs N`, `CMAKE_BUILD_PARALLEL_LEVEL=N`, or `CTEST_PARALLEL_LEVEL=N` to cap it; build options such as `--target` and CTest options such as `-R` are forwarded. The runners share one build-tree lock because concurrent builds/tests and several fixed integration-test roots are unsafe. Sanitizer examples use two jobs to limit memory pressure.
+
+Parallel jobs speed clean builds; a compiler cache speeds repeated builds. To enable an installed cache, configure once with `cmake --preset dev -DCMAKE_CXX_COMPILER_LAUNCHER=sccache` (or replace `sccache` with `ccache`). Use the same option with the sanitizer preset if desired; compiler flags keep those cache entries separate.
 
 Tests currently build into one `ava_tests` CTest target from focused test sources under `tests/`. LSP coverage uses the `ava_fake_lsp_server` support executable.
 
@@ -78,7 +81,7 @@ where **`OPTIONS`** is one or more of the following:
 * `-GNinja` : use ninja instead of make (highly recommended)
 * `--log-level=NOTICE` : reduce CMake output to notices, warnings and errors. Possible values are `ERROR`, `WARNING`, `NOTICE`, `STATUS` (default), `VERBOSE`, `DEBUG`, and `TRACE`.
   As a developer you should use the default (STATUS) or more verbose, otherwise the CMake options are not shown.
-* `-DCMAKE_CXX_COMPILER_LAUNCHER=ccache` : also set the environment variable `CCACHE_DIR` to a writable directory. As an active developer this is a must to speed up recompilations.
+* `-DCMAKE_CXX_COMPILER_LAUNCHER=sccache` (or `ccache`) : use an installed compiler cache to speed up recompilations; set `SCCACHE_DIR` or `CCACHE_DIR` when a non-default writable cache directory is needed.
 * `-DAVA_BUILD_TESTS=ON` : to compile the testsuite of ava.
 * `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` : generate the `compile_commands.json` compilation database, useful for tools that need the exact compiler command line for each source file.
   Typical tools that use it are:
@@ -105,7 +108,7 @@ where `Debug` is in red, because the default is `Release`.
 
 After (re)configuration AVA can be build by issuing the command:
 ```sh
-cmake --build "$BUILDDIR" --config "$CMAKE_CONFIG" --parallel $CPUS [--verbose]
+scripts/build.sh --build-dir "$BUILDDIR" --jobs "$CPUS" --config "$CMAKE_CONFIG" [--verbose]
 ```
 
 Adding `--verbose` shows the exact commands that are being executed by ninja;

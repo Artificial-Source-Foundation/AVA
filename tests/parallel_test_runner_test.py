@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract tests for scripts/run-tests.sh without running nested AVA tests."""
+"""Contract tests for AVA's parallel build/test wrappers without doing real work."""
 
 from __future__ import annotations
 
@@ -35,6 +35,29 @@ def run_runner(script: Path, build_dir: Path, fake_ctest: Path, *args: str, env_
     )
 
 
+def run_build_runner(
+    script: Path,
+    build_dir: Path,
+    fake_cmake: Path,
+    *args: str,
+    env_extra: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.pop("CMAKE_BUILD_PARALLEL_LEVEL", None)
+    env["AVA_CMAKE_COMMAND"] = str(fake_cmake)
+    if env_extra:
+        env.update(env_extra)
+    return subprocess.run(
+        [str(script), "--build-dir", str(build_dir), *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        check=False,
+        timeout=10,
+    )
+
+
 def wait_for_path(path: Path, process: subprocess.Popen[str], timeout: float) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -48,15 +71,18 @@ def wait_for_path(path: Path, process: subprocess.Popen[str], timeout: float) ->
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--script", type=Path, required=True)
+    parser.add_argument("--build-script", type=Path, required=True)
     parser.add_argument("--root", type=Path, required=True)
     args = parser.parse_args()
 
     script = args.script.resolve(strict=True)
+    build_script = args.build_script.resolve(strict=True)
     root = args.root.resolve()
     shutil.rmtree(root, ignore_errors=True)
     build_dir = root / "build"
     build_dir.mkdir(parents=True)
     (build_dir / "CTestTestfile.cmake").write_text("# fake configured tree\n", encoding="utf-8")
+    (build_dir / "CMakeCache.txt").write_text("# fake configured tree\n", encoding="utf-8")
 
     invocation_file = root / "ctest-args.json"
     fake_ctest = root / "fake-ctest.py"
@@ -111,6 +137,48 @@ Path(os.environ["FAKE_CTEST_ARGS"]).write_text(json.dumps(sys.argv[1:]), encodin
     require(invalid.returncode == 2, "runner rejects unbounded/zero parallelism")
     require("positive integer" in invalid.stderr and not invocation_file.exists(), "invalid jobs fail before CTest starts")
 
+    build_invocation_file = root / "cmake-args.json"
+    build_env = {"FAKE_CTEST_ARGS": str(build_invocation_file)}
+    explicit_build = run_build_runner(
+        build_script,
+        build_dir,
+        fake_ctest,
+        "--jobs",
+        "6",
+        "--target",
+        "ava_tests",
+        env_extra=build_env,
+    )
+    require(explicit_build.returncode == 0, f"explicit build runner failed: {explicit_build.stderr}")
+    require("6 parallel jobs" in explicit_build.stdout, "build runner reports the selected parallel level")
+    require(
+        json.loads(build_invocation_file.read_text(encoding="utf-8"))
+        == ["--build", str(build_dir), "--parallel", "6", "--target", "ava_tests"],
+        "build runner forwards the build tree, parallel level, and target exactly",
+    )
+
+    build_invocation_file.unlink()
+    inherited_build = run_build_runner(
+        build_script,
+        build_dir,
+        fake_ctest,
+        "--verbose",
+        env_extra={**build_env, "CMAKE_BUILD_PARALLEL_LEVEL": "4"},
+    )
+    require(inherited_build.returncode == 0, f"build environment override failed: {inherited_build.stderr}")
+    require(
+        json.loads(build_invocation_file.read_text(encoding="utf-8"))[2:4] == ["--parallel", "4"],
+        "build runner honors CMAKE_BUILD_PARALLEL_LEVEL",
+    )
+
+    build_invocation_file.unlink()
+    invalid_build = run_build_runner(build_script, build_dir, fake_ctest, "--jobs", "0", env_extra=build_env)
+    require(invalid_build.returncode == 2, "build runner rejects unbounded/zero parallelism")
+    require(
+        "positive integer" in invalid_build.stderr and not build_invocation_file.exists(),
+        "invalid build jobs fail before CMake starts",
+    )
+
     ready = root / "ready"
     release = root / "release"
     first_env = os.environ.copy()
@@ -133,7 +201,12 @@ Path(os.environ["FAKE_CTEST_ARGS"]).write_text(json.dumps(sys.argv[1:]), encodin
     try:
         wait_for_path(ready, first, 5)
         second = run_runner(script, build_dir, fake_ctest, "--jobs", "2", env_extra=common_env)
-        require(second.returncode == 2 and "already owns build tree" in second.stderr, "runner rejects a concurrent run in the same build tree")
+        require(second.returncode == 2 and "already owns build tree" in second.stderr, "runner rejects a concurrent test run in the same build tree")
+        blocked_build = run_build_runner(build_script, build_dir, fake_ctest, "--jobs", "2", env_extra=build_env)
+        require(
+            blocked_build.returncode == 2 and "already owns build tree" in blocked_build.stderr,
+            "build runner shares the build-tree lock with the test runner",
+        )
         release.write_text("release\n", encoding="utf-8")
         first_stdout, first_stderr = first.communicate(timeout=10)
         require(first.returncode == 0, f"locked runner failed after release: {first_stdout}\n{first_stderr}")
@@ -141,6 +214,27 @@ Path(os.environ["FAKE_CTEST_ARGS"]).write_text(json.dumps(sys.argv[1:]), encodin
         if first.poll() is None:
             first.kill()
             first.wait(timeout=5)
+
+    ready.unlink()
+    release.unlink()
+    signaled = subprocess.Popen(
+        [str(script), "--build-dir", str(build_dir), "--jobs", "2"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=first_env,
+    )
+    try:
+        wait_for_path(ready, signaled, 5)
+        signaled.terminate()
+        signal_stdout, signal_stderr = signaled.communicate(timeout=10)
+        require(signaled.returncode in (-15, 143), f"terminated runner returned {signaled.returncode}: {signal_stdout}\n{signal_stderr}")
+        after_signal = run_runner(script, build_dir, fake_ctest, "--jobs", "2", env_extra=common_env)
+        require(after_signal.returncode == 0, f"terminated runner retained its build lock: {after_signal.stderr}")
+    finally:
+        if signaled.poll() is None:
+            signaled.kill()
+            signaled.wait(timeout=5)
 
     return 0
 

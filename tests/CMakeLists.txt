@@ -425,6 +425,7 @@ if(Python3_Interpreter_FOUND)
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/parallel_test_runner_test.py
             --script ${CMAKE_SOURCE_DIR}/scripts/run-tests.sh
+            --build-script ${CMAKE_SOURCE_DIR}/scripts/build.sh
             --root ${CMAKE_BINARY_DIR}/parallel-test-runner)
   set_tests_properties(ava_build.parallel_test_runner PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 

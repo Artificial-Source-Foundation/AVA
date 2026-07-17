@@ -4,7 +4,7 @@
 
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
-cmake --build build
+scripts/build.sh --build-dir build
 scripts/run-tests.sh --build-dir build
 ```
 
@@ -12,11 +12,11 @@ Preset equivalent:
 
 ```sh
 cmake --preset dev
-cmake --build --preset dev
+scripts/build.sh
 scripts/run-tests.sh
 ```
 
-The runner defaults to the `build` tree, detects the available logical cores, and supplies that positive job count to CTest. Use `--jobs N` or `CTEST_PARALLEL_LEVEL=N` to cap concurrency, and append CTest options such as `-R`. It locks the selected build tree so concurrent full runs cannot collide through fixed integration-test roots or CTest's logs. Direct `ctest --preset dev` remains available as a sequential diagnostic fallback.
+The build and test runners default to the `build` tree, detect the available logical cores, and supply that positive job count to CMake/CTest. Use `--jobs N`, `CMAKE_BUILD_PARALLEL_LEVEL=N`, or `CTEST_PARALLEL_LEVEL=N` to cap concurrency; append build options such as `--target` or CTest options such as `-R`. They share a build-tree lock so builds, fixed integration-test roots, and CTest logs cannot collide. Direct CMake/CTest commands remain available as sequential diagnostic fallbacks.
 
 The test suite is built as one `ava_tests` CTest target from focused test sources under `tests/`. The LSP and MCP tests also build and use fake servers from `tests/support/`.
 
@@ -35,7 +35,7 @@ Recommended coverage:
 - `ava --print ... --json --allow-tool websearch` for `websearch`. This verifies the explicit `network.search` headless allow path and bounded search result shaping.
 - `ava --print ... --json` without `--allow-tool webfetch` for a prompt that asks for `webfetch`. This verifies `network.fetch` ask prompts fail closed by the default headless resolver; workspace-policy allow decisions may still proceed without prompting.
 - `ava --rpc` with a small JSONL harness that answers `permission_requested` with `permission_reply` for `write_file`, `edit_file`, `apply_patch`, and `bash`. The checked-in headless bash cleanup smoke verifies that timed-out shell process groups do not leave a child process behind.
-- `ctest --test-dir build -R '^ava_cli\.headless_e2e_model_smoke$' --output-on-failure` for the full-binary fake-provider coding-agent smoke. This is the default release gate for provider request/response handling, sequential tool dispatch, RPC permission replies, session persistence, provider continuation requests with tool results, replay through `--continue`, and clean exit in one run.
+- `scripts/run-tests.sh -R '^ava_cli\.headless_e2e_model_smoke$'` for the full-binary fake-provider coding-agent smoke. This is the default release gate for provider request/response handling, sequential tool dispatch, RPC permission replies, session persistence, provider continuation requests with tool results, replay through `--continue`, and clean exit in one run.
 - `ava --rpc` with `question_reply` for the `question` tool.
 - `ava --rpc` command-registry smokes for `list_commands` and `invoke_command` across prompt commands, skills, plugin commands, and MCP prompt commands.
 - `ava --rpc` plugin/MCP diagnostics smokes for plugin discovery/validation/static resources/enablement/fail-closed execution, MCP server list/inspect/restart, invalid MCP config containment, and fail-closed MCP tool discovery without a TUI resolver. `ava_cli.headless_rpc_sample_plugin` copies `examples/plugins/todo/` into an isolated project plugin directory and verifies the real sample's discovery, resources, enable/disable flow, and fail-closed command execution without starting the sample process.
@@ -49,7 +49,7 @@ Recommended coverage:
 The deterministic full-tool smoke is part of default CTest:
 
 ```sh
-ctest --test-dir build -R '^ava_cli\.headless_e2e_model_smoke$' --output-on-failure
+scripts/run-tests.sh -R '^ava_cli\.headless_e2e_model_smoke$'
 ```
 
 The smoke starts the built `ava --rpc` binary against `ava_fake_provider_server`, seeds a temporary workspace under the build tree, and drives `read_file`, `grep`, `list_directory`, `apply_patch`, and `bash` in one provider-backed turn. It uses `--allow read-only` only for read/search prompts; the outside-temp edit target and verification command must be resolved through RPC `permission_reply`. Assertions cover tool lifecycle events, successful tool results, permission events and persisted `permission_decision` session entries, `get_session_stats`, `validate_session`, `get_messages`, provider request-log continuation with prior tool results, and replay through `ava --rpc --continue`. Subagent/task and background job coverage lives in `ava_tests.agent_loop`; run that suite after changing `task`, subagent config, or `BackgroundJobRegistry` behavior.
@@ -82,7 +82,7 @@ The live coding dogfood script creates an isolated workspace, trusts a project-l
 
 ```sh
 cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
-cmake --build build-sanitize
+scripts/build.sh --build-dir build-sanitize --jobs 2
 scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 
@@ -90,7 +90,7 @@ Preset equivalent:
 
 ```sh
 cmake --preset sanitize
-cmake --build --preset sanitize
+scripts/build.sh --build-dir build-sanitize --jobs 2
 scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 
@@ -142,7 +142,7 @@ Pi's reference tree has broad Jest/Vitest coverage across provider protocols, co
 Run live smokes only when credentials are intentionally present in the environment:
 
 ```sh
-AVA_LIVE_PROVIDER_SMOKE=1 ctest --test-dir build -R provider_live_smoke --output-on-failure
+AVA_LIVE_PROVIDER_SMOKE=1 scripts/run-tests.sh -R provider_live_smoke
 AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-model-dogfood.sh
 AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-coding-dogfood.sh
 ```
@@ -195,9 +195,9 @@ Add regression tests for every safety-sensitive bug fix.
 For TUI-only changes, the focused suite is:
 
 ```sh
-cmake --build build --target ava_tests
+scripts/build.sh --target ava_tests
 ./build/ava_tests tui_composer
-ctest --test-dir build --output-on-failure -R "ava_tests.tui_composer"
+scripts/run-tests.sh -R "ava_tests.tui_composer"
 ```
 
 The suite includes the CI-safe ncurses baseline currently available in-tree: configured `ESCDELAY`, escape buffering/discard for CSI/OSC/DCS/bracketed-paste markers, mouse wheel/click mapping at the composer layer, resize stress renders, Unicode/CJK/combining/emoji width and cursor placement, `newterm` smokes for xterm/screen terminfo plus tmux/kitty/wezterm/ssh-like environment variables without a real TTY, and large/very-long transcript performance budgets.
@@ -205,9 +205,9 @@ The suite includes the CI-safe ncurses baseline currently available in-tree: con
 Real terminal coverage exists as prerequisite-gated CTest smokes:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 ctest --test-dir build -R ava_tui.tmux_smoke --output-on-failure
-AVA_TUI_KITTY_IMAGE_SMOKE=1 ctest --test-dir build -R ava_tui.kitty_image_smoke --output-on-failure
-AVA_TUI_OSC8_SMOKE=1 ctest --test-dir build -R ava_tui.osc8_smoke --output-on-failure
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh -R ava_tui.tmux_smoke
+AVA_TUI_KITTY_IMAGE_SMOKE=1 scripts/run-tests.sh -R ava_tui.kitty_image_smoke
+AVA_TUI_OSC8_SMOKE=1 scripts/run-tests.sh -R ava_tui.osc8_smoke
 ```
 
 The MVP strategy is renderer/editor reducers first, then PTY/tmux assertions for terminal protocols and cleanup. AVA intentionally does not require a separate virtual-terminal parser for MVP; add one only if focused renderer tests plus the existing PTY smokes stop providing stable evidence.
@@ -217,7 +217,7 @@ The MVP strategy is renderer/editor reducers first, then PTY/tmux assertions for
 Before treating a 0.90 release-candidate audit as complete, run and record:
 
 ```sh
-cmake --build build --target ava ava_tests
+scripts/build.sh --target ava ava_tests
 scripts/run-tests.sh
 scripts/run-tests.sh -R "ava_tests\.(session|agent_loop|agent_loop_resilience|app_print|app_runtime|app_command_classification|config_context_auth_oauth|provider_openai|provider_anthropic|provider_gemini|app_command_registry|app_compaction|core_json_permission|plugin|mcp)|ava_cli\.headless_rpc_"
 git --no-pager diff --check
@@ -226,7 +226,7 @@ git --no-pager diff --check
 When C++ or CTest behavior changed, also run a sanitizer build/test, using the preset when it works or the direct build directory fallback:
 
 ```sh
-cmake --build build-sanitize --target ava_tests
+scripts/build.sh --build-dir build-sanitize --jobs 2 --target ava_tests
 scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 

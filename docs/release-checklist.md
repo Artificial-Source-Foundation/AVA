@@ -70,22 +70,21 @@ Build-only dependencies are not packaged. Building from this checkout needs CMak
 
 ```sh
 cmake --preset dev
-cmake --build --preset dev
+scripts/build.sh
 scripts/run-tests.sh
 ```
 
 Focused release-closure coverage uses the registered CTest names. Python 3 and built `ava`, `ava_fake_provider_server`, and `ava_fake_mcp_server` executables are prerequisites for `ava_cli.acp_subprocess`.
 
 ```sh
-ctest --test-dir build \
-  -R '^(ava_tests\.(session|app_runtime|app_rpc|agent_loop|agent_loop_resilience|acp)|ava_cli\.acp_subprocess|ava_release\.package_linux)$' \
-  --output-on-failure
+scripts/run-tests.sh \
+  -R '^(ava_tests\.(session|app_runtime|app_rpc|agent_loop|agent_loop_resilience|acp)|ava_cli\.acp_subprocess|ava_release\.package_linux)$'
 ```
 
 The deterministic full-binary model/tool smoke is:
 
 ```sh
-ctest --test-dir build -R '^ava_cli\.headless_e2e_model_smoke$' --output-on-failure
+scripts/run-tests.sh -R '^ava_cli\.headless_e2e_model_smoke$'
 ```
 
 No command above opts into live-provider calls.
@@ -94,7 +93,7 @@ No command above opts into live-provider calls.
 
 ```sh
 cmake --preset sanitize
-cmake --build --preset sanitize
+scripts/build.sh --build-dir build-sanitize --jobs 2
 scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 
@@ -105,7 +104,7 @@ If the host cannot run ASan/UBSan, record the exact environment blocker rather t
 On a host with tmux and terminal support:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 ctest --test-dir build -R '^ava_tui\.tmux_smoke$' --output-on-failure
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh -R '^ava_tui\.tmux_smoke$'
 ```
 
 Other terminal and intentionally credential-gated live-provider checks remain classified in [`TESTING.md`](TESTING.md). They are not package-script steps.
@@ -136,7 +135,7 @@ All staging, allowlist/link checks, archive and checksum creation, checksum veri
 The deterministic package harness covers secure accepted-binary packaging, default private output, staged allowlist, checksum/extraction, insecure and in-repository output rejection, version mismatch, and symlink no-clobber behavior:
 
 ```sh
-ctest --test-dir build -R '^ava_release\.package_linux$' --output-on-failure
+scripts/run-tests.sh -R '^ava_release\.package_linux$'
 ```
 
 Build mode should also be run once for the release candidate because the CTest harness deliberately uses the already-built test binary.

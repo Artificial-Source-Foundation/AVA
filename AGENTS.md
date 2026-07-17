@@ -31,7 +31,7 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
-cmake --build build
+scripts/build.sh --build-dir build
 scripts/run-tests.sh --build-dir build
 ```
 
@@ -39,7 +39,7 @@ Preset equivalent:
 
 ```sh
 cmake --preset dev
-cmake --build --preset dev
+scripts/build.sh
 scripts/run-tests.sh
 ```
 
@@ -47,11 +47,11 @@ Sanitizers:
 
 ```sh
 cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
-cmake --build build-sanitize
-scripts/run-tests.sh --build-dir build-sanitize
+scripts/build.sh --build-dir build-sanitize --jobs 2
+scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 
-The test runner uses the available logical cores, rejects concurrent runs in the same build tree, and accepts `--jobs N` plus ordinary CTest filters such as `-R`.
+The build and test runners use the available logical cores, share a lock that rejects concurrent work in one build tree, and accept `--jobs N`; the test runner also forwards ordinary CTest filters such as `-R`. Sanitizer examples cap both phases at two jobs to limit memory pressure.
 
 Before handing work off, also run:
 

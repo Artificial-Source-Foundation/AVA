@@ -33,7 +33,7 @@ The optional Qt Quick desktop prototype additionally requires Qt 6.5+ with QML, 
 
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
-cmake --build build
+scripts/build.sh --build-dir build
 scripts/run-tests.sh --build-dir build
 ```
 
@@ -41,7 +41,7 @@ Equivalent CMake presets are available for local development:
 
 ```sh
 cmake --preset dev
-cmake --build --preset dev
+scripts/build.sh
 scripts/run-tests.sh
 ```
 
@@ -49,19 +49,19 @@ Sanitizer build:
 
 ```sh
 cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
-cmake --build build-sanitize
-scripts/run-tests.sh --build-dir build-sanitize
+scripts/build.sh --build-dir build-sanitize --jobs 2
+scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 
 Or with presets:
 
 ```sh
 cmake --preset sanitize
-cmake --build --preset sanitize
-scripts/run-tests.sh --build-dir build-sanitize
+scripts/build.sh --build-dir build-sanitize --jobs 2
+scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 
-`scripts/run-tests.sh` defaults to the `build` tree and all available logical cores. Pass `--jobs N` (or set `CTEST_PARALLEL_LEVEL`) to cap concurrency; CTest filters such as `-R` are forwarded. The runner locks its build tree so two full runs cannot overwrite each other's fixed test roots and CTest logs.
+`scripts/build.sh` and `scripts/run-tests.sh` default to the `build` tree and all available logical cores. Pass `--jobs N` (or set `CMAKE_BUILD_PARALLEL_LEVEL` / `CTEST_PARALLEL_LEVEL`) to cap concurrency; build options such as `--target` and CTest filters such as `-R` are forwarded. Both runners share a build-tree lock so builds and tests cannot modify one tree concurrently. Sanitizer examples use two jobs to limit memory pressure.
 
 GitHub Actions runs both the normal and sanitizer test jobs on pushes and pull requests targeting `develop`. Dependabot is enabled for GitHub Actions updates on `develop`.
 

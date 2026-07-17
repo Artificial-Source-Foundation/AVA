@@ -1,5 +1,7 @@
 ## Project Specific Programming Knowledge
 
+Every `.cpp` file beneath `src/ava/` must do `#include "sys.h"` as very first include.
+
 Only use `#include "debug.h"` when required for things that are typically
 declare by `cwds/debug.h`. e.g. `Dout`, `Debug`, `DoutEntering`, `ASSERT`.
 

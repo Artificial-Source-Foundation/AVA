@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace ava::provider {
@@ -29,6 +30,10 @@ class OpenAIStreamParser final : public StreamParser
   std::string active_reasoning_text_;
   std::vector<std::string> completed_reasoning_item_ids_;
   std::vector<std::string> completed_reasoning_texts_;
+  // Responses uses the output item ID to identify deltas but expects callers to
+  // dispatch and replay results with the distinct logical call_id.
+  std::unordered_map<std::string, std::string> function_call_ids_;
+  std::vector<std::string> completed_function_call_ids_;
   bool done_seen_ = false;
   bool error_seen_ = false;
 };

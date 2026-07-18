@@ -268,7 +268,9 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
   {
     if (ava::core::json::string_field(item, "type").value_or("") != "function_call")
       continue;
-    auto const id = first_string_field(item, {"id", "item_id", "call_id"}).value_or("");
+    // Responses output-item IDs (for example, fc_...) identify stream items;
+    // call_id is the logical identity required for dispatch and replay.
+    auto const id = first_string_field(item, {"call_id", "id", "item_id"}).value_or("");
     auto const name = ava::core::json::string_field(item, "name").value_or("");
     auto const arguments = ava::core::json::string_field(item, "arguments").value_or("");
     events.push_back(

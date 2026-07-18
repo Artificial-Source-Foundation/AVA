@@ -485,11 +485,13 @@ void test_agent_loop_tool_turn_and_continuation()
                                           .cache_read_per_million = std::nullopt,
                                           .cache_write_per_million = std::nullopt,
                                           .reasoning_per_million = std::nullopt};
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\","
+                                                    "\"call_id\":\"call_1\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
                                                     "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"delta\":\"{\\\"path\\\":"
                                                     "\\\"note.txt\\\"}\"}\n\n"
-                                                    "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_1\"}\n\n"
+                                                    "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\","
+                                                    "\"call_id\":\"call_1\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}}\n\n"
                                                     "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,"
                                                     "\"output_tokens\":2,\"total_tokens\":12}}}\n\n"),
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"read it\"}\n\n"
@@ -510,8 +512,12 @@ void test_agent_loop_tool_turn_and_continuation()
   expect(result && result->final_text == "read it" && result->tool_calls == 1 && result->provider_iterations == 2 && result->initial_context_messages == 1 &&
              result->tool_iterations == 1 && result->outcome == ava::core::RuntimeTerminalOutcome::Completed,
          "agent loop runs one sequential tool call then continues to final answer with status metadata");
-  expect(transport.requests().size() == 2 && transport.requests()[1].body.find("tool content") != std::string::npos,
-         "agent loop sends persisted tool result as continuation context");
+  expect(transport.requests().size() == 2 && transport.requests()[1].body.find("tool content") != std::string::npos &&
+             transport.requests()[1].body.find(R"({"type":"function_call","call_id":"call_1","name":"read_file",)") != std::string::npos &&
+             transport.requests()[1].body.find(R"({"type":"function_call_output","call_id":"call_1",)") != std::string::npos &&
+             transport.requests()[1].body.find("Tool call requested by assistant") == std::string::npos &&
+             transport.requests()[1].body.find("Tool result data only") == std::string::npos,
+         "agent loop continues OpenAI tool turns with canonical native function replay");
   expect(result && result->tool_timeline.size() == 1 && result->tool_timeline.front().status == ava::agent::ToolTimelineStatus::Success &&
              result->tool_timeline.front().name == "read_file" && result->tool_timeline.front().argument_summary.find("path=note.txt") != std::string::npos &&
              result->tool_timeline.front().argument_summary.find('{') == std::string::npos &&
@@ -2785,8 +2791,8 @@ void test_agent_loop_truncates_tool_context()
       .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("read large", store, provider, transport);
-  expect(result && transport.requests().size() == 2 && transport.requests()[1].body.find("tool result context truncated") != std::string::npos,
-         "agent loop truncates tool results before provider continuation context");
+  expect(result && transport.requests().size() == 2 && transport.requests()[1].body.find("tool result content truncated") != std::string::npos,
+         "agent loop truncates native tool results before OpenAI continuation");
 }
 
 }  // namespace

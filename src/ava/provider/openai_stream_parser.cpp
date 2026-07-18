@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -31,6 +32,46 @@ void remember_string(std::vector<std::string>& values, std::string value)
   if (value.empty() || contains_string(values, value))
     return;
   values.push_back(std::move(value));
+}
+
+std::string function_call_item_id_from_event(std::string_view data, std::optional<std::string_view> item = std::nullopt)
+{
+  if (auto id = detail::first_string_field(data, {"item_id", "output_item_id"}))
+    return *id;
+  if (item)
+  {
+    if (auto id = detail::first_string_field(*item, {"id", "item_id"}))
+      return *id;
+  }
+  return {};
+}
+
+std::string logical_function_call_id_from_event(std::string_view data, std::unordered_map<std::string, std::string>& function_call_ids,
+                                                std::optional<std::string_view> item = std::nullopt)
+{
+  auto const item_id = function_call_item_id_from_event(data, item);
+  auto call_id = detail::first_string_field(data, {"call_id"});
+  if (!call_id && item)
+    call_id = detail::first_string_field(*item, {"call_id"});
+  if (call_id)
+  {
+    if (!item_id.empty())
+      function_call_ids.insert_or_assign(item_id, *call_id);
+    return *call_id;
+  }
+  if (auto const mapped = function_call_ids.find(item_id); mapped != function_call_ids.end())
+    return mapped->second;
+  // Compatibility for legacy Responses event shapes that supplied only item_id.
+  return item_id;
+}
+
+void append_function_call_end(std::vector<StreamEvent>& events, std::vector<std::string>& completed_function_call_ids, std::string call_id)
+{
+  if (!call_id.empty() && contains_string(completed_function_call_ids, call_id))
+    return;
+  remember_string(completed_function_call_ids, call_id);
+  events.push_back(StreamEvent{
+      .type = StreamEventType::ToolCallEnd, .text = "", .tool_call_id = std::move(call_id), .tool_name = "", .error_message = "", .usage = std::nullopt});
 }
 
 std::string reasoning_item_id_from_event(std::string_view data, std::optional<std::string_view> item = std::nullopt)
@@ -106,7 +147,8 @@ void append_finish_reasoning_if_open(std::vector<StreamEvent>& events, bool& rea
 
 void append_event_for_data(std::vector<StreamEvent>& events, std::string_view data, bool& saw_content, bool& reasoning_open, bool& reasoning_text_seen,
                            std::string& active_reasoning_item_id, std::string& active_reasoning_text, std::vector<std::string>& completed_reasoning_item_ids,
-                           std::vector<std::string>& completed_reasoning_texts, bool& done_seen, bool& error_seen)
+                           std::vector<std::string>& completed_reasoning_texts, bool& done_seen, bool& error_seen,
+                           std::unordered_map<std::string, std::string>& function_call_ids, std::vector<std::string>& completed_function_call_ids)
 {
   if (data == "[DONE]")
   {
@@ -155,9 +197,7 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
       events.push_back(StreamEvent{
           .type = StreamEventType::ToolCallStart,
           .text = "",
-          .tool_call_id = detail::first_string_field(*item, {"id", "item_id", "call_id"})
-                              .or_else([&data]() { return detail::first_string_field(data, {"item_id", "call_id"}); })
-                              .value_or(""),
+          .tool_call_id = logical_function_call_id_from_event(data, function_call_ids, *item),
           .tool_name = ava::core::json::string_field(*item, "name").or_else([&data]() { return ava::core::json::string_field(data, "name"); }).value_or(""),
           .error_message = "",
           .usage = std::nullopt});
@@ -183,6 +223,13 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
       }
       append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text,
                                       completed_reasoning_item_ids, completed_reasoning_texts);
+    }
+    else if (item && ava::core::json::string_field(*item, "type").value_or("") == "function_call")
+    {
+      saw_content = true;
+      append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text,
+                                      completed_reasoning_item_ids, completed_reasoning_texts);
+      append_function_call_end(events, completed_function_call_ids, logical_function_call_id_from_event(data, function_call_ids, *item));
     }
     return;
   }
@@ -225,6 +272,13 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
                                     completed_reasoning_texts);
     return;
   }
+  if (type == "response.function_call_arguments.done")
+  {
+    // This lifecycle marker may carry both IDs. Retain the association for a
+    // following output_item.done event without publishing a duplicate end.
+    static_cast<void>(logical_function_call_id_from_event(data, function_call_ids));
+    return;
+  }
   if (is_ignored_lifecycle_event(type))
     return;
   if (type == "response.output_text.delta" || type == "response.text.delta")
@@ -246,14 +300,12 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     saw_content = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,
                                     completed_reasoning_texts);
-    events.push_back(StreamEvent{
-        .type = StreamEventType::ToolCallDelta,
-        .text = ava::core::json::string_field(data, "delta").value_or(""),
-        .tool_call_id =
-            ava::core::json::string_field(data, "item_id").or_else([&data]() { return ava::core::json::string_field(data, "call_id"); }).value_or(""),
-        .tool_name = "",
-        .error_message = "",
-        .usage = std::nullopt});
+    events.push_back(StreamEvent{.type = StreamEventType::ToolCallDelta,
+                                 .text = ava::core::json::string_field(data, "delta").value_or(""),
+                                 .tool_call_id = logical_function_call_id_from_event(data, function_call_ids),
+                                 .tool_name = "",
+                                 .error_message = "",
+                                 .usage = std::nullopt});
     return;
   }
   if (type == "response.function_call.added")
@@ -261,14 +313,12 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     saw_content = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,
                                     completed_reasoning_texts);
-    events.push_back(StreamEvent{
-        .type = StreamEventType::ToolCallStart,
-        .text = "",
-        .tool_call_id =
-            ava::core::json::string_field(data, "item_id").or_else([&data]() { return ava::core::json::string_field(data, "call_id"); }).value_or(""),
-        .tool_name = ava::core::json::string_field(data, "name").value_or(""),
-        .error_message = "",
-        .usage = std::nullopt});
+    events.push_back(StreamEvent{.type = StreamEventType::ToolCallStart,
+                                 .text = "",
+                                 .tool_call_id = logical_function_call_id_from_event(data, function_call_ids),
+                                 .tool_name = ava::core::json::string_field(data, "name").value_or(""),
+                                 .error_message = "",
+                                 .usage = std::nullopt});
     return;
   }
   if (type == "response.function_call.done" || type == "response.function_call.completed")
@@ -276,14 +326,7 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     saw_content = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,
                                     completed_reasoning_texts);
-    events.push_back(StreamEvent{
-        .type = StreamEventType::ToolCallEnd,
-        .text = "",
-        .tool_call_id =
-            ava::core::json::string_field(data, "item_id").or_else([&data]() { return ava::core::json::string_field(data, "call_id"); }).value_or(""),
-        .tool_name = "",
-        .error_message = "",
-        .usage = std::nullopt});
+    append_function_call_end(events, completed_function_call_ids, logical_function_call_id_from_event(data, function_call_ids));
     return;
   }
   if (type == "response.completed" || type == "response.incomplete")
@@ -323,7 +366,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
 void append_events_for_sse_line(std::vector<StreamEvent>& events, std::string& data, bool& saw_content, bool& reasoning_open, bool& reasoning_text_seen,
                                 std::string& active_reasoning_item_id, std::string& active_reasoning_text,
                                 std::vector<std::string>& completed_reasoning_item_ids, std::vector<std::string>& completed_reasoning_texts, bool& done_seen,
-                                bool& error_seen, std::string line)
+                                bool& error_seen, std::unordered_map<std::string, std::string>& function_call_ids,
+                                std::vector<std::string>& completed_function_call_ids, std::string line)
 {
   if (!line.empty() && line.back() == '\r')
     line.pop_back();
@@ -332,7 +376,7 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events, std::string& d
     if (!data.empty())
     {
       append_event_for_data(events, data, saw_content, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text,
-                            completed_reasoning_item_ids, completed_reasoning_texts, done_seen, error_seen);
+                            completed_reasoning_item_ids, completed_reasoning_texts, done_seen, error_seen, function_call_ids, completed_function_call_ids);
       data.clear();
     }
     return;
@@ -362,8 +406,8 @@ ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::append(std::stri
     if (newline == std::string::npos)
       break;
     append_events_for_sse_line(events, data_, saw_content_, reasoning_open_, reasoning_text_seen_, active_reasoning_item_id_, active_reasoning_text_,
-                               completed_reasoning_item_ids_, completed_reasoning_texts_, done_seen_, error_seen_,
-                               pending_line_.substr(line_start, newline - line_start));
+                               completed_reasoning_item_ids_, completed_reasoning_texts_, done_seen_, error_seen_, function_call_ids_,
+                               completed_function_call_ids_, pending_line_.substr(line_start, newline - line_start));
     line_start = newline + 1;
     search_from = line_start;
   }
@@ -379,14 +423,15 @@ ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::finish()
   if (!pending_line_.empty())
   {
     append_events_for_sse_line(events, data_, saw_content_, reasoning_open_, reasoning_text_seen_, active_reasoning_item_id_, active_reasoning_text_,
-                               completed_reasoning_item_ids_, completed_reasoning_texts_, done_seen_, error_seen_, std::move(pending_line_));
+                               completed_reasoning_item_ids_, completed_reasoning_texts_, done_seen_, error_seen_, function_call_ids_,
+                               completed_function_call_ids_, std::move(pending_line_));
     pending_line_.clear();
   }
   scan_offset_ = 0;
   if (!data_.empty())
   {
     append_event_for_data(events, data_, saw_content_, reasoning_open_, reasoning_text_seen_, active_reasoning_item_id_, active_reasoning_text_,
-                          completed_reasoning_item_ids_, completed_reasoning_texts_, done_seen_, error_seen_);
+                          completed_reasoning_item_ids_, completed_reasoning_texts_, done_seen_, error_seen_, function_call_ids_, completed_function_call_ids_);
     data_.clear();
   }
   append_finish_reasoning_if_open(events, reasoning_open_, reasoning_text_seen_, active_reasoning_item_id_, active_reasoning_text_,
@@ -407,6 +452,8 @@ ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::finish()
   active_reasoning_text_.clear();
   completed_reasoning_item_ids_.clear();
   completed_reasoning_texts_.clear();
+  function_call_ids_.clear();
+  completed_function_call_ids_.clear();
   done_seen_ = false;
   error_seen_ = false;
   return events;

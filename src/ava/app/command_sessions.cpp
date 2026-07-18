@@ -195,28 +195,19 @@ JsonlAttachmentSummary summarize_non_redacted_jsonl_attachments(std::vector<ava:
   return summary;
 }
 
-std::string raw_jsonl_attachment_note(JsonlAttachmentSummary const& summary)
-{
-  if (summary.count == 0)
-    return {};
-  return "portable JSONL exports include " + std::to_string(summary.count) +
-         " image attachment metadata record(s), but not the attachment files; JSONL /import rejects non-redacted attachments until an attachment-aware "
-         "archive format exists";
-}
-
-ava::core::VoidResult validate_raw_jsonl_import_attachments(std::vector<ava::session::SessionEntry> const& entries, std::filesystem::path const& path)
+ava::core::VoidResult validate_jsonl_import_attachments(std::vector<ava::session::SessionEntry> const& entries, std::filesystem::path const& path)
 {
   auto const summary = summarize_non_redacted_jsonl_attachments(entries);
   if (summary.count == 0)
     return {};
 
   auto error =
-      ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session import has image attachments but raw JSONL does not include attachment files");
+      ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session import has non-redacted image attachment metadata without attachment bytes");
   error.with_context("path", path.string());
   error.with_context("attachments", std::to_string(summary.count));
   error.with_context("first_entry_id", summary.first_entry_id);
   error.with_context("first_storage_path", summary.first_storage_path);
-  error.with_context("remediation", "remove or redact attachment metadata, or use a future attachment-aware archive format");
+  error.with_context("remediation", "import a portable redacted JSONL export or provide an attachment-aware archive");
   return std::unexpected(std::move(error));
 }
 
@@ -1512,7 +1503,7 @@ ava::core::Result<std::vector<ava::session::SessionEntry>> load_import_session_e
       error.with_context("first_issue", validation.issues.front().message);
     return std::unexpected(std::move(error));
   }
-  if (auto attachments = validate_raw_jsonl_import_attachments(entries, path); !attachments)
+  if (auto attachments = validate_jsonl_import_attachments(entries, path); !attachments)
     return std::unexpected(std::move(attachments.error()));
   return entries;
 }
@@ -1647,8 +1638,6 @@ ava::core::Result<CommandResult> run_export_command(runtime::Session& session, C
   }
 
   auto const format = parsed->format;
-  auto const jsonl_attachment_summary = format == ExportFormat::Jsonl ? summarize_non_redacted_jsonl_attachments(*entries) : JsonlAttachmentSummary{};
-  auto const jsonl_attachment_note = raw_jsonl_attachment_note(jsonl_attachment_summary);
   std::string content;
   if (format == ExportFormat::Html)
   {
@@ -1700,10 +1689,6 @@ ava::core::Result<CommandResult> run_export_command(runtime::Session& session, C
 
   auto result_json = std::string("{\"tool\":\"export\",\"ok\":true,\"format\":\"") + export_format_text(format) + "\",\"path\":\"" +
                      ava::core::json::escape(target_path.string()) + "\",\"bytes_written\":" + std::to_string(written->bytes_written);
-  if (format == ExportFormat::Jsonl)
-  {
-    result_json += ",\"attachment_files_included\":false,\"non_redacted_image_attachment_metadata_count\":" + std::to_string(jsonl_attachment_summary.count);
-  }
   result_json += "}";
   if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "export", ava::agent::ToolTimelineStatus::Success,
                                          "wrote " + std::to_string(written->bytes_written) + " bytes", result_json, linked_permission_ids());
@@ -1711,8 +1696,6 @@ ava::core::Result<CommandResult> run_export_command(runtime::Session& session, C
     return std::unexpected(std::move(recorded.error()));
   auto output = "exported session:\n  format: " + export_format_text(format) + "\n  path: " + target_path.string() +
                 "\n  bytes: " + std::to_string(written->bytes_written);
-  if (!jsonl_attachment_note.empty())
-    output += "\n  note: " + jsonl_attachment_note;
   add_output(result, std::move(output));
   return result;
 }

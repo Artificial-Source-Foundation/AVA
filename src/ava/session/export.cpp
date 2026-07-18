@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <optional>
 #include <string_view>
+#include <utility>
 
 namespace ava::session {
 namespace {
@@ -331,30 +332,83 @@ void append_cancel(std::string& out, SessionEntry const& entry, ExportOptions co
   append_fenced_block(out, "Data", entry.data_json, "json");
 }
 
+SessionEntry sanitize_user_message_attachments_for_portable_jsonl_export(SessionEntry entry)
+{
+  if (!ava::core::json::field_value_start(entry.data_json, "attachments"))
+    return entry;
+
+  // Rebuild attachment-bearing user data from the validated message allowlist.
+  // Portable exports never reference the source session's attachment tree.
+  auto const sanitized = sanitized_message_data_json(entry.data_json);
+  auto const attachments = ava::core::json::objects_in_array_field(sanitized, "attachments");
+  if (attachments.empty())
+  {
+    entry.data_json = sanitized;
+    return entry;
+  }
+
+  std::string data = "{";
+  bool first = true;
+  auto append_key = [&](std::string_view key) {
+    if (!first)
+      data += ',';
+    first = false;
+    data += json_string(key);
+    data += ':';
+  };
+  if (auto const text = ava::core::json::string_field(sanitized, "text"))
+  {
+    append_key("text");
+    data += json_string(*text);
+  }
+
+  append_key("attachments");
+  data += '[';
+  bool first_attachment = true;
+  for (auto const& attachment : attachments)
+  {
+    auto const id = ava::core::json::string_field(attachment, "id");
+    auto const mime_type = ava::core::json::string_field(attachment, "mime_type");
+    auto const byte_size = ava::core::json::integer_field(attachment, "byte_size");
+    auto const sha256 = ava::core::json::string_field(attachment, "sha256");
+    if (!id || !mime_type || !byte_size || !sha256)
+      continue;
+    if (!first_attachment)
+      data += ',';
+    first_attachment = false;
+    data += "{\"id\":" + json_string(*id) + ",\"type\":\"image\",\"mime_type\":" + json_string(*mime_type) +
+            ",\"byte_size\":" + std::to_string(*byte_size) + ",\"sha256\":" + json_string(*sha256) +
+            ",\"storage_path\":\"attachments/portable-redacted\",\"redacted\":true}";
+  }
+  data += "]}";
+  entry.data_json = std::move(data);
+  return entry;
+}
+
 }  // namespace
 
 SessionEntry sanitize_session_entry_for_portable_jsonl_export(SessionEntry entry)
 {
+  if (entry.type == EntryType::UserMessage)
+    entry = sanitize_user_message_attachments_for_portable_jsonl_export(std::move(entry));
   if (entry.type != EntryType::ReasoningBlock)
     return entry;
 
   bool const has_native_item = ava::core::json::field_value_start(entry.data_json, "native_item_json").has_value();
   bool const has_signature = ava::core::json::field_value_start(entry.data_json, "signature").has_value();
   bool const has_redacted_data = ava::core::json::field_value_start(entry.data_json, "redacted_data").has_value();
-  if (!has_native_item && !has_signature && !has_redacted_data)
-    return entry;
-
+  bool const redacted = bool_field_is_true(entry, "redacted");
   auto const provider = ava::core::json::string_field(entry.data_json, "provider").value_or("");
   auto const model = ava::core::json::string_field(entry.data_json, "model").value_or("");
   auto const format = ava::core::json::string_field(entry.data_json, "format").value_or("");
   auto text = ava::core::json::string_field(entry.data_json, "text").value_or("");
-  if (text.empty())
+  if (redacted || text.empty())
     text = "[Provider-private reasoning metadata omitted from portable export.]";
 
-  // Build a minimal portable record rather than copying unknown private native
-  // fields. This export is intentionally importable but not lossless.
+  // Always build an explicit allowlist: unknown or additive provider fields
+  // must not turn a portable export into an opaque provider-data transport.
   entry.data_json = "{\"provider\":" + json_string(provider) + ",\"model\":" + json_string(model) + ",\"format\":" + json_string(format) +
-                    ",\"text\":" + json_string(text) + ",\"redacted\":" + (bool_field_is_true(entry, "redacted") ? "true" : "false") +
+                    ",\"text\":" + json_string(text) + ",\"redacted\":" + (redacted ? "true" : "false") +
                     ",\"private_replay_metadata_omitted\":{\"native_item_json\":" + (has_native_item ? "true" : "false") +
                     ",\"signature\":" + (has_signature ? "true" : "false") + ",\"redacted_data\":" + (has_redacted_data ? "true" : "false") + "}}";
   return entry;

@@ -92,6 +92,15 @@ class JsonValidator
     return offset_ == value_.size();
   }
 
+  [[nodiscard]] bool valid_array()
+  {
+    skip_ws();
+    if (!parse_array())
+      return false;
+    skip_ws();
+    return offset_ == value_.size();
+  }
+
  private:
   void skip_ws()
   {
@@ -690,6 +699,42 @@ std::vector<std::string> objects_in_array_field(std::string_view object, std::st
     }
   }
   return result;
+}
+
+std::optional<std::vector<std::string>> strict_objects_in_array_field(std::string_view object, std::string_view key)
+{
+  auto const start = field_value_start(object, key);
+  if (!start || *start >= object.size() || object[*start] != '[')
+    return std::nullopt;
+  auto const array = parse_balanced(object, *start, '[', ']');
+  if (!array || !JsonValidator(*array).valid_array())
+    return std::nullopt;
+
+  std::vector<std::string> result;
+  std::size_t index = 1;
+  while (true)
+  {
+    while (index < array->size() && std::isspace(static_cast<unsigned char>((*array)[index])) != 0) ++index;
+    if (index >= array->size())
+      return std::nullopt;
+    if ((*array)[index] == ']')
+      return result;
+    if ((*array)[index] != '{')
+      return std::nullopt;
+    auto const item = parse_balanced(*array, index, '{', '}');
+    if (!item || !JsonValidator(*item).valid_object())
+      return std::nullopt;
+    result.push_back(*item);
+    index += item->size();
+    while (index < array->size() && std::isspace(static_cast<unsigned char>((*array)[index])) != 0) ++index;
+    if (index >= array->size())
+      return std::nullopt;
+    if ((*array)[index] == ']')
+      return result;
+    if ((*array)[index] != ',')
+      return std::nullopt;
+    ++index;
+  }
 }
 
 std::vector<std::string> strings_in_array_field(std::string_view object, std::string_view key)

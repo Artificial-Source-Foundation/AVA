@@ -90,7 +90,7 @@ std::vector<CommandCatalogEntry> const& command_catalog()
       CommandCatalogEntry{.command = "/status", .description = "Alias for /stats session status", .category = "Sessions"},
       CommandCatalogEntry{.command = "/compact", .description = "Generate and record a provider summary", .hint = "[instructions]", .category = "Sessions"},
       CommandCatalogEntry{.command = "/export",
-                          .description = "Export this session as Markdown, HTML, or raw JSONL",
+                          .description = "Export this session as Markdown, HTML, or sanitized portable JSONL",
                           .hint = "[markdown|html|jsonl] [path]",
                           .category = "Sessions"},
       CommandCatalogEntry{.command = "/permissions",

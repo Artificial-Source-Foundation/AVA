@@ -1665,6 +1665,25 @@ void test_session_replay_validation()
       !missing_native_reasoning_summary.ok() && has_replay_issue(missing_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
       "current-version sessions reject native reasoning metadata without a summary array");
 
+  auto scalar_native_reasoning_summary_entries = valid_native_reasoning_item_entries;
+  scalar_native_reasoning_summary_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"id\\\":\\\"rs_scalar_summary\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[\\\"not-an-object\\\"]}\"}";
+  auto const scalar_native_reasoning_summary = ava::session::validate_session_replay(scalar_native_reasoning_summary_entries);
+  expect(
+      !scalar_native_reasoning_summary.ok() && has_replay_issue(scalar_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+      "current-version sessions reject native reasoning summary arrays with scalar items");
+
+  auto malformed_native_reasoning_summary_entries = valid_native_reasoning_item_entries;
+  malformed_native_reasoning_summary_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"id\\\":\\\"rs_malformed_summary\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[{\\\"type\\\":\\\"summary_text\\\"}]}"
+      "\"}";
+  auto const malformed_native_reasoning_summary = ava::session::validate_session_replay(malformed_native_reasoning_summary_entries);
+  expect(!malformed_native_reasoning_summary.ok() &&
+             has_replay_issue(malformed_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+         "current-version sessions reject native reasoning summary items without summary_text text");
+
   auto oversized_native_reasoning_item_entries = valid_native_reasoning_item_entries;
   auto const oversized_native_item =
       std::string("{\"id\":\"rs_oversized\",\"type\":\"reasoning\",\"summary\":[],\"opaque\":\"") + std::string(64U * 1024U, 'x') + "\"}";
@@ -2616,13 +2635,12 @@ void test_session_markdown_export()
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ReasoningBlock,
                                  .timestamp = "2026-04-29T00:00:02Z",
-                                 .data_json =
-                                     "{\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-5\","
-                                     "\"format\":\"anthropic_thinking\","
-                                     "\"text\":\"visible reasoning summary\","
-                                     "\"signature\":\"super-secret-signature\","
-                                     "\"native_item_json\":\"{\\\"id\\\":\\\"rs_export\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[],"
-                                     "\\\"encrypted_content\\\":\\\"export-private-cipher\\\"}\"}"},
+                                 .data_json = "{\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-5\","
+                                              "\"format\":\"anthropic_thinking\","
+                                              "\"text\":\"visible reasoning summary\","
+                                              "\"signature\":\"super-secret-signature\","
+                                              "\"native_item_json\":\"{\\\"id\\\":\\\"rs_export\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[],"
+                                              "\\\"encrypted_content\\\":\\\"export-private-cipher\\\"}\"}"},
       ava::session::SessionEntry{.id = "reasoning_change_1",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ReasoningChange,
@@ -2721,6 +2739,56 @@ void test_session_markdown_export()
          "html export wraps the session markdown in a self-contained document");
   expect(html.find("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt; &amp; raw") != std::string::npos && html.find("<script>alert") == std::string::npos,
          "html export escapes user and model text instead of emitting executable markup");
+}
+
+void test_session_portable_jsonl_sanitizer()
+{
+  auto const redacted_with_private = ava::session::sanitize_session_entry_for_portable_jsonl_export(
+      ava::session::SessionEntry{.id = "portable_redacted_private",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ReasoningBlock,
+                                 .timestamp = "2026-05-11T00:00:00Z",
+                                 .data_json = "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\","
+                                              "\"text\":\"redacted secret text\",\"redacted\":true,\"signature\":\"secret-signature\","
+                                              "\"native_item_json\":\"{\\\"id\\\":\\\"rs_portable\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[]}\","
+                                              "\"redacted_data\":\"secret-redacted-data\",\"unknown_provider_canary\":\"must-not-export\"}"});
+  expect(redacted_with_private.data_json.find("redacted secret text") == std::string::npos &&
+             redacted_with_private.data_json.find("secret-signature") == std::string::npos &&
+             redacted_with_private.data_json.find("secret-redacted-data") == std::string::npos &&
+             redacted_with_private.data_json.find("must-not-export") == std::string::npos &&
+             redacted_with_private.data_json.find("[Provider-private reasoning metadata omitted from portable export.]") != std::string::npos &&
+             redacted_with_private.data_json.find("\"redacted\":true") != std::string::npos &&
+             redacted_with_private.data_json.find("\"native_item_json\":true") != std::string::npos &&
+             redacted_with_private.data_json.find("\"signature\":true") != std::string::npos &&
+             redacted_with_private.data_json.find("\"redacted_data\":true") != std::string::npos,
+         "portable JSONL rebuilds redacted reasoning with a neutral placeholder and private-field presence metadata");
+
+  auto const redacted_without_private = ava::session::sanitize_session_entry_for_portable_jsonl_export(
+      ava::session::SessionEntry{.id = "portable_redacted_plain",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ReasoningBlock,
+                                 .timestamp = "2026-05-11T00:00:01Z",
+                                 .data_json = "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\","
+                                              "\"text\":\"redacted text without known private fields\",\"redacted\":true,"
+                                              "\"unknown_provider_canary\":\"must-not-export\"}"});
+  expect(redacted_without_private.data_json.find("redacted text without known private fields") == std::string::npos &&
+             redacted_without_private.data_json.find("must-not-export") == std::string::npos &&
+             redacted_without_private.data_json.find("[Provider-private reasoning metadata omitted from portable export.]") != std::string::npos &&
+             redacted_without_private.data_json.find("\"native_item_json\":false") != std::string::npos &&
+             redacted_without_private.data_json.find("\"signature\":false") != std::string::npos &&
+             redacted_without_private.data_json.find("\"redacted_data\":false") != std::string::npos,
+         "portable JSONL redacts reasoning text and additive canaries even without known private fields");
+
+  auto const visible_without_private = ava::session::sanitize_session_entry_for_portable_jsonl_export(
+      ava::session::SessionEntry{.id = "portable_visible_plain",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ReasoningBlock,
+                                 .timestamp = "2026-05-11T00:00:02Z",
+                                 .data_json = "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\","
+                                              "\"text\":\"visible safe summary\",\"redacted\":false,\"unknown_provider_canary\":\"must-not-export\"}"});
+  expect(visible_without_private.data_json.find("visible safe summary") != std::string::npos &&
+             visible_without_private.data_json.find("must-not-export") == std::string::npos,
+         "portable JSONL retains only visible non-redacted reasoning text from its explicit allowlist");
 }
 
 void test_compaction_config_and_thresholds()
@@ -4176,6 +4244,7 @@ void run_session_tests()
   test_session_resume_and_listing();
   test_session_compaction_entry_round_trip();
   test_session_markdown_export();
+  test_session_portable_jsonl_sanitizer();
   test_compaction_config_and_thresholds();
   test_compaction_context_reconstruction();
   test_tool_content_parts_reconstruction();

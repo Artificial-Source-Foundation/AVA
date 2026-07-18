@@ -16,6 +16,10 @@ namespace ava::core::json {
 [[nodiscard]] std::optional<long long> integer_field(std::string_view object, std::string_view key);
 [[nodiscard]] std::optional<std::string> object_field(std::string_view object, std::string_view key);
 [[nodiscard]] std::vector<std::string> objects_in_array_field(std::string_view object, std::string_view key);
+// Returns nullopt unless the named value is a syntactically valid array whose
+// every element is a JSON object. Unlike objects_in_array_field(), this never
+// skips scalar or malformed elements.
+[[nodiscard]] std::optional<std::vector<std::string>> strict_objects_in_array_field(std::string_view object, std::string_view key);
 [[nodiscard]] std::vector<std::string> strings_in_array_field(std::string_view object, std::string_view key);
 [[nodiscard]] bool is_valid_object(std::string_view value);
 

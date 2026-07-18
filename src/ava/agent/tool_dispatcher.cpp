@@ -215,7 +215,7 @@ ava::core::Result<std::optional<std::string>> optional_task_string_arg(std::stri
                                                                        std::string_view tool_name)
 {
   auto value = ava::core::json::string_field(arguments, field);
-  if (!value)
+  if (!value || value->empty())
     return std::optional<std::string>{};
   if (auto safe = reject_control_arg(*value, field, tool_name); !safe)
     return std::unexpected(std::move(safe.error()));

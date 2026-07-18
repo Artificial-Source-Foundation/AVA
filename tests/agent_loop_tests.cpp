@@ -564,7 +564,8 @@ void test_agent_loop_task_subagent_runs_child_session()
                                                     "data: "
                                                     "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_task\",\"delta\":\"{"
                                                     "\\\"description\\\":\\\"Check docs\\\",\\\"prompt\\\":\\\"Return child result only.\\\","
-                                                    "\\\"subagent_type\\\":\\\"general\\\"}\"}\n\n"
+                                                    "\\\"subagent_type\\\":\\\"general\\\",\\\"task_id\\\":\\\"\\\",\\\"command\\\":\\\"\\\","
+                                                    "\\\"background\\\":false}\"}\n\n"
                                                     "data: [DONE]\n\n"),
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child result\"}\n\n"
                                                     "data: [DONE]\n\n"),
@@ -624,6 +625,8 @@ void test_agent_loop_task_subagent_runs_child_session()
     }
   }
   expect(saw_task_call && saw_task_result && saw_task_permission, "task parent session persists task call, result, and permission decision");
+  auto const parent_validation = entries ? ava::session::validate_session_replay(*entries) : ava::session::SessionReplayValidation{};
+  expect(entries && parent_validation.ok(), "task parent session passes strict replay validation");
 
   auto summaries = ava::session::SessionStore::list_sessions(workspace, session_root);
   expect(summaries && summaries->size() == 2, "task subagent creates a persisted child session beside the parent");

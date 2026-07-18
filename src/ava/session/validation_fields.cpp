@@ -52,7 +52,7 @@ bool valid_status(std::string_view status)
 bool valid_operation(std::string_view operation)
 {
   return operation == "read" || operation == "search" || operation == "edit" || operation == "bash" || operation == "network.fetch" ||
-         operation == "network.search" || operation == "lsp.server.launch" || operation == "lsp.query" || operation == "skill" ||
+         operation == "network.search" || operation == "lsp.server.launch" || operation == "lsp.query" || operation == "skill" || operation == "task" ||
          operation == "plugin.execute" || operation == "plugin.tool.call" || operation == "plugin.command.run" || operation == "plugin.event.observe" ||
          operation == "mcp.server.launch" || operation == "mcp.server.connect" || operation == "mcp.tool.call" || operation == "mcp.resource.read";
 }

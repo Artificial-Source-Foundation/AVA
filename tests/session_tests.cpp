@@ -1624,6 +1624,21 @@ void test_session_replay_validation()
   auto const valid_model_reasoning = ava::session::validate_session_replay(valid_model_reasoning_entries);
   expect(valid_model_reasoning.ok() && valid_model_reasoning.issues.empty(), "session replay validator accepts durable model and reasoning metadata");
 
+  auto valid_native_reasoning_item_entries = valid_model_reasoning_entries;
+  valid_native_reasoning_item_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"id\\\":\\\"rs_session\\\",\\\"type\\\":\\\"reasoning\\\",\\\"encrypted_content\\\":\\\"cipher-session\\\"}\"}";
+  auto const valid_native_reasoning_item = ava::session::validate_session_replay(valid_native_reasoning_item_entries);
+  expect(valid_native_reasoning_item.ok(), "session replay validator accepts optional private native reasoning item objects");
+
+  auto invalid_native_reasoning_item_entries = valid_native_reasoning_item_entries;
+  invalid_native_reasoning_item_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"type\\\":\\\"message\\\"}\"}";
+  auto const invalid_native_reasoning_item = ava::session::validate_session_replay(invalid_native_reasoning_item_entries);
+  expect(!invalid_native_reasoning_item.ok() && has_replay_issue(invalid_native_reasoning_item, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+         "session replay validator rejects private native items that are not reasoning objects");
+
   std::vector<ava::session::SessionEntry> const invalid_model_start_entries = {
       ava::session::SessionEntry{.id = "bad_start",
                                  .parent_id = "",
@@ -2557,10 +2572,12 @@ void test_session_markdown_export()
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ReasoningBlock,
                                  .timestamp = "2026-04-29T00:00:02Z",
-                                 .data_json = "{\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-5\","
-                                              "\"format\":\"anthropic_thinking\","
-                                              "\"text\":\"visible reasoning summary\","
-                                              "\"signature\":\"super-secret-signature\"}"},
+                                 .data_json =
+                                     "{\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-5\","
+                                     "\"format\":\"anthropic_thinking\","
+                                     "\"text\":\"visible reasoning summary\","
+                                     "\"signature\":\"super-secret-signature\","
+                                     "\"native_item_json\":\"{\\\"type\\\":\\\"reasoning\\\",\\\"encrypted_content\\\":\\\"export-private-cipher\\\"}\"}"},
       ava::session::SessionEntry{.id = "reasoning_change_1",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ReasoningChange,
@@ -2618,8 +2635,9 @@ void test_session_markdown_export()
          "markdown export hides internal replay user messages");
   expect(basic.find("## Assistant") != std::string::npos && basic.find("Hello human") != std::string::npos, "markdown export renders assistant messages");
   expect(basic.find("## Reasoning") != std::string::npos && basic.find("visible reasoning summary") != std::string::npos &&
-             basic.find("Signature present") != std::string::npos && basic.find("super-secret-signature") == std::string::npos,
-         "markdown export renders reasoning blocks without leaking provider-private signatures");
+             basic.find("Signature present") != std::string::npos && basic.find("super-secret-signature") == std::string::npos &&
+             basic.find("export-private-cipher") == std::string::npos,
+         "markdown export renders reasoning blocks without leaking provider-private replay metadata");
   expect(basic.find("## Reasoning Change") != std::string::npos && basic.find("Budget tokens") != std::string::npos && basic.find("4096") != std::string::npos,
          "markdown export renders reasoning-change budget tokens when present");
   expect(basic.find("Usage:") != std::string::npos && basic.find("input_tokens") != std::string::npos, "markdown export renders assistant usage when present");

@@ -47,6 +47,10 @@ std::string reasoning_block_data_json(ParsedReasoningBlock const& block, std::st
   {
     json += ",\"redacted_data\":\"" + ava::core::json::escape(block.redacted_data) + "\"";
   }
+  if (!block.native_item_json.empty())
+  {
+    json += ",\"native_item_json\":\"" + ava::core::json::escape(block.native_item_json) + "\"";
+  }
   json += ",\"redacted\":";
   json += block.redacted ? "true" : "false";
   json += '}';
@@ -121,7 +125,7 @@ ava::core::VoidResult append_assistant_message(ava::session::SessionStore& store
 ava::core::VoidResult append_reasoning_block(ava::session::SessionStore& store, ParsedReasoningBlock const& block, std::string_view provider_id,
                                              std::string_view model_id)
 {
-  if (block.text.empty() && block.signature.empty() && block.redacted_data.empty())
+  if (block.text.empty() && block.signature.empty() && block.redacted_data.empty() && block.native_item_json.empty())
     return {};
   return append_entry(store, ava::session::EntryType::ReasoningBlock, reasoning_block_data_json(block, provider_id, model_id));
 }
@@ -191,7 +195,7 @@ ava::core::VoidResult append_assistant_message(SessionAppendSink const& sink, st
 ava::core::VoidResult append_reasoning_block(SessionAppendSink const& sink, ParsedReasoningBlock const& block, std::string_view provider_id,
                                              std::string_view model_id)
 {
-  if (block.text.empty() && block.signature.empty() && block.redacted_data.empty())
+  if (block.text.empty() && block.signature.empty() && block.redacted_data.empty() && block.native_item_json.empty())
     return {};
   return append_entry(sink, ava::session::EntryType::ReasoningBlock, ava::core::make_id("entry"), reasoning_block_data_json(block, provider_id, model_id));
 }

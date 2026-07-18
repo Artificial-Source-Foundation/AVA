@@ -261,13 +261,50 @@ std::vector<ava::provider::ContentPart> tool_result_content_parts(ava::session::
                                  .is_error = !bool_field(entry.data_json, "success").value_or(true)}};
 }
 
+bool valid_openai_native_reasoning_item_json(std::string_view native_item_json)
+{
+  return ava::core::json::is_valid_object(native_item_json) &&
+         ava::core::json::string_field(native_item_json, "type").value_or("") == "reasoning";
+}
+
+bool has_unreplayable_openai_reasoning(std::vector<ava::provider::ContentPart> const& parts)
+{
+  for (auto const& part : parts) {
+    if (part.type == ava::provider::ContentPartType::Reasoning && part.reasoning_format == "openai_responses" &&
+        !valid_openai_native_reasoning_item_json(part.reasoning_native_item_json)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool has_replayable_openai_reasoning(std::vector<ava::provider::ContentPart> const& parts)
+{
+  for (auto const& part : parts) {
+    if (part.type == ava::provider::ContentPartType::Reasoning && part.reasoning_format == "openai_responses" &&
+        valid_openai_native_reasoning_item_json(part.reasoning_native_item_json)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void append_readable_reasoning_fallback(std::string& target, std::vector<ava::provider::ContentPart> const& parts)
+{
+  for (auto const& part : parts) {
+    if (part.type == ava::provider::ContentPartType::Reasoning && !part.redacted)
+      append_fallback_text(target, part.text);
+  }
+}
+
 std::optional<ava::provider::ContentPart> reasoning_content_part(ava::session::SessionEntry const& entry)
 {
   auto const text = ava::core::json::string_field(entry.data_json, "text").value_or("");
   auto const signature = ava::core::json::string_field(entry.data_json, "signature").value_or("");
   auto const redacted_data = ava::core::json::string_field(entry.data_json, "redacted_data").value_or("");
+  auto const native_item_json = ava::core::json::string_field(entry.data_json, "native_item_json").value_or("");
   bool const redacted = bool_field(entry.data_json, "redacted").value_or(false);
-  if (text.empty() && signature.empty() && redacted_data.empty()) return std::nullopt;
+  if (text.empty() && signature.empty() && redacted_data.empty() && native_item_json.empty()) return std::nullopt;
   return ava::provider::ContentPart{
       .type = ava::provider::ContentPartType::Reasoning,
       .text = redacted ? std::string{} : text,
@@ -278,6 +315,7 @@ std::optional<ava::provider::ContentPart> reasoning_content_part(ava::session::S
       .reasoning_format = ava::core::json::string_field(entry.data_json, "format").value_or(""),
       .reasoning_signature = signature,
       .reasoning_redacted_data = redacted_data,
+      .reasoning_native_item_json = native_item_json,
       .redacted = redacted};
 }
 
@@ -351,9 +389,9 @@ bool erase_first_string(std::vector<std::string>& values, std::string_view value
 
 std::optional<NativeToolReplayBatch> collect_native_tool_replay_batch(
     std::vector<ava::session::SessionEntry> const& entries, std::size_t assistant_index, std::size_t tool_call_count,
-    std::vector<std::string> const& emitted_native_tool_use_ids, std::size_t max_tool_result_context_bytes)
+    std::vector<std::string> const& emitted_native_tool_use_ids, std::size_t max_tool_result_context_bytes, bool allow_single_tool_call)
 {
-  if (tool_call_count <= 1) return std::nullopt;
+  if (tool_call_count == 0 || (tool_call_count == 1 && !allow_single_tool_call)) return std::nullopt;
   NativeToolReplayBatch batch;
   std::vector<std::string> batch_tool_use_ids;
   std::size_t cursor = assistant_index + 1;
@@ -452,9 +490,50 @@ ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messag
         return std::unexpected(std::move(valid_message.error()));
       }
       auto const tool_call_count = assistant_tool_call_count(entry);
-      if (auto const batch = collect_native_tool_replay_batch(
-              entries, index, tool_call_count, emitted_native_tool_use_ids, options.max_tool_result_context_bytes)) {
+      auto const unreplayable_openai_reasoning = has_unreplayable_openai_reasoning(pending_reasoning_parts);
+      if (!unreplayable_openai_reasoning) {
+        if (auto const batch = collect_native_tool_replay_batch(
+                entries, index, tool_call_count, emitted_native_tool_use_ids, options.max_tool_result_context_bytes,
+                has_replayable_openai_reasoning(pending_reasoning_parts))) {
+          std::string assistant_content;
+          append_readable_reasoning_fallback(assistant_content, pending_reasoning_parts);
+          append_fallback_text(assistant_content, entry_text(entry));
+          std::vector<ava::provider::ContentPart> assistant_parts;
+          append_pending_reasoning_parts(assistant_parts, pending_reasoning_parts);
+          if (!entry_text(entry).empty()) {
+            assistant_parts.push_back(ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
+                                                                 .text = entry_text(entry),
+                                                                 .tool_call_id = "",
+                                                                 .tool_name = "",
+                                                                 .input_json = "",
+                                                                 .is_error = false});
+          }
+          std::string user_content;
+          std::vector<ava::provider::ContentPart> user_parts;
+          for (auto const& pair : batch->pairs) {
+            append_fallback_text(assistant_content, tool_call_context_text(entries[pair.call_index]));
+            assistant_parts.push_back(pair.tool_use);
+            append_fallback_text(user_content, truncate_tool_context(tool_context_text(entries[pair.result_index]),
+                                                                     options.max_tool_result_context_bytes));
+            user_parts.push_back(pair.tool_result);
+            emitted_native_tool_use_ids.push_back(pair.tool_use.tool_call_id);
+          }
+          messages.push_back(ava::provider::ChatMessage{
+              .role = "assistant", .content = std::move(assistant_content), .content_parts = std::move(assistant_parts)});
+          messages.push_back(ava::provider::ChatMessage{
+              .role = "user", .content = std::move(user_content), .content_parts = std::move(user_parts)});
+          index = batch->end_index - 1;
+          continue;
+        }
+      }
+      if (tool_call_count > 1 || unreplayable_openai_reasoning) {
+        for (auto id : next_tool_call_ids(entries, index, tool_call_count)) {
+          suppressed_native_tool_use_ids.push_back(std::move(id));
+        }
+      }
+      if (!pending_reasoning_parts.empty()) {
         std::string assistant_content;
+        append_readable_reasoning_fallback(assistant_content, pending_reasoning_parts);
         append_fallback_text(assistant_content, entry_text(entry));
         std::vector<ava::provider::ContentPart> assistant_parts;
         append_pending_reasoning_parts(assistant_parts, pending_reasoning_parts);
@@ -466,41 +545,8 @@ ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messag
                                                                .input_json = "",
                                                                .is_error = false});
         }
-        std::string user_content;
-        std::vector<ava::provider::ContentPart> user_parts;
-        for (auto const& pair : batch->pairs) {
-          append_fallback_text(assistant_content, tool_call_context_text(entries[pair.call_index]));
-          assistant_parts.push_back(pair.tool_use);
-          append_fallback_text(user_content, truncate_tool_context(tool_context_text(entries[pair.result_index]),
-                                                                   options.max_tool_result_context_bytes));
-          user_parts.push_back(pair.tool_result);
-          emitted_native_tool_use_ids.push_back(pair.tool_use.tool_call_id);
-        }
         messages.push_back(ava::provider::ChatMessage{
             .role = "assistant", .content = std::move(assistant_content), .content_parts = std::move(assistant_parts)});
-        messages.push_back(ava::provider::ChatMessage{
-            .role = "user", .content = std::move(user_content), .content_parts = std::move(user_parts)});
-        index = batch->end_index - 1;
-        continue;
-      }
-      if (tool_call_count > 1) {
-        for (auto id : next_tool_call_ids(entries, index, tool_call_count)) {
-          suppressed_native_tool_use_ids.push_back(std::move(id));
-        }
-      }
-      if (!pending_reasoning_parts.empty()) {
-        std::vector<ava::provider::ContentPart> assistant_parts;
-        append_pending_reasoning_parts(assistant_parts, pending_reasoning_parts);
-        if (!entry_text(entry).empty()) {
-          assistant_parts.push_back(ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
-                                                               .text = entry_text(entry),
-                                                               .tool_call_id = "",
-                                                               .tool_name = "",
-                                                               .input_json = "",
-                                                               .is_error = false});
-        }
-        messages.push_back(ava::provider::ChatMessage{
-            .role = "assistant", .content = entry_text(entry), .content_parts = std::move(assistant_parts)});
       } else {
         messages.push_back(ava::provider::ChatMessage{.role = "assistant", .content = entry_text(entry)});
       }

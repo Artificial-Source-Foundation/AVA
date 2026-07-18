@@ -17,6 +17,8 @@ struct ParsedReasoningBlock
   std::string format;
   std::string signature;
   std::string redacted_data;
+  // Opaque provider-only JSON retained only for exact native replay.
+  std::string native_item_json;
   bool redacted = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON

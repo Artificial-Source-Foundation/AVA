@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/openai_request.h"
+#include "ava/provider/openai_response_parser_detail.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/core/json.h"
 
@@ -44,6 +45,17 @@ std::optional<std::string> native_content_item_json(ChatMessage const& message, 
         text += "\n\n";
       text += part->text;
     }
+    else if (part->type == ContentPartType::Reasoning)
+    {
+      // When native replay cannot be used, retain readable reasoning summaries
+      // in the ordinary synthetic history without exposing private metadata.
+      if (!part->text.empty())
+      {
+        if (!text.empty())
+          text += "\n\n";
+        text += part->text;
+      }
+    }
     else if (part->type == ContentPartType::Image)
     {
       has_image = true;
@@ -61,6 +73,15 @@ std::optional<std::string> native_content_item_json(ChatMessage const& message, 
   for (auto const* part : parts)
   {
     if (part->type == ContentPartType::Text)
+    {
+      if (part->text.empty())
+        continue;
+      if (!first)
+        json += ',';
+      first = false;
+      json += "{\"type\":\"input_text\",\"text\":\"" + ava::core::json::escape(part->text) + "\"}";
+    }
+    else if (part->type == ContentPartType::Reasoning)
     {
       if (part->text.empty())
         continue;
@@ -111,6 +132,23 @@ bool valid_tool_result_part(ContentPart const& part)
   return is_openai_logical_call_id(part.tool_call_id);
 }
 
+bool valid_openai_reasoning_item_part(ContentPart const& part)
+{
+  return part.type == ContentPartType::Reasoning && part.reasoning_format == detail::kOpenAIResponsesReasoningFormat &&
+         ava::core::json::is_valid_object(part.reasoning_native_item_json) &&
+         ava::core::json::string_field(part.reasoning_native_item_json, "type").value_or("") == "reasoning";
+}
+
+bool has_unreplayable_openai_reasoning(std::vector<ContentPart> const& parts)
+{
+  for (auto const& part : parts)
+  {
+    if (part.type == ContentPartType::Reasoning && part.reasoning_format == detail::kOpenAIResponsesReasoningFormat && !valid_openai_reasoning_item_part(part))
+      return true;
+  }
+  return false;
+}
+
 using NativeToolPartMask = std::vector<std::vector<bool>>;
 
 NativeToolPartMask paired_native_tool_part_mask(std::vector<ChatMessage> const& messages)
@@ -124,6 +162,8 @@ NativeToolPartMask paired_native_tool_part_mask(std::vector<ChatMessage> const& 
     auto const& assistant = messages[assistant_index];
     auto const& result = messages[assistant_index + 1];
     if (assistant.role != "assistant" || result.role != "user")
+      continue;
+    if (has_unreplayable_openai_reasoning(assistant.content_parts))
       continue;
 
     std::vector<std::size_t> tool_use_indexes;
@@ -201,6 +241,11 @@ NativeToolPartMask paired_native_tool_part_mask(std::vector<ChatMessage> const& 
     ++assistant_index;
   }
   return mask;
+}
+
+std::string reasoning_input_item_json(ContentPart const& part)
+{
+  return part.reasoning_native_item_json;
 }
 
 std::string function_call_input_item_json(ContentPart const& part)
@@ -336,6 +381,12 @@ std::string request_body_json(ProviderRequest const& request, bool include_max_o
     for (std::size_t part_index = 0; part_index < message.content_parts.size(); ++part_index)
     {
       auto const& part = message.content_parts[part_index];
+      if (part.type == ContentPartType::Reasoning && valid_openai_reasoning_item_part(part))
+      {
+        append_ordinary_parts();
+        append_input_item(reasoning_input_item_json(part));
+        continue;
+      }
       if (!native_tool_parts[message_index][part_index])
       {
         ordinary_parts.push_back(&part);

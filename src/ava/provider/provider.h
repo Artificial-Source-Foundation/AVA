@@ -42,6 +42,9 @@ struct ContentPart
   std::string reasoning_format = {};
   std::string reasoning_signature = {};
   std::string reasoning_redacted_data = {};
+  // Opaque provider-only JSON for exact reasoning-item replay. It must never
+  // cross public stream/event boundaries or be included in exports.
+  std::string reasoning_native_item_json = {};
   bool redacted = false;
   // Image attachment metadata. Session/RPC records store references and
   // provider serializers may load bytes transiently after validation.
@@ -185,6 +188,9 @@ struct StreamEvent
   std::string reasoning_format = {};
   std::string reasoning_signature = {};
   std::string reasoning_redacted_data = {};
+  // Opaque provider-only JSON for exact reasoning-item replay. Stream bridges
+  // must clear this field before publishing an event outside the agent loop.
+  std::string reasoning_native_item_json = {};
   bool redacted = false;
   bool reasoning_signature_present = false;
 

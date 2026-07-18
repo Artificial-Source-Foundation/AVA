@@ -9,6 +9,7 @@
 #include "ava/app/runtime.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
+#include "ava/agent/stream_bridge.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
@@ -248,6 +249,48 @@ void test_openai_provider_contract()
              native_parts_request->body.find("Tool result data only") == std::string::npos && native_parts_request->body.find("\"id\":") == std::string::npos,
          "OpenAI request serializes paired native tool content as Responses function-call input items");
 
+  auto const native_reasoning_item_json =
+      R"({"id":"rs_request","type":"reasoning","summary":[{"type":"summary_text","text":"inspect first"}],"status":"completed","encrypted_content":"cipher-request"})";
+  ava::provider::ProviderRequest native_reasoning_request{
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system",
+      .messages = {ava::provider::ChatMessage{
+                       .role = "assistant",
+                       .content = "inspect first\n\nI will read the note.",
+                       .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Reasoning,
+                                                                    .text = "inspect first",
+                                                                    .reasoning_format = "openai_responses",
+                                                                    .reasoning_native_item_json = native_reasoning_item_json},
+                                         ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text, .text = "I will read the note."},
+                                         ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                                    .tool_call_id = "call_reasoning",
+                                                                    .tool_name = "read_file",
+                                                                    .input_json = R"({"path":"note.txt"})"}}},
+                   ava::provider::ChatMessage{
+                       .role = "user",
+                       .content = "tool output",
+                       .content_parts = {ava::provider::ContentPart{
+                           .type = ava::provider::ContentPartType::ToolResult, .text = "tool output", .tool_call_id = "call_reasoning"}}}},
+      .tools_json = {}};
+  auto const public_native_reasoning_request = provider.build_request(native_reasoning_request, "api-token");
+  auto const oauth_native_reasoning_request = provider.build_request(
+      native_reasoning_request, ava::provider::ProviderAuthContext{.access_token = "oauth-token", .credential_type = "oauth", .account_id = ""});
+  expect(public_native_reasoning_request && oauth_native_reasoning_request &&
+             public_native_reasoning_request->body.find(native_reasoning_item_json) != std::string::npos &&
+             public_native_reasoning_request->body.find(native_reasoning_item_json) <
+                 public_native_reasoning_request->body.find(R"({"type":"function_call","call_id":"call_reasoning",)") &&
+             oauth_native_reasoning_request->body.find(native_reasoning_item_json) != std::string::npos &&
+             oauth_native_reasoning_request->body.find("\"store\":false") != std::string::npos,
+         "shared public and OAuth Responses serializers replay exact native reasoning before function call/output");
+
+  auto invalid_native_reasoning_request = native_reasoning_request;
+  invalid_native_reasoning_request.messages[0].content_parts[0].reasoning_native_item_json = R"(["not","a","reasoning","object"] )";
+  auto const invalid_native_reasoning = provider.build_request(invalid_native_reasoning_request, "api-token");
+  expect(invalid_native_reasoning && invalid_native_reasoning->body.find("inspect first") != std::string::npos &&
+             invalid_native_reasoning->body.find("\"type\":\"function_call\"") == std::string::npos,
+         "OpenAI native tool replay falls back to readable synthetic history for an invalid private reasoning item");
+
   auto const unpaired_native_parts_request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "openai",
@@ -474,6 +517,122 @@ void test_openai_provider_contract()
              (*output_item_tool)[1].text.find("smoke.txt") != std::string::npos && (*output_item_tool)[2].type == ava::provider::StreamEventType::ToolCallEnd &&
              (*output_item_tool)[2].tool_call_id == "call_live_provider",
          "OpenAI stream parser maps function-call item IDs to logical call IDs across lifecycle events");
+
+  auto const reasoning_tool_item_json =
+      R"({"id":"rs_private","type":"reasoning","summary":[{"type":"summary_text","text":"check plan"}],"status":"completed","encrypted_content":"opaque-ciphertext"})";
+  auto reasoning_tool = ava::provider::parse_openai_sse(
+      std::string("data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"rs_private\",\"type\":\"reasoning\"}}\n\n") +
+      "data: {\"type\":\"response.output_item.done\",\"item\":" + reasoning_tool_item_json +
+      "}\n\n"
+      "data: "
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_private\",\"type\":\"function_call\",\"call_id\":\"call_private\",\"name\":\"read_file\"}"
+      "}\n\n"
+      "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_private\",\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}\n\n"
+      "data: "
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_private\",\"type\":\"function_call\",\"call_id\":\"call_private\",\"name\":\"read_file\","
+      "\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}}\n\n"
+      "data: [DONE]\n\n");
+  auto const private_reasoning_end = reasoning_tool ? std::find_if(reasoning_tool->begin(), reasoning_tool->end(),
+                                                                   [](auto const& event) { return event.type == ava::provider::StreamEventType::ReasoningEnd; })
+                                                    : std::vector<ava::provider::StreamEvent>::const_iterator{};
+  expect(reasoning_tool && private_reasoning_end != reasoning_tool->end() && private_reasoning_end->reasoning_native_item_json == reasoning_tool_item_json,
+         "OpenAI Responses stream retains the exact private completed reasoning item for native tool continuation");
+
+  auto arguments_done_only = ava::provider::parse_openai_sse(
+      "data: "
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_done\",\"type\":\"function_call\",\"call_id\":\"call_done\",\"name\":\"read_file\"}}\n\n"
+      "data: {\"type\":\"response.function_call_arguments.done\",\"call_id\":\"call_done\",\"arguments\":\"{\\\"path\\\":\\\"done.txt\\\"}\"}\n\n"
+      "data: "
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_done\",\"type\":\"function_call\",\"call_id\":\"call_done\",\"name\":\"read_file\"}}\n\n"
+      "data: [DONE]\n\n");
+  expect(arguments_done_only && arguments_done_only->size() == 4 && (*arguments_done_only)[1].type == ava::provider::StreamEventType::ToolCallDelta &&
+             (*arguments_done_only)[1].text == R"({"path":"done.txt"})",
+         "OpenAI function_call_arguments.done supplies complete arguments when no deltas arrived");
+
+  auto arguments_item_done_only = ava::provider::parse_openai_sse(
+      "data: "
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_final\",\"type\":\"function_call\",\"call_id\":\"call_final\",\"name\":\"read_file\","
+      "\"arguments\":\"{\\\"path\\\":\\\"final.txt\\\"}\"}}\n\n"
+      "data: [DONE]\n\n");
+  expect(arguments_item_done_only && arguments_item_done_only->size() == 4 &&
+             (*arguments_item_done_only)[0].type == ava::provider::StreamEventType::ToolCallStart && (*arguments_item_done_only)[0].tool_name == "read_file" &&
+             (*arguments_item_done_only)[1].text == R"({"path":"final.txt"})" &&
+             (*arguments_item_done_only)[2].type == ava::provider::StreamEventType::ToolCallEnd,
+         "OpenAI output_item.done creates a named complete function call when added and deltas were absent");
+
+  auto identical_final_arguments = ava::provider::parse_openai_sse(
+      "data: "
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_equal\",\"type\":\"function_call\",\"call_id\":\"call_equal\",\"name\":\"read_file\","
+      "\"arguments\":\"{}\"}}\n\n"
+      "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_equal\",\"arguments\":\"{}\"}\n\n"
+      "data: "
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_equal\",\"type\":\"function_call\",\"call_id\":\"call_equal\",\"name\":\"read_file\","
+      "\"arguments\":\"{}\"}}\n\n"
+      "data: [DONE]\n\n");
+  expect(identical_final_arguments && std::count_if(identical_final_arguments->begin(), identical_final_arguments->end(),
+                                                    [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallDelta; }) == 1,
+         "OpenAI duplicate complete function arguments are emitted once");
+
+  auto suffix_final_arguments = ava::provider::parse_openai_sse(
+      "data: "
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_suffix\",\"type\":\"function_call\",\"call_id\":\"call_suffix\",\"name\":\"read_file\","
+      "\"arguments\":\"{\"}}\n\n"
+      "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_suffix\",\"arguments\":\"{}\"}\n\n"
+      "data: "
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_suffix\",\"type\":\"function_call\",\"call_id\":\"call_suffix\",\"name\":\"read_file\"}}"
+      "\n\n"
+      "data: [DONE]\n\n");
+  expect(suffix_final_arguments && suffix_final_arguments->size() == 5 && (*suffix_final_arguments)[1].text == "{" && (*suffix_final_arguments)[2].text == "}",
+         "OpenAI complete function arguments append only their missing suffix");
+
+  auto conflicting_final_arguments = ava::provider::parse_openai_sse(
+      "data: "
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_conflict\",\"type\":\"function_call\",\"call_id\":\"call_conflict\",\"name\":\"read_"
+      "file\",\"arguments\":\"{}\"}}\n\n"
+      "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_conflict\",\"arguments\":\"{\\\"path\\\":\\\"conflict.txt\\\"}\"}\n\n");
+  expect(conflicting_final_arguments && std::any_of(conflicting_final_arguments->begin(), conflicting_final_arguments->end(),
+                                                    [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI conflicting complete function arguments fail the provider stream closed");
+
+  ava::provider::OpenAIStreamParser reusable_parser;
+  auto first_reusable = reusable_parser.append(
+      "data: "
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_reset_one\",\"type\":\"function_call\",\"call_id\":\"call_reset_one\",\"name\":\"read_"
+      "file\",\"arguments\":\"{}\"}}\n\n"
+      "data: [DONE]\n\n");
+  auto first_reusable_finish = reusable_parser.finish();
+  auto second_reusable = reusable_parser.append(
+      "data: "
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_reset_two\",\"type\":\"function_call\",\"call_id\":\"call_reset_two\",\"name\":\"read_"
+      "file\",\"arguments\":\"{}\"}}\n\n"
+      "data: [DONE]\n\n");
+  auto second_reusable_finish = reusable_parser.finish();
+  expect(first_reusable && first_reusable_finish && second_reusable && second_reusable_finish && second_reusable->size() == 4 &&
+             (*second_reusable)[0].tool_call_id == "call_reset_two",
+         "OpenAI stream parser clears function-call argument state after finish");
+
+  ava::provider::StreamEvent observed_private_reasoning{.type = ava::provider::StreamEventType::ReasoningEnd,
+                                                        .text = "",
+                                                        .tool_call_id = "",
+                                                        .tool_name = "",
+                                                        .error_message = "",
+                                                        .usage = std::nullopt,
+                                                        .finish_reason = std::nullopt,
+                                                        .reasoning_format = "",
+                                                        .reasoning_signature = "",
+                                                        .reasoning_redacted_data = "",
+                                                        .reasoning_native_item_json = reasoning_tool_item_json,
+                                                        .redacted = false,
+                                                        .reasoning_signature_present = false};
+  ava::provider::StreamEvent public_private_reasoning;
+  ava::agent::AgentLoopOptions bridge_options;
+  bridge_options.on_stream_event = [&public_private_reasoning](auto const& event) -> ava::core::VoidResult {
+    public_private_reasoning = event;
+    return {};
+  };
+  auto bridged_private_reasoning = ava::agent::publish_stream_event(bridge_options, observed_private_reasoning);
+  expect(bridged_private_reasoning && public_private_reasoning.reasoning_native_item_json.empty(),
+         "public stream bridge redacts private OpenAI reasoning item JSON");
 
   auto reasoning_summary = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\"}}\n\n"
@@ -753,23 +912,26 @@ void test_openai_provider_contract()
              (*non_stream_tool)[3].type == ava::provider::StreamEventType::ToolCallEnd && (*non_stream_tool)[4].type == ava::provider::StreamEventType::Done &&
              (*non_stream_tool)[4].usage,
          "OpenAI non-stream Responses API parses mixed text and tool calls");
-  auto non_stream_reasoning =
-      non_stream_provider.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                                     .headers = {},
-                                                                     .body = "{\"output\":[{\"type\":\"reasoning\",\"summary\":[{\"type\":"
-                                                                             "\"summary_text\",\"text\":\"think\"}]},{\"type\":\"message\","
-                                                                             "\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}],"
-                                                                             "\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}"},
-                                         false);
+  auto non_stream_reasoning = non_stream_provider.parse_response(
+      ava::provider::HttpResponse{
+          .status_code = 200,
+          .headers = {},
+          .body = "{\"output\":[{\"id\":\"rs_non_stream\",\"type\":\"reasoning\",\"summary\":[{\"type\":"
+                  "\"summary_text\",\"text\":\"think\"}],\"status\":\"completed\",\"encrypted_content\":\"cipher-non-stream\"},{\"type\":\"message\","
+                  "\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}],"
+                  "\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}"},
+      false);
   expect(non_stream_reasoning && non_stream_reasoning->size() == 5 && (*non_stream_reasoning)[0].type == ava::provider::StreamEventType::ReasoningStart &&
              (*non_stream_reasoning)[1].type == ava::provider::StreamEventType::ReasoningDelta && (*non_stream_reasoning)[1].text == "think" &&
              (*non_stream_reasoning)[2].type == ava::provider::StreamEventType::ReasoningEnd &&
+             (*non_stream_reasoning)[2].reasoning_native_item_json.find("cipher-non-stream") != std::string::npos &&
              (*non_stream_reasoning)[3].type == ava::provider::StreamEventType::TextDelta && (*non_stream_reasoning)[3].text == "done" &&
              (*non_stream_reasoning)[4].type == ava::provider::StreamEventType::Done,
          "OpenAI non-stream Responses API parses reasoning summary before answer text");
-  auto nested_text =
-      ava::provider::parse_openai_response_text("{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"nested\"}]}]}");
-  expect(nested_text && *nested_text == "nested", "OpenAI non-stream response text parses nested message content");
+  auto nested_text = ava::provider::parse_openai_response_text(
+      "{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"nested one\"},"
+      "{\"type\":\"output_text\",\"text\":\"nested two\"}]}]}");
+  expect(nested_text && *nested_text == "nested one\n\nnested two", "OpenAI non-stream response retains all nested output_text parts in message order");
   auto non_stream_incomplete =
       non_stream_provider.parse_response(ava::provider::HttpResponse{.status_code = 200,
                                                                      .headers = {},

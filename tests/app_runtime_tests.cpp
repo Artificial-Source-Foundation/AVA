@@ -2297,13 +2297,12 @@ void test_app_command_dispatcher()
   expect(!has_completion(connect_item, 0, "openai") && !has_completion(connect_item, 1, "api-key") &&
              !has_completion(connect_item, 1, "browser-oauth", {"openai"}) && !has_completion(connect_item, 1, "headless-oauth", {"openai"}) &&
              has_completion(models_item, 0, "openai/gpt-5.5") && !has_completion(models_item, 0, "gpt-5.5") &&
-             has_completion(sessions_item, 0, session->store.session_id()) &&
-             has_completion(context_item, 0, (workspace / "AGENTS.md").generic_string()) && has_completion(read_item, 0, "src/main.cpp") &&
-             has_completion(write_item, 0, "src/main.cpp") && has_completion(glob_item, 0, "src/**") && has_completion(find_item, 0, "src/**") &&
-             has_completion(ls_item, 0, "src/main.cpp") && has_completion(grep_item, 1, "src/**") && has_completion(export_item, 0, "markdown") &&
-             has_completion(export_item, 0, "html") && has_completion(export_item, 0, "jsonl") && has_completion(import_item, 1, "--confirm") &&
-             has_completion(hotkeys_item, 0, "init") && has_completion(hotkeys_item, 0, "import") && has_completion(hotkeys_item, 0, "set") &&
-             has_completion(hotkeys_item, 0, "reset") && has_completion(hotkeys_item, 1, "submit", {"set"}) &&
+             has_completion(sessions_item, 0, session->store.session_id()) && has_completion(context_item, 0, (workspace / "AGENTS.md").generic_string()) &&
+             has_completion(read_item, 0, "src/main.cpp") && has_completion(write_item, 0, "src/main.cpp") && has_completion(glob_item, 0, "src/**") &&
+             has_completion(find_item, 0, "src/**") && has_completion(ls_item, 0, "src/main.cpp") && has_completion(grep_item, 1, "src/**") &&
+             has_completion(export_item, 0, "markdown") && has_completion(export_item, 0, "html") && has_completion(export_item, 0, "jsonl") &&
+             has_completion(import_item, 1, "--confirm") && has_completion(hotkeys_item, 0, "init") && has_completion(hotkeys_item, 0, "import") &&
+             has_completion(hotkeys_item, 0, "set") && has_completion(hotkeys_item, 0, "reset") && has_completion(hotkeys_item, 1, "submit", {"set"}) &&
              has_completion(hotkeys_item, 1, "variant_cycle", {"set"}) && has_completion(hotkeys_item, 1, "submit", {"reset"}) &&
              has_completion(hotkeys_item, 0, "validate") && has_completion(hotkeys_item, 1, "--force", {"init"}) &&
              has_completion(hotkeys_item, 2, "--force", {"import"}) && !has_completion(read_item, 0, "my folder/space file.txt") &&
@@ -2568,20 +2567,20 @@ void test_app_command_dispatcher()
              permissions_diagnose->output[0].find("loaded rules: 1") != std::string::npos &&
              permissions_diagnose->output[0].find("outside the model-writable workspace") != std::string::npos,
          "command dispatcher /permissions diagnose reports storage and fail-closed behavior");
-  auto append_permission_audit =
-      ava::agent::append_permission_decision(session->owner_append_route(), ava::tools::PermissionAuditEvent{.permission_request_id = "permreq_runtime_deny",
-                                                                                        .operation = ava::permissions::Operation::RunCommand,
-                                                                                        .mode = ava::agent::Mode::Build,
-                                                                                        .tool_name = "bash",
-                                                                                        .action = ava::permissions::PermissionAction::Deny,
-                                                                                        .reason = "command can change external or destructive state",
-                                                                                        .risk = ava::permissions::PermissionRisk::High,
-                                                                                        .command = "git push origin main",
-                                                                                        .resolution = "deny",
-                                                                                        .resolution_source = "resolver",
-                                                                                        .resolution_reason = "remembered deny | rule",
-                                                                                        .actor = "tui",
-                                                                                        .rule_id = permission_rule_id});
+  auto append_permission_audit = ava::agent::append_permission_decision(
+      session->owner_append_route(), ava::tools::PermissionAuditEvent{.permission_request_id = "permreq_runtime_deny",
+                                                                      .operation = ava::permissions::Operation::RunCommand,
+                                                                      .mode = ava::agent::Mode::Build,
+                                                                      .tool_name = "bash",
+                                                                      .action = ava::permissions::PermissionAction::Deny,
+                                                                      .reason = "command can change external or destructive state",
+                                                                      .risk = ava::permissions::PermissionRisk::High,
+                                                                      .command = "git push origin main",
+                                                                      .resolution = "deny",
+                                                                      .resolution_source = "resolver",
+                                                                      .resolution_reason = "remembered deny | rule",
+                                                                      .actor = "tui",
+                                                                      .rule_id = permission_rule_id});
   expect(append_permission_audit.has_value(), append_permission_audit
                                                   ? "command dispatcher test appends a permission audit entry"
                                                   : "command dispatcher test appends a permission audit entry: " + append_permission_audit.error().format());
@@ -3114,7 +3113,7 @@ void test_app_session_jsonl_import_export_attachment_caveat()
 
   auto exported = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export jsonl attachment-export.jsonl"});
   expect(exported && exported->handled && !exported->output.empty() &&
-             exported->output[0].find("note: raw JSONL exports include 1 image attachment") != std::string::npos &&
+             exported->output[0].find("note: portable JSONL exports include 1 image attachment") != std::string::npos &&
              exported->output[0].find("not the attachment files") != std::string::npos && exported->tool_timeline.size() == 2 &&
              exported->tool_timeline[1].structured_result_json.find("\"attachment_files_included\":false") != std::string::npos &&
              exported->tool_timeline[1].structured_result_json.find("\"non_redacted_image_attachment_metadata_count\":1") != std::string::npos,
@@ -3165,6 +3164,80 @@ void test_app_session_jsonl_import_export_attachment_caveat()
                                           entry.data_json.find("\"redacted\":true") != std::string::npos;
                                  }),
          "command dispatcher /import still allows redacted attachment metadata that does not require local bytes");
+}
+
+void test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata()
+{
+  auto const root = temp_root() / "app-session-jsonl-private-replay-export";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "private JSONL export test opens a runtime session");
+  if (!session)
+    return;
+
+  auto appended = session->append_owned(ava::session::SessionEntry{
+      .id = "entry_private_reasoning_export",
+      .parent_id = "",
+      .type = ava::session::EntryType::ReasoningBlock,
+      .timestamp = "2026-05-10T00:00:01Z",
+      .data_json = "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"visible reasoning summary\","
+                   "\"redacted\":false,\"signature\":\"export-private-signature\",\"redacted_data\":\"export-private-redacted\","
+                   "\"native_item_json\":\"{\\\"id\\\":\\\"rs_export\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[],"
+                   "\\\"encrypted_content\\\":\\\"export-private-cipher\\\"}\"}"});
+  expect(appended.has_value(), "private JSONL export test seeds native reasoning replay metadata");
+  if (!appended)
+    return;
+
+  auto stdout_export = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export jsonl"});
+  auto const stdout_jsonl = stdout_export && !stdout_export->output.empty() ? stdout_export->output.front() : std::string{};
+  expect(stdout_export && stdout_export->handled && stdout_jsonl.find("visible reasoning summary") != std::string::npos &&
+             stdout_jsonl.find("private_replay_metadata_omitted") != std::string::npos && stdout_jsonl.find("export-private-signature") == std::string::npos &&
+             stdout_jsonl.find("export-private-redacted") == std::string::npos && stdout_jsonl.find("export-private-cipher") == std::string::npos,
+         "command dispatcher /export jsonl stdout removes private reasoning replay values while preserving visible portable content");
+
+  auto file_export = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export jsonl private-export.jsonl"});
+  auto const export_path = workspace / "private-export.jsonl";
+  auto const file_jsonl = app_read_binary_file(export_path);
+  expect(file_export && file_export->handled && !file_export->output.empty() && file_export->output.front().find("format: jsonl") != std::string::npos &&
+             file_jsonl.find("visible reasoning summary") != std::string::npos && file_jsonl.find("private_replay_metadata_omitted") != std::string::npos &&
+             file_jsonl.find("export-private-signature") == std::string::npos && file_jsonl.find("export-private-redacted") == std::string::npos &&
+             file_jsonl.find("export-private-cipher") == std::string::npos,
+         "command dispatcher /export jsonl file removes all private reasoning replay values");
+
+  auto source_entries = session->store.load();
+  expect(source_entries && std::ranges::any_of(*source_entries,
+                                               [](ava::session::SessionEntry const& entry) {
+                                                 return entry.id == "entry_private_reasoning_export" &&
+                                                        entry.data_json.find("export-private-signature") != std::string::npos &&
+                                                        entry.data_json.find("export-private-redacted") != std::string::npos &&
+                                                        entry.data_json.find("export-private-cipher") != std::string::npos;
+                                               }),
+         "private JSONL export leaves active session reasoning metadata unchanged");
+
+  auto imported = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import private-export.jsonl --confirm"});
+  auto imported_entries = session->store.load();
+  expect(imported && imported->handled && !imported->output.empty() && imported->output.front().find("imported session") != std::string::npos &&
+             imported_entries &&
+             std::ranges::any_of(*imported_entries,
+                                 [](ava::session::SessionEntry const& entry) {
+                                   return entry.type == ava::session::EntryType::ReasoningBlock &&
+                                          entry.data_json.find("visible reasoning summary") != std::string::npos &&
+                                          entry.data_json.find("private_replay_metadata_omitted") != std::string::npos &&
+                                          entry.data_json.find("export-private-signature") == std::string::npos &&
+                                          entry.data_json.find("export-private-redacted") == std::string::npos &&
+                                          entry.data_json.find("export-private-cipher") == std::string::npos;
+                                 }),
+         "sanitized JSONL export remains importable without restoring private reasoning replay values");
 }
 
 void test_app_session_branch_commands()
@@ -3505,8 +3578,8 @@ void test_app_runtime_model_switch_persists_and_reopens()
     ava::tests::FakeTransport transport({});
     std::istringstream in("{\"id\":\"list\",\"type\":\"list_models\"}\n");
     std::ostringstream out;
-    auto result = ava::app::run_rpc_loop(*reopened, reopen_options, provider, transport, ava::app::runtime::RunOptions{}, in, out,
-                                             ava::app::rpc::RpcInputWake{});
+    auto result =
+        ava::app::run_rpc_loop(*reopened, reopen_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
     auto const jsonl = out.str();
     auto const restored_position = jsonl.find("\"model\":\"claude-test\"");
     expect(result.has_value() && restored_position != std::string::npos, "RPC list_models includes restored removed current model");
@@ -4102,6 +4175,7 @@ void run_app_runtime_tests()
   test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call();
   test_app_command_dispatcher();
   test_app_session_jsonl_import_export_attachment_caveat();
+  test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata();
   test_app_session_branch_commands();
   test_app_session_new_resume_commands();
   test_app_session_metadata_commands();

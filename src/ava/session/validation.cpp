@@ -5,6 +5,7 @@
 #include "ava/session/validation_fields.h"
 
 #include "ava/core/json.h"
+#include "ava/provider/openai_reasoning.h"
 #include "ava/provider/provider.h"
 
 #include <algorithm>
@@ -1015,8 +1016,20 @@ void validate_reasoning_block_entry(SessionReplayValidation& validation, std::si
   {
     add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "", "reasoning_block entry is missing provider/model/content metadata");
   }
-  if (native_item_start && (!native_item_json || !ava::core::json::is_valid_object(*native_item_json) ||
-                            ava::core::json::string_field(*native_item_json, "type").value_or("") != "reasoning"))
+  // Version 3 OpenAI writers can only persist native replay metadata after the
+  // strict provider validator accepts it. Older sessions keep readable text as
+  // a compatibility fallback even when their optional opaque metadata is stale.
+  bool const is_openai_responses_reasoning =
+      provider == "openai" && ava::core::json::string_field(entry.data_json, "format").value_or("") == "openai_responses";
+  if (native_item_start && is_openai_responses_reasoning && entry.version == kCurrentSessionEntryVersion &&
+      (!native_item_json || !ava::provider::is_valid_openai_native_reasoning_item_json(*native_item_json)))
+  {
+    add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "",
+              "reasoning_block native_item_json must be a bounded OpenAI reasoning object with id and summary array");
+  }
+  if (native_item_start && !is_openai_responses_reasoning &&
+      (!native_item_json || !ava::core::json::is_valid_object(*native_item_json) ||
+       ava::core::json::string_field(*native_item_json, "type").value_or("") != "reasoning"))
   {
     add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "",
               "reasoning_block native_item_json must be a JSON reasoning object");

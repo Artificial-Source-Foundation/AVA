@@ -264,14 +264,14 @@ void test_openai_provider_contract()
                                                                     .reasoning_native_item_json = native_reasoning_item_json},
                                          ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text, .text = "I will read the note."},
                                          ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
-                                                                    .tool_call_id = "call_reasoning",
+                                                                    .tool_call_id = "opaque.reasoning-17",
                                                                     .tool_name = "read_file",
                                                                     .input_json = R"({"path":"note.txt"})"}}},
                    ava::provider::ChatMessage{
                        .role = "user",
                        .content = "tool output",
                        .content_parts = {ava::provider::ContentPart{
-                           .type = ava::provider::ContentPartType::ToolResult, .text = "tool output", .tool_call_id = "call_reasoning"}}}},
+                           .type = ava::provider::ContentPartType::ToolResult, .text = "tool output", .tool_call_id = "opaque.reasoning-17"}}}},
       .tools_json = {}};
   auto const public_native_reasoning_request = provider.build_request(native_reasoning_request, "api-token");
   auto const oauth_native_reasoning_request = provider.build_request(
@@ -279,13 +279,13 @@ void test_openai_provider_contract()
   expect(public_native_reasoning_request && oauth_native_reasoning_request &&
              public_native_reasoning_request->body.find(native_reasoning_item_json) != std::string::npos &&
              public_native_reasoning_request->body.find(native_reasoning_item_json) <
-                 public_native_reasoning_request->body.find(R"({"type":"function_call","call_id":"call_reasoning",)") &&
+                 public_native_reasoning_request->body.find(R"({"type":"function_call","call_id":"opaque.reasoning-17",)") &&
              oauth_native_reasoning_request->body.find(native_reasoning_item_json) != std::string::npos &&
              oauth_native_reasoning_request->body.find("\"store\":false") != std::string::npos,
          "shared public and OAuth Responses serializers replay exact native reasoning before function call/output");
 
   auto invalid_native_reasoning_request = native_reasoning_request;
-  invalid_native_reasoning_request.messages[0].content_parts[0].reasoning_native_item_json = R"(["not","a","reasoning","object"] )";
+  invalid_native_reasoning_request.messages[0].content_parts[0].reasoning_native_item_json = R"({"id":"rs_missing_summary","type":"reasoning"})";
   auto const invalid_native_reasoning = provider.build_request(invalid_native_reasoning_request, "api-token");
   expect(invalid_native_reasoning && invalid_native_reasoning->body.find("inspect first") != std::string::npos &&
              invalid_native_reasoning->body.find("\"type\":\"function_call\"") == std::string::npos,
@@ -308,28 +308,29 @@ void test_openai_provider_contract()
              unpaired_native_parts_request->body.find("\"type\":\"function_call\"") == std::string::npos,
          "OpenAI request retains fallback text for unpaired native tool replay");
 
-  auto const legacy_item_id_request = provider.build_request(
+  auto const opaque_logical_id_request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "openai",
           .model_id = "gpt-5.5",
           .system_prompt = "system",
           .messages = {ava::provider::ChatMessage{.role = "assistant",
-                                                  .content = "legacy item-id tool fallback",
+                                                  .content = "opaque logical-id tool replay",
                                                   .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
-                                                                                               .tool_call_id = "fc_legacy",
+                                                                                               .tool_call_id = "opaque-tool-id",
                                                                                                .tool_name = "read_file",
                                                                                                .input_json = R"({"path":"note.txt"})"}}},
                        ava::provider::ChatMessage{
                            .role = "user",
-                           .content = "legacy item-id result fallback",
+                           .content = "opaque logical-id result replay",
                            .content_parts = {ava::provider::ContentPart{
-                               .type = ava::provider::ContentPartType::ToolResult, .text = "tool result", .tool_call_id = "fc_legacy"}}}},
+                               .type = ava::provider::ContentPartType::ToolResult, .text = "tool result", .tool_call_id = "opaque-tool-id"}}}},
           .tools_json = {}},
       "oauth-token");
-  expect(legacy_item_id_request && legacy_item_id_request->body.find("legacy item-id tool fallback") != std::string::npos &&
-             legacy_item_id_request->body.find("legacy item-id result fallback") != std::string::npos &&
-             legacy_item_id_request->body.find("\"type\":\"function_call\"") == std::string::npos,
-         "OpenAI request preserves fallback replay when a legacy session has only an item ID");
+  expect(opaque_logical_id_request && opaque_logical_id_request->body.find("opaque logical-id tool replay") == std::string::npos &&
+             opaque_logical_id_request->body.find("opaque logical-id result replay") == std::string::npos &&
+             opaque_logical_id_request->body.find(R"({"type":"function_call","call_id":"opaque-tool-id",)") != std::string::npos &&
+             opaque_logical_id_request->body.find(R"({"type":"function_call_output","call_id":"opaque-tool-id",)") != std::string::npos,
+         "OpenAI request treats bounded opaque logical call IDs as valid native replay identities");
 
   auto const malformed_native_parts_request = provider.build_request(
       ava::provider::ProviderRequest{
@@ -518,6 +519,81 @@ void test_openai_provider_contract()
              (*output_item_tool)[2].tool_call_id == "call_live_provider",
          "OpenAI stream parser maps function-call item IDs to logical call IDs across lifecycle events");
 
+  auto documented_missing_call_id = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_missing_call\",\"type\":\"function_call\",\"name\":\"read_file\"}}\n\n"
+      "data: [DONE]\n\n");
+  expect(documented_missing_call_id &&
+             std::none_of(documented_missing_call_id->begin(), documented_missing_call_id->end(),
+                          [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallStart; }) &&
+             std::any_of(documented_missing_call_id->begin(), documented_missing_call_id->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI documented output items reject a missing logical call_id instead of falling back to item.id");
+  auto documented_empty_call_id = ava::provider::parse_openai_sse(
+      "data: "
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_empty_call\",\"type\":\"function_call\",\"call_id\":\"\",\"name\":\"read_file\"}}\n\n"
+      "data: [DONE]\n\n");
+  expect(documented_empty_call_id &&
+             std::none_of(documented_empty_call_id->begin(), documented_empty_call_id->end(),
+                          [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallStart; }) &&
+             std::any_of(documented_empty_call_id->begin(), documented_empty_call_id->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI documented output items reject an explicit empty logical call_id");
+  auto documented_missing_name = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_missing_name\",\"type\":\"function_call\",\"call_id\":\"opaque-missing-name\"}}\n\n"
+      "data: [DONE]\n\n");
+  auto documented_empty_name = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_empty_name\",\"type\":\"function_call\",\"call_id\":\"opaque-empty-name\",\"name\":\"\"}}\n\n"
+      "data: [DONE]\n\n");
+  expect(documented_missing_name && documented_empty_name &&
+             std::none_of(documented_missing_name->begin(), documented_missing_name->end(),
+                          [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallStart; }) &&
+             std::none_of(documented_empty_name->begin(), documented_empty_name->end(),
+                          [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallStart; }) &&
+             std::any_of(documented_missing_name->begin(), documented_missing_name->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }) &&
+             std::any_of(documented_empty_name->begin(), documented_empty_name->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI documented output items require a present nonempty function name");
+  auto documented_mapping_change = ava::provider::parse_openai_sse(
+      "data: "
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_mapping\",\"type\":\"function_call\",\"call_id\":\"opaque-first\",\"name\":\"read_file\"}"
+      "}\n\n"
+      "data: "
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_mapping\",\"type\":\"function_call\",\"call_id\":\"opaque-second\",\"name\":\"read_file\"}"
+      "}\n\n"
+      "data: [DONE]\n\n");
+  expect(documented_mapping_change &&
+             std::count_if(documented_mapping_change->begin(), documented_mapping_change->end(),
+                           [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallStart; }) == 1 &&
+             std::any_of(documented_mapping_change->begin(), documented_mapping_change->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI documented item-id mappings reject a changed logical call_id without dispatching a replacement call");
+  auto documented_name_change = ava::provider::parse_openai_sse(
+      "data: "
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_name\",\"type\":\"function_call\",\"call_id\":\"opaque-name\",\"name\":\"read_file\"}}"
+      "\n\n"
+      "data: "
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_name\",\"type\":\"function_call\",\"call_id\":\"opaque-name\",\"name\":\"write_file\"}}"
+      "\n\n"
+      "data: [DONE]\n\n");
+  expect(documented_name_change && std::any_of(documented_name_change->begin(), documented_name_change->end(),
+                                               [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI documented item-id mappings reject a changed function name");
+  auto documented_mapping_collision = ava::provider::parse_openai_sse(
+      "data: "
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_first\",\"type\":\"function_call\",\"call_id\":\"opaque-collision\",\"name\":\"read_"
+      "file\"}}\n\n"
+      "data: "
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_second\",\"type\":\"function_call\",\"call_id\":\"opaque-collision\",\"name\":\"read_"
+      "file\"}}\n\n"
+      "data: [DONE]\n\n");
+  expect(documented_mapping_collision &&
+             std::count_if(documented_mapping_collision->begin(), documented_mapping_collision->end(),
+                           [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallStart; }) == 1 &&
+             std::any_of(documented_mapping_collision->begin(), documented_mapping_collision->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI documented item-id mappings reject logical call-id collisions before dispatching a second call");
+
   auto const reasoning_tool_item_json =
       R"({"id":"rs_private","type":"reasoning","summary":[{"type":"summary_text","text":"check plan"}],"status":"completed","encrypted_content":"opaque-ciphertext"})";
   auto reasoning_tool = ava::provider::parse_openai_sse(
@@ -537,6 +613,16 @@ void test_openai_provider_contract()
                                                     : std::vector<ava::provider::StreamEvent>::const_iterator{};
   expect(reasoning_tool && private_reasoning_end != reasoning_tool->end() && private_reasoning_end->reasoning_native_item_json == reasoning_tool_item_json,
          "OpenAI Responses stream retains the exact private completed reasoning item for native tool continuation");
+  auto malformed_stream_reasoning = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"rs_missing_summary\",\"type\":\"reasoning\",\"text\":\"safe summary\"}}\n\n"
+      "data: [DONE]\n\n");
+  auto const malformed_stream_reasoning_end = malformed_stream_reasoning
+                                                  ? std::find_if(malformed_stream_reasoning->begin(), malformed_stream_reasoning->end(),
+                                                                 [](auto const& event) { return event.type == ava::provider::StreamEventType::ReasoningEnd; })
+                                                  : std::vector<ava::provider::StreamEvent>::const_iterator{};
+  expect(malformed_stream_reasoning && malformed_stream_reasoning_end != malformed_stream_reasoning->end() &&
+             malformed_stream_reasoning_end->reasoning_native_item_json.empty(),
+         "OpenAI streaming parser keeps readable reasoning while dropping malformed native replay metadata");
 
   auto arguments_done_only = ava::provider::parse_openai_sse(
       "data: "
@@ -876,6 +962,20 @@ void test_openai_provider_contract()
   auto api_error = ava::provider::parse_openai_sse("data: {\"type\":\"response.error\",\"error\":{\"message\":\"bad request\"}}\n\n");
   expect(api_error && api_error->size() == 1 && (*api_error)[0].type == ava::provider::StreamEventType::Error && (*api_error)[0].error_message == "bad request",
          "OpenAI SSE error event preserves error message");
+  auto documented_top_level_error =
+      ava::provider::parse_openai_sse("data: {\"type\":\"error\",\"message\":\"top-level provider failure\",\"untrusted_payload\":\"do-not-log\"}\n\n");
+  expect(documented_top_level_error && documented_top_level_error->size() == 1 &&
+             (*documented_top_level_error)[0].type == ava::provider::StreamEventType::Error &&
+             (*documented_top_level_error)[0].error_message == "top-level provider failure" &&
+             (*documented_top_level_error)[0].error_message.find("do-not-log") == std::string::npos,
+         "OpenAI top-level SSE error diagnostics retain only the provider message");
+  auto documented_failed_error = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"documented failure\",\"code\":\"bad_request\"},"
+      "\"untrusted_payload\":\"do-not-log\"}}\n\n");
+  expect(documented_failed_error && documented_failed_error->size() == 1 && (*documented_failed_error)[0].type == ava::provider::StreamEventType::Error &&
+             (*documented_failed_error)[0].error_message == "documented failure" &&
+             (*documented_failed_error)[0].error_message.find("do-not-log") == std::string::npos,
+         "OpenAI response.failed SSE errors extract only response.error.message");
   auto unknown_between_deltas = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.output_text.delta\",\"delta\":\"a\"}\n\n"
       "data: {\"type\":\"response.new_lifecycle_event\"}\n\n"
@@ -912,6 +1012,18 @@ void test_openai_provider_contract()
              (*non_stream_tool)[3].type == ava::provider::StreamEventType::ToolCallEnd && (*non_stream_tool)[4].type == ava::provider::StreamEventType::Done &&
              (*non_stream_tool)[4].usage,
          "OpenAI non-stream Responses API parses mixed text and tool calls");
+  auto non_stream_missing_call_id = non_stream_provider.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"output\":[{\"id\":\"fc_nonstream_missing\",\"type\":\"function_call\",\"name\":\"read_file\","
+                                          "\"arguments\":\"{}\"}]}"},
+      false);
+  expect(non_stream_missing_call_id &&
+             std::none_of(non_stream_missing_call_id->begin(), non_stream_missing_call_id->end(),
+                          [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallStart; }) &&
+             std::any_of(non_stream_missing_call_id->begin(), non_stream_missing_call_id->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI non-stream function-call items reject a missing logical call_id instead of item.id fallback");
   auto non_stream_reasoning = non_stream_provider.parse_response(
       ava::provider::HttpResponse{
           .status_code = 200,
@@ -928,6 +1040,19 @@ void test_openai_provider_contract()
              (*non_stream_reasoning)[3].type == ava::provider::StreamEventType::TextDelta && (*non_stream_reasoning)[3].text == "done" &&
              (*non_stream_reasoning)[4].type == ava::provider::StreamEventType::Done,
          "OpenAI non-stream Responses API parses reasoning summary before answer text");
+  auto non_stream_malformed_reasoning = non_stream_provider.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"output\":[{\"id\":\"rs_missing_summary\",\"type\":\"reasoning\",\"text\":\"safe summary\"},"
+                                          "{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}"},
+      false);
+  auto const malformed_reasoning_end = non_stream_malformed_reasoning
+                                           ? std::find_if(non_stream_malformed_reasoning->begin(), non_stream_malformed_reasoning->end(),
+                                                          [](auto const& event) { return event.type == ava::provider::StreamEventType::ReasoningEnd; })
+                                           : std::vector<ava::provider::StreamEvent>::const_iterator{};
+  expect(non_stream_malformed_reasoning && malformed_reasoning_end != non_stream_malformed_reasoning->end() &&
+             malformed_reasoning_end->reasoning_native_item_json.empty(),
+         "OpenAI non-stream parser keeps readable reasoning while dropping malformed native replay metadata");
   auto nested_text = ava::provider::parse_openai_response_text(
       "{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"nested one\"},"
       "{\"type\":\"output_text\",\"text\":\"nested two\"}]}]}");

@@ -163,7 +163,7 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 - `/context [query|source]`: list base prompt metadata, system-prompt resources, context files, prompt commands, skills, subagents, plugins, LSP config diagnostics, and freshness status
 - `/trust [status|project|deny|clear]`: inspect or change this workspace's project-resource trust decision for commands, skills, subagents, plugins, MCP/LSP config, and system prompt resources
 - `/compact [instructions]`: generate and record a provider summary
-- `/export [markdown|html|jsonl] [path]`: export this session as Markdown, safe self-contained HTML, or raw AVA JSONL; `/export <file.html>` writes Pi-style HTML and `/export <file.jsonl>` writes re-importable JSONL through the permissioned file path
+- `/export [markdown|html|jsonl] [path]`: export this session as Markdown, safe self-contained HTML, or sanitized portable AVA JSONL; `/export <file.html>` writes Pi-style HTML and `/export <file.jsonl>` writes re-importable JSONL through the permissioned file path, omitting provider-private reasoning replay metadata
 - `/import <path.jsonl> --confirm`: validate an AVA JSONL session archive, create a new local session, and switch to it; without `--confirm`, AVA only previews the entry count
 - `/stats`: show session counts, usage, cost, and resume/export hints; `/status` is an alias
 - `/permissions <list|audit|diagnose|explain|add|remove> ...`: inspect session permission audits and manage persistent permission rules; `/permission-rules` and `/perms` are aliases

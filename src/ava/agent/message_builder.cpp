@@ -6,6 +6,7 @@
 #include "ava/session/validation.h"
 #include "ava/session/session_store.h"
 
+#include "ava/provider/openai_reasoning.h"
 #include "ava/provider/provider_utils.h"
 
 #include "ava/core/json.h"
@@ -261,17 +262,11 @@ std::vector<ava::provider::ContentPart> tool_result_content_parts(ava::session::
                                  .is_error = !bool_field(entry.data_json, "success").value_or(true)}};
 }
 
-bool valid_openai_native_reasoning_item_json(std::string_view native_item_json)
-{
-  return ava::core::json::is_valid_object(native_item_json) &&
-         ava::core::json::string_field(native_item_json, "type").value_or("") == "reasoning";
-}
-
 bool has_unreplayable_openai_reasoning(std::vector<ava::provider::ContentPart> const& parts)
 {
   for (auto const& part : parts) {
     if (part.type == ava::provider::ContentPartType::Reasoning && part.reasoning_format == "openai_responses" &&
-        !valid_openai_native_reasoning_item_json(part.reasoning_native_item_json)) {
+        !ava::provider::is_valid_openai_native_reasoning_item_json(part.reasoning_native_item_json)) {
       return true;
     }
   }
@@ -282,7 +277,7 @@ bool has_replayable_openai_reasoning(std::vector<ava::provider::ContentPart> con
 {
   for (auto const& part : parts) {
     if (part.type == ava::provider::ContentPartType::Reasoning && part.reasoning_format == "openai_responses" &&
-        valid_openai_native_reasoning_item_json(part.reasoning_native_item_json)) {
+        ava::provider::is_valid_openai_native_reasoning_item_json(part.reasoning_native_item_json)) {
       return true;
     }
   }
@@ -305,14 +300,21 @@ std::optional<ava::provider::ContentPart> reasoning_content_part(ava::session::S
   auto const native_item_json = ava::core::json::string_field(entry.data_json, "native_item_json").value_or("");
   bool const redacted = bool_field(entry.data_json, "redacted").value_or(false);
   if (text.empty() && signature.empty() && redacted_data.empty() && native_item_json.empty()) return std::nullopt;
+  auto const format = ava::core::json::string_field(entry.data_json, "format").value_or("");
+  auto visible_text = redacted ? std::string{} : text;
+  if (!redacted && visible_text.empty() && format == "openai_responses" && !native_item_json.empty() &&
+      !ava::provider::is_valid_openai_native_reasoning_item_json(native_item_json))
+  {
+    visible_text = "[AVA: invalid provider-native reasoning metadata omitted]";
+  }
   return ava::provider::ContentPart{
       .type = ava::provider::ContentPartType::Reasoning,
-      .text = redacted ? std::string{} : text,
+      .text = std::move(visible_text),
       .tool_call_id = "",
       .tool_name = "",
       .input_json = "",
       .is_error = false,
-      .reasoning_format = ava::core::json::string_field(entry.data_json, "format").value_or(""),
+      .reasoning_format = format,
       .reasoning_signature = signature,
       .reasoning_redacted_data = redacted_data,
       .reasoning_native_item_json = native_item_json,
@@ -387,6 +389,9 @@ bool erase_first_string(std::vector<std::string>& values, std::string_view value
   return true;
 }
 
+// Session v3 can replay the common contiguous reasoning -> tool-call -> tool-result
+// path. It has no ordered-output manifest, so arbitrary commentary/reasoning/
+// function interleaving and assistant phase preservation remain unsupported.
 std::optional<NativeToolReplayBatch> collect_native_tool_replay_batch(
     std::vector<ava::session::SessionEntry> const& entries, std::size_t assistant_index, std::size_t tool_call_count,
     std::vector<std::string> const& emitted_native_tool_use_ids, std::size_t max_tool_result_context_bytes, bool allow_single_tool_call)

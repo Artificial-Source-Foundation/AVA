@@ -152,7 +152,7 @@ ava::core::Result<std::string> format_session_jsonl(std::vector<ava::session::Se
   std::string out;
   for (auto const& entry : entries)
   {
-    auto line = ava::session::serialize_session_entry_line(entry);
+    auto line = ava::session::serialize_session_entry_line(ava::session::sanitize_session_entry_for_portable_jsonl_export(entry));
     if (!line)
       return std::unexpected(std::move(line.error()));
     out += *line;
@@ -199,8 +199,8 @@ std::string raw_jsonl_attachment_note(JsonlAttachmentSummary const& summary)
 {
   if (summary.count == 0)
     return {};
-  return "raw JSONL exports include " + std::to_string(summary.count) +
-         " image attachment metadata record(s), but not the attachment files; raw JSONL /import rejects non-redacted attachments until an attachment-aware "
+  return "portable JSONL exports include " + std::to_string(summary.count) +
+         " image attachment metadata record(s), but not the attachment files; JSONL /import rejects non-redacted attachments until an attachment-aware "
          "archive format exists";
 }
 

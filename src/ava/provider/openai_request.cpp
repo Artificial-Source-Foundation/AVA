@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/provider/openai_provider.h"
+#include "ava/provider/openai_reasoning.h"
 #include "ava/provider/openai_request.h"
 #include "ava/provider/openai_response_parser_detail.h"
 #include "ava/provider/provider_utils.h"
@@ -117,26 +118,20 @@ std::string input_item_json(ChatMessage const& message)
   return "{\"role\":\"" + ava::core::json::escape(message.role) + "\",\"content\":\"" + ava::core::json::escape(message.content) + "\"}";
 }
 
-bool is_openai_logical_call_id(std::string_view call_id)
-{
-  return call_id.size() > std::string_view("call_").size() && call_id.starts_with("call_");
-}
-
 bool valid_tool_use_part(ContentPart const& part)
 {
-  return is_openai_logical_call_id(part.tool_call_id) && !part.tool_name.empty() && is_valid_json_object(part.input_json);
+  return is_valid_openai_opaque_id(part.tool_call_id) && !part.tool_name.empty() && is_valid_json_object(part.input_json);
 }
 
 bool valid_tool_result_part(ContentPart const& part)
 {
-  return is_openai_logical_call_id(part.tool_call_id);
+  return is_valid_openai_opaque_id(part.tool_call_id);
 }
 
 bool valid_openai_reasoning_item_part(ContentPart const& part)
 {
   return part.type == ContentPartType::Reasoning && part.reasoning_format == detail::kOpenAIResponsesReasoningFormat &&
-         ava::core::json::is_valid_object(part.reasoning_native_item_json) &&
-         ava::core::json::string_field(part.reasoning_native_item_json, "type").value_or("") == "reasoning";
+         is_valid_openai_native_reasoning_item_json(part.reasoning_native_item_json);
 }
 
 bool has_unreplayable_openai_reasoning(std::vector<ContentPart> const& parts)

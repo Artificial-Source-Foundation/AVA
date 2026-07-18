@@ -559,6 +559,8 @@ if(Python3_Interpreter_FOUND)
       PROPERTIES
         SKIP_RETURN_CODE 77
         TIMEOUT 60
+        TIMEOUT_SIGNAL_NAME SIGTERM
+        TIMEOUT_SIGNAL_GRACE_PERIOD 10
         LABELS "tui;tmux;smoke;opt-in"
         ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
   endforeach()

@@ -210,7 +210,7 @@ AVA_TUI_KITTY_IMAGE_SMOKE=1 scripts/run-tests.sh -R ava_tui.kitty_image_smoke
 AVA_TUI_OSC8_SMOKE=1 scripts/run-tests.sh -R ava_tui.osc8_smoke
 ```
 
-The tmux family dispatches 13 independent scenarios. Each gets a guarded leaf under `build/tui-tmux-smoke/<scenario>/`, its own HOME/XDG/workspace, private config-free tmux socket, and separate evidence directory at `build/tui-tmux-smoke/<scenario>/evidence/`. The fake-provider request logs remain at `build/tui-tmux-smoke/active_run/active-provider-requests.log` and `build/tui-tmux-smoke/restore_followup/restore-provider-requests.log`.
+The tmux family dispatches 13 independent scenarios. Each gets a guarded leaf under `build/tui-tmux-smoke/<scenario>/`, its own HOME/XDG/workspace, private config-free tmux socket, and separate evidence directory at `build/tui-tmux-smoke/<scenario>/evidence/`. Drivers enforce a 50-second internal deadline, clean private tmux/provider process groups on SIGINT or SIGTERM, and receive a 10-second graceful-cleanup window before CTest's 60-second outer timeout. The fake-provider request logs remain at `build/tui-tmux-smoke/active_run/active-provider-requests.log` and `build/tui-tmux-smoke/restore_followup/restore-provider-requests.log`.
 
 The MVP strategy is renderer/editor reducers first, then PTY/tmux assertions for terminal protocols and cleanup. AVA intentionally does not require a separate virtual-terminal parser for MVP; add one only if focused renderer tests plus the existing PTY smokes stop providing stable evidence.
 

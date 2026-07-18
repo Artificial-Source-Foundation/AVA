@@ -370,14 +370,25 @@ class FakeProvider:
 
     def stop(self) -> None:
         if self.process.poll() is None:
-            os.killpg(self.process.pid, signal.SIGTERM)
+            try:
+                os.killpg(self.process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             try:
                 self.process.wait(timeout=2.0)
             except subprocess.TimeoutExpired:
-                os.killpg(self.process.pid, signal.SIGKILL)
-                self.process.wait(timeout=2.0)
-        self._stdout.close()
-        self._stderr.close()
+                try:
+                    os.killpg(self.process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    self.process.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    pass
+        if not self._stdout.closed:
+            self._stdout.close()
+        if not self._stderr.closed:
+            self._stderr.close()
 
 
 @dataclass
@@ -410,17 +421,22 @@ class SmokeContext:
     editor_command: str = field(init=False)
     _environment: dict[str, str] = field(init=False)
     _providers: list[FakeProvider] = field(default_factory=list, init=False)
+    _closed: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
-        self._prepare_root()
-        tmpdir = self.root / "tmp"
-        tmpdir.mkdir(mode=0o700)
-        tmux_home = self.root / "tmux-home"
-        tmux_home.mkdir(mode=0o700)
-        self._environment = _compatibility_environment(home=tmux_home, tmpdir=tmpdir)
-        self.tmux = TmuxClient(self.tmux_exe, self.root / "tmux.sock", self._environment)
-        self._prepare_fixture()
-        self.tmux.start()
+        try:
+            self._prepare_root()
+            tmpdir = self.root / "tmp"
+            tmpdir.mkdir(mode=0o700)
+            tmux_home = self.root / "tmux-home"
+            tmux_home.mkdir(mode=0o700)
+            self._environment = _compatibility_environment(home=tmux_home, tmpdir=tmpdir)
+            self.tmux = TmuxClient(self.tmux_exe, self.root / "tmux.sock", self._environment)
+            self._prepare_fixture()
+            self.tmux.start()
+        except BaseException:
+            self.close()
+            raise
 
     def _prepare_root(self) -> None:
         root = self.root.absolute()
@@ -703,13 +719,25 @@ class SmokeContext:
         )
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         for provider in reversed(self._providers):
-            provider.stop()
+            try:
+                provider.stop()
+            except (OSError, subprocess.SubprocessError):
+                # Continue to the tmux server: leaving AVA panes alive is worse
+                # than losing a cleanup diagnostic during signal handling.
+                pass
         self._providers.clear()
-        self.tmux.close()
-        # tmux may leave a dead custom socket pathname after kill-server. It is
-        # inside this scenario's guarded leaf; never touch the shared parent.
-        self.tmux.socket_path.unlink(missing_ok=True)
+        tmux_client = getattr(self, "tmux", None)
+        if tmux_client is not None:
+            try:
+                tmux_client.close()
+            finally:
+                # tmux may leave a dead custom socket pathname after kill-server. It is
+                # inside this scenario's guarded leaf; never touch the shared parent.
+                tmux_client.socket_path.unlink(missing_ok=True)
 
     def __enter__(self) -> "SmokeContext":
         return self

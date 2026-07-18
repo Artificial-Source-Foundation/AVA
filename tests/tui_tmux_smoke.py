@@ -9,6 +9,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import sys
 
 from tui_smoke_helpers import (
@@ -575,6 +576,9 @@ def scenario_restore_followup(ctx: SmokeContext) -> None:
 
 
 def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
+    # Preserve the original precedence assertion without depending on the
+    # theme-persistence scenario: NO_COLOR must override a stored light theme.
+    ctx.ava_config.joinpath("display.json").write_text('{"theme":"light"}\n', encoding="utf-8")
     tmux_exe, root, workspace, ava_config, env_prefix, session = _main_session(ctx)
     import_keybinds_content = ctx.import_keybinds_content
     initial = wait_for(tmux_exe, session, r"Type a message|live session", "initial TUI frame")
@@ -2775,14 +2779,35 @@ def main() -> int:
     if not fake_provider_exe.exists():
         raise RuntimeError(f"fake provider executable does not exist: {fake_provider_exe}")
 
-    with SmokeContext(
-        scenario=args.scenario,
-        root=pathlib.Path(args.root),
-        ava_exe=ava_exe,
-        fake_provider_exe=fake_provider_exe,
-        tmux_exe=tmux_exe,
-    ) as context:
+    context: SmokeContext | None = None
+
+    def stop_scenario(signum: int, _frame: object) -> None:
+        if context is not None:
+            context.close()
+        raise SystemExit(128 + signum)
+
+    for handled_signal in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(handled_signal, stop_scenario)
+    if hasattr(signal, "SIGALRM"):
+        signal.signal(signal.SIGALRM, stop_scenario)
+        # Leave CTest ten seconds to deliver SIGTERM and verify cleanup before
+        # its outer timeout force-kills the process tree.
+        signal.alarm(50)
+
+    try:
+        context = SmokeContext(
+            scenario=args.scenario,
+            root=pathlib.Path(args.root),
+            ava_exe=ava_exe,
+            fake_provider_exe=fake_provider_exe,
+            tmux_exe=tmux_exe,
+        )
         SCENARIO_HANDLERS[args.scenario](context)
+    finally:
+        if hasattr(signal, "SIGALRM"):
+            signal.alarm(0)
+        if context is not None:
+            context.close()
     return 0
 
 

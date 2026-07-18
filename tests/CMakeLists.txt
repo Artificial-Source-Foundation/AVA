@@ -531,13 +531,37 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(ava_release.package_linux PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 240 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
   endif()
 
-  add_test(
-    NAME ava_tui.tmux_smoke
-    COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tui_tmux_smoke.py
-            --ava $<TARGET_FILE:ava>
-            --root ${CMAKE_BINARY_DIR}/tui-tmux-smoke)
-  set_tests_properties(ava_tui.tmux_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+  set(AVA_TUI_TMUX_SMOKE_SCENARIOS
+    suspend_resume
+    keybind_conflict
+    theme_env
+    theme_persisted
+    active_run
+    restore_followup
+    main_startup_trust_keybinds
+    main_models_selectors
+    main_editor_input
+    main_slash_completions
+    main_permission_flow
+    main_session_mgmt
+    main_paste_scrollback_attach)
+  foreach(AVA_TUI_TMUX_SMOKE_SCENARIO IN LISTS AVA_TUI_TMUX_SMOKE_SCENARIOS)
+    add_test(
+      NAME ava_tui.tmux_smoke_${AVA_TUI_TMUX_SMOKE_SCENARIO}
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/tui_tmux_smoke.py
+              --scenario ${AVA_TUI_TMUX_SMOKE_SCENARIO}
+              --ava $<TARGET_FILE:ava>
+              --fake-provider $<TARGET_FILE:ava_fake_provider_server>
+              --root ${CMAKE_BINARY_DIR}/tui-tmux-smoke/${AVA_TUI_TMUX_SMOKE_SCENARIO})
+    set_tests_properties(
+      ava_tui.tmux_smoke_${AVA_TUI_TMUX_SMOKE_SCENARIO}
+      PROPERTIES
+        SKIP_RETURN_CODE 77
+        TIMEOUT 60
+        LABELS "tui;tmux;smoke;opt-in"
+        ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+  endforeach()
 
   add_test(
     NAME ava_tui.kitty_image_smoke

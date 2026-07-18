@@ -131,7 +131,7 @@ Pi's reference tree has broad Jest/Vitest coverage across provider protocols, co
 | Provider protocol regressions | `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `ava_tests.provider_gemini`, `ava_tests.config_context_auth_oauth`, and `ava_tests.provider_live_smoke` | Local protocol tests must pass. Live provider cases are credential-gated and classified in the matrix below. |
 | Headless/RPC automation | `ava_cli.headless_print_*`, `ava_cli.headless_rpc_*`, `ava_cli.headless_tool_visibility`, `ava_cli.headless_performance_smoke`, `ava_cli.headless_e2e_model_smoke` | Fake-provider smokes must pass in default CTest; live credentials are not required. |
 | Subagent/background jobs | `ava_tests.agent_loop` task-subagent and `BackgroundJobRegistry` tests; opt-in live task/coding dogfood when credentials are present | Foreground/background task delegation, custom subagent config, cancellation, retained job snapshots, and explicit `--allow-tool task` behavior must remain covered by deterministic tests. |
-| TUI/editor/renderer | `ava_tests.tui_composer` plus gated `ava_tui.tmux_smoke`, `ava_tui.kitty_image_smoke`, and `ava_tui.osc8_smoke` | Deterministic renderer/editor tests are required; PTY smokes are run when prerequisites exist and otherwise skip with code 77. |
+| TUI/editor/renderer | `ava_tests.tui_composer` plus gated `ava_tui.tmux_smoke_*`, `ava_tui.kitty_image_smoke`, and `ava_tui.osc8_smoke` | Deterministic renderer/editor tests are required; PTY smokes are run when prerequisites exist and otherwise skip with code 77. |
 | Virtual-terminal decision | AVA does not add a Pi-style TypeScript virtual terminal for MVP. Renderer tests assert visible rows/widths and tmux/PTY captures assert real terminal behavior. | Revisit a screen-model parser only if tmux/PTY smoke flakes or cannot cover a terminal protocol that renderer tests cannot prove. |
 | Performance thresholds | `ava_tests.tui_composer` large-render budgets and `ava_cli.headless_performance_smoke` | Treat budget failures as release regressions unless the threshold is intentionally raised with profiling evidence. |
 | Side-effect safety | [`docs/engineering/side-effect-safety-checklist.md`](engineering/side-effect-safety-checklist.md) | New side-effect classes must answer the permission/audit/cancellation/output-bound/test questions before release. |
@@ -205,10 +205,12 @@ The suite includes the CI-safe ncurses baseline currently available in-tree: con
 Real terminal coverage exists as prerequisite-gated CTest smokes:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh -R ava_tui.tmux_smoke
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 13 -R '^ava_tui\.tmux_smoke_'
 AVA_TUI_KITTY_IMAGE_SMOKE=1 scripts/run-tests.sh -R ava_tui.kitty_image_smoke
 AVA_TUI_OSC8_SMOKE=1 scripts/run-tests.sh -R ava_tui.osc8_smoke
 ```
+
+The tmux family dispatches 13 independent scenarios. Each gets a guarded leaf under `build/tui-tmux-smoke/<scenario>/`, its own HOME/XDG/workspace, private config-free tmux socket, and separate evidence directory at `build/tui-tmux-smoke/<scenario>/evidence/`. The fake-provider request logs remain at `build/tui-tmux-smoke/active_run/active-provider-requests.log` and `build/tui-tmux-smoke/restore_followup/restore-provider-requests.log`.
 
 The MVP strategy is renderer/editor reducers first, then PTY/tmux assertions for terminal protocols and cleanup. AVA intentionally does not require a separate virtual-terminal parser for MVP; add one only if focused renderer tests plus the existing PTY smokes stop providing stable evidence.
 

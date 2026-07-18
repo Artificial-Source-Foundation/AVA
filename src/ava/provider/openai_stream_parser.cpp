@@ -17,14 +17,13 @@ namespace {
 
 bool is_ignored_lifecycle_event(std::string_view type)
 {
-  return type == "response.created" || type == "response.in_progress" || type == "response.output_item.added" || type == "response.output_item.done" ||
-         type == "response.content_part.added" || type == "response.content_part.done" || type == "response.output_text.done" ||
-         type == "response.function_call_arguments.done";
+  return type == "response.created" || type == "response.in_progress" || type == "response.content_part.added" || type == "response.content_part.done" ||
+         type == "response.output_text.done";
 }
 
 bool contains_string(std::vector<std::string> const& values, std::string_view value)
 {
-  return std::ranges::find(values, value) != values.end();
+  return std::find(values.begin(), values.end(), value) != values.end();
 }
 
 void remember_string(std::vector<std::string>& values, std::string value)
@@ -46,32 +45,156 @@ std::string function_call_item_id_from_event(std::string_view data, std::optiona
   return {};
 }
 
-std::string logical_function_call_id_from_event(std::string_view data, std::unordered_map<std::string, std::string>& function_call_ids,
-                                                std::optional<std::string_view> item = std::nullopt)
+std::string logical_function_call_id_from_event(std::string_view data, std::optional<std::string_view> item = std::nullopt)
 {
-  auto const item_id = function_call_item_id_from_event(data, item);
-  auto call_id = detail::first_string_field(data, {"call_id"});
-  if (!call_id && item)
-    call_id = detail::first_string_field(*item, {"call_id"});
-  if (call_id)
-  {
-    if (!item_id.empty())
-      function_call_ids.insert_or_assign(item_id, *call_id);
+  if (auto call_id = detail::first_string_field(data, {"call_id"}))
     return *call_id;
+  if (item)
+  {
+    if (auto call_id = detail::first_string_field(*item, {"call_id"}))
+      return *call_id;
   }
-  if (auto const mapped = function_call_ids.find(item_id); mapped != function_call_ids.end())
-    return mapped->second;
-  // Compatibility for legacy Responses event shapes that supplied only item_id.
-  return item_id;
+  return {};
 }
 
-void append_function_call_end(std::vector<StreamEvent>& events, std::vector<std::string>& completed_function_call_ids, std::string call_id)
+std::string function_call_name_from_event(std::string_view data, std::optional<std::string_view> item = std::nullopt)
 {
-  if (!call_id.empty() && contains_string(completed_function_call_ids, call_id))
+  if (item)
+  {
+    if (auto name = ava::core::json::string_field(*item, "name"))
+      return *name;
+  }
+  return ava::core::json::string_field(data, "name").value_or("");
+}
+
+std::optional<std::string> function_call_arguments_from_event(std::string_view data, std::optional<std::string_view> item = std::nullopt)
+{
+  if (item)
+  {
+    if (auto arguments = ava::core::json::string_field(*item, "arguments"))
+      return arguments;
+  }
+  return ava::core::json::string_field(data, "arguments");
+}
+
+OpenAIStreamParser::FunctionCallState& function_call_state_for(std::string_view data,
+                                                               std::unordered_map<std::string, OpenAIStreamParser::FunctionCallState>& calls,
+                                                               std::optional<std::string_view> item = std::nullopt)
+{
+  auto item_id = function_call_item_id_from_event(data, item);
+  auto const call_id = logical_function_call_id_from_event(data, item);
+  auto const name = function_call_name_from_event(data, item);
+  if (item_id.empty() && !call_id.empty())
+  {
+    for (auto& [existing_item_id, existing_state] : calls)
+    {
+      static_cast<void>(existing_item_id);
+      if (existing_state.logical_call_id != call_id)
+        continue;
+      if (!name.empty())
+        existing_state.name = name;
+      return existing_state;
+    }
+  }
+  if (item_id.empty())
+    item_id = call_id;
+  auto& state = calls[item_id];
+  if (!call_id.empty())
+    state.logical_call_id = call_id;
+  if (state.logical_call_id.empty())
+    state.logical_call_id = item_id;
+  if (!name.empty())
+    state.name = name;
+  return state;
+}
+
+void append_stream_error(std::vector<StreamEvent>& events, bool& error_seen, std::string message)
+{
+  error_seen = true;
+  events.push_back(
+      StreamEvent{.type = StreamEventType::Error, .text = "", .tool_call_id = "", .tool_name = "", .error_message = std::move(message), .usage = std::nullopt});
+}
+
+bool append_function_call_start_if_ready(std::vector<StreamEvent>& events, OpenAIStreamParser::FunctionCallState& state)
+{
+  if (state.started)
+    return true;
+  if (state.logical_call_id.empty() || state.name.empty())
+    return false;
+  state.started = true;
+  events.push_back(StreamEvent{.type = StreamEventType::ToolCallStart,
+                               .text = "",
+                               .tool_call_id = state.logical_call_id,
+                               .tool_name = state.name,
+                               .error_message = "",
+                               .usage = std::nullopt});
+  return true;
+}
+
+void append_unemitted_function_call_arguments(std::vector<StreamEvent>& events, OpenAIStreamParser::FunctionCallState& state)
+{
+  if (!state.started || state.emitted_argument_bytes >= state.arguments.size())
     return;
-  remember_string(completed_function_call_ids, call_id);
+  events.push_back(StreamEvent{.type = StreamEventType::ToolCallDelta,
+                               .text = state.arguments.substr(state.emitted_argument_bytes),
+                               .tool_call_id = state.logical_call_id,
+                               .tool_name = "",
+                               .error_message = "",
+                               .usage = std::nullopt});
+  state.emitted_argument_bytes = state.arguments.size();
+}
+
+bool append_function_call_argument_fragment(std::vector<StreamEvent>& events, OpenAIStreamParser::FunctionCallState& state, std::string_view fragment)
+{
+  if (fragment.empty())
+    return true;
+  state.arguments += fragment;
+  static_cast<void>(append_function_call_start_if_ready(events, state));
+  append_unemitted_function_call_arguments(events, state);
+  return true;
+}
+
+bool reconcile_complete_function_call_arguments(std::vector<StreamEvent>& events, OpenAIStreamParser::FunctionCallState& state,
+                                                std::optional<std::string> const& complete_arguments, bool& error_seen)
+{
+  if (!complete_arguments)
+    return true;
+  if (*complete_arguments == state.arguments)
+    return true;
+  if (complete_arguments->starts_with(state.arguments))
+  {
+    state.arguments = *complete_arguments;
+    static_cast<void>(append_function_call_start_if_ready(events, state));
+    append_unemitted_function_call_arguments(events, state);
+    return true;
+  }
+  append_stream_error(events, error_seen, "conflicting OpenAI function call arguments");
+  return false;
+}
+
+bool append_function_call_end(std::vector<StreamEvent>& events, OpenAIStreamParser::FunctionCallState& state, bool require_named_start, bool& error_seen)
+{
+  if (state.ended)
+    return true;
+  if (!state.started)
+  {
+    if (!append_function_call_start_if_ready(events, state))
+    {
+      if (require_named_start)
+      {
+        append_stream_error(events, error_seen, "OpenAI function call item has an empty logical call ID or name");
+        return false;
+      }
+    }
+    else
+    {
+      append_unemitted_function_call_arguments(events, state);
+    }
+  }
+  state.ended = true;
   events.push_back(StreamEvent{
-      .type = StreamEventType::ToolCallEnd, .text = "", .tool_call_id = std::move(call_id), .tool_name = "", .error_message = "", .usage = std::nullopt});
+      .type = StreamEventType::ToolCallEnd, .text = "", .tool_call_id = state.logical_call_id, .tool_name = "", .error_message = "", .usage = std::nullopt});
+  return true;
 }
 
 std::string reasoning_item_id_from_event(std::string_view data, std::optional<std::string_view> item = std::nullopt)
@@ -126,7 +249,7 @@ void append_reasoning_delta(std::vector<StreamEvent>& events, bool& reasoning_op
 
 void append_finish_reasoning_if_open(std::vector<StreamEvent>& events, bool& reasoning_open, bool& reasoning_text_seen, std::string& active_reasoning_item_id,
                                      std::string& active_reasoning_text, std::vector<std::string>& completed_reasoning_item_ids,
-                                     std::vector<std::string>& completed_reasoning_texts)
+                                     std::vector<std::string>& completed_reasoning_texts, std::string native_item_json = {})
 {
   if (!reasoning_open)
     return;
@@ -142,13 +265,14 @@ void append_finish_reasoning_if_open(std::vector<StreamEvent>& events, bool& rea
                                .tool_name = "",
                                .error_message = "",
                                .usage = std::nullopt,
-                               .reasoning_format = std::string(detail::kOpenAIResponsesReasoningFormat)});
+                               .reasoning_format = std::string(detail::kOpenAIResponsesReasoningFormat),
+                               .reasoning_native_item_json = std::move(native_item_json)});
 }
 
 void append_event_for_data(std::vector<StreamEvent>& events, std::string_view data, bool& saw_content, bool& reasoning_open, bool& reasoning_text_seen,
                            std::string& active_reasoning_item_id, std::string& active_reasoning_text, std::vector<std::string>& completed_reasoning_item_ids,
                            std::vector<std::string>& completed_reasoning_texts, bool& done_seen, bool& error_seen,
-                           std::unordered_map<std::string, std::string>& function_call_ids, std::vector<std::string>& completed_function_call_ids)
+                           std::unordered_map<std::string, OpenAIStreamParser::FunctionCallState>& function_calls)
 {
   if (data == "[DONE]")
   {
@@ -168,11 +292,9 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
   }
   if (!is_json_object_shape(data))
   {
-    error_seen = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,
                                     completed_reasoning_texts);
-    events.push_back(StreamEvent{
-        .type = StreamEventType::Error, .text = "", .tool_call_id = "", .tool_name = "", .error_message = "malformed OpenAI SSE event", .usage = std::nullopt});
+    append_stream_error(events, error_seen, "malformed OpenAI SSE event");
     return;
   }
   auto const type = ava::core::json::string_field(data, "type").value_or("");
@@ -194,13 +316,10 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
       saw_content = true;
       append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text,
                                       completed_reasoning_item_ids, completed_reasoning_texts);
-      events.push_back(StreamEvent{
-          .type = StreamEventType::ToolCallStart,
-          .text = "",
-          .tool_call_id = logical_function_call_id_from_event(data, function_call_ids, *item),
-          .tool_name = ava::core::json::string_field(*item, "name").or_else([&data]() { return ava::core::json::string_field(data, "name"); }).value_or(""),
-          .error_message = "",
-          .usage = std::nullopt});
+      auto& state = function_call_state_for(data, function_calls, *item);
+      static_cast<void>(append_function_call_argument_fragment(events, state, function_call_arguments_from_event(data, *item).value_or("")));
+      static_cast<void>(append_function_call_start_if_ready(events, state));
+      append_unemitted_function_call_arguments(events, state);
     }
     return;
   }
@@ -211,25 +330,24 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     {
       auto const item_id = reasoning_item_id_from_event(data, *item);
       auto const summary = detail::reasoning_summary_text_from_object(*item);
-      if (contains_string(completed_reasoning_item_ids, item_id) || contains_string(completed_reasoning_texts, summary))
-      {
+      if (contains_string(completed_reasoning_item_ids, item_id))
         return;
-      }
       saw_content = true;
       set_active_reasoning_item_id(active_reasoning_item_id, item_id);
       if (!reasoning_text_seen)
-      {
         append_reasoning_delta(events, reasoning_open, reasoning_text_seen, active_reasoning_text, summary);
-      }
       append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text,
-                                      completed_reasoning_item_ids, completed_reasoning_texts);
+                                      completed_reasoning_item_ids, completed_reasoning_texts, *item);
     }
     else if (item && ava::core::json::string_field(*item, "type").value_or("") == "function_call")
     {
       saw_content = true;
       append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text,
                                       completed_reasoning_item_ids, completed_reasoning_texts);
-      append_function_call_end(events, completed_function_call_ids, logical_function_call_id_from_event(data, function_call_ids, *item));
+      auto& state = function_call_state_for(data, function_calls, *item);
+      if (!reconcile_complete_function_call_arguments(events, state, function_call_arguments_from_event(data, *item), error_seen))
+        return;
+      static_cast<void>(append_function_call_end(events, state, true, error_seen));
     }
     return;
   }
@@ -258,25 +376,23 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
   {
     auto const item_id = reasoning_item_id_from_event(data);
     auto const summary = detail::reasoning_summary_text_from_object(data);
-    if (contains_string(completed_reasoning_item_ids, item_id) || contains_string(completed_reasoning_texts, summary))
-    {
+    if (contains_string(completed_reasoning_item_ids, item_id))
       return;
-    }
     saw_content = true;
     set_active_reasoning_item_id(active_reasoning_item_id, item_id);
     if (!reasoning_text_seen)
-    {
       append_reasoning_delta(events, reasoning_open, reasoning_text_seen, active_reasoning_text, summary);
-    }
-    append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,
-                                    completed_reasoning_texts);
+    // Do not close here: output_item.done carries the opaque reasoning item
+    // that must be attached to the same private reasoning block for replay.
     return;
   }
   if (type == "response.function_call_arguments.done")
   {
-    // This lifecycle marker may carry both IDs. Retain the association for a
-    // following output_item.done event without publishing a duplicate end.
-    static_cast<void>(logical_function_call_id_from_event(data, function_call_ids));
+    auto& state = function_call_state_for(data, function_calls);
+    if (!reconcile_complete_function_call_arguments(events, state, function_call_arguments_from_event(data), error_seen))
+      return;
+    static_cast<void>(append_function_call_start_if_ready(events, state));
+    append_unemitted_function_call_arguments(events, state);
     return;
   }
   if (is_ignored_lifecycle_event(type))
@@ -300,12 +416,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     saw_content = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,
                                     completed_reasoning_texts);
-    events.push_back(StreamEvent{.type = StreamEventType::ToolCallDelta,
-                                 .text = ava::core::json::string_field(data, "delta").value_or(""),
-                                 .tool_call_id = logical_function_call_id_from_event(data, function_call_ids),
-                                 .tool_name = "",
-                                 .error_message = "",
-                                 .usage = std::nullopt});
+    auto& state = function_call_state_for(data, function_calls);
+    static_cast<void>(append_function_call_argument_fragment(events, state, ava::core::json::string_field(data, "delta").value_or("")));
     return;
   }
   if (type == "response.function_call.added")
@@ -313,12 +425,23 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     saw_content = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,
                                     completed_reasoning_texts);
-    events.push_back(StreamEvent{.type = StreamEventType::ToolCallStart,
-                                 .text = "",
-                                 .tool_call_id = logical_function_call_id_from_event(data, function_call_ids),
-                                 .tool_name = ava::core::json::string_field(data, "name").value_or(""),
-                                 .error_message = "",
-                                 .usage = std::nullopt});
+    auto& state = function_call_state_for(data, function_calls);
+    if (state.logical_call_id.empty())
+    {
+      // Preserve the provider-neutral empty-ID signal so the agent's existing
+      // call-ID validator rejects it before any session mutation.
+      events.push_back(StreamEvent{
+          .type = StreamEventType::ToolCallStart, .text = "", .tool_call_id = "", .tool_name = state.name, .error_message = "", .usage = std::nullopt});
+      return;
+    }
+    if (state.name.empty())
+    {
+      append_stream_error(events, error_seen, "OpenAI function call item has an empty logical call ID or name");
+      return;
+    }
+    static_cast<void>(append_function_call_argument_fragment(events, state, function_call_arguments_from_event(data).value_or("")));
+    static_cast<void>(append_function_call_start_if_ready(events, state));
+    append_unemitted_function_call_arguments(events, state);
     return;
   }
   if (type == "response.function_call.done" || type == "response.function_call.completed")
@@ -326,7 +449,10 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     saw_content = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,
                                     completed_reasoning_texts);
-    append_function_call_end(events, completed_function_call_ids, logical_function_call_id_from_event(data, function_call_ids));
+    auto& state = function_call_state_for(data, function_calls);
+    if (!reconcile_complete_function_call_arguments(events, state, function_call_arguments_from_event(data), error_seen))
+      return;
+    static_cast<void>(append_function_call_end(events, state, false, error_seen));
     return;
   }
   if (type == "response.completed" || type == "response.incomplete")
@@ -346,28 +472,21 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
   }
   if (type == "response.error" || type == "response.failed")
   {
-    error_seen = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,
                                     completed_reasoning_texts);
     auto const error_object = ava::core::json::object_field(data, "error");
-    events.push_back(StreamEvent{.type = StreamEventType::Error,
-                                 .text = "",
-                                 .tool_call_id = "",
-                                 .tool_name = "",
-                                 .error_message = error_object ? ava::core::json::string_field(*error_object, "message").value_or("")
-                                                               : ava::core::json::string_field(data, "message").value_or(""),
-                                 .usage = std::nullopt});
+    append_stream_error(
+        events, error_seen,
+        error_object ? ava::core::json::string_field(*error_object, "message").value_or("") : ava::core::json::string_field(data, "message").value_or(""));
     return;
   }
   // OpenAI may add non-content lifecycle events without changing the assistant turn.
-  // Ignore unknown event types unless the provider explicitly reports an error.
 }
 
 void append_events_for_sse_line(std::vector<StreamEvent>& events, std::string& data, bool& saw_content, bool& reasoning_open, bool& reasoning_text_seen,
                                 std::string& active_reasoning_item_id, std::string& active_reasoning_text,
                                 std::vector<std::string>& completed_reasoning_item_ids, std::vector<std::string>& completed_reasoning_texts, bool& done_seen,
-                                bool& error_seen, std::unordered_map<std::string, std::string>& function_call_ids,
-                                std::vector<std::string>& completed_function_call_ids, std::string line)
+                                bool& error_seen, std::unordered_map<std::string, OpenAIStreamParser::FunctionCallState>& function_calls, std::string line)
 {
   if (!line.empty() && line.back() == '\r')
     line.pop_back();
@@ -376,7 +495,7 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events, std::string& d
     if (!data.empty())
     {
       append_event_for_data(events, data, saw_content, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text,
-                            completed_reasoning_item_ids, completed_reasoning_texts, done_seen, error_seen, function_call_ids, completed_function_call_ids);
+                            completed_reasoning_item_ids, completed_reasoning_texts, done_seen, error_seen, function_calls);
       data.clear();
     }
     return;
@@ -406,8 +525,8 @@ ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::append(std::stri
     if (newline == std::string::npos)
       break;
     append_events_for_sse_line(events, data_, saw_content_, reasoning_open_, reasoning_text_seen_, active_reasoning_item_id_, active_reasoning_text_,
-                               completed_reasoning_item_ids_, completed_reasoning_texts_, done_seen_, error_seen_, function_call_ids_,
-                               completed_function_call_ids_, pending_line_.substr(line_start, newline - line_start));
+                               completed_reasoning_item_ids_, completed_reasoning_texts_, done_seen_, error_seen_, function_calls_,
+                               pending_line_.substr(line_start, newline - line_start));
     line_start = newline + 1;
     search_from = line_start;
   }
@@ -423,15 +542,14 @@ ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::finish()
   if (!pending_line_.empty())
   {
     append_events_for_sse_line(events, data_, saw_content_, reasoning_open_, reasoning_text_seen_, active_reasoning_item_id_, active_reasoning_text_,
-                               completed_reasoning_item_ids_, completed_reasoning_texts_, done_seen_, error_seen_, function_call_ids_,
-                               completed_function_call_ids_, std::move(pending_line_));
+                               completed_reasoning_item_ids_, completed_reasoning_texts_, done_seen_, error_seen_, function_calls_, std::move(pending_line_));
     pending_line_.clear();
   }
   scan_offset_ = 0;
   if (!data_.empty())
   {
     append_event_for_data(events, data_, saw_content_, reasoning_open_, reasoning_text_seen_, active_reasoning_item_id_, active_reasoning_text_,
-                          completed_reasoning_item_ids_, completed_reasoning_texts_, done_seen_, error_seen_, function_call_ids_, completed_function_call_ids_);
+                          completed_reasoning_item_ids_, completed_reasoning_texts_, done_seen_, error_seen_, function_calls_);
     data_.clear();
   }
   append_finish_reasoning_if_open(events, reasoning_open_, reasoning_text_seen_, active_reasoning_item_id_, active_reasoning_text_,
@@ -452,8 +570,7 @@ ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::finish()
   active_reasoning_text_.clear();
   completed_reasoning_item_ids_.clear();
   completed_reasoning_texts_.clear();
-  function_call_ids_.clear();
-  completed_function_call_ids_.clear();
+  function_calls_.clear();
   done_seen_ = false;
   error_seen_ = false;
   return events;

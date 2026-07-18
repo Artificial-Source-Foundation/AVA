@@ -14,6 +14,20 @@ namespace ava::provider {
 class OpenAIStreamParser final : public StreamParser
 {
  public:
+  // Responses identifies the streamed item with an fc_ ID while callers
+  // dispatch and replay through the separate logical call_id.
+  struct FunctionCallState
+  {
+    std::string logical_call_id;
+    std::string name;
+    std::string arguments;
+    std::size_t emitted_argument_bytes = 0;
+    bool started = false;
+    bool ended = false;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
+  };
+
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk) override;
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> finish() override;
 
@@ -30,10 +44,7 @@ class OpenAIStreamParser final : public StreamParser
   std::string active_reasoning_text_;
   std::vector<std::string> completed_reasoning_item_ids_;
   std::vector<std::string> completed_reasoning_texts_;
-  // Responses uses the output item ID to identify deltas but expects callers to
-  // dispatch and replay results with the distinct logical call_id.
-  std::unordered_map<std::string, std::string> function_call_ids_;
-  std::vector<std::string> completed_function_call_ids_;
+  std::unordered_map<std::string, FunctionCallState> function_calls_;
   bool done_seen_ = false;
   bool error_seen_ = false;
 };

@@ -211,16 +211,21 @@ ava::core::Result<std::string> parse_openai_response_text(std::string_view body)
     return *output;
   if (auto text = ava::core::json::string_field(body, "text"))
     return *text;
+  std::string output_text;
   for (auto const& item : ava::core::json::objects_in_array_field(body, "output"))
   {
     if (ava::core::json::string_field(item, "type").value_or("") != "message")
       continue;
     for (auto const& content : ava::core::json::objects_in_array_field(item, "content"))
     {
+      if (ava::core::json::string_field(content, "type").value_or("") != "output_text")
+        continue;
       if (auto text = ava::core::json::string_field(content, "text"))
-        return *text;
+        append_joined_text(output_text, *text);
     }
   }
+  if (!output_text.empty())
+    return output_text;
   return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI response text is missing"));
 }
 
@@ -235,8 +240,6 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
     if (ava::core::json::string_field(item, "type").value_or("") != "reasoning")
       continue;
     auto const summary = reasoning_summary_text_from_object(item);
-    if (summary.empty())
-      continue;
     events.push_back(StreamEvent{.type = StreamEventType::ReasoningStart,
                                  .text = "",
                                  .tool_call_id = "",
@@ -244,20 +247,24 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
                                  .error_message = "",
                                  .usage = std::nullopt,
                                  .reasoning_format = std::string(kOpenAIResponsesReasoningFormat)});
-    events.push_back(StreamEvent{.type = StreamEventType::ReasoningDelta,
-                                 .text = summary,
-                                 .tool_call_id = "",
-                                 .tool_name = "",
-                                 .error_message = "",
-                                 .usage = std::nullopt,
-                                 .reasoning_format = std::string(kOpenAIResponsesReasoningFormat)});
+    if (!summary.empty())
+    {
+      events.push_back(StreamEvent{.type = StreamEventType::ReasoningDelta,
+                                   .text = summary,
+                                   .tool_call_id = "",
+                                   .tool_name = "",
+                                   .error_message = "",
+                                   .usage = std::nullopt,
+                                   .reasoning_format = std::string(kOpenAIResponsesReasoningFormat)});
+    }
     events.push_back(StreamEvent{.type = StreamEventType::ReasoningEnd,
                                  .text = "",
                                  .tool_call_id = "",
                                  .tool_name = "",
                                  .error_message = "",
                                  .usage = std::nullopt,
-                                 .reasoning_format = std::string(kOpenAIResponsesReasoningFormat)});
+                                 .reasoning_format = std::string(kOpenAIResponsesReasoningFormat),
+                                 .reasoning_native_item_json = item});
   }
   if (auto text = parse_openai_response_text(body))
   {

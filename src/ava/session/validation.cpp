@@ -1008,10 +1008,18 @@ void validate_reasoning_block_entry(SessionReplayValidation& validation, std::si
   auto const text = ava::core::json::string_field(entry.data_json, "text").value_or("");
   auto const signature = ava::core::json::string_field(entry.data_json, "signature").value_or("");
   auto const redacted_data = ava::core::json::string_field(entry.data_json, "redacted_data").value_or("");
+  auto const native_item_start = ava::core::json::field_value_start(entry.data_json, "native_item_json");
+  auto const native_item_json = ava::core::json::string_field(entry.data_json, "native_item_json");
   if (provider.empty() || model.empty() || !present_non_empty_string(entry.data_json, "format") || !present_boolean(entry.data_json, "redacted") ||
-      (text.empty() && signature.empty() && redacted_data.empty()))
+      (text.empty() && signature.empty() && redacted_data.empty() && (!native_item_json || native_item_json->empty())))
   {
     add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "", "reasoning_block entry is missing provider/model/content metadata");
+  }
+  if (native_item_start && (!native_item_json || !ava::core::json::is_valid_object(*native_item_json) ||
+                            ava::core::json::string_field(*native_item_json, "type").value_or("") != "reasoning"))
+  {
+    add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "",
+              "reasoning_block native_item_json must be a JSON reasoning object");
   }
 }
 

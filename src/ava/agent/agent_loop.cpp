@@ -1051,8 +1051,9 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
                  event.type == ava::provider::StreamEventType::ReasoningEnd)
         {
           auto const event_bytes = event.type == ava::provider::StreamEventType::ReasoningEnd
-                                       ? event.reasoning_signature.size() + event.reasoning_redacted_data.size()
-                                       : event.text.size() + event.reasoning_signature.size() + event.reasoning_redacted_data.size();
+                                       ? event.reasoning_signature.size() + event.reasoning_redacted_data.size() + event.reasoning_native_item_json.size()
+                                       : event.text.size() + event.reasoning_signature.size() + event.reasoning_redacted_data.size() +
+                                             event.reasoning_native_item_json.size();
           if (would_exceed(streamed_assistant_text_bytes, event_bytes, options_.max_assistant_text_bytes))
           {
             return std::unexpected(output_limit_error("reasoning byte limit exceeded", "max_assistant_text_bytes", options_.max_assistant_text_bytes));

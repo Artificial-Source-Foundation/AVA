@@ -23,7 +23,7 @@ ProviderToolCall& pending_call_for(std::vector<ProviderToolCall>& calls, std::st
 
 std::size_t reasoning_block_bytes(ParsedReasoningBlock const& block)
 {
-  return block.text.size() + block.signature.size() + block.redacted_data.size();
+  return block.text.size() + block.signature.size() + block.redacted_data.size() + block.native_item_json.size();
 }
 
 }  // namespace
@@ -39,7 +39,8 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(std::vector<ava::pro
   auto finish_reasoning = [&]() {
     if (!current_reasoning)
       return;
-    if (!current_reasoning->text.empty() || !current_reasoning->signature.empty() || !current_reasoning->redacted_data.empty())
+    if (!current_reasoning->text.empty() || !current_reasoning->signature.empty() || !current_reasoning->redacted_data.empty() ||
+        !current_reasoning->native_item_json.empty())
     {
       turn.reasoning_blocks.push_back(std::move(*current_reasoning));
     }
@@ -65,8 +66,9 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(std::vector<ava::pro
                                                .format = event.reasoning_format,
                                                .signature = event.reasoning_signature,
                                                .redacted_data = event.reasoning_redacted_data,
+                                               .native_item_json = event.reasoning_native_item_json,
                                                .redacted = event.redacted};
-      auto const private_bytes = event.reasoning_signature.size() + event.reasoning_redacted_data.size();
+      auto const private_bytes = event.reasoning_signature.size() + event.reasoning_redacted_data.size() + event.reasoning_native_item_json.size();
       if (would_exceed(std::size_t{0}, private_bytes, limits.max_assistant_text_bytes))
       {
         return std::unexpected(output_limit_error("reasoning byte limit exceeded", "max_assistant_text_bytes", limits.max_assistant_text_bytes));
@@ -76,8 +78,8 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(std::vector<ava::pro
     {
       if (!current_reasoning)
       {
-        current_reasoning =
-            ParsedReasoningBlock{.text = "", .format = event.reasoning_format, .signature = "", .redacted_data = "", .redacted = event.redacted};
+        current_reasoning = ParsedReasoningBlock{
+            .text = "", .format = event.reasoning_format, .signature = "", .redacted_data = "", .native_item_json = "", .redacted = event.redacted};
       }
       if (current_reasoning->format.empty())
         current_reasoning->format = event.reasoning_format;
@@ -96,8 +98,8 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(std::vector<ava::pro
     {
       if (!current_reasoning)
       {
-        current_reasoning =
-            ParsedReasoningBlock{.text = "", .format = event.reasoning_format, .signature = "", .redacted_data = "", .redacted = event.redacted};
+        current_reasoning = ParsedReasoningBlock{
+            .text = "", .format = event.reasoning_format, .signature = "", .redacted_data = "", .native_item_json = "", .redacted = event.redacted};
       }
       if (current_reasoning->format.empty())
         current_reasoning->format = event.reasoning_format;
@@ -105,8 +107,10 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(std::vector<ava::pro
         current_reasoning->signature = event.reasoning_signature;
       if (!event.reasoning_redacted_data.empty())
         current_reasoning->redacted_data = event.reasoning_redacted_data;
+      if (!event.reasoning_native_item_json.empty())
+        current_reasoning->native_item_json = event.reasoning_native_item_json;
       current_reasoning->redacted = current_reasoning->redacted || event.redacted;
-      auto const private_bytes = event.reasoning_signature.size() + event.reasoning_redacted_data.size();
+      auto const private_bytes = event.reasoning_signature.size() + event.reasoning_redacted_data.size() + event.reasoning_native_item_json.size();
       if (would_exceed(std::size_t{0}, private_bytes, limits.max_assistant_text_bytes))
       {
         return std::unexpected(output_limit_error("reasoning byte limit exceeded", "max_assistant_text_bytes", limits.max_assistant_text_bytes));

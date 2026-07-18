@@ -485,18 +485,23 @@ void test_agent_loop_tool_turn_and_continuation()
                                           .cache_read_per_million = std::nullopt,
                                           .cache_write_per_million = std::nullopt,
                                           .reasoning_per_million = std::nullopt};
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\","
-                                                    "\"call_id\":\"call_1\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
-                                                    "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"delta\":\"{\\\"path\\\":"
-                                                    "\\\"note.txt\\\"}\"}\n\n"
-                                                    "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\","
-                                                    "\"call_id\":\"call_1\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}}\n\n"
-                                                    "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,"
-                                                    "\"output_tokens\":2,\"total_tokens\":12}}}\n\n"),
-                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"read it\"}\n\n"
-                                                    "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":5,"
-                                                    "\"output_tokens\":3,\"total_tokens\":8}}}\n\n")});
+  auto const private_reasoning_item_json =
+      R"({"id":"rs_tool","type":"reasoning","summary":[{"type":"summary_text","text":"inspect note"}],"status":"completed","encrypted_content":"ciphertext-tool"})";
+  ava::tests::FakeTransport transport(
+      {sse_response(std::string("data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"rs_tool\",\"type\":\"reasoning\"}}\n\n") +
+                    "data: {\"type\":\"response.output_item.done\",\"item\":" + private_reasoning_item_json + "}\n\n" +
+                    "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\","
+                    "\"call_id\":\"call_1\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+                    "data: "
+                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"delta\":\"{\\\"path\\\":"
+                    "\\\"note.txt\\\"}\"}\n\n"
+                    "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\","
+                    "\"call_id\":\"call_1\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}}\n\n"
+                    "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,"
+                    "\"output_tokens\":2,\"total_tokens\":12}}}\n\n"),
+       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"read it\"}\n\n"
+                    "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":5,"
+                    "\"output_tokens\":3,\"total_tokens\":8}}}\n\n")});
   std::vector<ava::agent::ToolTimelineEntry> tool_events;
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
@@ -513,11 +518,16 @@ void test_agent_loop_tool_turn_and_continuation()
              result->tool_iterations == 1 && result->outcome == ava::core::RuntimeTerminalOutcome::Completed,
          "agent loop runs one sequential tool call then continues to final answer with status metadata");
   expect(transport.requests().size() == 2 && transport.requests()[1].body.find("tool content") != std::string::npos &&
+             transport.requests()[1].body.find(private_reasoning_item_json) != std::string::npos &&
              transport.requests()[1].body.find(R"({"type":"function_call","call_id":"call_1","name":"read_file",)") != std::string::npos &&
              transport.requests()[1].body.find(R"({"type":"function_call_output","call_id":"call_1",)") != std::string::npos &&
+             transport.requests()[1].body.find(private_reasoning_item_json) <
+                 transport.requests()[1].body.find(R"({"type":"function_call","call_id":"call_1",)") &&
+             transport.requests()[1].body.find(R"({"type":"function_call","call_id":"call_1",)") <
+                 transport.requests()[1].body.find(R"({"type":"function_call_output","call_id":"call_1",)") &&
              transport.requests()[1].body.find("Tool call requested by assistant") == std::string::npos &&
              transport.requests()[1].body.find("Tool result data only") == std::string::npos,
-         "agent loop continues OpenAI tool turns with canonical native function replay");
+         "agent loop continues OpenAI reasoning tool turns with exact native reasoning before function replay");
   expect(result && result->tool_timeline.size() == 1 && result->tool_timeline.front().status == ava::agent::ToolTimelineStatus::Success &&
              result->tool_timeline.front().name == "read_file" && result->tool_timeline.front().argument_summary.find("path=note.txt") != std::string::npos &&
              result->tool_timeline.front().argument_summary.find('{') == std::string::npos &&
@@ -541,6 +551,7 @@ void test_agent_loop_tool_turn_and_continuation()
   bool saw_tool_call = false;
   bool saw_tool_result = false;
   bool saw_structured_tool_result = false;
+  bool saw_private_reasoning_item = false;
   bool saw_final_assistant = false;
   for (auto const& entry : *entries)
   {
@@ -549,11 +560,13 @@ void test_agent_loop_tool_turn_and_continuation()
     saw_structured_tool_result = saw_structured_tool_result || (entry.type == ava::session::EntryType::ToolResult &&
                                                                 entry.data_json.find("\"structured_result\":{\"schema_version\":1") != std::string::npos &&
                                                                 entry.data_json.find("\"content_type\":\"application/json\"") != std::string::npos);
+    saw_private_reasoning_item = saw_private_reasoning_item || (entry.type == ava::session::EntryType::ReasoningBlock &&
+                                                                entry.data_json.find("encrypted_content\\\":\\\"ciphertext-tool") != std::string::npos);
     saw_final_assistant =
         saw_final_assistant || (entry.type == ava::session::EntryType::AssistantMessage && entry.data_json.find("read it") != std::string::npos);
   }
-  expect(saw_tool_call && saw_tool_result && saw_structured_tool_result && saw_final_assistant,
-         "agent loop persists assistant, tool call, and semantic structured tool result entries");
+  expect(saw_tool_call && saw_tool_result && saw_structured_tool_result && saw_private_reasoning_item && saw_final_assistant,
+         "agent loop persists private native reasoning with assistant, tool call, and semantic structured tool result entries");
 }
 
 void test_agent_loop_task_subagent_runs_child_session()

@@ -36,6 +36,7 @@ std::size_t output_estimate_bytes(ParsedAssistantTurn const& turn)
     bytes += reasoning.text.size();
     bytes += reasoning.signature.size();
     bytes += reasoning.redacted_data.size();
+    bytes += reasoning.native_item_json.size();
   }
   for (auto const& call : turn.tool_calls)
   {

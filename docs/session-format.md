@@ -161,8 +161,8 @@ Persisted image attachments are metadata references, not inline uploads:
 - `storage_path` must be a relative `attachments/...` path without absolute roots, `..`, empty segments, backslashes, drive prefixes, or control bytes.
 - AVA imports local RPC `attachments` paths and inline RPC `images` uploads into the session attachment store before writing message metadata. Raw base64 image data is invalid in persisted session JSONL.
 - Replay loads bytes only from the active session's attachment directory and verifies path containment, symlinks, byte size, and SHA-256 before sending image content to providers.
-- Portable JSONL export does not bundle attachment bytes. If you archive sessions with non-redacted image attachments, archive the sibling `<session_id>.attachments` directory too.
-- Branch/fork/clone code copies non-redacted image attachment bytes for copied entries. Slash `/import <path.jsonl>` validates JSONL and creates a new session, but it does not currently bundle or reconstruct external attachment bytes from the source archive; imported image history needs the bytes mirrored into the new session's attachment directory before image replay can work.
+- Portable JSONL export does not bundle attachment bytes. It converts every exported image attachment to the accepted `redacted:true` metadata form, preserves safe audit fields such as id/MIME/size/digest, and replaces the source storage reference with a deterministic portable placeholder. The export therefore re-imports without attachment bytes, but it cannot replay the original image content.
+- Branch/fork/clone code copies non-redacted image attachment bytes for copied entries. Slash `/import <path.jsonl>` accepts portable redacted attachment metadata without reconstructing attachment bytes; directly imported non-redacted attachment references still require an attachment-aware archive because image replay would otherwise be dangling.
 
 Provider replay also has request-level caps, including at most 16 images and aggregate byte limits before base64 expansion; some providers have lower per-image limits.
 

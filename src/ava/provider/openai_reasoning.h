@@ -36,8 +36,17 @@ inline constexpr std::size_t kMaxOpenAIOpaqueIdBytes = 256U;
     return false;
   }
   auto const id = ava::core::json::string_field(native_item_json, "id");
-  auto const summary_start = ava::core::json::field_value_start(native_item_json, "summary");
-  return id && is_valid_openai_opaque_id(*id) && summary_start && *summary_start < native_item_json.size() && native_item_json[*summary_start] == '[';
+  auto const summary_items = ava::core::json::strict_objects_in_array_field(native_item_json, "summary");
+  if (!id || !is_valid_openai_opaque_id(*id) || !summary_items)
+    return false;
+  for (auto const& summary_item : *summary_items)
+  {
+    if (ava::core::json::string_field(summary_item, "type").value_or("") != "summary_text" || !ava::core::json::string_field(summary_item, "text"))
+    {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace ava::provider

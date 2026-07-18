@@ -291,6 +291,14 @@ void test_openai_provider_contract()
              invalid_native_reasoning->body.find("\"type\":\"function_call\"") == std::string::npos,
          "OpenAI native tool replay falls back to readable synthetic history for an invalid private reasoning item");
 
+  auto invalid_native_summary_request = native_reasoning_request;
+  invalid_native_summary_request.messages[0].content_parts[0].reasoning_native_item_json =
+      R"({"id":"rs_scalar_summary","type":"reasoning","summary":["not-an-object"]})";
+  auto const invalid_native_summary = provider.build_request(invalid_native_summary_request, "api-token");
+  expect(invalid_native_summary && invalid_native_summary->body.find("inspect first") != std::string::npos &&
+             invalid_native_summary->body.find("\"type\":\"function_call\"") == std::string::npos,
+         "OpenAI request replay rejects native reasoning summaries with non-object entries");
+
   auto const unpaired_native_parts_request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "openai",
@@ -508,7 +516,8 @@ void test_openai_provider_contract()
       "\"type\":\"function_call\",\"name\":\"read_file\",\"call_id\":\"call_live_provider\",\"arguments\":\"\"}}\n\n"
       "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_live\","
       "\"delta\":\"{\\\"path\\\":\\\"smoke.txt\\\"}\"}\n\n"
-      "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_live\"}\n\n"
+      "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_live\","
+      "\"arguments\":\"{\\\"path\\\":\\\"smoke.txt\\\"}\"}\n\n"
       "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_live\",\"type\":\"function_call\","
       "\"name\":\"read_file\",\"call_id\":\"call_live_provider\",\"arguments\":\"{\\\"path\\\":\\\"smoke.txt\\\"}\"}}\n\n"
       "data: [DONE]\n\n");
@@ -519,8 +528,92 @@ void test_openai_provider_contract()
              (*output_item_tool)[2].tool_call_id == "call_live_provider",
          "OpenAI stream parser maps function-call item IDs to logical call IDs across lifecycle events");
 
+  auto documented_added_terminal = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_open\",\"type\":\"function_call\","
+      "\"call_id\":\"call_open\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+      "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n");
+  expect(documented_added_terminal &&
+             std::any_of(documented_added_terminal->begin(), documented_added_terminal->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallStart; }) &&
+             std::none_of(documented_added_terminal->begin(), documented_added_terminal->end(),
+                          [](auto const& event) { return event.type == ava::provider::StreamEventType::Done; }) &&
+             std::any_of(documented_added_terminal->begin(), documented_added_terminal->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI documented output_item.added cannot reach a successful terminal before output_item.done");
+  auto documented_added_incomplete = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_open_incomplete\",\"type\":\"function_call\","
+      "\"call_id\":\"call_open_incomplete\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+      "data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\"}}\n\n");
+  expect(documented_added_incomplete &&
+             std::none_of(documented_added_incomplete->begin(), documented_added_incomplete->end(),
+                          [](auto const& event) { return event.type == ava::provider::StreamEventType::Done; }) &&
+             std::any_of(documented_added_incomplete->begin(), documented_added_incomplete->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI response.incomplete rejects an unfinished documented function item");
+  auto documented_added_done = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_open_done\",\"type\":\"function_call\","
+      "\"call_id\":\"call_open_done\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+      "data: [DONE]\n\n");
+  expect(documented_added_done &&
+             std::none_of(documented_added_done->begin(), documented_added_done->end(),
+                          [](auto const& event) { return event.type == ava::provider::StreamEventType::Done; }) &&
+             std::any_of(documented_added_done->begin(), documented_added_done->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI [DONE] rejects an unfinished documented function item");
+  auto documented_added_eof = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_open_eof\",\"type\":\"function_call\","
+      "\"call_id\":\"call_open_eof\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n");
+  expect(documented_added_eof &&
+             std::any_of(documented_added_eof->begin(), documented_added_eof->end(), [](auto const& event) {
+               return event.type == ava::provider::StreamEventType::Error && event.error_message.find("item completion") != std::string::npos;
+             }),
+         "OpenAI finish fallback rejects an unfinished documented function item");
+
+  auto empty_final_arguments = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_empty_final\",\"type\":\"function_call\","
+      "\"call_id\":\"call_empty_final\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+      "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_empty_final\",\"type\":\"function_call\","
+      "\"call_id\":\"call_empty_final\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n");
+  auto malformed_final_arguments = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_bad_final\",\"type\":\"function_call\","
+      "\"call_id\":\"call_bad_final\",\"name\":\"read_file\",\"arguments\":\"{\"}}\n\n");
+  expect(empty_final_arguments && malformed_final_arguments &&
+             std::none_of(empty_final_arguments->begin(), empty_final_arguments->end(),
+                          [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallEnd; }) &&
+             std::none_of(malformed_final_arguments->begin(), malformed_final_arguments->end(),
+                          [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallEnd; }) &&
+             std::any_of(empty_final_arguments->begin(), empty_final_arguments->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }) &&
+             std::any_of(malformed_final_arguments->begin(), malformed_final_arguments->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI output_item.done rejects empty or malformed final function arguments before ToolCallEnd");
+
+  auto documented_done_missing_arguments = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_done_missing\",\"type\":\"function_call\","
+      "\"call_id\":\"call_done_missing\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+      "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_done_missing\"}\n\n");
+  auto documented_done_wrong_arguments = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_done_wrong\",\"type\":\"function_call\","
+      "\"call_id\":\"call_done_wrong\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+      "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_done_wrong\",\"arguments\":{}}\n\n");
+  auto documented_delta_missing = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_delta_missing\",\"type\":\"function_call\","
+      "\"call_id\":\"call_delta_missing\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+      "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_delta_missing\"}\n\n");
+  auto documented_delta_wrong = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_delta_wrong\",\"type\":\"function_call\","
+      "\"call_id\":\"call_delta_wrong\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+      "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_delta_wrong\",\"delta\":{}}\n\n");
+  auto has_error = [](auto const& parsed) {
+    return parsed && std::any_of(parsed->begin(), parsed->end(), [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; });
+  };
+  expect(has_error(documented_done_missing_arguments) && has_error(documented_done_wrong_arguments) && has_error(documented_delta_missing) &&
+             has_error(documented_delta_wrong),
+         "OpenAI documented function argument delta and completion events require present string fields");
+
   auto documented_missing_call_id = ava::provider::parse_openai_sse(
-      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_missing_call\",\"type\":\"function_call\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+      "data: "
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_missing_call\",\"type\":\"function_call\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
       "data: [DONE]\n\n");
   expect(documented_missing_call_id &&
              std::none_of(documented_missing_call_id->begin(), documented_missing_call_id->end(),
@@ -530,7 +623,8 @@ void test_openai_provider_contract()
          "OpenAI documented output items reject a missing logical call_id instead of falling back to item.id");
   auto documented_empty_call_id = ava::provider::parse_openai_sse(
       "data: "
-      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_empty_call\",\"type\":\"function_call\",\"call_id\":\"\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_empty_call\",\"type\":\"function_call\",\"call_id\":\"\",\"name\":\"read_file\","
+      "\"arguments\":\"\"}}\n\n"
       "data: [DONE]\n\n");
   expect(documented_empty_call_id &&
              std::none_of(documented_empty_call_id->begin(), documented_empty_call_id->end(),
@@ -539,10 +633,14 @@ void test_openai_provider_contract()
                          [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
          "OpenAI documented output items reject an explicit empty logical call_id");
   auto documented_missing_name = ava::provider::parse_openai_sse(
-      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_missing_name\",\"type\":\"function_call\",\"call_id\":\"opaque-missing-name\",\"arguments\":\"\"}}\n\n"
+      "data: "
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_missing_name\",\"type\":\"function_call\",\"call_id\":\"opaque-missing-name\","
+      "\"arguments\":\"\"}}\n\n"
       "data: [DONE]\n\n");
   auto documented_empty_name = ava::provider::parse_openai_sse(
-      "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_empty_name\",\"type\":\"function_call\",\"call_id\":\"opaque-empty-name\",\"name\":\"\",\"arguments\":\"\"}}\n\n"
+      "data: "
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_empty_name\",\"type\":\"function_call\",\"call_id\":\"opaque-empty-name\",\"name\":\"\","
+      "\"arguments\":\"\"}}\n\n"
       "data: [DONE]\n\n");
   expect(documented_missing_name && documented_empty_name &&
              std::none_of(documented_missing_name->begin(), documented_missing_name->end(),
@@ -590,10 +688,12 @@ void test_openai_provider_contract()
          "OpenAI documented argument events reject orphan and empty item IDs without legacy ID promotion");
   auto documented_mapping_change = ava::provider::parse_openai_sse(
       "data: "
-      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_mapping\",\"type\":\"function_call\",\"call_id\":\"opaque-first\",\"name\":\"read_file\",\"arguments\":\"\"}"
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_mapping\",\"type\":\"function_call\",\"call_id\":\"opaque-first\",\"name\":\"read_file\","
+      "\"arguments\":\"\"}"
       "}\n\n"
       "data: "
-      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_mapping\",\"type\":\"function_call\",\"call_id\":\"opaque-second\",\"name\":\"read_file\",\"arguments\":\"\"}"
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_mapping\",\"type\":\"function_call\",\"call_id\":\"opaque-second\",\"name\":\"read_file\","
+      "\"arguments\":\"\"}"
       "}\n\n"
       "data: [DONE]\n\n");
   expect(documented_mapping_change &&
@@ -604,10 +704,12 @@ void test_openai_provider_contract()
          "OpenAI documented item-id mappings reject a changed logical call_id without dispatching a replacement call");
   auto documented_name_change = ava::provider::parse_openai_sse(
       "data: "
-      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_name\",\"type\":\"function_call\",\"call_id\":\"opaque-name\",\"name\":\"read_file\",\"arguments\":\"\"}}"
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_name\",\"type\":\"function_call\",\"call_id\":\"opaque-name\",\"name\":\"read_file\","
+      "\"arguments\":\"\"}}"
       "\n\n"
       "data: "
-      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_name\",\"type\":\"function_call\",\"call_id\":\"opaque-name\",\"name\":\"write_file\",\"arguments\":\"\"}}"
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_name\",\"type\":\"function_call\",\"call_id\":\"opaque-name\",\"name\":\"write_file\","
+      "\"arguments\":\"\"}}"
       "\n\n"
       "data: [DONE]\n\n");
   expect(documented_name_change && std::any_of(documented_name_change->begin(), documented_name_change->end(),
@@ -635,7 +737,8 @@ void test_openai_provider_contract()
       "data: {\"type\":\"response.output_item.done\",\"item\":" + reasoning_tool_item_json +
       "}\n\n"
       "data: "
-      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_private\",\"type\":\"function_call\",\"call_id\":\"call_private\",\"name\":\"read_file\",\"arguments\":\"\"}"
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_private\",\"type\":\"function_call\",\"call_id\":\"call_private\",\"name\":\"read_file\","
+      "\"arguments\":\"\"}"
       "}\n\n"
       "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_private\",\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}\n\n"
       "data: "
@@ -657,13 +760,26 @@ void test_openai_provider_contract()
   expect(malformed_stream_reasoning && malformed_stream_reasoning_end != malformed_stream_reasoning->end() &&
              malformed_stream_reasoning_end->reasoning_native_item_json.empty(),
          "OpenAI streaming parser keeps readable reasoning while dropping malformed native replay metadata");
+  auto malformed_summary_shape = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"rs_scalar_summary\",\"type\":\"reasoning\","
+      "\"summary\":[\"not-an-object\"]}}\n\n"
+      "data: [DONE]\n\n");
+  auto const malformed_summary_shape_end = malformed_summary_shape
+                                               ? std::find_if(malformed_summary_shape->begin(), malformed_summary_shape->end(),
+                                                              [](auto const& event) { return event.type == ava::provider::StreamEventType::ReasoningEnd; })
+                                               : std::vector<ava::provider::StreamEvent>::const_iterator{};
+  expect(malformed_summary_shape && malformed_summary_shape_end != malformed_summary_shape->end() &&
+             malformed_summary_shape_end->reasoning_native_item_json.empty(),
+         "OpenAI streaming parser drops native replay metadata for malformed reasoning summary array elements");
 
   auto arguments_done_only = ava::provider::parse_openai_sse(
       "data: "
-      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_done\",\"type\":\"function_call\",\"call_id\":\"call_done\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+      "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_done\",\"type\":\"function_call\",\"call_id\":\"call_done\",\"name\":\"read_file\","
+      "\"arguments\":\"\"}}\n\n"
       "data: {\"type\":\"response.function_call_arguments.done\",\"call_id\":\"call_done\",\"arguments\":\"{\\\"path\\\":\\\"done.txt\\\"}\"}\n\n"
       "data: "
-      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_done\",\"type\":\"function_call\",\"call_id\":\"call_done\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"done.txt\\\"}\"}}\n\n"
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_done\",\"type\":\"function_call\",\"call_id\":\"call_done\",\"name\":\"read_file\","
+      "\"arguments\":\"{\\\"path\\\":\\\"done.txt\\\"}\"}}\n\n"
       "data: [DONE]\n\n");
   expect(arguments_done_only && arguments_done_only->size() == 4 && (*arguments_done_only)[1].type == ava::provider::StreamEventType::ToolCallDelta &&
              (*arguments_done_only)[1].text == R"({"path":"done.txt"})",
@@ -699,7 +815,8 @@ void test_openai_provider_contract()
       "\"arguments\":\"{\"}}\n\n"
       "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_suffix\",\"arguments\":\"{}\"}\n\n"
       "data: "
-      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_suffix\",\"type\":\"function_call\",\"call_id\":\"call_suffix\",\"name\":\"read_file\",\"arguments\":\"{}\"}}"
+      "{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_suffix\",\"type\":\"function_call\",\"call_id\":\"call_suffix\",\"name\":\"read_file\","
+      "\"arguments\":\"{}\"}}"
       "\n\n"
       "data: [DONE]\n\n");
   expect(suffix_final_arguments && suffix_final_arguments->size() == 5 && (*suffix_final_arguments)[1].text == "{" && (*suffix_final_arguments)[2].text == "}",
@@ -1080,6 +1197,42 @@ void test_openai_provider_contract()
              std::any_of(non_stream_wrong_type_arguments->begin(), non_stream_wrong_type_arguments->end(),
                          [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
          "OpenAI non-stream function-call items require a present string arguments field before dispatch");
+  auto non_stream_missing_item_id = non_stream_provider.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"output\":[{\"type\":\"function_call\",\"call_id\":\"opaque-nonstream-missing-item\","
+                                          "\"name\":\"read_file\",\"arguments\":\"{}\"}]}"},
+      false);
+  auto non_stream_malformed_arguments = non_stream_provider.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"output\":[{\"id\":\"fc_nonstream_bad_arguments\",\"type\":\"function_call\","
+                                          "\"call_id\":\"opaque-nonstream-bad-arguments\",\"name\":\"read_file\",\"arguments\":\"[\"}]}"},
+      false);
+  auto non_stream_duplicate_item = non_stream_provider.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"output\":[{\"id\":\"fc_duplicate\",\"type\":\"function_call\",\"call_id\":\"call_one\","
+                                          "\"name\":\"read_file\",\"arguments\":\"{}\"},{\"id\":\"fc_duplicate\",\"type\":\"function_call\","
+                                          "\"call_id\":\"call_two\",\"name\":\"read_file\",\"arguments\":\"{}\"}]}"},
+      false);
+  auto non_stream_duplicate_call = non_stream_provider.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"output\":[{\"id\":\"fc_call_one\",\"type\":\"function_call\",\"call_id\":\"call_duplicate\","
+                                          "\"name\":\"read_file\",\"arguments\":\"{}\"},{\"id\":\"fc_call_two\",\"type\":\"function_call\","
+                                          "\"call_id\":\"call_duplicate\",\"name\":\"read_file\",\"arguments\":\"{}\"}]}"},
+      false);
+  expect(non_stream_missing_item_id && non_stream_malformed_arguments && non_stream_duplicate_item && non_stream_duplicate_call &&
+             std::any_of(non_stream_missing_item_id->begin(), non_stream_missing_item_id->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }) &&
+             std::any_of(non_stream_malformed_arguments->begin(), non_stream_malformed_arguments->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }) &&
+             std::any_of(non_stream_duplicate_item->begin(), non_stream_duplicate_item->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }) &&
+             std::any_of(non_stream_duplicate_call->begin(), non_stream_duplicate_call->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI non-stream function calls require JSON-object arguments and unique item/call identities");
   auto non_stream_reasoning = non_stream_provider.parse_response(
       ava::provider::HttpResponse{
           .status_code = 200,

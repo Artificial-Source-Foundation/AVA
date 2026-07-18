@@ -9,6 +9,7 @@
 #include <initializer_list>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -272,25 +273,42 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
     events.push_back(
         StreamEvent{.type = StreamEventType::TextDelta, .text = *text, .tool_call_id = "", .tool_name = "", .error_message = "", .usage = std::nullopt});
   }
+  std::unordered_map<std::string, std::string> call_ids_by_item_id;
+  std::unordered_map<std::string, std::string> item_ids_by_call_id;
   for (auto const& item : ava::core::json::objects_in_array_field(body, "output"))
   {
     if (ava::core::json::string_field(item, "type").value_or("") != "function_call")
       continue;
     // Responses output-item IDs (for example, fc_...) identify stream items;
     // call_id is the separate opaque identity required for dispatch and replay.
+    auto const item_id = ava::core::json::string_field(item, "id");
     auto const call_id = ava::core::json::string_field(item, "call_id");
     auto const name = ava::core::json::string_field(item, "name");
     auto const arguments = ava::core::json::string_field(item, "arguments");
-    if (!call_id || !name || !arguments || !is_valid_openai_opaque_id(*call_id) || name->empty())
+    if (!item_id || !call_id || !name || !arguments || !is_valid_openai_opaque_id(*item_id) || !is_valid_openai_opaque_id(*call_id) ||
+        !is_valid_openai_opaque_id(*name) || !ava::core::json::is_valid_object(*arguments))
+    {
+      events.push_back(
+          StreamEvent{.type = StreamEventType::Error,
+                      .text = "",
+                      .tool_call_id = "",
+                      .tool_name = "",
+                      .error_message = "OpenAI function call item requires bounded item ID, logical call ID, name, and JSON-object string arguments",
+                      .usage = std::nullopt});
+      continue;
+    }
+    if (call_ids_by_item_id.contains(*item_id) || item_ids_by_call_id.contains(*call_id))
     {
       events.push_back(StreamEvent{.type = StreamEventType::Error,
                                    .text = "",
                                    .tool_call_id = "",
                                    .tool_name = "",
-                                   .error_message = "OpenAI function call item requires a nonempty logical call ID, name, and string arguments",
+                                   .error_message = "OpenAI function call item ID and logical call ID must form a unique one-to-one mapping",
                                    .usage = std::nullopt});
       continue;
     }
+    call_ids_by_item_id.emplace(*item_id, *call_id);
+    item_ids_by_call_id.emplace(*call_id, *item_id);
     events.push_back(StreamEvent{
         .type = StreamEventType::ToolCallStart, .text = "", .tool_call_id = *call_id, .tool_name = *name, .error_message = "", .usage = std::nullopt});
     events.push_back(StreamEvent{

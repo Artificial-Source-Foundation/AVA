@@ -3077,9 +3077,9 @@ void test_app_command_dispatcher()
   expect(quit && quit->handled && quit->quit, "command dispatcher /quit requests shell exit");
 }
 
-void test_app_session_jsonl_import_export_attachment_caveat()
+void test_app_session_jsonl_import_export_portable_attachments()
 {
-  auto const root = temp_root() / "app-session-jsonl-attachment-caveat";
+  auto const root = temp_root() / "app-session-jsonl-portable-attachments";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
   auto const workspace = root / "workspace";
@@ -3092,78 +3092,65 @@ void test_app_session_jsonl_import_export_attachment_caveat()
   open_options.mode = ava::agent::Mode::Build;
   open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "JSONL attachment caveat test opens runtime session");
+  expect(session.has_value(), "portable JSONL attachment test opens runtime session");
   if (!session)
     return;
 
-  auto const attachment_json = std::string(R"({"id":"img_import_missing","type":"image","mime_type":"image/png","byte_size":12,)"
+  auto const attachment_json = std::string(R"({"id":"img_portable","type":"image","mime_type":"image/png","byte_size":12,)"
                                            R"("sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
-                                           R"("storage_path":"attachments/img_import_missing.png"})");
-  auto const redacted_attachment_json = std::string(R"({"id":"img_import_redacted","type":"image","mime_type":"image/png","byte_size":12,)"
-                                                    R"("sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
-                                                    R"("storage_path":"attachments/img_import_redacted.png","redacted":true})");
-
+                                           R"("storage_path":"attachments/source-only.png"})");
   auto const attached_entry = ava::session::SessionEntry{.id = "entry_jsonl_attachment_user",
                                                          .parent_id = "",
                                                          .type = ava::session::EntryType::UserMessage,
                                                          .timestamp = "2026-05-02T00:00:01Z",
                                                          .data_json = "{\"text\":\"see attached\",\"attachments\":[" + attachment_json + "]}"};
   auto appended = session->append_owned(attached_entry);
-  expect(appended.has_value(), "JSONL attachment caveat test seeds non-redacted image attachment metadata");
+  expect(appended.has_value(), "portable JSONL attachment test seeds non-redacted image attachment metadata");
+  if (!appended)
+    return;
 
-  auto exported = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export jsonl attachment-export.jsonl"});
-  expect(exported && exported->handled && !exported->output.empty() &&
-             exported->output[0].find("note: portable JSONL exports include 1 image attachment") != std::string::npos &&
-             exported->output[0].find("not the attachment files") != std::string::npos && exported->tool_timeline.size() == 2 &&
-             exported->tool_timeline[1].structured_result_json.find("\"attachment_files_included\":false") != std::string::npos &&
-             exported->tool_timeline[1].structured_result_json.find("\"non_redacted_image_attachment_metadata_count\":1") != std::string::npos,
-         "command dispatcher /export jsonl warns when attachment files are not bundled");
+  auto stdout_export = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export jsonl"});
+  auto const stdout_jsonl = stdout_export && !stdout_export->output.empty() ? stdout_export->output.front() : std::string{};
+  auto file_export = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export jsonl attachment-export.jsonl"});
+  auto const file_jsonl = app_read_binary_file(workspace / "attachment-export.jsonl");
+  expect(stdout_export && stdout_export->handled && file_export && file_export->handled && !file_export->output.empty() && stdout_jsonl == file_jsonl &&
+             file_jsonl.find("attachments/source-only.png") == std::string::npos && file_jsonl.find("attachments/portable-redacted") != std::string::npos &&
+             file_jsonl.find("\"redacted\":true") != std::string::npos && file_export->output[0].find("note:") == std::string::npos,
+         "pathless and file portable JSONL exports deterministically redact attachment references without a contradictory warning");
 
   auto write_import_entries = [](std::filesystem::path const& path, std::vector<ava::session::SessionEntry> const& entries) {
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     for (auto const& entry : entries)
     {
       auto line = ava::session::serialize_session_entry_line(entry);
-      expect(line.has_value(), "JSONL attachment import test serializes fixture entry");
+      expect(line.has_value(), "portable JSONL attachment import test serializes fixture entry");
       if (line)
         file << *line << '\n';
     }
   };
-
   auto const import_start = ava::session::SessionEntry{.id = "entry_import_attachment_start",
                                                        .parent_id = "",
                                                        .type = ava::session::EntryType::SessionStart,
                                                        .timestamp = "2026-05-02T00:00:00Z",
                                                        .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-5.5\"}"};
-  auto const missing_attachment_import_path = workspace / "missing-attachment-import.jsonl";
-  write_import_entries(missing_attachment_import_path, {import_start, attached_entry});
+  write_import_entries(workspace / "nonportable-attachment.jsonl", {import_start, attached_entry});
+  auto const session_before_nonportable_import = session->store.session_id();
+  auto nonportable_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import nonportable-attachment.jsonl --confirm"});
+  expect(nonportable_import && nonportable_import->handled && !nonportable_import->output.empty() &&
+             nonportable_import->output[0].find("non-redacted image attachment metadata") != std::string::npos &&
+             session->store.session_id() == session_before_nonportable_import,
+         "direct non-portable attachment references remain rejected rather than creating dangling bytes");
 
-  auto const session_before_missing_import = session->store.session_id();
-  auto missing_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import missing-attachment-import.jsonl --confirm"});
-  expect(missing_import && missing_import->handled && !missing_import->output.empty() &&
-             missing_import->output[0].find("raw JSONL does not include attachment files") != std::string::npos &&
-             missing_import->output[0].find("first_storage_path: attachments/img_import_missing.png") != std::string::npos &&
-             session->store.session_id() == session_before_missing_import,
-         "command dispatcher /import rejects non-redacted attachment metadata instead of creating dangling storage references");
-
-  auto const redacted_import_path = workspace / "redacted-attachment-import.jsonl";
-  auto const redacted_entry = ava::session::SessionEntry{.id = "entry_import_redacted_user",
-                                                         .parent_id = "",
-                                                         .type = ava::session::EntryType::UserMessage,
-                                                         .timestamp = "2026-05-02T00:00:01Z",
-                                                         .data_json = "{\"text\":\"redacted attached\",\"attachments\":[" + redacted_attachment_json + "]}"};
-  write_import_entries(redacted_import_path, {import_start, redacted_entry});
-
-  auto redacted_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import redacted-attachment-import.jsonl --confirm"});
-  auto redacted_entries = session->store.load();
-  expect(redacted_import && redacted_import->handled && !redacted_import->output.empty() &&
-             redacted_import->output[0].find("imported session") != std::string::npos && redacted_entries &&
-             std::ranges::any_of(*redacted_entries,
+  auto imported = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import attachment-export.jsonl --confirm"});
+  auto imported_entries = session->store.load();
+  expect(imported && imported->handled && !imported->output.empty() && imported->output[0].find("imported session") != std::string::npos && imported_entries &&
+             std::ranges::any_of(*imported_entries,
                                  [](ava::session::SessionEntry const& entry) {
-                                   return entry.data_json.find("img_import_redacted") != std::string::npos &&
-                                          entry.data_json.find("\"redacted\":true") != std::string::npos;
+                                   return entry.data_json.find("img_portable") != std::string::npos &&
+                                          entry.data_json.find("\"redacted\":true") != std::string::npos &&
+                                          entry.data_json.find("attachments/source-only.png") == std::string::npos;
                                  }),
-         "command dispatcher /import still allows redacted attachment metadata that does not require local bytes");
+         "portable JSONL attachment exports re-import as redacted metadata without source bytes");
 }
 
 void test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata()
@@ -4174,7 +4161,7 @@ void run_app_runtime_tests()
   test_app_first_run_auth_onboarding();
   test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call();
   test_app_command_dispatcher();
-  test_app_session_jsonl_import_export_attachment_caveat();
+  test_app_session_jsonl_import_export_portable_attachments();
   test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata();
   test_app_session_branch_commands();
   test_app_session_new_resume_commands();

@@ -1727,6 +1727,74 @@ void test_agent_loop_non_stream_response()
          "agent loop passes explicit non-stream request expectation");
 }
 
+void test_agent_loop_non_stream_error_prevents_tool_dispatch()
+{
+  auto const root = temp_root() / "agent-nonstream-provider-error";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "nonstream-provider-error"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {ava::provider::HttpResponse{.status_code = 200,
+                                   .headers = {},
+                                   .body = "{\"output\":[{\"id\":\"fc_first\",\"type\":\"function_call\",\"call_id\":\"call_duplicate\","
+                                           "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"},{\"id\":\"fc_second\","
+                                           "\"type\":\"function_call\",\"call_id\":\"call_duplicate\",\"name\":\"read_file\","
+                                           "\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}]}"}});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .stream = false,
+      .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+  });
+  auto result = loop.run_turn("read", store, provider, transport);
+  auto entries = store.load();
+  expect(!result && result.error().category() == ava::core::ErrorCategory::Provider && entries &&
+             std::none_of(entries->begin(), entries->end(),
+                          [](ava::session::SessionEntry const& entry) { return entry.type == ava::session::EntryType::ToolCall; }),
+         "a non-stream OpenAI parser Error prevents dispatch of an earlier otherwise valid tool call");
+}
+
+void test_agent_loop_stream_unended_documented_function_prevents_dispatch()
+{
+  auto const root = temp_root() / "agent-stream-unended-documented-function";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "stream-unended-documented-function"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response("data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_open\",\"type\":\"function_call\","
+                    "\"call_id\":\"call_open\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+                    "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n")});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .append_entry = append_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+  });
+  auto result = loop.run_turn("read", store, provider, transport);
+  auto entries = store.load();
+  expect(!result && result.error().category() == ava::core::ErrorCategory::Provider && entries &&
+             std::none_of(entries->begin(), entries->end(),
+                          [](ava::session::SessionEntry const& entry) { return entry.type == ava::session::EntryType::ToolCall; }),
+         "an unfinished documented streaming function item fails before agent tool dispatch");
+}
+
 void test_agent_loop_compaction_status_metadata()
 {
   auto const root = temp_root() / "agent-compaction-status";
@@ -2838,6 +2906,8 @@ void run_agent_loop_tests()
   test_agent_loop_permission_resolver_threads_to_tools();
   test_agent_loop_question_resolver_threads_to_tools();
   test_agent_loop_non_stream_response();
+  test_agent_loop_non_stream_error_prevents_tool_dispatch();
+  test_agent_loop_stream_unended_documented_function_prevents_dispatch();
   test_agent_loop_compaction_status_metadata();
   test_agent_loop_replays_steering_after_mid_turn_auto_compaction();
   test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction();

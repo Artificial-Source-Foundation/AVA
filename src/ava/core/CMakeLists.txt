@@ -1,4 +1,5 @@
 add_library(ava_core
+  "AnchorOpen.cpp"
   "AnchorSet.cpp"
   "atomic_file.cpp"
   "error.cpp"

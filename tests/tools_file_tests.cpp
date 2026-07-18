@@ -5,6 +5,7 @@
 #include "ava/tools/file_tools.h"
 #include "ava/tools/mutation_queue.h"
 #include "ava/tools/secure_workspace.h"
+#include "ava/core/AnchorOpen.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/open_beneath.h"
 #include "ava/session/export.h"
@@ -1477,6 +1478,140 @@ void test_anchor_set_symlinked_root()
   expect(!anchors.contains_lexical(real_target / "src" / "main.cpp"), "contains_lexical rejects resolved target path");
 }
 
+// Read all bytes available on fd into a string. Used to verify that the
+// descriptor returned by open_writable/open_readable points at the expected
+// file content.
+std::string read_all_from_fd(int fd)
+{
+  std::string content;
+  std::array<char, 4096> buffer{};
+  while (true)
+  {
+    auto const count = ::read(fd, buffer.data(), buffer.size());
+    if (count <= 0)
+    {
+      if (count < 0 && errno == EINTR)
+        continue;
+      break;
+    }
+    content.append(buffer.data(), static_cast<std::size_t>(count));
+  }
+  return content;
+}
+
+// Verify the AnchorOpen entry points (open_writable / open_readable). These are
+// the single, orthogonal point through which tools open paths against the anchor
+// set; the deeper find_anchor/open_beneath mechanics are covered by the
+// existing AnchorSet and SecureWorkspace tests, so this test stays at the
+// AnchorOpen contract level and avoids re-walking the full symlink matrix.
+//   - open_writable: in-anchor open + identity; outside -> PermissionDenied;
+//     O_CREAT creates beneath the anchor; a cross-anchor escaping symlink is
+//     rejected.
+//   - open_readable: in-anchor open; external (outside-all-anchors) open, the
+//     capability that distinguishes reads from writes; O_WRONLY/O_RDWR are
+//     rejected; an escaping symlink inside an anchor is rejected.
+//   - AnchorOpen owns its descriptor: move transfers it, the source goes empty.
+// The "external symlink that enters a writable anchor" hardening is deferred
+// (see the marker in AnchorOpen.cpp) and is intentionally not asserted here.
+void test_anchor_open()
+{
+  auto const root = temp_root() / "anchor-open";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  std::filesystem::create_directories(root);
+
+  // Two writable anchors and an external (outside-all-anchors) directory.
+  auto const ws_a = root / "workspace-a";
+  auto const ws_b = root / "workspace-b";
+  auto const external = root / "external";
+  std::filesystem::create_directories(ws_a / "subdir");
+  std::filesystem::create_directories(ws_b / "subdir");
+  std::filesystem::create_directories(external);
+  {
+    std::ofstream file(ws_a / "subdir" / "file_a.txt", std::ios::binary | std::ios::trunc);
+    file << "anchor A content";
+  }
+  {
+    std::ofstream file(external / "outside.txt", std::ios::binary | std::ios::trunc);
+    file << "external content";
+  }
+
+  auto opened_set = ava::core::AnchorSet::open({ws_a, ws_b});
+  expect(opened_set.has_value(), "AnchorSet::open succeeds for anchor-open test");
+  if (!opened_set)
+    return;
+  auto const& anchors = **opened_set;
+
+  // open_writable opens an existing file beneath its anchor and reports identity.
+  auto writable = ava::core::open_writable(anchors, ws_a / "subdir" / "file_a.txt", O_RDONLY | O_CLOEXEC);
+  expect(writable.has_value() && writable->root() == ws_a && writable->relative() == "subdir/file_a.txt" &&
+              writable->absolute() == ws_a / "subdir" / "file_a.txt" && writable->fd() >= 0,
+         "open_writable opens an in-anchor file and reports anchor identity");
+  if (writable)
+    expect(read_all_from_fd(writable->fd()) == "anchor A content", "open_writable descriptor reads the file");
+
+  // open_writable rejects a path outside all anchors: writes must go through an anchor.
+  auto writable_outside = ava::core::open_writable(anchors, external / "outside.txt", O_WRONLY | O_CLOEXEC);
+  expect(!writable_outside && writable_outside.error().category() == ava::core::ErrorCategory::PermissionDenied,
+         "open_writable rejects a path outside all anchors with PermissionDenied");
+
+  // open_writable creates a new file beneath the anchor with O_CREAT.
+  auto const created_path = ws_a / "created.txt";
+  auto created = ava::core::open_writable(anchors, created_path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+  expect(created.has_value() && created->root() == ws_a, "open_writable creates a new file beneath anchor A");
+  if (created)
+  {
+    expect(::write(created->fd(), "created", 7) == 7, "open_writable created descriptor is writable");
+    std::filesystem::remove(created_path, cleanup);
+  }
+
+  // A cross-anchor symlink in A pointing into B is rejected: the resolution
+  // never leaves A's descriptor, so open_beneath returns EXDEV -> PermissionDenied.
+  std::error_code link_error;
+  std::filesystem::create_directory_symlink("../workspace-b", ws_a / "link-to-b", link_error);
+  expect(!link_error, "anchor-open test creates a cross-anchor symlink");
+  if (!link_error)
+  {
+    auto escaping = ava::core::open_writable(anchors, ws_a / "link-to-b" / "subdir" / "file_b.txt", O_WRONLY | O_CLOEXEC);
+    expect(!escaping && escaping.error().category() == ava::core::ErrorCategory::PermissionDenied,
+           "open_writable rejects a cross-anchor escaping symlink with PermissionDenied");
+  }
+
+  // open_readable opens an in-anchor file beneath its anchor.
+  auto readable = ava::core::open_readable(anchors, ws_a / "subdir" / "file_a.txt", O_RDONLY | O_CLOEXEC);
+  expect(readable.has_value() && readable->root() == ws_a && read_all_from_fd(readable->fd()) == "anchor A content",
+         "open_readable opens an in-anchor file and reads its content");
+
+  // open_readable opens a path outside all anchors (the read-only capability).
+  auto external_read = ava::core::open_readable(anchors, external / "outside.txt", O_RDONLY | O_CLOEXEC);
+  expect(external_read.has_value() && external_read->root().empty() && external_read->relative().empty() &&
+              read_all_from_fd(external_read->fd()) == "external content",
+         "open_readable opens an external path with empty anchor identity");
+
+  // open_readable rejects write access modes.
+  auto const write_mode = ava::core::open_readable(anchors, ws_a / "subdir" / "file_a.txt", O_WRONLY | O_CLOEXEC);
+  auto const rdwr_mode = ava::core::open_readable(anchors, ws_a / "subdir" / "file_a.txt", O_RDWR | O_CLOEXEC);
+  expect(!write_mode && write_mode.error().category() == ava::core::ErrorCategory::InvalidArgument && !rdwr_mode &&
+              rdwr_mode.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "open_readable rejects O_WRONLY and O_RDWR with InvalidArgument");
+
+  // open_readable rejects an escaping symlink inside an anchor (same containment as write).
+  if (!link_error)
+  {
+    auto escaping_read = ava::core::open_readable(anchors, ws_a / "link-to-b" / "subdir" / "file_b.txt", O_RDONLY | O_CLOEXEC);
+    expect(!escaping_read && escaping_read.error().category() == ava::core::ErrorCategory::PermissionDenied,
+           "open_readable rejects an escaping symlink inside an anchor with PermissionDenied");
+  }
+
+  // AnchorOpen owns its descriptor: move transfers it, the source becomes empty.
+  if (writable)
+  {
+    int const held_fd = writable->fd();
+    auto moved = std::move(*writable);
+    expect(moved.fd() == held_fd && writable->fd() == -1, "AnchorOpen move transfers the descriptor and empties the source");
+  }
+}
+
 }  // namespace
 
 void run_tools_file_tests()
@@ -1491,4 +1626,5 @@ void run_tools_file_tests()
   test_secure_workspace_symlink_containment();
   test_anchor_set_multi_anchor();
   test_anchor_set_symlinked_root();
+  test_anchor_open();
 }

@@ -280,21 +280,21 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
     // call_id is the separate opaque identity required for dispatch and replay.
     auto const call_id = ava::core::json::string_field(item, "call_id");
     auto const name = ava::core::json::string_field(item, "name");
-    if (!call_id || !name || !is_valid_openai_opaque_id(*call_id) || name->empty())
+    auto const arguments = ava::core::json::string_field(item, "arguments");
+    if (!call_id || !name || !arguments || !is_valid_openai_opaque_id(*call_id) || name->empty())
     {
       events.push_back(StreamEvent{.type = StreamEventType::Error,
                                    .text = "",
                                    .tool_call_id = "",
                                    .tool_name = "",
-                                   .error_message = "OpenAI function call item requires a nonempty logical call ID and name",
+                                   .error_message = "OpenAI function call item requires a nonempty logical call ID, name, and string arguments",
                                    .usage = std::nullopt});
       continue;
     }
-    auto const arguments = ava::core::json::string_field(item, "arguments").value_or("");
     events.push_back(StreamEvent{
         .type = StreamEventType::ToolCallStart, .text = "", .tool_call_id = *call_id, .tool_name = *name, .error_message = "", .usage = std::nullopt});
     events.push_back(StreamEvent{
-        .type = StreamEventType::ToolCallDelta, .text = arguments, .tool_call_id = *call_id, .tool_name = "", .error_message = "", .usage = std::nullopt});
+        .type = StreamEventType::ToolCallDelta, .text = *arguments, .tool_call_id = *call_id, .tool_name = "", .error_message = "", .usage = std::nullopt});
     events.push_back(
         StreamEvent{.type = StreamEventType::ToolCallEnd, .text = "", .tool_call_id = *call_id, .tool_name = "", .error_message = "", .usage = std::nullopt});
   }

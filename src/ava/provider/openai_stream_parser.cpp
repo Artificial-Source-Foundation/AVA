@@ -137,14 +137,21 @@ OpenAIStreamParser::FunctionCallState* legacy_function_call_state_for_existing_e
   return nullptr;
 }
 
-bool has_documented_function_call_mapping(std::string_view data, std::unordered_map<std::string, OpenAIStreamParser::FunctionCallState> const& calls,
-                                          std::unordered_map<std::string, std::string> const& item_ids_by_logical_id)
+bool has_documented_function_call_mapping(std::string_view data, std::unordered_map<std::string, std::string> const& item_ids_by_logical_id)
 {
-  auto const item_id = function_call_item_id_from_event(data);
-  if (!item_id.empty() && calls.contains(item_id))
+  // item_id/output_item_id identify documented Responses output items. Their
+  // mere presence commits the event to the documented path: an unknown, empty,
+  // or non-string identity must not be reinterpreted as a legacy call ID.
+  if (ava::core::json::field_value_start(data, "item_id") || ava::core::json::field_value_start(data, "output_item_id"))
     return true;
   auto const call_id = ava::core::json::string_field(data, "call_id");
   return call_id && item_ids_by_logical_id.contains(*call_id);
+}
+
+bool has_valid_legacy_function_call_identity(std::string_view data)
+{
+  auto const call_id = ava::core::json::string_field(data, "call_id");
+  return call_id && is_valid_openai_opaque_id(*call_id);
 }
 
 OpenAIStreamParser::FunctionCallState* bind_documented_function_call_item(std::vector<StreamEvent>& events, bool& error_seen, std::string_view item,
@@ -154,9 +161,10 @@ OpenAIStreamParser::FunctionCallState* bind_documented_function_call_item(std::v
   auto const item_id = ava::core::json::string_field(item, "id");
   auto const call_id = ava::core::json::string_field(item, "call_id");
   auto const name = ava::core::json::string_field(item, "name");
-  if (!item_id || !call_id || !name || !is_valid_openai_opaque_id(*item_id) || !is_valid_openai_opaque_id(*call_id) || name->empty())
+  auto const arguments = ava::core::json::string_field(item, "arguments");
+  if (!item_id || !call_id || !name || !arguments || !is_valid_openai_opaque_id(*item_id) || !is_valid_openai_opaque_id(*call_id) || name->empty())
   {
-    append_stream_error(events, error_seen, "OpenAI function call item requires a nonempty item ID, logical call ID, and name");
+    append_stream_error(events, error_seen, "OpenAI function call item requires a nonempty item ID, logical call ID, name, and string arguments");
     return nullptr;
   }
 
@@ -190,16 +198,32 @@ OpenAIStreamParser::FunctionCallState* documented_function_call_state_for_event(
                                                                                 std::unordered_map<std::string, OpenAIStreamParser::FunctionCallState>& calls,
                                                                                 std::unordered_map<std::string, std::string> const& item_ids_by_logical_id)
 {
-  auto const item_id = function_call_item_id_from_event(data);
+  auto const item_id_start = ava::core::json::field_value_start(data, "item_id");
+  auto const item_id = ava::core::json::string_field(data, "item_id");
+  auto const output_item_id_start = ava::core::json::field_value_start(data, "output_item_id");
+  auto const output_item_id = ava::core::json::string_field(data, "output_item_id");
   auto const call_id_start = ava::core::json::field_value_start(data, "call_id");
   auto const call_id = ava::core::json::string_field(data, "call_id");
   auto const name_start = ava::core::json::field_value_start(data, "name");
   auto const name = ava::core::json::string_field(data, "name");
 
-  OpenAIStreamParser::FunctionCallState* state = nullptr;
-  if (!item_id.empty())
+  if ((item_id_start && (!item_id || !is_valid_openai_opaque_id(*item_id))) ||
+      (output_item_id_start && (!output_item_id || !is_valid_openai_opaque_id(*output_item_id))))
   {
-    auto const found = calls.find(item_id);
+    append_stream_error(events, error_seen, "OpenAI function call arguments contain an invalid documented item ID");
+    return nullptr;
+  }
+  if (item_id && output_item_id && *item_id != *output_item_id)
+  {
+    append_stream_error(events, error_seen, "OpenAI function call arguments have conflicting documented item IDs");
+    return nullptr;
+  }
+
+  OpenAIStreamParser::FunctionCallState* state = nullptr;
+  auto const documented_item_id = item_id ? item_id : output_item_id;
+  if (documented_item_id)
+  {
+    auto const found = calls.find(*documented_item_id);
     if (found == calls.end())
     {
       append_stream_error(events, error_seen, "OpenAI function call arguments reference an unbound item ID");
@@ -541,11 +565,18 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
   }
   if (type == "response.function_call_arguments.done")
   {
-    bool const documented_mapping = has_documented_function_call_mapping(data, function_calls, function_call_item_ids_by_logical_id);
+    bool const documented_mapping = has_documented_function_call_mapping(data, function_call_item_ids_by_logical_id);
     auto* state = documented_mapping ? documented_function_call_state_for_event(events, error_seen, data, function_calls, function_call_item_ids_by_logical_id)
                                      : legacy_function_call_state_for_existing_event(data, legacy_function_calls);
     if (!state && !documented_mapping)
+    {
+      if (!has_valid_legacy_function_call_identity(data))
+      {
+        append_stream_error(events, error_seen, "OpenAI legacy function call arguments require a nonempty logical call ID");
+        return;
+      }
       state = &legacy_function_call_state_for(data, legacy_function_calls);
+    }
     if (state)
     {
       if (!reconcile_complete_function_call_arguments(events, *state, function_call_arguments_from_event(data), error_seen))
@@ -576,11 +607,18 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     saw_content = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,
                                     completed_reasoning_texts);
-    bool const documented_mapping = has_documented_function_call_mapping(data, function_calls, function_call_item_ids_by_logical_id);
+    bool const documented_mapping = has_documented_function_call_mapping(data, function_call_item_ids_by_logical_id);
     auto* state = documented_mapping ? documented_function_call_state_for_event(events, error_seen, data, function_calls, function_call_item_ids_by_logical_id)
                                      : legacy_function_call_state_for_existing_event(data, legacy_function_calls);
     if (!state && !documented_mapping)
+    {
+      if (!has_valid_legacy_function_call_identity(data))
+      {
+        append_stream_error(events, error_seen, "OpenAI legacy function call arguments require a nonempty logical call ID");
+        return;
+      }
       state = &legacy_function_call_state_for(data, legacy_function_calls);
+    }
     if (state)
       static_cast<void>(append_function_call_argument_fragment(events, *state, ava::core::json::string_field(data, "delta").value_or("")));
     return;

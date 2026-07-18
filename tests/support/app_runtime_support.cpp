@@ -235,9 +235,9 @@ ava::provider::HttpResponse sse_response(std::string body)
 std::string read_file_call_sse(std::string_view path, std::string_view call_id)
 {
   auto const escaped_id = ava::core::json::escape(call_id);
-  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"" + escaped_id +
+  return "data: {\"type\":\"response.function_call.added\",\"call_id\":\"" + escaped_id +
          "\",\"name\":\"read_file\"}\n\n"
-         "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"" +
+         "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"" +
          escaped_id + "\",\"delta\":\"{\\\"path\\\":\\\"" + ava::core::json::escape(path) +
          "\\\"}\"}\n\n"
          "data: [DONE]\n\n";
@@ -246,9 +246,9 @@ std::string read_file_call_sse(std::string_view path, std::string_view call_id)
 std::string write_file_call_sse(std::string_view path, std::string_view content)
 {
   auto const args = "{\"path\":\"" + ava::core::json::escape(path) + "\",\"content\":\"" + ava::core::json::escape(content) + "\"}";
-  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_write\",\"name\":\"write_file\"}\n\n"
+  return "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_write\",\"name\":\"write_file\"}\n\n"
          "data: "
-         "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_write\",\"delta\":\"" +
+         "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_write\",\"delta\":\"" +
          ava::core::json::escape(args) +
          "\"}\n\n"
          "data: [DONE]\n\n";
@@ -256,9 +256,9 @@ std::string write_file_call_sse(std::string_view path, std::string_view content)
 
 std::string question_call_sse()
 {
-  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_question\",\"name\":\"question\"}\n\n"
+  return "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_question\",\"name\":\"question\"}\n\n"
          "data: "
-         "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_question\",\"delta\":\"{"
+         "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_question\",\"delta\":\"{"
          "\\\"header\\\":\\\"Pick\\\",\\\"question\\\":\\\"Continue?\\\",\\\"options\\\":[{\\\"value\\\":\\\"yes\\\","
          "\\\"label\\\":\\\"Yes\\\"}],\\\"allow_custom\\\":true}\"}\n\n"
          "data: [DONE]\n\n";
@@ -266,9 +266,9 @@ std::string question_call_sse()
 
 std::string multi_question_call_sse()
 {
-  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_question\",\"name\":\"question\"}\n\n"
+  return "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_question\",\"name\":\"question\"}\n\n"
          "data: "
-         "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_question\",\"delta\":\"{"
+         "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_question\",\"delta\":\"{"
          "\\\"header\\\":\\\"Pick\\\",\\\"question\\\":\\\"Choose providers\\\",\\\"options\\\":[{"
          "\\\"value\\\":\\\"alpha\\\",\\\"label\\\":\\\"Alpha\\\"},{\\\"value\\\":\\\"beta\\\","
          "\\\"label\\\":\\\"Beta\\\"}],\\\"multiple\\\":true,\\\"allow_custom\\\":true}\"}\n\n"

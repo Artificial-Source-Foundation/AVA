@@ -881,10 +881,10 @@ void test_app_runtime_enabled_plugin_resources_autoload()
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
-                                           .body = "data: {\"type\":\"response.function_call.added\",\"item_id\":"
+                                           .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
                                                    "\"call_plugin_skill_runtime\",\"name\":\"skill\"}\n\n"
                                                    "data: {\"type\":\"response.function_call_arguments.delta\","
-                                                   "\"item_id\":\"call_plugin_skill_runtime\",\"delta\":\"{\\\"name\\\":"
+                                                   "\"call_id\":\"call_plugin_skill_runtime\",\"delta\":\"{\\\"name\\\":"
                                                    "\\\"plugin-triage\\\"}\"}\n\n"
                                                    "data: [DONE]\n\n",
                                        },
@@ -1562,10 +1562,10 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
-                                           .body = "data: {\"type\":\"response.function_call.added\",\"item_id\":"
+                                           .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
                                                    "\"call_bash\",\"name\":\"bash\"}\n\n"
                                                    "data: {\"type\":\"response.function_call_arguments.delta\","
-                                                   "\"item_id\":\"call_bash\",\"delta\":\"{\\\"command\\\":"
+                                                   "\"call_id\":\"call_bash\",\"delta\":\"{\\\"command\\\":"
                                                    "\\\"pwd\\\",\\\"max_bytes\\\":4}\"}\n\n"
                                                    "data: [DONE]\n\n",
                                        },
@@ -1698,11 +1698,11 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
-                                           .body = "data: {\"type\":\"response.function_call.added\",\"item_id\":"
+                                           .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
                                                    "\"call_read\",\"name\":\"read_file\"}\n\n"
                                                    "data: "
                                                    "{\"type\":\"response.function_call_arguments.delta\","
-                                                   "\"item_id\":\"call_read\",\"delta\":\"{\\\"path\\\":"
+                                                   "\"call_id\":\"call_read\",\"delta\":\"{\\\"path\\\":"
                                                    "\\\"note.txt\\\"}\"}\n\n"
                                                    "data: [DONE]\n\n",
                                        },

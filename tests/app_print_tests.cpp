@@ -522,11 +522,11 @@ void test_app_print_mode_uses_headless_permission_policy()
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
-                                           .body = "data: {\"type\":\"response.function_call.added\",\"item_id\":"
+                                           .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
                                                    "\"call_outside\",\"name\":\"read_file\"}\n\n"
                                                    "data: "
                                                    "{\"type\":\"response.function_call_arguments.delta\","
-                                                   "\"item_id\":\"call_outside\",\"delta\":\"{"
+                                                   "\"call_id\":\"call_outside\",\"delta\":\"{"
                                                    "\\\"path\\\":\\\"" +
                                                    ava::core::json::escape(outside_path.generic_string()) +
                                                    "\\\"}\"}\n\n"
@@ -583,11 +583,11 @@ void test_app_print_mode_default_permission_denial_is_actionable()
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
-                                           .body = "data: {\"type\":\"response.function_call.added\",\"item_id\":"
+                                           .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
                                                    "\"call_outside\",\"name\":\"read_file\"}\n\n"
                                                    "data: "
                                                    "{\"type\":\"response.function_call_arguments.delta\","
-                                                   "\"item_id\":\"call_outside\",\"delta\":\"{"
+                                                   "\"call_id\":\"call_outside\",\"delta\":\"{"
                                                    "\\\"path\\\":\\\"" +
                                                    ava::core::json::escape(outside_path.generic_string()) +
                                                    "\\\"}\"}\n\n"

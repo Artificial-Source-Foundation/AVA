@@ -54,9 +54,9 @@ ava::provider::HttpResponse sse_response(std::string const& body)
 
 std::string tool_call_sse(std::string_view id, std::string_view name, std::string_view arguments_json)
 {
-  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"" + ava::core::json::escape(id) + "\",\"name\":\"" + ava::core::json::escape(name) +
-         "\"}\n\n" + "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"" + ava::core::json::escape(id) + "\",\"delta\":\"" +
-         ava::core::json::escape(arguments_json) + "\"}\n\n" + "data: {\"type\":\"response.function_call.done\",\"item_id\":\"" + ava::core::json::escape(id) +
+  return "data: {\"type\":\"response.function_call.added\",\"call_id\":\"" + ava::core::json::escape(id) + "\",\"name\":\"" + ava::core::json::escape(name) +
+         "\"}\n\n" + "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"" + ava::core::json::escape(id) + "\",\"delta\":\"" +
+         ava::core::json::escape(arguments_json) + "\"}\n\n" + "data: {\"type\":\"response.function_call.done\",\"call_id\":\"" + ava::core::json::escape(id) +
          "\"}\n\n";
 }
 
@@ -579,9 +579,9 @@ void test_agent_loop_task_subagent_runs_child_session()
   auto const session_root = root / "sessions";
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_task\",\"name\":\"task\"}\n\n"
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_task\",\"delta\":\"{"
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
                                                     "\\\"description\\\":\\\"Check docs\\\",\\\"prompt\\\":\\\"Return child result only.\\\","
                                                     "\\\"subagent_type\\\":\\\"general\\\",\\\"task_id\\\":\\\"\\\",\\\"command\\\":\\\"\\\","
                                                     "\\\"background\\\":false}\"}\n\n"
@@ -725,8 +725,8 @@ void test_agent_loop_task_subagent_recovers_torn_child_before_resume()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   auto const task_arguments = std::string("{\\\"description\\\":\\\"Resume child\\\",\\\"prompt\\\":\\\"Continue child.\\\",") +
                               "\\\"subagent_type\\\":\\\"general\\\",\\\"task_id\\\":\\\"" + child_id + "\\\"}";
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_resume\",\"name\":\"task\"}\n\n"
-                                                    "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_resume\",\"delta\":\"" +
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_resume\",\"name\":\"task\"}\n\n"
+                                                    "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_resume\",\"delta\":\"" +
                                                     task_arguments +
                                                     "\"}\n\n"
                                                     "data: [DONE]\n\n"),
@@ -817,9 +817,9 @@ void test_agent_loop_custom_subagent_definition_controls_prompt_and_tools()
   auto const session_root = root / "sessions";
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-custom"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_task\",\"name\":\"task\"}\n\n"
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_task\",\"delta\":\"{"
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
                                                     "\\\"description\\\":\\\"Review docs\\\",\\\"prompt\\\":\\\"Return review result.\\\","
                                                     "\\\"subagent_type\\\":\\\"reviewer\\\"}\"}\n\n"
                                                     "data: [DONE]\n\n"),
@@ -873,9 +873,9 @@ void test_agent_loop_background_task_starts_child_session()
   auto trace_collector = std::make_shared<TraceCollector>();
   auto observation = std::make_shared<ava::observability::RunObservation>(trace_collector);
   auto background_state = std::make_shared<BlockingBackgroundTransport::State>();
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_task\",\"name\":\"task\"}\n\n"
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_task\",\"delta\":\"{"
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
                                                     "\\\"description\\\":\\\"Explore async\\\",\\\"prompt\\\":\\\"Return background child.\\\","
                                                     "\\\"subagent_type\\\":\\\"general\\\",\\\"background\\\":true}\"}\n\n"
                                                     "data: [DONE]\n\n"),
@@ -937,8 +937,8 @@ void test_agent_loop_background_task_starts_child_session()
     auto const resume_arguments = std::string("{\\\"description\\\":\\\"Resume running child\\\",\\\"prompt\\\":\\\"Compete.\\\",") +
                                   "\\\"subagent_type\\\":\\\"general\\\",\\\"task_id\\\":\\\"" + running_jobs.front().child_session_id + "\\\"}";
     ava::tests::FakeTransport competing_transport(
-        {sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_compete\",\"name\":\"task\"}\n\n"
-                      "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_compete\",\"delta\":\"" +
+        {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_compete\",\"name\":\"task\"}\n\n"
+                      "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_compete\",\"delta\":\"" +
                       resume_arguments +
                       "\"}\n\n"
                       "data: [DONE]\n\n"),
@@ -1017,9 +1017,9 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
   auto background_requests = std::make_shared<std::vector<ava::provider::HttpRequest>>();
   auto background_mutex = std::make_shared<std::mutex>();
   auto registry = std::make_shared<ava::agent::BackgroundJobRegistry>();
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_task\",\"name\":\"task\"}\n\n"
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_task\",\"delta\":\"{"
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
                                                     "\\\"description\\\":\\\"Fail async\\\",\\\"prompt\\\":\\\"This background request will fail.\\\","
                                                     "\\\"subagent_type\\\":\\\"general\\\",\\\"background\\\":true}\"}\n\n"
                                                     "data: [DONE]\n\n"),
@@ -1108,9 +1108,9 @@ void test_agent_loop_background_task_cancel_requests_child_cancellation()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   auto registry = std::make_shared<ava::agent::BackgroundJobRegistry>();
   auto background_state = std::make_shared<BlockingBackgroundTransport::State>();
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_task\",\"name\":\"task\"}\n\n"
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_task\",\"delta\":\"{"
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
                                                     "\\\"description\\\":\\\"Cancel async\\\",\\\"prompt\\\":\\\"Wait until canceled.\\\","
                                                     "\\\"subagent_type\\\":\\\"general\\\",\\\"background\\\":true}\"}\n\n"
                                                     "data: [DONE]\n\n"),
@@ -1184,9 +1184,9 @@ void test_agent_loop_background_task_requires_registry_owner()
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "no-registry"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_task\",\"name\":\"task\"}\n\n"
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_task\",\"delta\":\"{"
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
                                                     "\\\"description\\\":\\\"No registry\\\",\\\"prompt\\\":\\\"Try background.\\\","
                                                     "\\\"subagent_type\\\":\\\"general\\\",\\\"background\\\":true}\"}\n\n"
                                                     "data: [DONE]\n\n"),
@@ -1486,9 +1486,9 @@ void test_agent_loop_permission_resolver_threads_to_tools()
   }
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "resolver"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_outside\",\"name\":\"read_file\"}\n\n"
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_outside\",\"name\":\"read_file\"}\n\n"
                                                     "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_outside\",\"delta\":\"{"
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_outside\",\"delta\":\"{"
                                                     "\\\"path\\\":\\\"" +
                                                     ava::core::json::escape(outside_path.generic_string()) +
                                                     "\\\"}\"}\n\n"
@@ -1546,9 +1546,9 @@ void test_agent_loop_permission_resolver_threads_to_tools()
     std::filesystem::create_directories(bash_workspace);
     ava::session::SessionStore bash_store(
         ava::session::SessionStoreOptions{.root_dir = bash_root / "sessions", .workspace_dir = bash_workspace, .session_id = "bash-allow"});
-    ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
+    ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
                                                            "data: "
-                                                           "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_bash\",\"delta\":\"{"
+                                                           "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_bash\",\"delta\":\"{"
                                                            "\\\"command\\\":\\\"true\\\"}\"}\n\n"
                                                            "data: [DONE]\n\n"),
                                               sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"bash allowed\"}\n\n"
@@ -1584,9 +1584,9 @@ void test_agent_loop_permission_resolver_threads_to_tools()
     std::filesystem::create_directories(bash_workspace);
     ava::session::SessionStore bash_store(
         ava::session::SessionStoreOptions{.root_dir = bash_root / "sessions", .workspace_dir = bash_workspace, .session_id = "bash-deny"});
-    ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
+    ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
                                                            "data: "
-                                                           "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_bash\",\"delta\":\"{"
+                                                           "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_bash\",\"delta\":\"{"
                                                            "\\\"command\\\":\\\"true\\\"}\"}\n\n"
                                                            "data: [DONE]\n\n"),
                                               sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"bash denied\"}\n\n"
@@ -1627,9 +1627,9 @@ void test_agent_loop_permission_resolver_threads_to_tools()
     std::filesystem::create_directories(bash_workspace);
     ava::session::SessionStore bash_store(
         ava::session::SessionStoreOptions{.root_dir = bash_root / "sessions", .workspace_dir = bash_workspace, .session_id = "bash-fail"});
-    ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
+    ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
                                                            "data: "
-                                                           "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_bash\",\"delta\":\"{"
+                                                           "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_bash\",\"delta\":\"{"
                                                            "\\\"command\\\":\\\"true\\\"}\"}\n\n"
                                                            "data: [DONE]\n\n"),
                                               sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"bash resolver failed\"}\n\n"
@@ -1668,9 +1668,9 @@ void test_agent_loop_question_resolver_threads_to_tools()
   ava::session::SessionStore store(
       ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "question-resolver"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_question\",\"name\":\"question\"}\n\n"
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_question\",\"name\":\"question\"}\n\n"
                                                     "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_question\",\"delta\":\"{"
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_question\",\"delta\":\"{"
                                                     "\\\"question\\\":\\\"Pick one?\\\",\\\"options\\\":[\\\"A\\\",\\\"B\\\"]}\"}\n\n"
                                                     "data: [DONE]\n\n"),
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"question answered\"}\n\n"
@@ -1930,16 +1930,16 @@ void test_agent_loop_multiple_tools_and_denied_continuation()
   }
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "multi"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
                                                     "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
                                                     "\\\"one.txt\\\"}\"}\n\n"
-                                                    "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_1\"}\n\n"
-                                                    "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_2\",\"name\":\"read_file\"}\n\n"
+                                                    "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_1\"}\n\n"
+                                                    "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_2\",\"name\":\"read_file\"}\n\n"
                                                     "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_2\",\"delta\":\"{\\\"path\\\":"
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_2\",\"delta\":\"{\\\"path\\\":"
                                                     "\\\"two.txt\\\"}\"}\n\n"
-                                                    "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_2\"}\n\n"
+                                                    "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_2\"}\n\n"
                                                     "data: [DONE]\n\n"),
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n"
                                                     "data: [DONE]\n\n")});
@@ -2013,9 +2013,9 @@ void test_agent_loop_multiple_tools_and_denied_continuation()
   ava::session::SessionStore denied_store(
       ava::session::SessionStoreOptions{.root_dir = denied_root / "sessions", .workspace_dir = denied_workspace, .session_id = "denied"});
   ava::tests::FakeTransport denied_transport(
-      {sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_write\",\"name\":\"write_file\"}\n\n"
+      {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_write\",\"name\":\"write_file\"}\n\n"
                     "data: "
-                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_write\",\"delta\":\"{\\\"path\\\":"
+                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_write\",\"delta\":\"{\\\"path\\\":"
                     "\\\"src/new.cpp\\\",\\\"content\\\":\\\"bad\\\"}\"}\n\n"
                     "data: [DONE]\n\n"),
        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"permission explained\"}\n\n"
@@ -2508,16 +2508,16 @@ void test_agent_loop_cancellation_stops_later_sequential_tools()
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "multi-cancel"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
-      {sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
+      {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
                     "data: "
-                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
+                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
                     "\\\"one.txt\\\"}\"}\n\n"
-                    "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_1\"}\n\n"
-                    "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_2\",\"name\":\"read_file\"}\n\n"
+                    "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_1\"}\n\n"
+                    "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_2\",\"name\":\"read_file\"}\n\n"
                     "data: "
-                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_2\",\"delta\":\"{\\\"path\\\":"
+                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_2\",\"delta\":\"{\\\"path\\\":"
                     "\\\"two.txt\\\"}\"}\n\n"
-                    "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_2\"}\n\n"
+                    "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_2\"}\n\n"
                     "data: [DONE]\n\n")});
   bool cancel_after_first_tool = false;
   std::vector<ava::agent::ToolTimelineEntry> tool_events;
@@ -2588,10 +2588,10 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "delta-before-start"});
     ava::tests::FakeTransport transport({sse_response("data: "
-                                                      "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
+                                                      "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
                                                       "\\\"note.txt\\\"}\"}\n\n"
-                                                      "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
-                                                      "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_1\"}\n\n"
+                                                      "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
+                                                      "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_1\"}\n\n"
                                                       "data: [DONE]\n\n"),
                                          sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n"
                                                       "data: [DONE]\n\n")});
@@ -2640,9 +2640,9 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "duplicate-call-id"});
     auto const repeated_call = sse_response(
-        "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_reused\",\"name\":\"read_file\"}\n\n"
-        "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_reused\",\"delta\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}\n\n"
-        "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_reused\"}\n\n"
+        "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_reused\",\"name\":\"read_file\"}\n\n"
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_reused\",\"delta\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}\n\n"
+        "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_reused\"}\n\n"
         "data: [DONE]\n\n");
     ava::tests::FakeTransport transport({repeated_call, repeated_call});
     std::vector<ava::agent::ToolTimelineEntry> tool_events;
@@ -2689,9 +2689,9 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "cross-prompt-duplicate"});
     auto const tool_call = sse_response(
-        "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_persistent\",\"name\":\"read_file\"}\n\n"
-        "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_persistent\",\"delta\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}\n\n"
-        "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_persistent\"}\n\n"
+        "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_persistent\",\"name\":\"read_file\"}\n\n"
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_persistent\",\"delta\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}\n\n"
+        "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_persistent\"}\n\n"
         "data: [DONE]\n\n");
     ava::tests::FakeTransport transport({tool_call,
                                          sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"first done\"}\n\n"
@@ -2745,7 +2745,7 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "empty-call-id"});
     ava::tests::FakeTransport transport(
-        {sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"\",\"name\":\"read_file\"}\n\n"
+        {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"\",\"name\":\"read_file\"}\n\n"
                       "data: [DONE]\n\n")});
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
@@ -2785,9 +2785,9 @@ void test_agent_loop_truncates_tool_context()
   }
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "truncate"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_large\",\"name\":\"read_file\"}\n\n"
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_large\",\"name\":\"read_file\"}\n\n"
                                                     "data: "
-                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_large\",\"delta\":\"{\\\"path\\\":"
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_large\",\"delta\":\"{\\\"path\\\":"
                                                     "\\\"large.txt\\\"}\"}\n\n"
                                                     "data: [DONE]\n\n"),
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n"

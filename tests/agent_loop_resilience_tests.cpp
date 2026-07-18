@@ -146,9 +146,9 @@ void test_agent_loop_cancellation_boundaries()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "cancel-before-tool"});
     bool cancel = false;
-    CallbackTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_read\",\"name\":\"read_file\"}\n\n"
+    CallbackTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_read\",\"name\":\"read_file\"}\n\n"
                                               "data: "
-                                              "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_read\",\"delta\":\"{\\\"path\\\":"
+                                              "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_read\",\"delta\":\"{\\\"path\\\":"
                                               "\\\"note.txt\\\"}\"}\n\n"
                                               "data: [DONE]\n\n")},
                                 [&cancel] { cancel = true; });
@@ -190,9 +190,9 @@ void test_agent_loop_cancellation_boundaries()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "cancel-during-bash-tool"});
     ava::tests::FakeTransport transport(
-        {sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
+        {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
                       "data: "
-                      "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_bash\",\"delta\":\"{\\\"command\\\":"
+                      "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_bash\",\"delta\":\"{\\\"command\\\":"
                       "\\\"sleep 2\\\",\\\"timeout_ms\\\":5000}\"}\n\n"
                       "data: [DONE]\n\n")});
     bool bash_started = false;
@@ -369,9 +369,9 @@ void test_agent_loop_error_paths_and_bounds()
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "arg-bound"});
     ava::tests::FakeTransport transport(
-        {sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
+        {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
                       "data: "
-                      "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
+                      "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
                       "\\\"note.txt\\\"}\"}\n\n"
                       "data: [DONE]\n\n")});
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
@@ -398,7 +398,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "control-call-id"});
     ava::tests::FakeTransport transport(
-        {sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_\\u0001bad\",\"name\":\"read_file\"}\n\n"
+        {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_\\u0001bad\",\"name\":\"read_file\"}\n\n"
                       "data: [DONE]\n\n")});
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
@@ -432,7 +432,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "long-call-id"});
     std::string const long_call_id(300, 'a');
-    ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"" + long_call_id +
+    ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"" + long_call_id +
                                                       "\",\"name\":\"read_file\"}\n\n"
                                                       "data: [DONE]\n\n")});
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
@@ -459,12 +459,12 @@ void test_agent_loop_max_iteration_guard()
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "max"});
   auto tool_sse = [](std::string_view call_id) {
-    return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"" + std::string(call_id) +
+    return "data: {\"type\":\"response.function_call.added\",\"call_id\":\"" + std::string(call_id) +
            "\",\"name\":\"glob\"}\n\n"
-           "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"" +
+           "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"" +
            std::string(call_id) +
            "\",\"delta\":\"{\\\"pattern\\\":\\\"**/*\\\"}\"}\n\n"
-           "data: {\"type\":\"response.function_call.done\",\"item_id\":\"" +
+           "data: {\"type\":\"response.function_call.done\",\"call_id\":\"" +
            std::string(call_id) +
            "\"}\n\n"
            "data: [DONE]\n\n";

@@ -16,6 +16,7 @@ struct ExportOptions
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+[[nodiscard]] SessionEntry sanitize_session_entry_for_portable_jsonl_export(SessionEntry entry);
 [[nodiscard]] std::string format_session_markdown(std::vector<SessionEntry> const& entries, ExportOptions const& options = {});
 [[nodiscard]] std::string format_session_html(std::vector<SessionEntry> const& entries, ExportOptions const& options = {});
 

@@ -333,6 +333,33 @@ void append_cancel(std::string& out, SessionEntry const& entry, ExportOptions co
 
 }  // namespace
 
+SessionEntry sanitize_session_entry_for_portable_jsonl_export(SessionEntry entry)
+{
+  if (entry.type != EntryType::ReasoningBlock)
+    return entry;
+
+  bool const has_native_item = ava::core::json::field_value_start(entry.data_json, "native_item_json").has_value();
+  bool const has_signature = ava::core::json::field_value_start(entry.data_json, "signature").has_value();
+  bool const has_redacted_data = ava::core::json::field_value_start(entry.data_json, "redacted_data").has_value();
+  if (!has_native_item && !has_signature && !has_redacted_data)
+    return entry;
+
+  auto const provider = ava::core::json::string_field(entry.data_json, "provider").value_or("");
+  auto const model = ava::core::json::string_field(entry.data_json, "model").value_or("");
+  auto const format = ava::core::json::string_field(entry.data_json, "format").value_or("");
+  auto text = ava::core::json::string_field(entry.data_json, "text").value_or("");
+  if (text.empty())
+    text = "[Provider-private reasoning metadata omitted from portable export.]";
+
+  // Build a minimal portable record rather than copying unknown private native
+  // fields. This export is intentionally importable but not lossless.
+  entry.data_json = "{\"provider\":" + json_string(provider) + ",\"model\":" + json_string(model) + ",\"format\":" + json_string(format) +
+                    ",\"text\":" + json_string(text) + ",\"redacted\":" + (bool_field_is_true(entry, "redacted") ? "true" : "false") +
+                    ",\"private_replay_metadata_omitted\":{\"native_item_json\":" + (has_native_item ? "true" : "false") +
+                    ",\"signature\":" + (has_signature ? "true" : "false") + ",\"redacted_data\":" + (has_redacted_data ? "true" : "false") + "}}";
+  return entry;
+}
+
 std::string format_session_markdown(std::vector<SessionEntry> const& entries, ExportOptions const& options)
 {
   std::string out = "# AVA Session Export\n\n";

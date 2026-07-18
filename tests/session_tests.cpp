@@ -1627,7 +1627,8 @@ void test_session_replay_validation()
   auto valid_native_reasoning_item_entries = valid_model_reasoning_entries;
   valid_native_reasoning_item_entries[3].data_json =
       "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
-      "\"native_item_json\":\"{\\\"id\\\":\\\"rs_session\\\",\\\"type\\\":\\\"reasoning\\\",\\\"encrypted_content\\\":\\\"cipher-session\\\"}\"}";
+      "\"native_item_json\":\"{\\\"id\\\":\\\"rs_session\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[],\\\"encrypted_content\\\":\\\"cipher-"
+      "session\\\"}\"}";
   auto const valid_native_reasoning_item = ava::session::validate_session_replay(valid_native_reasoning_item_entries);
   expect(valid_native_reasoning_item.ok(), "session replay validator accepts optional private native reasoning item objects");
 
@@ -1638,6 +1639,49 @@ void test_session_replay_validation()
   auto const invalid_native_reasoning_item = ava::session::validate_session_replay(invalid_native_reasoning_item_entries);
   expect(!invalid_native_reasoning_item.ok() && has_replay_issue(invalid_native_reasoning_item, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "session replay validator rejects private native items that are not reasoning objects");
+
+  auto missing_native_reasoning_id_entries = valid_native_reasoning_item_entries;
+  missing_native_reasoning_id_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[]}\"}";
+  auto const missing_native_reasoning_id = ava::session::validate_session_replay(missing_native_reasoning_id_entries);
+  expect(!missing_native_reasoning_id.ok() && has_replay_issue(missing_native_reasoning_id, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+         "current-version sessions reject native reasoning metadata without an id");
+
+  auto empty_native_reasoning_id_entries = valid_native_reasoning_item_entries;
+  empty_native_reasoning_id_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"id\\\":\\\"\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[]}\"}";
+  auto const empty_native_reasoning_id = ava::session::validate_session_replay(empty_native_reasoning_id_entries);
+  expect(!empty_native_reasoning_id.ok() && has_replay_issue(empty_native_reasoning_id, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+         "current-version sessions reject native reasoning metadata with an empty id");
+
+  auto missing_native_reasoning_summary_entries = valid_native_reasoning_item_entries;
+  missing_native_reasoning_summary_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"id\\\":\\\"rs_missing_summary\\\",\\\"type\\\":\\\"reasoning\\\"}\"}";
+  auto const missing_native_reasoning_summary = ava::session::validate_session_replay(missing_native_reasoning_summary_entries);
+  expect(
+      !missing_native_reasoning_summary.ok() && has_replay_issue(missing_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+      "current-version sessions reject native reasoning metadata without a summary array");
+
+  auto oversized_native_reasoning_item_entries = valid_native_reasoning_item_entries;
+  auto const oversized_native_item =
+      std::string("{\"id\":\"rs_oversized\",\"type\":\"reasoning\",\"summary\":[],\"opaque\":\"") + std::string(64U * 1024U, 'x') + "\"}";
+  oversized_native_reasoning_item_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"" +
+      ava::core::json::escape(oversized_native_item) + "\"}";
+  auto const oversized_native_reasoning_item = ava::session::validate_session_replay(oversized_native_reasoning_item_entries);
+  expect(
+      !oversized_native_reasoning_item.ok() && has_replay_issue(oversized_native_reasoning_item, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+      "current-version sessions reject native reasoning metadata beyond the provider-private byte bound");
+
+  auto legacy_native_reasoning_item_entries = missing_native_reasoning_summary_entries;
+  legacy_native_reasoning_item_entries[3].version = 0;
+  auto const legacy_native_reasoning_item = ava::session::validate_session_replay(legacy_native_reasoning_item_entries);
+  expect(legacy_native_reasoning_item.ok(),
+         "legacy sessions retain readable fallback compatibility when explicitly present native reasoning metadata is malformed");
 
   std::vector<ava::session::SessionEntry> const invalid_model_start_entries = {
       ava::session::SessionEntry{.id = "bad_start",
@@ -2577,7 +2621,8 @@ void test_session_markdown_export()
                                      "\"format\":\"anthropic_thinking\","
                                      "\"text\":\"visible reasoning summary\","
                                      "\"signature\":\"super-secret-signature\","
-                                     "\"native_item_json\":\"{\\\"type\\\":\\\"reasoning\\\",\\\"encrypted_content\\\":\\\"export-private-cipher\\\"}\"}"},
+                                     "\"native_item_json\":\"{\\\"id\\\":\\\"rs_export\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[],"
+                                     "\\\"encrypted_content\\\":\\\"export-private-cipher\\\"}\"}"},
       ava::session::SessionEntry{.id = "reasoning_change_1",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ReasoningChange,

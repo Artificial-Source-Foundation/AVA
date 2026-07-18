@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/provider/openai_reasoning.h"
 #include "ava/provider/openai_response_parser.h"
 #include "ava/provider/openai_response_parser_detail.h"
 #include "ava/provider/openai_stream_parser.h"
@@ -264,7 +265,7 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
                                  .error_message = "",
                                  .usage = std::nullopt,
                                  .reasoning_format = std::string(kOpenAIResponsesReasoningFormat),
-                                 .reasoning_native_item_json = item});
+                                 .reasoning_native_item_json = is_valid_openai_native_reasoning_item_json(item) ? item : std::string{}});
   }
   if (auto text = parse_openai_response_text(body))
   {
@@ -276,16 +277,26 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
     if (ava::core::json::string_field(item, "type").value_or("") != "function_call")
       continue;
     // Responses output-item IDs (for example, fc_...) identify stream items;
-    // call_id is the logical identity required for dispatch and replay.
-    auto const id = first_string_field(item, {"call_id", "id", "item_id"}).value_or("");
-    auto const name = ava::core::json::string_field(item, "name").value_or("");
+    // call_id is the separate opaque identity required for dispatch and replay.
+    auto const call_id = ava::core::json::string_field(item, "call_id");
+    auto const name = ava::core::json::string_field(item, "name");
+    if (!call_id || !name || !is_valid_openai_opaque_id(*call_id) || name->empty())
+    {
+      events.push_back(StreamEvent{.type = StreamEventType::Error,
+                                   .text = "",
+                                   .tool_call_id = "",
+                                   .tool_name = "",
+                                   .error_message = "OpenAI function call item requires a nonempty logical call ID and name",
+                                   .usage = std::nullopt});
+      continue;
+    }
     auto const arguments = ava::core::json::string_field(item, "arguments").value_or("");
-    events.push_back(
-        StreamEvent{.type = StreamEventType::ToolCallStart, .text = "", .tool_call_id = id, .tool_name = name, .error_message = "", .usage = std::nullopt});
     events.push_back(StreamEvent{
-        .type = StreamEventType::ToolCallDelta, .text = arguments, .tool_call_id = id, .tool_name = "", .error_message = "", .usage = std::nullopt});
+        .type = StreamEventType::ToolCallStart, .text = "", .tool_call_id = *call_id, .tool_name = *name, .error_message = "", .usage = std::nullopt});
+    events.push_back(StreamEvent{
+        .type = StreamEventType::ToolCallDelta, .text = arguments, .tool_call_id = *call_id, .tool_name = "", .error_message = "", .usage = std::nullopt});
     events.push_back(
-        StreamEvent{.type = StreamEventType::ToolCallEnd, .text = "", .tool_call_id = id, .tool_name = "", .error_message = "", .usage = std::nullopt});
+        StreamEvent{.type = StreamEventType::ToolCallEnd, .text = "", .tool_call_id = *call_id, .tool_name = "", .error_message = "", .usage = std::nullopt});
   }
   bool const allows_empty_terminal = finish_reason == ProviderFinishReason::MaxTokens || finish_reason == ProviderFinishReason::Refusal ||
                                      finish_reason == ProviderFinishReason::Cancelled || finish_reason == ProviderFinishReason::Error;

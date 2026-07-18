@@ -111,9 +111,11 @@ Validation checks that policy `allow`/`deny` entries resolve consistently, that 
 ### Reasoning
 
 - `reasoning_block.data` includes `provider`, `model`, `format`, `redacted`, and at least one of `text`, `signature`, or `redacted_data`.
+- OpenAI Responses native replay metadata, when explicitly present on a current-version `openai_responses` block, is a bounded strict JSON object with `type:"reasoning"`, a non-empty opaque `id`, and a present array-valued `summary` (which may be empty). Unknown additive provider fields are retained only in the private session record.
 - RPC `get_messages` sanitizes reasoning blocks: non-redacted text may be returned, but raw provider signatures and opaque redacted-thinking payloads are replaced with safe fields such as `signature_present` and `redacted`.
 - `reasoning_change.data` includes `provider`, `model`, `enabled`, `format`, and when enabled a `level`; it may include `budget_tokens` and `display` where the selected model supports those controls.
-- Validation checks reasoning entries against the active provider/model boundary established by `session_start` and `model_change`.
+- Validation checks reasoning entries against the active provider/model boundary established by `session_start` and `model_change`. Legacy malformed optional native OpenAI metadata may fall back to readable synthetic history; current-version explicitly-present malformed metadata is rejected.
+- OpenAI native continuation supports the common contiguous reasoning → function-call → matching function-result path. Session version 3 does not carry an ordered-output manifest, so arbitrary commentary/reasoning/function interleaving and assistant phase preservation remain a known backlog limitation.
 
 ### `compaction`
 
@@ -159,7 +161,7 @@ Persisted image attachments are metadata references, not inline uploads:
 - `storage_path` must be a relative `attachments/...` path without absolute roots, `..`, empty segments, backslashes, drive prefixes, or control bytes.
 - AVA imports local RPC `attachments` paths and inline RPC `images` uploads into the session attachment store before writing message metadata. Raw base64 image data is invalid in persisted session JSONL.
 - Replay loads bytes only from the active session's attachment directory and verifies path containment, symlinks, byte size, and SHA-256 before sending image content to providers.
-- Raw JSONL export does not bundle attachment bytes. If you archive sessions with non-redacted image attachments, archive the sibling `<session_id>.attachments` directory too.
+- Portable JSONL export does not bundle attachment bytes. If you archive sessions with non-redacted image attachments, archive the sibling `<session_id>.attachments` directory too.
 - Branch/fork/clone code copies non-redacted image attachment bytes for copied entries. Slash `/import <path.jsonl>` validates JSONL and creates a new session, but it does not currently bundle or reconstruct external attachment bytes from the source archive; imported image history needs the bytes mirrored into the new session's attachment directory before image replay can work.
 
 Provider replay also has request-level caps, including at most 16 images and aggregate byte limits before base64 expansion; some providers have lower per-image limits.
@@ -168,8 +170,8 @@ Provider replay also has request-level caps, including at most 16 images and agg
 
 - `/export` writes a Markdown transcript by default.
 - `/export html [path]` writes or returns an HTML rendering.
-- `/export jsonl [path]` or `/export raw [path]` emits AVA raw JSONL records.
-- RPC `export` and `export_html` return Markdown/HTML command output. Dedicated RPC raw JSONL export/import/share commands are deferred; use slash/line-shell `/export jsonl` for raw archives.
+- `/export jsonl [path]` or `/export raw [path]` emits portable sanitized AVA JSONL records. Reasoning `native_item_json`, `signature`, and `redacted_data` values are omitted and replaced by safe visible text and omission metadata where needed, so JSONL export is importable but not lossless.
+- RPC `export` and `export_html` return Markdown/HTML command output. Dedicated RPC portable JSONL export/import/share commands are deferred; use slash/line-shell `/export jsonl` for a portable archive.
 - `/import <path.jsonl> --confirm` is slash/line-shell only for the current MVP. It reads a local regular file, rejects symlinks, parses each bounded JSONL line, validates replay integrity, creates a new session, appends supported entries, and switches to the new session.
 - Import treats missing-version legacy entries as version `0` while reading and rewrites those entries at the current writer version when appending to the new session.
 - Normal AVA startup, resume, list, tree, fork, clone, compact, and export do not rewrite existing session files. Prefer copy-forward import/migration into a new session over editing JSONL in place.

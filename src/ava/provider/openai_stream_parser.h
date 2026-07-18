@@ -15,7 +15,7 @@ class OpenAIStreamParser final : public StreamParser
 {
  public:
   // Responses identifies the streamed item with an fc_ ID while callers
-  // dispatch and replay through the separate logical call_id.
+  // dispatch and replay through the separate opaque logical call_id.
   struct FunctionCallState
   {
     std::string logical_call_id;
@@ -44,7 +44,11 @@ class OpenAIStreamParser final : public StreamParser
   std::string active_reasoning_text_;
   std::vector<std::string> completed_reasoning_item_ids_;
   std::vector<std::string> completed_reasoning_texts_;
+  // Documented output-item events bind these maps once. Legacy event-family
+  // state remains separate so it cannot turn an item ID into a logical call ID.
   std::unordered_map<std::string, FunctionCallState> function_calls_;
+  std::unordered_map<std::string, std::string> function_call_item_ids_by_logical_id_;
+  std::unordered_map<std::string, FunctionCallState> legacy_function_calls_;
   bool done_seen_ = false;
   bool error_seen_ = false;
 };

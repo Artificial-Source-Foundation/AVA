@@ -485,6 +485,11 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
                                  .finish_reason = ProviderFinishReason::Completed});
     return;
   }
+  if (done_seen)
+  {
+    append_stream_error(events, error_seen, "OpenAI response emitted an event after its terminal marker");
+    return;
+  }
   if (!is_json_object_shape(data))
   {
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id, active_reasoning_text, completed_reasoning_item_ids,

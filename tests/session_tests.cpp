@@ -8,6 +8,7 @@
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/agent/agent_loop.h"
+#include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/bash_tool.h"
@@ -31,6 +32,7 @@
 #include "ava/session/validation.h"
 #include "ava/session/validation_fields.h"
 #include "ava/permissions/permission.h"
+#include "ava/provider/anthropic_provider.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/context/context_loader.h"
@@ -3255,6 +3257,39 @@ void test_tool_content_parts_reconstruction()
          "non-contiguous tool-use/result history falls back to text-only native replay");
 }
 
+void test_portable_omitted_reasoning_reconstructs_as_safe_text()
+{
+  std::vector<ava::session::SessionEntry> const entries = {
+      ava::session::SessionEntry{.id = "portable_reasoning",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ReasoningBlock,
+                                 .timestamp = "2026-05-11T00:00:00Z",
+                                 .data_json = "{\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-5\",\"format\":\"anthropic_thinking\","
+                                              "\"text\":\"[Provider-private reasoning metadata omitted from portable export.]\",\"redacted\":true,"
+                                              "\"private_replay_metadata_omitted\":{\"native_item_json\":false,\"signature\":false,\"redacted_data\":true}}"},
+      ava::session::SessionEntry{.id = "portable_answer",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-05-11T00:00:01Z",
+                                 .data_json = "{\"text\":\"answer after portable import\",\"tool_calls\":0}"}};
+
+  auto messages = ava::agent::build_provider_messages_from_entries(entries);
+  expect(messages && messages->size() == 1 && (*messages)[0].content_parts.size() == 2 &&
+             (*messages)[0].content_parts[0].type == ava::provider::ContentPartType::Text && !(*messages)[0].content_parts[0].redacted &&
+             (*messages)[0].content_parts[0].text.find("metadata omitted") != std::string::npos,
+         "portable private-replay omission markers reconstruct as ordinary safe assistant text");
+  if (!messages)
+    return;
+
+  ava::provider::AnthropicProvider const provider("https://anthropic.example.test");
+  auto request = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic", .model_id = "claude-sonnet-4-5", .system_prompt = "system", .messages = *messages, .tools_json = {}, .stream = false},
+      "anthropic-key");
+  expect(request && request->body.find("metadata omitted") != std::string::npos && request->body.find("redacted_thinking") == std::string::npos,
+         "portable imported Anthropic reasoning builds a safe ordinary-text request without private redacted data");
+}
+
 void test_image_attachment_message_reconstruction_and_validation()
 {
   std::string const attachment_json = R"({"id":"img_1","type":"image","mime_type":"image/png","byte_size":1234,)"
@@ -4248,6 +4283,7 @@ void run_session_tests()
   test_compaction_config_and_thresholds();
   test_compaction_context_reconstruction();
   test_tool_content_parts_reconstruction();
+  test_portable_omitted_reasoning_reconstructs_as_safe_text();
   test_image_attachment_message_reconstruction_and_validation();
   test_image_attachment_storage_boundary();
   test_image_attachment_import();

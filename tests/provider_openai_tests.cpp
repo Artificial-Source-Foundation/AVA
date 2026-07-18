@@ -528,6 +528,17 @@ void test_openai_provider_contract()
              (*output_item_tool)[2].tool_call_id == "call_live_provider",
          "OpenAI stream parser maps function-call item IDs to logical call IDs across lifecycle events");
 
+  auto post_terminal_tool = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
+      "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_late\",\"type\":\"function_call\","
+      "\"call_id\":\"call_late\",\"name\":\"list_directory\",\"arguments\":\"{}\"}}\n\n");
+  expect(post_terminal_tool &&
+             std::none_of(post_terminal_tool->begin(), post_terminal_tool->end(),
+                          [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallStart; }) &&
+             std::any_of(post_terminal_tool->begin(), post_terminal_tool->end(),
+                         [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
+         "OpenAI stream parser rejects documented function calls emitted after a terminal response event");
+
   auto documented_added_terminal = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_open\",\"type\":\"function_call\","
       "\"call_id\":\"call_open\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
@@ -563,10 +574,11 @@ void test_openai_provider_contract()
   auto documented_added_eof = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_open_eof\",\"type\":\"function_call\","
       "\"call_id\":\"call_open_eof\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n");
-  expect(documented_added_eof &&
-             std::any_of(documented_added_eof->begin(), documented_added_eof->end(), [](auto const& event) {
-               return event.type == ava::provider::StreamEventType::Error && event.error_message.find("item completion") != std::string::npos;
-             }),
+  expect(documented_added_eof && std::any_of(documented_added_eof->begin(), documented_added_eof->end(),
+                                             [](auto const& event) {
+                                               return event.type == ava::provider::StreamEventType::Error &&
+                                                      event.error_message.find("item completion") != std::string::npos;
+                                             }),
          "OpenAI finish fallback rejects an unfinished documented function item");
 
   auto empty_final_arguments = ava::provider::parse_openai_sse(

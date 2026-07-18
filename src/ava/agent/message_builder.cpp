@@ -299,6 +299,15 @@ std::optional<ava::provider::ContentPart> reasoning_content_part(ava::session::S
   auto const redacted_data = ava::core::json::string_field(entry.data_json, "redacted_data").value_or("");
   auto const native_item_json = ava::core::json::string_field(entry.data_json, "native_item_json").value_or("");
   bool const redacted = bool_field(entry.data_json, "redacted").value_or(false);
+  bool const private_replay_omitted = ava::core::json::field_value_start(entry.data_json, "private_replay_metadata_omitted").has_value();
+  if (private_replay_omitted) {
+    return ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
+                                      .text = text.empty() ? "[Provider-private reasoning metadata omitted from portable export.]" : text,
+                                      .tool_call_id = "",
+                                      .tool_name = "",
+                                      .input_json = "",
+                                      .is_error = false};
+  }
   if (text.empty() && signature.empty() && redacted_data.empty() && native_item_json.empty()) return std::nullopt;
   auto const format = ava::core::json::string_field(entry.data_json, "format").value_or("");
   auto visible_text = redacted ? std::string{} : text;

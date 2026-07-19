@@ -112,6 +112,9 @@ struct CommandExecutionPlanMetadata
   std::filesystem::path resolved_executable;
   std::filesystem::path cwd;
   bool executor_identity_verified = false;
+  bool containment_available = false;
+  std::string containment_profile_id;
+  bool containment_network_allowed = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

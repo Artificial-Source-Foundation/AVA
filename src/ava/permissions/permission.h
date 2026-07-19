@@ -31,7 +31,26 @@ enum class CommandContainmentStatus
 {
   NotRequired,
   Unavailable,
+  // A containment plan has been prepared and is available, but has not yet
+  // been applied in the child. This is the pre-execution label.
+  Available,
+  // The containment plan was successfully applied in the child before exec.
+  // This is the post-execution label included in tool/process audit.
+  Active,
   UnverifiedDelegatedExecutor,
+};
+
+// Copyable, dependency-free summary of containment availability for the
+// permission decision. The tool layer prepares a full containment plan and
+// extracts these fields so permissions can depend on containment without a
+// header dependency on the containment subsystem.
+struct CommandContainmentInfo
+{
+  bool available = false;
+  std::string profile_id;
+  bool network_allowed = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 // Command planning is owned by ava_command. This value object deliberately
@@ -49,6 +68,8 @@ struct CommandPermissionMetadata
   bool executes_mutable_project_code = false;
   bool containment_available = false;
   CommandContainmentStatus containment_status = CommandContainmentStatus::Unavailable;
+  std::string containment_profile_id;
+  bool containment_network_allowed = false;
   ava::command::InteractiveScope backend_maximum_scope = ava::command::InteractiveScope::Once;
   std::string environment_profile_id;
   std::string environment_digest;
@@ -145,6 +166,8 @@ struct PermissionPrompt
 using PermissionResolver = std::function<ava::core::Result<PermissionResolutionDecision>(PermissionPrompt const&)>;
 
 [[nodiscard]] CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan const& plan, bool unverified_delegated_executor = false);
+[[nodiscard]] CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan const& plan, CommandContainmentInfo const& containment,
+                                                                    bool unverified_delegated_executor = false);
 [[nodiscard]] PermissionDecision decide(PermissionRequest const& request);
 [[nodiscard]] PermissionDecision decide(CommandPermissionMetadata const& metadata);
 [[nodiscard]] bool command_permission_allows_reusable_grant(CommandPermissionMetadata const& metadata) noexcept;

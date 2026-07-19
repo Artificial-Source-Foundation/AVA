@@ -38,6 +38,7 @@ void run_mcp_tests();
 void run_permission_rules_tests();
 void run_tui_composer_tests();
 void run_run_observer_tests();
+void run_containment_tests();
 #ifdef CWDEBUG
 void run_debug_tests();
 #endif
@@ -83,6 +84,7 @@ constexpr std::array kTestSuites{
     TestSuite{"permission_rules", run_permission_rules_tests},
     TestSuite{"tui_composer", run_tui_composer_tests},
     TestSuite{"run_observer", run_run_observer_tests},
+    TestSuite{"containment", run_containment_tests},
 #ifdef CWDEBUG
     TestSuite{"debug", run_debug_tests},
 #endif

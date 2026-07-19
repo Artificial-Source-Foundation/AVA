@@ -74,6 +74,7 @@ set(AVA_TESTS_SOURCES
   "tools_tests.cpp"
   "tui_composer_tests.cpp"
   "run_observer_tests.cpp"
+  "containment_tests.cpp"
 )
 # The debug suite relies on libcwd-backed machinery (ava_debug, CWDEBUG), so it is
 # only compiled in when libcwd is effectively enabled.
@@ -128,6 +129,7 @@ set(AVA_TEST_SUITES
   permission_rules
   tui_composer
   run_observer
+  containment
 )
 foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})

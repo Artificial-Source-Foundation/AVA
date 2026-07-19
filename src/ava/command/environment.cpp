@@ -281,4 +281,9 @@ std::vector<EnvironmentVariable> const& CommandEnvironment::entries() const noex
   return entries_;
 }
 
+SyntheticEnvironmentRoots const& CommandEnvironment::synthetic_roots() const noexcept
+{
+  return roots_;
+}
+
 }  // namespace ava::command

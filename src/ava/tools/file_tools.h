@@ -231,6 +231,10 @@ struct WriteOptions
 [[nodiscard]] ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command,
                                                               ava::command::CommandPreparation const& preparation, bool unverified_delegated_executor,
                                                               std::string_view tool_name, std::string_view error_message);
+[[nodiscard]] ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command,
+                                                              ava::command::CommandPreparation const& preparation,
+                                                              ava::permissions::CommandContainmentInfo const& containment, bool unverified_delegated_executor,
+                                                              std::string_view tool_name, std::string_view error_message);
 [[nodiscard]] std::string permission_audit_data_json(PermissionAuditEvent const& event);
 [[nodiscard]] ava::core::VoidResult replace_file_with_staged_file(std::filesystem::path const& staged_path, std::filesystem::path const& target_path);
 void remove_staged_file_best_effort(std::filesystem::path const& staged_path);

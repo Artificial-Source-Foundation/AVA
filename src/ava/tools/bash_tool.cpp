@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/containment/containment.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/spill_files.h"
 
@@ -448,7 +449,10 @@ ava::tools::CommandExecutionPlanMetadata execution_metadata(ava::command::Comman
                                                   .backend_maximum_scope = permission.backend_maximum_scope,
                                                   .resolved_executable = permission.resolved_executable,
                                                   .cwd = plan.cwd(),
-                                                  .executor_identity_verified = false};
+                                                  .executor_identity_verified = false,
+                                                  .containment_available = permission.containment_available,
+                                                  .containment_profile_id = permission.containment_profile_id,
+                                                  .containment_network_allowed = permission.containment_network_allowed};
 }
 
 bool group_exists(pid_t pgid)
@@ -603,7 +607,24 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
 
   auto const tool_name = context.permission_tool_name.empty() ? std::string("bash") : context.permission_tool_name;
   bool const unverified_delegated_executor = static_cast<bool>(context.command_executor);
-  if (auto permission = ensure_command_permission(context, command, *preparation, unverified_delegated_executor, tool_name, "command requires permission");
+  // Prepare a development containment plan for commands that execute mutable
+  // project code. The plan probes kernel features (Landlock/seccomp) without
+  // mutating parent state and determines whether standard mutable commands
+  // can auto-run (containment available) or must downgrade to Ask.
+  bool const needs_containment = !unverified_delegated_executor && (preparation->plan().classification().capabilities.requires_containment ||
+                                                                    preparation->plan().classification().capabilities.executes_mutable_project_code ||
+                                                                    preparation->plan().classification().level == ava::command::CommandLevel::Sensitive);
+  std::optional<ava::containment::DevelopmentContainmentPlan> containment_plan;
+  if (needs_containment)
+  {
+    containment_plan = ava::containment::prepare_development_containment(*preparation, preparation->plan().classification().capabilities.network_enabled);
+  }
+  bool const containment_available = containment_plan && ava::containment::containment_is_available(*containment_plan);
+  ava::permissions::CommandContainmentInfo const containment_info{.available = containment_available,
+                                                                  .profile_id = containment_plan ? containment_plan->profile_id : std::string{},
+                                                                  .network_allowed = containment_plan ? containment_plan->network_allowed : false};
+  if (auto permission =
+          ensure_command_permission(context, command, *preparation, containment_info, unverified_delegated_executor, tool_name, "command requires permission");
       !permission)
   {
     return std::unexpected(std::move(permission.error()));
@@ -782,8 +803,10 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     char release = '\0';
     if (read_retry(control_read.get(), &release, 1) != 1 || release != 'G')
       _exit(127);
-    control_read.reset();
-    status_write.reset();
+    // When containment is available, keep the status/control pipes open for
+    // the containment handshake. The child applies containment after
+    // stdio/cwd setup, reports status, and waits for the parent's final
+    // release before exec.
     UniqueFd null_input(::open("/dev/null", O_RDONLY | O_CLOEXEC));
     if (null_input.get() < 0 || ::dup2(null_input.get(), STDIN_FILENO) < 0 || ::dup2(write_fd.get(), STDOUT_FILENO) < 0 ||
         ::dup2(write_fd.get(), STDERR_FILENO) < 0 || ::chdir(cwd.c_str()) != 0)
@@ -793,7 +816,30 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     write_fd.reset();
     if (null_input.get() != STDIN_FILENO)
       null_input.reset();
-    close_nonstandard_fds();
+    if (containment_available)
+    {
+      // Close inherited non-stdio FDs except the containment handshake
+      // pipes so no inherited socket can bypass the seccomp filter.
+      ava::containment::close_inherited_fds_except(status_write.get(), control_read.get());
+      int containment_status = 0;
+      if (auto containment_result = ava::containment::apply_containment_in_child(*containment_plan); !containment_result)
+        containment_status = errno == 0 ? EIO : errno;
+      static_cast<void>(write_retry(status_write.get(), &containment_status, sizeof(containment_status)));
+      if (containment_status != 0)
+        _exit(127);
+      char final_release = '\0';
+      if (read_retry(control_read.get(), &final_release, 1) != 1 || final_release != 'X')
+        _exit(127);
+      status_write.reset();
+      control_read.reset();
+      close_nonstandard_fds();
+    }
+    else
+    {
+      control_read.reset();
+      status_write.reset();
+      close_nonstandard_fds();
+    }
     ::execve(executable.c_str(), argv.data(), environment.data());
     _exit(127);
   }
@@ -825,7 +871,8 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     return std::unexpected(poll_result == 0 ? ava::core::Error(ava::core::ErrorCategory::Io, "sealed command process-group setup timed out")
                                             : errno_error("sealed command process-group setup failed"));
   }
-  status_read.reset();
+  if (!containment_available)
+    status_read.reset();
   pid_t const observed_pgid = ::getpgid(pid);
   bool const group_verified = gate_status == 0 && observed_pgid == pid && (parent_setpgid || observed_pgid == pid) && ::kill(-pid, 0) == 0;
   if (!group_verified)
@@ -907,7 +954,53 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     static_cast<void>(terminate_verified_group(pid, pid, sentinel_pid, status, leader_reaped, sentinel_reaped));
     return std::unexpected(errno_error("failed to release sealed command process for exec"));
   }
-  control_write.reset();
+  if (containment_available)
+  {
+    // Containment handshake: the child applies Landlock + seccomp after
+    // stdio/cwd setup and reports success/failure before exec. The parent
+    // must acknowledge success before the child proceeds to execve.
+    pollfd containment_poll{.fd = status_read.get(), .events = POLLIN, .revents = 0};
+    int containment_poll_result = 0;
+    do
+    {
+      containment_poll_result = ::poll(&containment_poll, 1, static_cast<int>(kGateTimeout.count()));
+    } while (containment_poll_result < 0 && errno == EINTR);
+    int containment_status = EIO;
+    if (containment_poll_result <= 0 || (containment_poll.revents & POLLIN) == 0 ||
+        read_retry(status_read.get(), &containment_status, sizeof(containment_status)) != sizeof(containment_status))
+    {
+      int cleanup_status = 0;
+      bool cleanup_leader_reaped = false;
+      bool cleanup_sentinel_reaped = false;
+      static_cast<void>(terminate_verified_group(pid, pid, sentinel_pid, cleanup_status, cleanup_leader_reaped, cleanup_sentinel_reaped));
+      return std::unexpected(containment_poll_result == 0 ? ava::core::Error(ava::core::ErrorCategory::Io, "sealed command containment installation timed out")
+                                                          : errno_error("sealed command containment installation failed"));
+    }
+    if (containment_status != 0)
+    {
+      int cleanup_status = 0;
+      bool cleanup_leader_reaped = false;
+      bool cleanup_sentinel_reaped = false;
+      static_cast<void>(terminate_verified_group(pid, pid, sentinel_pid, cleanup_status, cleanup_leader_reaped, cleanup_sentinel_reaped));
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "sealed command containment installation failed before exec; user code did not start"));
+    }
+    char const final_release = 'X';
+    if (write_retry(control_write.get(), &final_release, 1) != 1)
+    {
+      int cleanup_status = 0;
+      bool cleanup_leader_reaped = false;
+      bool cleanup_sentinel_reaped = false;
+      static_cast<void>(terminate_verified_group(pid, pid, sentinel_pid, cleanup_status, cleanup_leader_reaped, cleanup_sentinel_reaped));
+      return std::unexpected(errno_error("failed to release sealed command process after containment"));
+    }
+    status_read.reset();
+    control_write.reset();
+  }
+  else
+  {
+    control_write.reset();
+  }
 
   int const flags = ::fcntl(read_fd.get(), F_GETFL, 0);
   if (flags < 0 || ::fcntl(read_fd.get(), F_SETFL, flags | O_NONBLOCK) < 0)

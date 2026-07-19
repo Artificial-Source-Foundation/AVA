@@ -251,14 +251,12 @@ void test_bash_tool()
     test_file << "add_test(NAME repository_controlled_code COMMAND /usr/bin/touch " << repository_test_marker.generic_string() << ")\n";
   }
   auto repository_build = ava::tools::run_bash(context, "cmake --build " + repository_test_dir.generic_string());
-  expect(!repository_build && repository_build.error().format().find("resolution: no_resolver") != std::string::npos &&
-             !std::filesystem::exists(repository_test_marker),
-         "repository builds cannot execute automatically without an explicit resolver approval");
+  expect(repository_build && repository_build->exit_code == 0 && !std::filesystem::exists(repository_test_marker),
+         "repository builds auto-allow under verified development containment; the fake cmake exits without creating the test marker");
 
   auto repository_test = ava::tools::run_bash(context, "ctest --test-dir " + repository_test_dir.generic_string());
-  expect(!repository_test && repository_test.error().format().find("resolution: no_resolver") != std::string::npos &&
-             !std::filesystem::exists(repository_test_marker),
-         "repository test code cannot execute automatically without an explicit resolver approval");
+  expect(repository_test && repository_test->exit_code == 0 && !std::filesystem::exists(repository_test_marker),
+         "repository tests auto-allow under verified development containment; the fake ctest exits without creating the test marker");
 
   ava::tools::ToolContext const timeout_context{
       .workspace_dir = temp_root(),
@@ -538,10 +536,11 @@ void test_sealed_local_bash_contract()
                               return prompt.command_metadata && prompt.command_metadata->level == ava::command::CommandLevel::Critical &&
                                      prompt.command_metadata->backend_maximum_scope == ava::command::InteractiveScope::Once;
                             });
-  expect(!npm && npm.error().format().find("resolution: no_resolver") != std::string::npos && !python_bare && !python_absolute && !bash_inline &&
-             !destructive && !raw && all_critical && critical_prompts[0].command_metadata->family == critical_prompts[1].command_metadata->family &&
+  expect(npm && npm->exit_code == 0 && npm->output.find("npm-ran") != std::string::npos && !python_bare && !python_absolute && !bash_inline && !destructive &&
+             !raw && all_critical && critical_prompts[0].command_metadata->family == critical_prompts[1].command_metadata->family &&
              critical_prompts[0].command_metadata->resolved_executable == critical_prompts[1].command_metadata->resolved_executable,
-         "npm project code asks, and bare/absolute Python, bash, destructive, and raw-shell commands are critical one-shot prompts rather than hard denies");
+         "npm project code auto-allows under verified development containment, while bare/absolute Python, bash, destructive, and raw-shell commands remain "
+         "critical one-shot prompts");
 
   auto const normal_group_file = workspace / "normal-background-pgid";
   ava::tools::ToolContext const group_context{

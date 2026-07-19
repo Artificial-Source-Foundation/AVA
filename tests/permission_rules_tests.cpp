@@ -190,11 +190,29 @@ void test_permission_rule_matches_command_operations_without_path_targets()
                                                                                                     .actor = "test"});
   expect(allow_echo.has_value(), "permission rule storage accepts exact command rules for non-file operations");
 
+  // Until the separate stable recipe identity/store exists, every planned
+  // command is one-shot only. Legacy v1 RunCommand Allows are ignored; only
+  // authoritative Denies are retained.
   auto matched = ava::permissions::match_persistent_permission_rule(store, command_prompt(store, "echo safe"));
+  expect(matched && !*matched, "legacy v1 command Allow rules are ignored for one-shot command plans");
+
+  auto deny_echo =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Deny,
+                                                                                                    .operation = ava::permissions::Operation::RunCommand,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "bash",
+                                                                                                    .target_path = {},
+                                                                                                    .command = "echo safe",
+                                                                                                    .reason = "deny exact verification command",
+                                                                                                    .actor = "test"});
+  expect(deny_echo.has_value(), "permission rule storage accepts exact command deny rules");
+  auto matched_deny = ava::permissions::match_persistent_permission_rule(store, command_prompt(store, "echo safe"));
+  expect(matched_deny && *matched_deny && (*matched_deny)->rule_id == deny_echo->rule_id && (*matched_deny)->action == ava::permissions::PermissionAction::Deny,
+         "legacy v1 command Deny rules remain authoritative for one-shot command plans");
+
   auto unmatched = ava::permissions::match_persistent_permission_rule(store, command_prompt(store, "echo unsafe"));
-  expect(matched && *matched && (*matched)->rule_id == allow_echo->rule_id && (*matched)->action == ava::permissions::PermissionAction::Allow && unmatched &&
-             !*unmatched,
-         "persistent permission rules match command operations by exact command/tool without a path target");
+  expect(unmatched && !*unmatched, "non-matching command prompts produce no persistent rule match");
 }
 
 void test_repository_build_test_persistent_allows_are_rejected_but_denies_win()

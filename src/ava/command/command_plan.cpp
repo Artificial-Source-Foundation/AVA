@@ -107,8 +107,13 @@ std::string compute_fingerprint(CommandPlan const& plan, PathMetadata const& wor
   {
     append_executable_metadata(hash, plan.resolved_executable()->executable);
     hash.append_field(to_string(plan.resolved_executable()->origin));
+    hash.append_field(plan.resolved_executable()->shebang_fully_resolved ? "resolved" : "partial");
     hash.append_number(plan.resolved_executable()->shebang_interpreters.size());
-    for (auto const& interpreter : plan.resolved_executable()->shebang_interpreters) append_executable_metadata(hash, interpreter);
+    for (auto const& interpreter : plan.resolved_executable()->shebang_interpreters)
+    {
+      append_executable_metadata(hash, interpreter.interpreter);
+      hash.append_field(interpreter.argument);
+    }
   }
   auto const& classification = plan.classification();
   hash.append_field(to_string(classification.level));
@@ -303,7 +308,7 @@ ava::core::Result<bool> plan_is_fresh(CommandPlan const& plan)
       return false;
     for (auto const& interpreter : plan.resolved_executable_->shebang_interpreters)
     {
-      result = fresh(interpreter);
+      result = fresh(interpreter.interpreter);
       if (!result)
         return std::unexpected(std::move(result.error()));
       if (!*result)

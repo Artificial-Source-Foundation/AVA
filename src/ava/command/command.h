@@ -291,11 +291,26 @@ struct ExecutableMetadata
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct ShebangInterpreter
+{
+  ExecutableMetadata interpreter;
+  std::string argument;
+
+  friend bool operator==(ShebangInterpreter const&, ShebangInterpreter const&) = default;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct ResolvedExecutable
 {
   ExecutableMetadata executable;
   ExecutableOrigin origin = ExecutableOrigin::System;
-  std::vector<ExecutableMetadata> shebang_interpreters;
+  std::vector<ShebangInterpreter> shebang_interpreters;
+  // False when a shebang references /usr/bin/env with a name that could not be
+  // resolved through the sealed PATH, or uses an unsupported multi-argument
+  // form. The plan still succeeds so policy can issue a one-shot prompt, but
+  // the interpreter chain is not fully bound.
+  bool shebang_fully_resolved = true;
 
   friend bool operator==(ResolvedExecutable const&, ResolvedExecutable const&) = default;
 

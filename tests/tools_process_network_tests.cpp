@@ -533,6 +533,135 @@ void test_sealed_local_bash_contract()
          "normal leader completion cleans verified background children before returning");
 }
 
+void test_sealed_process_group_sentinel_and_grace()
+{
+  auto const root = temp_root() / "sealed-process-group-sentinel-grace";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "sentinel/grace fixture owns every root");
+  auto const first_bin = root / "bin";
+  std::filesystem::create_directories(first_bin);
+  expect(::chmod(first_bin.c_str(), S_IRWXU) == 0, "sentinel/grace fixture bin is owner-only");
+  auto write_executable = [](std::filesystem::path const& path, std::string_view body) {
+    std::ofstream executable(path, std::ios::binary | std::ios::trunc);
+    executable << body;
+    executable.close();
+    return ::chmod(path.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0;
+  };
+
+  // A fixture that verifies the leader has no unexpected child processes.
+  // If the sentinel were forked by the leader (old design), it would appear
+  // here as an unexpected child. With the AVA-owned sibling design, the
+  // leader's /proc/self/task/$$/children is empty.
+  expect(write_executable(first_bin / "child-check",
+                          "#!/bin/sh\n"
+                          "children=''\n"
+                          "while IFS= read -r line; do\n"
+                          "  children=\"${children}${line} \"\n"
+                          "done < /proc/self/task/$$/children 2>/dev/null\n"
+                          "if [ -n \"$children\" ]; then\n"
+                          "  printf 'unexpected-children: %s\\n' \"$children\"\n"
+                          "else\n"
+                          "  printf 'no-unexpected-children\\n'\n"
+                          "fi\n"),
+         "sentinel/grace fixture creates the child-check executable");
+
+  // A fixture that starts a background subshell with a SIGTERM handler that
+  // writes a marker after a short delay, then the leader exits normally.
+  auto const grace_marker = workspace / "grace-marker";
+  std::filesystem::remove(grace_marker, cleanup);
+  expect(write_executable(first_bin / "grace-leader",
+                          "#!/bin/sh\n"
+                          "(\n"
+                          "  trap 'sleep 0.1; touch " +
+                              grace_marker.string() +
+                              "; exit 0' TERM\n"
+                              "  while true; do sleep 0.05; done\n"
+                              ") &\n"
+                              "exit 0\n"),
+         "sentinel/grace fixture creates the grace-leader executable");
+
+  ScopedEnvVar const path_guard("PATH", first_bin.string() + ":/usr/bin:/bin");
+  ava::tools::ToolContext const context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      }};
+
+  // Fix 1: the sentinel is an AVA-owned sibling, so the leader (after exec)
+  // has no unexpected child processes.
+  auto child_check = ava::tools::run_bash(context, "child-check", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(2000)});
+  expect(child_check && child_check->exit_code == 0 && child_check->output.find("no-unexpected-children") != std::string::npos,
+         "the sealed command sentinel is an AVA-owned sibling: a direct command sees no sentinel child");
+
+  // Fix 2: the verified process group receives a finite SIGTERM grace period
+  // even when the leader has already exited normally. The background child's
+  // TERM handler completes during grace, and no SIGKILL is needed.
+  auto grace = ava::tools::run_bash(context, "grace-leader", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(2000)});
+  expect(grace && grace->exit_code == 0 && std::filesystem::exists(grace_marker),
+         "background child TERM handler completes during the finite grace period on normal leader exit");
+
+  // Timeout coverage: a long-running command with a background child is
+  // terminated via the timeout path, which also applies the grace period.
+  auto const timeout_marker = workspace / "timeout-marker";
+  std::filesystem::remove(timeout_marker, cleanup);
+  auto const timeout_group_file = workspace / "timeout-child-pgid";
+  std::filesystem::remove(timeout_group_file, cleanup);
+  expect(write_executable(first_bin / "timeout-leader",
+                          "#!/bin/sh\n"
+                          "(\n"
+                          "  trap 'sleep 0.1; touch " +
+                              timeout_marker.string() +
+                              "; exit 0' TERM\n"
+                              "  printf $$ > " +
+                              timeout_group_file.string() +
+                              "\n"
+                              "  while true; do sleep 0.05; done\n"
+                              ") &\n"
+                              "while true; do sleep 1; done\n"),
+         "sentinel/grace fixture creates the timeout-leader executable");
+  auto timeout_result = ava::tools::run_bash(context, "timeout-leader", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(500), .max_bytes = 1024});
+  auto const timeout_pgid = read_pid_file_for_test(timeout_group_file);
+  expect(timeout_result && timeout_result->timed_out && timeout_pgid && wait_for_process_group_exit(*timeout_pgid) && std::filesystem::exists(timeout_marker),
+         "timeout termination applies the grace period to the verified process group");
+
+  // Cancel coverage: cancellation also applies the grace period.
+  auto const cancel_marker = workspace / "cancel-marker";
+  std::filesystem::remove(cancel_marker, cleanup);
+  auto const cancel_group_file = workspace / "cancel-child-pgid";
+  std::filesystem::remove(cancel_group_file, cleanup);
+  expect(write_executable(first_bin / "cancel-leader",
+                          "#!/bin/sh\n"
+                          "(\n"
+                          "  trap 'sleep 0.1; touch " +
+                              cancel_marker.string() +
+                              "; exit 0' TERM\n"
+                              "  printf $$ > " +
+                              cancel_group_file.string() +
+                              "\n"
+                              "  while true; do sleep 0.05; done\n"
+                              ") &\n"
+                              "while true; do sleep 1; done\n"),
+         "sentinel/grace fixture creates the cancel-leader executable");
+  ava::tools::ToolContext const cancel_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .cancel_requested = [&cancel_group_file] { return std::filesystem::exists(cancel_group_file); }};
+  auto cancel_result =
+      ava::tools::run_bash(cancel_context, "cancel-leader", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000), .max_bytes = 1024});
+  auto const cancel_pgid = read_pid_file_for_test(cancel_group_file);
+  expect(cancel_result && cancel_result->canceled && !cancel_result->timed_out && cancel_pgid && wait_for_process_group_exit(*cancel_pgid) &&
+             std::filesystem::exists(cancel_marker),
+         "cancellation applies the grace period to the verified process group");
+}
+
 void test_webfetch_tool()
 {
   std::error_code remove_error;
@@ -707,6 +836,7 @@ void run_tools_process_network_tests()
   test_bash_tool();
   test_injected_command_executor();
   test_sealed_local_bash_contract();
+  test_sealed_process_group_sentinel_and_grace();
   test_webfetch_tool();
   test_websearch_tool();
 }

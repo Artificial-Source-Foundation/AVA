@@ -510,7 +510,14 @@ ExecutableOrigin executable_origin(ExecutableMetadata const& executable, std::fi
   return ExecutableOrigin::System;
 }
 
-ava::core::Result<std::optional<std::filesystem::path>> shebang_interpreter_path(ExecutableMetadata const& executable, CommandLimits const& limits)
+struct ShebangParse
+{
+  std::filesystem::path interpreter_path;
+  std::string argument;
+  bool is_env = false;
+};
+
+ava::core::Result<std::optional<ShebangParse>> shebang_interpreter_path(ExecutableMetadata const& executable, CommandLimits const& limits)
 {
   // A normal read follows neither a final symlink nor a special file, and the
   // fstat identity check closes the metadata-to-read race as far as this
@@ -542,7 +549,7 @@ ava::core::Result<std::optional<std::filesystem::path>> shebang_interpreter_path
   }
   line.resize(static_cast<std::size_t>(read_count));
   if (!line.starts_with("#!"))
-    return std::optional<std::filesystem::path>{};
+    return std::optional<ShebangParse>{};
   auto const newline = line.find('\n');
   if (newline == std::string::npos && line.size() > limits.max_shebang_bytes)
   {
@@ -558,39 +565,105 @@ ava::core::Result<std::optional<std::filesystem::path>> shebang_interpreter_path
   while (end < body.size() && std::isspace(static_cast<unsigned char>(body[end])) == 0) ++end;
   auto const interpreter = body.substr(first, end - first);
   while (end < body.size() && std::isspace(static_cast<unsigned char>(body[end])) != 0) ++end;
-  if (interpreter.empty() || has_forbidden_byte(interpreter) || !std::filesystem::path(interpreter).is_absolute())
+  // Linux passes at most one argument from the shebang to the interpreter;
+  // everything after the first whitespace-delimited interpreter token up to
+  // the newline is that single argument.
+  auto const argument = body.substr(end);
+  if (interpreter.empty() || has_forbidden_byte(interpreter) || has_forbidden_byte(argument) || !std::filesystem::path(interpreter).is_absolute())
   {
     return std::unexpected(
         command_error(ava::core::ErrorCategory::InvalidArgument, "shebang must name an absolute interpreter path", "path", executable.canonical_path.string()));
   }
-  if (end != body.size() || interpreter == "/usr/bin/env")
-  {
-    return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument,
-                                         "shebang arguments and /usr/bin/env indirection are unsupported for sealed command plans", "path",
-                                         executable.canonical_path.string()));
-  }
-  return std::filesystem::path(interpreter);
+  ShebangParse parse{.interpreter_path = std::filesystem::path(interpreter), .argument = std::string(argument), .is_env = interpreter == "/usr/bin/env"};
+  return parse;
 }
 
-ava::core::Result<std::vector<ExecutableMetadata>> inspect_shebang_chain(ExecutableMetadata const& executable, CommandLimits const& limits)
+std::optional<ExecutableMetadata> resolve_env_name(std::string_view name, std::vector<CommandPathEntry> const& path_entries)
 {
-  std::vector<ExecutableMetadata> interpreters;
+  if (name.empty() || name.find('/') != std::string_view::npos || has_forbidden_byte(name))
+    return std::nullopt;
+  for (auto const& entry : path_entries)
+  {
+    auto const candidate = entry.directory / name;
+    std::error_code exists_error;
+    bool const exists = std::filesystem::exists(candidate, exists_error);
+    if (!exists && !exists_error)
+      continue;
+    if (exists_error)
+      continue;
+    auto metadata = executable_metadata(candidate);
+    if (metadata)
+      return *metadata;
+  }
+  return std::nullopt;
+}
+
+ava::core::Result<std::pair<std::vector<ShebangInterpreter>, bool>> inspect_shebang_chain(ExecutableMetadata const& executable, CommandLimits const& limits,
+                                                                                          std::vector<CommandPathEntry> const& path_entries)
+{
+  std::vector<ShebangInterpreter> interpreters;
   std::set<std::filesystem::path> seen;
   seen.insert(executable.canonical_path);
   auto current = executable;
+  bool fully_resolved = true;
   while (true)
   {
-    auto interpreter_path = shebang_interpreter_path(current, limits);
-    if (!interpreter_path)
-      return std::unexpected(std::move(interpreter_path.error()));
-    if (!*interpreter_path)
-      return interpreters;
+    auto parsed = shebang_interpreter_path(current, limits);
+    if (!parsed)
+      return std::unexpected(std::move(parsed.error()));
+    if (!*parsed)
+      return std::make_pair(std::move(interpreters), fully_resolved);
     if (interpreters.size() >= limits.max_shebang_depth)
     {
       return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "shebang interpreter chain exceeds the bounded depth", "path",
                                            executable.canonical_path.string()));
     }
-    auto interpreter = executable_metadata(**interpreter_path);
+    auto const& parse = **parsed;
+    if (parse.is_env)
+    {
+      // #!/usr/bin/env <name> resolves the single name through the sealed
+      // PATH. A missing or multi-token argument is safely representable as
+      // a one-shot critical prompt but cannot be fully bound.
+      auto env_meta = executable_metadata(parse.interpreter_path);
+      if (!env_meta)
+        return std::unexpected(std::move(env_meta.error()));
+      if (!seen.insert(env_meta->canonical_path).second)
+      {
+        return std::unexpected(
+            command_error(ava::core::ErrorCategory::InvalidArgument, "shebang interpreter chain contains a cycle", "path", env_meta->canonical_path.string()));
+      }
+      interpreters.push_back(ShebangInterpreter{.interpreter = *env_meta, .argument = parse.argument});
+      // Determine whether the env argument is a single resolvable name.
+      std::size_t token_start = 0;
+      while (token_start < parse.argument.size() && std::isspace(static_cast<unsigned char>(parse.argument[token_start])) != 0) ++token_start;
+      std::size_t token_end = token_start;
+      while (token_end < parse.argument.size() && std::isspace(static_cast<unsigned char>(parse.argument[token_end])) == 0) ++token_end;
+      std::size_t rest = token_end;
+      while (rest < parse.argument.size() && std::isspace(static_cast<unsigned char>(parse.argument[rest])) != 0) ++rest;
+      if (token_end == token_start || rest != parse.argument.size())
+      {
+        // Empty argument or trailing tokens: not a simple single-name env
+        // invocation. The plan still succeeds with a one-shot critical prompt.
+        fully_resolved = false;
+        return std::make_pair(std::move(interpreters), fully_resolved);
+      }
+      auto const name = std::string_view(parse.argument).substr(token_start, token_end - token_start);
+      auto resolved = resolve_env_name(name, path_entries);
+      if (!resolved)
+      {
+        fully_resolved = false;
+        return std::make_pair(std::move(interpreters), fully_resolved);
+      }
+      if (!seen.insert(resolved->canonical_path).second)
+      {
+        return std::unexpected(
+            command_error(ava::core::ErrorCategory::InvalidArgument, "shebang interpreter chain contains a cycle", "path", resolved->canonical_path.string()));
+      }
+      interpreters.push_back(ShebangInterpreter{.interpreter = *resolved, .argument = {}});
+      current = std::move(*resolved);
+      continue;
+    }
+    auto interpreter = executable_metadata(parse.interpreter_path);
     if (!interpreter)
       return std::unexpected(std::move(interpreter.error()));
     if (!seen.insert(interpreter->canonical_path).second)
@@ -598,7 +671,7 @@ ava::core::Result<std::vector<ExecutableMetadata>> inspect_shebang_chain(Executa
       return std::unexpected(
           command_error(ava::core::ErrorCategory::InvalidArgument, "shebang interpreter chain contains a cycle", "path", interpreter->canonical_path.string()));
     }
-    interpreters.push_back(*interpreter);
+    interpreters.push_back(ShebangInterpreter{.interpreter = *interpreter, .argument = parse.argument});
     current = std::move(*interpreter);
   }
 }
@@ -753,11 +826,13 @@ ava::core::Result<ResolvedExecutable> resolve_executable(std::vector<std::string
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
-  auto interpreters = inspect_shebang_chain(*metadata, limits);
+  auto interpreters = inspect_shebang_chain(*metadata, limits, path_entries);
   if (!interpreters)
     return std::unexpected(std::move(interpreters.error()));
-  return ResolvedExecutable{
-      .executable = *metadata, .origin = executable_origin(*metadata, workspace, trusted_home), .shebang_interpreters = std::move(*interpreters)};
+  return ResolvedExecutable{.executable = *metadata,
+                            .origin = executable_origin(*metadata, workspace, trusted_home),
+                            .shebang_interpreters = std::move(interpreters->first),
+                            .shebang_fully_resolved = interpreters->second};
 }
 
 std::optional<PathMetadata> seal_recipe_path_argument(std::string_view value, std::filesystem::path const& cwd, std::filesystem::path const& workspace)

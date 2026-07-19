@@ -305,7 +305,9 @@ CommandClassification classify_command(std::vector<std::string> const& argv, Res
 {
   auto const executable_name = lowercase(executable.executable.canonical_path.filename().string());
   CommandClassification classification;
-  if (auto destructive = classify_destructive_or_privileged(executable_name, argv))
+  if (!executable.shebang_fully_resolved)
+    classification = critical_classification(CommandFamily::UnknownWrapper, CommandCapabilities{.unknown_wrapper = true});
+  else if (auto destructive = classify_destructive_or_privileged(executable_name, argv))
     classification = std::move(*destructive);
   else if (is_inline_interpreter(executable_name, argv))
     classification = critical_classification(CommandFamily::InterpreterInline, CommandCapabilities{.interpreter_inline = true});

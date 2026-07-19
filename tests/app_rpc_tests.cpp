@@ -7,6 +7,7 @@
 #include "ava/app/project_trust.h"
 #include "ava/app/rpc/catalog.h"
 #include "ava/app/rpc/output.h"
+#include "ava/app/rpc/resolvers.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/rpc/runtime_navigation.h"
 #include "ava/app/rpc/serialization.h"
@@ -275,6 +276,71 @@ void test_app_rpc_prompt_payload_serialization()
              permission_json.find("\"diff_preview\":\"--- a\\n+++ b\\n-old\\n+new\"") != std::string::npos &&
              permission_json.find("\"diff_truncated\":true") != std::string::npos,
          "RPC permission request payload preserves semantic operation, target, risk, reason, and diff preview data");
+
+  // The additive optional command_metadata block carries the sealed command
+  // plan identity so RPC clients can display exact execution context.
+  ava::permissions::CommandPermissionMetadata command_metadata;
+  command_metadata.level = ava::command::CommandLevel::Critical;
+  command_metadata.family = ava::command::CommandFamily::InterpreterInline;
+  command_metadata.fingerprint = "sha256:ava-command-plan-v3:test-fingerprint";
+  command_metadata.execution_domain = ava::command::CommandExecutionDomain::RawShell;
+  command_metadata.resolved_executable = "/usr/bin/env";
+  command_metadata.executable_origin = ava::command::ExecutableOrigin::System;
+  command_metadata.cwd = "/workspace";
+  command_metadata.containment_available = false;
+  command_metadata.containment_status = ava::permissions::CommandContainmentStatus::Unavailable;
+  command_metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  command_metadata.environment_profile_id = "ava-local-bash-prompt-v1";
+  command_metadata.environment_digest = "abc123";
+  command_metadata.executor_identity_verified = false;
+  auto const command_permission_json =
+      ava::app::rpc::permission_request_payload_json("permission_cmd", ava::permissions::PermissionPrompt{.permission_request_id = "permreq_cmd",
+                                                                                                          .operation = ava::permissions::Operation::RunCommand,
+                                                                                                          .mode = ava::agent::Mode::Build,
+                                                                                                          .workspace_dir = "/workspace",
+                                                                                                          .target_path = {},
+                                                                                                          .command = "python3 -c 'print(1)'",
+                                                                                                          .tool_name = "bash",
+                                                                                                          .reason = "sealed command requires approval",
+                                                                                                          .risk = ava::permissions::PermissionRisk::Critical,
+                                                                                                          .command_metadata = command_metadata});
+  expect(command_permission_json.find("\"command_metadata\":{") != std::string::npos &&
+             command_permission_json.find("\"level\":\"critical\"") != std::string::npos &&
+             command_permission_json.find("\"family\":\"interpreter_inline\"") != std::string::npos &&
+             command_permission_json.find("\"fingerprint\":\"sha256:ava-command-plan-v3:test-fingerprint\"") != std::string::npos &&
+             command_permission_json.find("\"execution_domain\":\"raw_shell\"") != std::string::npos &&
+             command_permission_json.find("\"resolved_executable\":\"/usr/bin/env\"") != std::string::npos &&
+             command_permission_json.find("\"origin\":\"system\"") != std::string::npos &&
+             command_permission_json.find("\"cwd\":\"/workspace\"") != std::string::npos &&
+             command_permission_json.find("\"containment_available\":false") != std::string::npos &&
+             command_permission_json.find("\"containment_status\":\"unavailable\"") != std::string::npos &&
+             command_permission_json.find("\"backend_maximum_scope\":\"once\"") != std::string::npos &&
+             command_permission_json.find("\"environment_profile_id\":\"ava-local-bash-prompt-v1\"") != std::string::npos &&
+             command_permission_json.find("\"environment_digest\":\"abc123\"") != std::string::npos &&
+             command_permission_json.find("\"executor_identity_verified\":false") != std::string::npos,
+         "RPC permission request payload includes additive optional command_metadata fields for sealed commands");
+
+  // The command_fingerprint is additive in session grant serialization: it is
+  // omitted when empty and present when a sealed command plan is bound.
+  ava::app::rpc::PendingResolverState grant_pending_state;
+  grant_pending_state.permission_session_grants.push_back(ava::app::rpc::PermissionSessionGrant{.grant_id = "permgrant_1",
+                                                                                                .permission_request_id = "permreq_1",
+                                                                                                .session_id = "session_1",
+                                                                                                .operation = ava::permissions::Operation::RunCommand,
+                                                                                                .mode = ava::agent::Mode::Build,
+                                                                                                .tool_name = "bash",
+                                                                                                .target_path = {},
+                                                                                                .command = "true",
+                                                                                                .command_fingerprint = {},
+                                                                                                .reason = "one-shot",
+                                                                                                .risk = ava::permissions::PermissionRisk::Critical});
+  auto const grants_json_no_fp = ava::app::rpc::permission_session_grants_result_json(grant_pending_state);
+  expect(grants_json_no_fp.find("\"command_fingerprint\"") == std::string::npos,
+         "RPC session grant serialization omits command_fingerprint when no sealed plan is bound");
+  grant_pending_state.permission_session_grants.front().command_fingerprint = "sha256:ava-command-plan-v3:grant-fingerprint";
+  auto const grants_json_with_fp = ava::app::rpc::permission_session_grants_result_json(grant_pending_state);
+  expect(grants_json_with_fp.find("\"command_fingerprint\":\"sha256:ava-command-plan-v3:grant-fingerprint\"") != std::string::npos,
+         "RPC session grant serialization includes command_fingerprint when a sealed plan is bound");
 
   auto const question_json = ava::app::rpc::question_request_payload_json(
       "question_1", ava::agent::QuestionPrompt{.header = "Choose",

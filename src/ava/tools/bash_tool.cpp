@@ -29,7 +29,7 @@ namespace {
 constexpr char kDefaultStartupPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 constexpr std::size_t kBashProgressByteInterval = 128 * 1024;
 constexpr auto kBashProgressTimeInterval = std::chrono::seconds(2);
-constexpr auto kProcessGroupGrace = std::chrono::milliseconds(75);
+constexpr auto kProcessGroupGrace = std::chrono::milliseconds(300);
 constexpr auto kProcessGroupKillWait = std::chrono::milliseconds(500);
 constexpr auto kGateTimeout = std::chrono::milliseconds(1000);
 constexpr std::size_t kCleanupEntryLimit = 4096;
@@ -461,20 +461,36 @@ ava::core::VoidResult signal_verified_group(pid_t pgid, int signal_number)
   return std::unexpected(errno_error("failed to signal verified command process group"));
 }
 
-ava::core::VoidResult terminate_verified_group(pid_t pgid, pid_t leader, int& status, bool& leader_reaped)
+ava::core::VoidResult terminate_verified_group(pid_t pgid, pid_t leader, pid_t sentinel, int& status, bool& leader_reaped, bool& sentinel_reaped)
 {
   if (auto signaled = signal_verified_group(pgid, SIGTERM); !signaled)
     return signaled;
+  // The grace period applies to the entire verified group, not just the
+  // leader. Even when the leader has already exited, background children with
+  // TERM handlers receive their finite grace window before SIGKILL.
   auto const grace_deadline = std::chrono::steady_clock::now() + kProcessGroupGrace;
-  while (!leader_reaped && std::chrono::steady_clock::now() < grace_deadline)
+  while (std::chrono::steady_clock::now() < grace_deadline)
   {
-    auto const waited = waitpid_retry(leader, &status, WNOHANG);
-    if (waited == leader)
-      leader_reaped = true;
-    else if (waited < 0 && errno != ECHILD)
-      return std::unexpected(errno_error("failed to wait for command process leader during cleanup"));
     if (!leader_reaped)
-      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    {
+      auto const waited = waitpid_retry(leader, &status, WNOHANG);
+      if (waited == leader)
+        leader_reaped = true;
+      else if (waited < 0 && errno != ECHILD)
+        return std::unexpected(errno_error("failed to wait for command process leader during cleanup"));
+    }
+    if (!sentinel_reaped && sentinel > 0)
+    {
+      int sentinel_status = 0;
+      auto const waited = waitpid_retry(sentinel, &sentinel_status, WNOHANG);
+      if (waited == sentinel)
+        sentinel_reaped = true;
+      else if (waited < 0 && errno != ECHILD)
+        return std::unexpected(errno_error("failed to wait for command sentinel during cleanup"));
+    }
+    if (!group_exists(pgid))
+      break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
   if (group_exists(pgid))
   {
@@ -489,13 +505,38 @@ ava::core::VoidResult terminate_verified_group(pid_t pgid, pid_t leader, int& st
     else if (waited < 0 && errno != ECHILD)
       return std::unexpected(errno_error("failed to reap command process leader during cleanup"));
   }
+  if (!sentinel_reaped && sentinel > 0)
+  {
+    int sentinel_status = 0;
+    static_cast<void>(waitpid_retry(sentinel, &sentinel_status, 0));
+    sentinel_reaped = true;
+  }
   return wait_for_group_exit(pgid, std::chrono::steady_clock::now() + kProcessGroupKillWait);
+}
+
+ava::core::VoidResult reap_owned_child(pid_t child)
+{
+  if (child <= 0)
+    return {};
+  int status = 0;
+  auto const waited = waitpid_retry(child, &status, WNOHANG);
+  if (waited == child || (waited < 0 && errno == ECHILD))
+    return {};
+  if (waited < 0)
+    return std::unexpected(errno_error("failed to wait for owned child during cleanup"));
+  // The child is still alive; kill and reap it directly. This is a verified
+  // PID from fork, not a PGID signal.
+  static_cast<void>(::kill(child, SIGKILL));
+  static_cast<void>(waitpid_retry(child, &status, 0));
+  return {};
 }
 
 ava::core::VoidResult gate_failure_cleanup(pid_t child, UniqueFd& control_write)
 {
   // Closing the gate is the child-side cleanup signal before exec. Do not
   // signal a process group until parent and child have both verified it.
+  // The sentinel sibling has not been forked yet at gate-failure time, so
+  // only the leader child needs reaping.
   control_write.reset();
   int status = 0;
   auto const deadline = std::chrono::steady_clock::now() + kProcessGroupGrace;
@@ -508,9 +549,6 @@ ava::core::VoidResult gate_failure_cleanup(pid_t child, UniqueFd& control_write)
       return std::unexpected(errno_error("failed to wait for gated command child"));
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
-  // The leader itself is a verified PID returned by fork; this is deliberately
-  // not a PGID signal. The pre-exec child closes its gate and reaps its private
-  // sentinel on normal gate failure.
   static_cast<void>(::kill(child, SIGKILL));
   static_cast<void>(waitpid_retry(child, &status, 0));
   return {};
@@ -684,21 +722,32 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   auto control_pipe = make_pipe_cloexec();
   if (!control_pipe)
     return std::unexpected(std::move(control_pipe.error()));
+  auto sentinel_pipe = make_pipe_cloexec();
+  if (!sentinel_pipe)
+    return std::unexpected(std::move(sentinel_pipe.error()));
   UniqueFd read_fd((*output_pipe)[0]);
   UniqueFd write_fd((*output_pipe)[1]);
   UniqueFd status_read((*status_pipe)[0]);
   UniqueFd status_write((*status_pipe)[1]);
   UniqueFd control_read((*control_pipe)[0]);
   UniqueFd control_write((*control_pipe)[1]);
+  UniqueFd sentinel_read((*sentinel_pipe)[0]);
+  UniqueFd sentinel_write((*sentinel_pipe)[1]);
 
   pid_t const pid = ::fork();
   if (pid < 0)
     return std::unexpected(errno_error("failed to fork sealed command process"));
   if (pid == 0)
   {
+    // Leader child: establish the process group behind the gate, then wait
+    // for the parent's release before exec. The sentinel is NOT forked here;
+    // the parent forks it as an AVA-owned sibling so a direct command calling
+    // waitpid(-1) never sees a sentinel child.
     read_fd.reset();
     status_read.reset();
     control_write.reset();
+    sentinel_read.reset();
+    sentinel_write.reset();
     int gate_status = 0;
     if (::setpgid(0, 0) != 0)
     {
@@ -706,32 +755,10 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
       static_cast<void>(write_retry(status_write.get(), &gate_status, sizeof(gate_status)));
       _exit(127);
     }
-    pid_t const sentinel = ::fork();
-    if (sentinel < 0)
-    {
-      gate_status = errno == 0 ? EIO : errno;
-      static_cast<void>(write_retry(status_write.get(), &gate_status, sizeof(gate_status)));
-      _exit(127);
-    }
-    if (sentinel == 0)
-    {
-      // The sentinel keeps the verified group identity from being recycled
-      // between leader completion and descendant cleanup. It has no stdio or
-      // control descriptors and never execs user code.
-      write_fd.reset();
-      status_write.reset();
-      control_read.reset();
-      while (true) static_cast<void>(::pause());
-    }
     static_cast<void>(write_retry(status_write.get(), &gate_status, sizeof(gate_status)));
     char release = '\0';
     if (read_retry(control_read.get(), &release, 1) != 1 || release != 'G')
-    {
-      static_cast<void>(::kill(sentinel, SIGKILL));
-      int sentinel_status = 0;
-      static_cast<void>(waitpid_retry(sentinel, &sentinel_status, 0));
       _exit(127);
-    }
     control_read.reset();
     status_write.reset();
     UniqueFd null_input(::open("/dev/null", O_RDONLY | O_CLOEXEC));
@@ -784,12 +811,72 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::Io, "failed to establish a parent/child-acknowledged verified command process group before exec"));
   }
+  // Fork the sentinel as an AVA-owned sibling of the leader. The sentinel
+  // joins the leader's verified PGID and acknowledges before the leader is
+  // released for exec, so a direct command calling waitpid(-1) never sees a
+  // sentinel child. AVA reaps both the leader and the sentinel.
+  pid_t sentinel_pid = ::fork();
+  if (sentinel_pid < 0)
+  {
+    int status = 0;
+    bool reaped = false;
+    static_cast<void>(terminate_verified_group(pid, pid, 0, status, reaped, reaped));
+    return std::unexpected(errno_error("failed to fork sealed command sentinel"));
+  }
+  if (sentinel_pid == 0)
+  {
+    read_fd.reset();
+    write_fd.reset();
+    status_read.reset();
+    status_write.reset();
+    control_read.reset();
+    control_write.reset();
+    sentinel_read.reset();
+    // Join the verified command process group. The leader established it
+    // behind the gate; the parent verified it before forking here.
+    if (::setpgid(0, pid) != 0)
+      _exit(127);
+    char const ack = 'S';
+    static_cast<void>(write_retry(sentinel_write.get(), &ack, 1));
+    sentinel_write.reset();
+    close_nonstandard_fds();
+    // The sentinel keeps the verified group identity from being recycled
+    // between leader completion and descendant cleanup. It never execs user
+    // code and has no stdio or control descriptors.
+    while (true) static_cast<void>(::pause());
+  }
+  sentinel_write.reset();
+  pollfd sentinel_poll{.fd = sentinel_read.get(), .events = POLLIN, .revents = 0};
+  int sentinel_poll_result = 0;
+  do
+  {
+    sentinel_poll_result = ::poll(&sentinel_poll, 1, static_cast<int>(kGateTimeout.count()));
+  } while (sentinel_poll_result < 0 && errno == EINTR);
+  char sentinel_ack = '\0';
+  bool sentinel_verified = false;
+  if (sentinel_poll_result > 0 && (sentinel_poll.revents & POLLIN) != 0 && read_retry(sentinel_read.get(), &sentinel_ack, 1) == 1 && sentinel_ack == 'S')
+  {
+    pid_t const sentinel_pgid = ::getpgid(sentinel_pid);
+    sentinel_verified = sentinel_pgid == pid;
+  }
+  sentinel_read.reset();
+  if (!sentinel_verified)
+  {
+    static_cast<void>(reap_owned_child(sentinel_pid));
+    int status = 0;
+    bool leader_reaped = false;
+    bool sentinel_reaped = false;
+    static_cast<void>(terminate_verified_group(pid, pid, sentinel_pid, status, leader_reaped, sentinel_reaped));
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::Io, "failed to establish a parent/child-acknowledged sentinel in the verified command process group"));
+  }
   char const release = 'G';
   if (write_retry(control_write.get(), &release, 1) != 1)
   {
     int status = 0;
-    bool reaped = false;
-    static_cast<void>(terminate_verified_group(pid, pid, status, reaped));
+    bool leader_reaped = false;
+    bool sentinel_reaped = false;
+    static_cast<void>(terminate_verified_group(pid, pid, sentinel_pid, status, leader_reaped, sentinel_reaped));
     return std::unexpected(errno_error("failed to release sealed command process for exec"));
   }
   control_write.reset();
@@ -798,14 +885,16 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   if (flags < 0 || ::fcntl(read_fd.get(), F_SETFL, flags | O_NONBLOCK) < 0)
   {
     int status = 0;
-    bool reaped = false;
-    static_cast<void>(terminate_verified_group(pid, pid, status, reaped));
+    bool leader_reaped = false;
+    bool sentinel_reaped = false;
+    static_cast<void>(terminate_verified_group(pid, pid, sentinel_pid, status, leader_reaped, sentinel_reaped));
     return std::unexpected(errno_error("failed to configure sealed command output pipe"));
   }
 
   SpillBuffer spill_buffer;
   bool running = true;
   bool leader_reaped = false;
+  bool sentinel_reaped = false;
   int status = 0;
   bool saw_output = false;
   bool previous_was_newline = false;
@@ -825,7 +914,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     return emit_tool_progress(context, "bash output " + std::to_string(result.total_bytes) + " bytes", "running");
   };
   auto fail_after_cleanup = [&](ava::core::Error error) -> ava::core::Result<BashResult> {
-    static_cast<void>(terminate_verified_group(pid, pid, status, leader_reaped));
+    static_cast<void>(terminate_verified_group(pid, pid, sentinel_pid, status, leader_reaped, sentinel_reaped));
     return std::unexpected(std::move(error));
   };
 
@@ -851,7 +940,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     if (is_canceled(context))
     {
       result.canceled = true;
-      if (auto stopped = terminate_verified_group(pid, pid, status, leader_reaped); !stopped)
+      if (auto stopped = terminate_verified_group(pid, pid, sentinel_pid, status, leader_reaped, sentinel_reaped); !stopped)
         return std::unexpected(std::move(stopped.error()));
       running = false;
       break;
@@ -860,9 +949,10 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     if (waited == pid)
     {
       leader_reaped = true;
-      // Even a successful leader may have background descendants. The private
-      // sentinel preserves the verified PGID until TERM-to-KILL cleanup ends.
-      if (auto stopped = terminate_verified_group(pid, pid, status, leader_reaped); !stopped)
+      // Even a successful leader may have background descendants. The
+      // AVA-owned sentinel preserves the verified PGID until TERM-to-KILL
+      // cleanup ends, and the grace period applies to the entire group.
+      if (auto stopped = terminate_verified_group(pid, pid, sentinel_pid, status, leader_reaped, sentinel_reaped); !stopped)
         return std::unexpected(std::move(stopped.error()));
       running = false;
       break;
@@ -872,7 +962,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     if (std::chrono::steady_clock::now() >= deadline)
     {
       result.timed_out = true;
-      if (auto stopped = terminate_verified_group(pid, pid, status, leader_reaped); !stopped)
+      if (auto stopped = terminate_verified_group(pid, pid, sentinel_pid, status, leader_reaped, sentinel_reaped); !stopped)
         return std::unexpected(std::move(stopped.error()));
       running = false;
       break;

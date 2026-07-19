@@ -1192,12 +1192,11 @@ ava::core::Result<std::optional<PersistentPermissionRule>> match_persistent_perm
       matched_deny = matched_deny ? prefer_more_specific(*matched_deny, rule) : rule;
       continue;
     }
-    if (is_repository_build_or_test_allow(rule))
-      continue;
-    // v1 rules predate sealed command identity. They retain authoritative
-    // Denies, but cannot silently authorize critical, unverified, or
-    // uncontained mutable plans on the new command path.
-    if (rule.operation == Operation::RunCommand && !command_prompt_allows_persistent_allow(prompt))
+    // Until the separate stable recipe identity/store exists, every planned
+    // command is one-shot only. v1 command rules predate sealed command
+    // identity, so all legacy RunCommand Allows are ignored; only
+    // authoritative Denies are retained.
+    if (rule.operation == Operation::RunCommand)
       continue;
     matched_allow = matched_allow ? prefer_more_specific(*matched_allow, rule) : rule;
   }

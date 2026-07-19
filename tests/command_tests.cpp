@@ -340,7 +340,7 @@ void test_workspace_cwd_path_and_interpreter_freshness()
          "workspace, cwd, PATH entries, executables, and every shebang interpreter participate in freshness validation");
 }
 
-void test_raw_shell_binds_configured_shell_and_rejects_env_shebang()
+void test_raw_shell_binds_configured_shell_and_accepts_env_shebang()
 {
   CommandFixture fixture("raw-shell");
   auto raw = command::CommandIntent::compatibility("echo safe; whoami");
@@ -351,15 +351,40 @@ void test_raw_shell_binds_configured_shell_and_rejects_env_shebang()
   auto invalid_shell_options = fixture.options();
   invalid_shell_options.shell = "shell";
   auto invalid_shell_plan = command::seal_command_plan(*raw, invalid_shell_options);
-  fixture.executable("env-indirect", "#!/usr/bin/env python\nprint('no')\n");
-  auto env_indirect = command::seal_command_plan(*command::CommandIntent::structured({"env-indirect"}), fixture.options());
+
+  // Real env-python/node-like fixtures: a script using #!/usr/bin/env <name>
+  // resolves the interpreter through the sealed PATH and binds the chain.
+  fixture.executable("python3", "printf 'python3-ran\\n'\n");
+  fixture.executable("node", "printf 'node-ran\\n'\n");
+  fixture.executable("env-python", "#!/usr/bin/env python3\nprintf 'env-python-ran\\n'\n");
+  fixture.executable("env-node", "#!/usr/bin/env node\nprintf 'env-node-ran\\n'\n");
+  // An interpreter-argument shebang (Linux one-argument behavior).
+  fixture.executable("interpreter", "#!/bin/sh\nprintf 'interpreter-ran\\n'\n");
+  fixture.executable("arg-script", "#!" + (fixture.bin / "interpreter").string() + " -u\nprintf 'arg-script-ran\\n'\n");
+  // An env shebang with an unresolvable name: plan succeeds with a partial
+  // (unresolved) chain, producing a one-shot critical prompt.
+  fixture.executable("env-missing", "#!/usr/bin/env nonexistent-lang\nprintf 'env-missing\\n'\n");
+
+  auto env_python = command::seal_command_plan(*command::CommandIntent::structured({"env-python"}), fixture.options());
+  auto env_node = command::seal_command_plan(*command::CommandIntent::structured({"env-node"}), fixture.options());
+  auto arg_script = command::seal_command_plan(*command::CommandIntent::structured({"arg-script"}), fixture.options());
+  auto env_missing = command::seal_command_plan(*command::CommandIntent::structured({"env-missing"}), fixture.options());
 
   expect(raw_plan && raw_plan->execution_domain() == command::CommandExecutionDomain::RawShell && raw_plan->resolved_executable() &&
              raw_plan->resolved_executable()->executable.canonical_path == std::filesystem::canonical(fixture.bin / "shell") &&
              raw_plan->classification().level == command::CommandLevel::Critical && default_shell_plan && default_shell_plan->resolved_executable() &&
              default_shell_plan->resolved_executable()->executable.canonical_path == std::filesystem::canonical("/bin/sh") && !invalid_shell_plan &&
-             !env_indirect,
-         "raw-shell plans bind the exact absolute configured shell and reject unsupported /usr/bin/env shebang indirection");
+             env_python && env_python->resolved_executable()->shebang_interpreters.size() == 2 &&
+             env_python->resolved_executable()->shebang_interpreters[0].interpreter.canonical_path == std::filesystem::canonical("/usr/bin/env") &&
+             env_python->resolved_executable()->shebang_interpreters[0].argument == "python3" &&
+             env_python->resolved_executable()->shebang_interpreters[1].interpreter.canonical_path == std::filesystem::canonical(fixture.bin / "python3") &&
+             env_python->resolved_executable()->shebang_fully_resolved && env_node && env_node->resolved_executable()->shebang_fully_resolved && arg_script &&
+             arg_script->resolved_executable()->shebang_interpreters.size() >= 1 &&
+             arg_script->resolved_executable()->shebang_interpreters[0].argument == "-u" && arg_script->resolved_executable()->shebang_fully_resolved &&
+             env_missing && !env_missing->resolved_executable()->shebang_fully_resolved &&
+             env_missing->classification().level == command::CommandLevel::Critical,
+         "raw-shell plans bind the configured shell; env shebangs resolve the interpreter chain, "
+         "interpreter-argument shebangs bind the argument, and unresolvable env shebangs produce a one-shot critical prompt");
 }
 
 void test_environment_is_synthetic_and_digest_bound()
@@ -600,7 +625,7 @@ void run_command_tests()
   test_recipe_paths_are_canonical_sealed_and_fresh();
   test_sealed_freshness_and_symlink_provenance();
   test_workspace_cwd_path_and_interpreter_freshness();
-  test_raw_shell_binds_configured_shell_and_rejects_env_shebang();
+  test_raw_shell_binds_configured_shell_and_accepts_env_shebang();
   test_environment_is_synthetic_and_digest_bound();
   test_synthetic_environment_roots_are_sealed_and_fresh();
   test_capabilities_scopes_and_standard_recipes();

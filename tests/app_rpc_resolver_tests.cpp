@@ -676,6 +676,96 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
          "an authoritative deny takes precedence over a matching session grant");
 }
 
+void test_app_rpc_command_one_shot_blocks_reusable_grants()
+{
+  auto const root = temp_root() / "app-rpc-command-one-shot";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto const paths = app_test_paths(root);
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC command one-shot test opens runtime session");
+  if (!session)
+    return;
+
+  ava::app::rpc::PendingResolverState pending_state;
+  ava::app::rpc::RpcRunState run_state;
+  std::mutex session_mutex;
+  ThreadSafeStringBuf output_buffer;
+  std::ostream output_stream(&output_buffer);
+  ava::app::rpc::output_ts output(output_stream, [] { });
+
+  // The sealed command path always attaches metadata with
+  // backend_maximum_scope == Once, so command_permission_allows_reusable_grant
+  // returns false and allow_session replies must not create grants.
+  ava::permissions::CommandPermissionMetadata metadata;
+  metadata.level = ava::command::CommandLevel::Critical;
+  metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  metadata.fingerprint = "sha256:ava-command-plan-v3:one-shot-regression";
+  metadata.executor_identity_verified = true;
+
+  ava::permissions::PermissionPrompt const prompt{.permission_request_id = "permreq_one_shot",
+                                                  .operation = ava::permissions::Operation::RunCommand,
+                                                  .mode = ava::agent::Mode::Build,
+                                                  .workspace_dir = workspace,
+                                                  .target_path = {},
+                                                  .command = "true",
+                                                  .tool_name = "bash",
+                                                  .reason = "sealed command requires approval",
+                                                  .risk = ava::permissions::PermissionRisk::Critical,
+                                                  .command_metadata = metadata};
+
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session, session_mutex, nullptr, "prompt_os");
+
+  auto wait_for_permission_request = [&] {
+    bool const published = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(5));
+    std::lock_guard lock(pending_state.mutex);
+    return published && !pending_state.permission_requests.empty() ? pending_state.permission_requests.begin()->first : std::string();
+  };
+
+  // First invocation: reply with allow_session. Because the command is
+  // one-shot only, no session grant must be created.
+  std::optional<ava::core::Result<ava::permissions::PermissionResolutionDecision>> first_result;
+  std::jthread first_thread([&] { first_result = resolver(prompt); });
+  auto const first_request_id = wait_for_permission_request();
+  auto first_reply = first_request_id.empty()
+                         ? ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing first permission request")))
+                         : ava::app::rpc::resolve_permission_reply(pending_state, first_request_id, "prompt_os", "allow_session");
+  first_thread.join();
+  bool no_grant_after_first = false;
+  {
+    std::lock_guard lock(pending_state.mutex);
+    no_grant_after_first = pending_state.permission_session_grants.empty();
+  }
+  expect(!first_request_id.empty() && first_reply && first_result && *first_result && **first_result == ava::permissions::PermissionResolution::Allow &&
+             no_grant_after_first,
+         "allow_session for a one-shot command returns Allow without creating a reusable session grant");
+
+  // Second invocation: because no grant was created, the resolver must be
+  // called again and create a fresh pending request.
+  std::optional<ava::core::Result<ava::permissions::PermissionResolutionDecision>> second_result;
+  std::jthread second_thread([&] { second_result = resolver(prompt); });
+  auto const second_request_id = wait_for_permission_request();
+  auto second_reply = second_request_id.empty()
+                          ? ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing second permission request")))
+                          : ava::app::rpc::resolve_permission_reply(pending_state, second_request_id, "prompt_os", "allow");
+  second_thread.join();
+  bool no_grant_after_second = false;
+  {
+    std::lock_guard lock(pending_state.mutex);
+    no_grant_after_second = pending_state.permission_session_grants.empty();
+  }
+  expect(!second_request_id.empty() && second_reply && second_result && *second_result && **second_result == ava::permissions::PermissionResolution::Allow &&
+             no_grant_after_second && first_request_id != second_request_id,
+         "the permission resolver is called twice for the same one-shot command and no reusable grant is created");
+}
+
 void test_app_rpc_permission_request_includes_mutation_diff_preview()
 {
   auto const root = temp_root() / "app-rpc-permission-diff";
@@ -985,6 +1075,7 @@ void run_app_rpc_resolver_tests()
   test_app_rpc_permission_reply_allow_and_deny_flows();
   test_app_rpc_permission_reply_session_grant_flow();
   test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_deny();
+  test_app_rpc_command_one_shot_blocks_reusable_grants();
   test_app_rpc_permission_request_includes_mutation_diff_preview();
   test_app_rpc_persistent_permission_rule_lifecycle();
   test_app_rpc_question_reply_flow();

@@ -102,6 +102,26 @@ Tool records use `status` (`running`, `success`, `error`, or `canceled` as appli
 
 `permission_requested.payload` includes `resolver_request_id`, optional durable `permission_request_id`, `operation`, `mode`, `target_path`, `command`, `tool_name`, `reason`, `risk`, and optional `diff_preview`/`diff_truncated`. Reply with `decision` equal to `allow`, `allow_session`, or `deny`; optional `reason` is at most 1024 bytes. `allow_session` creates an in-memory exact-match grant for this RPC process. Persistent allow/deny rules are separate commands and never override built-in hard denies.
 
+When `operation` is `bash` and the request originates from a sealed command plan, `permission_requested.payload` includes an optional `command_metadata` object with the following additive fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `level` | string | Command risk level: `standard`, `sensitive`, or `critical`. |
+| `family` | string | Command family (e.g. `inspection`, `cmake_build`, `interpreter_inline`, `raw_shell`). |
+| `fingerprint` | string | Instantaneous integrity binding for the sealed plan (`sha256:ava-command-plan-v3:...`); never a durable grant identity. |
+| `execution_domain` | string | `direct_argv` or `raw_shell`. |
+| `resolved_executable` | string | Canonical path of the resolved executable. |
+| `origin` | string | Executable provenance: `system`, `user`, or `workspace`. |
+| `cwd` | string | Canonical working directory. |
+| `containment_available` | boolean | Whether process containment is available (always `false` in this milestone). |
+| `containment_status` | string | `not_required`, `unavailable`, or `unverified_delegated_executor`. |
+| `backend_maximum_scope` | string | Maximum reusable scope: `once`, `session`, or `workspace`. All commands are `once` during this milestone. |
+| `environment_profile_id` | string | Synthetic environment profile identifier. |
+| `environment_digest` | string | Synthetic environment digest (no environment values). |
+| `executor_identity_verified` | boolean | Whether the executor identity is verified (always `false` for delegated execution). |
+
+Session grant serialization (`permission_grants` result) includes an additive `command_fingerprint` string field when a sealed command plan is bound; it is omitted for non-command grants. Until the separate stable recipe identity/store exists, every planned command is one-shot only (`backend_maximum_scope` is `once`), so `allow_session` replies for commands return a one-shot `allow` without creating a reusable grant. Legacy v1 persistent command Allow rules are ignored; only authoritative Denies are retained.
+
 ### Question request/reply
 
 `question_requested.payload` includes `resolver_request_id`, `header`, `question`, option objects (`value`, `label`), and `multiple`, `allow_custom`, `secret`, `modal`, `searchable`. A single-select reply uses one of string `answer` or string `selected`. A multi-select reply may use string-array `selected_options` and, when allowed, string `answer`. Values must match current options; wrong types, duplicates, or invalid combinations do not resolve the pending question.

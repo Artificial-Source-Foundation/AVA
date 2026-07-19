@@ -502,13 +502,11 @@ CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan 
       .environment_profile_id = plan.environment_profile_id(),
       .environment_digest = plan.environment_digest(),
       .executor_identity_verified = !unverified_delegated_executor};
-  // This milestone has no containment implementation. Mutable project code
-  // must therefore remain a one-shot prompt even when its recipe would later
-  // support a broader scope under containment.
-  if (metadata.level == ava::command::CommandLevel::Critical || (metadata.executes_mutable_project_code && !metadata.containment_available))
-  {
-    metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
-  }
+  // Until the separate stable recipe identity/store exists, every planned
+  // command is one-shot only regardless of classification, containment, or
+  // executor verification. No command may receive a reusable session or
+  // workspace grant during this milestone.
+  metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
   if (unverified_delegated_executor)
   {
     metadata.level = ava::command::CommandLevel::Critical;
@@ -543,8 +541,10 @@ PermissionDecision decide(CommandPermissionMetadata const& metadata)
 
 bool command_permission_allows_reusable_grant(CommandPermissionMetadata const& metadata) noexcept
 {
-  return metadata.executor_identity_verified && metadata.level != ava::command::CommandLevel::Critical &&
-         metadata.backend_maximum_scope != ava::command::InteractiveScope::Once && !(metadata.executes_mutable_project_code && !metadata.containment_available);
+  // Every planned command is one-shot only during this milestone, so no
+  // command metadata may receive a reusable session or workspace grant.
+  static_cast<void>(metadata);
+  return false;
 }
 
 bool command_prompt_allows_persistent_allow(PermissionPrompt const& prompt) noexcept

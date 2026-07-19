@@ -138,8 +138,9 @@ void test_compatibility_parser_is_lossless_or_raw_shell()
 void test_compatibility_shell_words_are_critical_raw_shell()
 {
   CommandFixture fixture("compatibility-shell-words");
-  std::vector<std::string> const shell_words{"cd workspace", "command ls",    "exec tool", "time tool", "export NAME=value", "unset NAME", "set -e",
-                                             "read value",   "source script", ". script",  "eval tool", "if condition",      "for item"};
+  std::vector<std::string> const shell_words{"cd workspace", "chdir workspace",   "command ls",   "exec tool", "time tool",  "enable -n echo",
+                                             "coproc tool",  "export NAME=value", "unset NAME",   "set -e",    "read value", "source script",
+                                             ". script",     "eval tool",         "if condition", "for item"};
   bool all_raw_critical = true;
   for (auto const& text : shell_words)
   {

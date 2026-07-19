@@ -66,13 +66,13 @@ bool is_shell_command_position_word(std::string_view value)
   // Compatibility input is shell text, so command-position shell words must
   // never be reinterpreted as a direct executable lookup. This includes POSIX
   // special builtins, common shell builtins, and grammar/control keywords.
-  static constexpr std::array<std::string_view, 75> kShellWords{
-      ".",        ":",        "alias",   "bg",     "bind",   "break",   "builtin", "caller",   "case",    "cd",    "command", "compgen", "complete",
-      "compopt",  "continue", "declare", "dirs",   "disown", "do",      "done",    "echo",     "elif",    "else",  "esac",    "eval",    "exec",
-      "exit",     "export",   "false",   "fc",     "fg",     "fi",      "for",     "function", "getopts", "hash",  "help",    "history", "if",
-      "in",       "jobs",     "kill",    "let",    "local",  "logout",  "mapfile", "popd",     "printf",  "pushd", "pwd",     "read",    "readarray",
-      "readonly", "return",   "select",  "set",    "shift",  "shopt",   "source",  "suspend",  "test",    "then",  "time",    "times",   "trap",
-      "true",     "type",     "typeset", "ulimit", "umask",  "unalias", "unset",   "until",    "wait",    "while"};
+  static constexpr std::array<std::string_view, 78> kShellWords{
+      ".",        ":",       "alias",     "bg",       "bind",    "break",   "builtin", "caller", "case",    "cd",      "chdir",    "command", "compgen",
+      "complete", "compopt", "continue",  "coproc",   "declare", "dirs",    "disown",  "do",     "done",    "echo",    "elif",     "else",    "enable",
+      "esac",     "eval",    "exec",      "exit",     "export",  "false",   "fc",      "fg",     "fi",      "for",     "function", "getopts", "hash",
+      "help",     "history", "if",        "in",       "jobs",    "kill",    "let",     "local",  "logout",  "mapfile", "popd",     "printf",  "pushd",
+      "pwd",      "read",    "readarray", "readonly", "return",  "select",  "set",     "shift",  "shopt",   "source",  "suspend",  "test",    "then",
+      "time",     "times",   "trap",      "true",     "type",    "typeset", "ulimit",  "umask",  "unalias", "unset",   "until",    "wait",    "while"};
   return std::ranges::find(kShellWords, value) != kShellWords.end();
 }
 

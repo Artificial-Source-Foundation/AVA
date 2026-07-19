@@ -53,8 +53,11 @@ set(TARGET_FILE "${WORKSPACE}/src/todo.txt")
 set(MUTATION_FILE "${TEST_ROOT}/outside-todo.txt")
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
-file(MAKE_DIRECTORY "${WORKSPACE}/src" "${WORKSPACE}/docs" "${HOME_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}" "${DATA_DIR}")
-file(CHMOD "${TEST_ROOT}" "${WORKSPACE}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+file(MAKE_DIRECTORY "${WORKSPACE}/src" "${WORKSPACE}/docs" "${HOME_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}/ava/sessions" "${DATA_DIR}")
+# Model command sealing treats AVA's config and current-session namespace as
+# authority roots, so this fixture must model the owner-private XDG layout.
+file(CHMOD "${TEST_ROOT}" "${WORKSPACE}" "${HOME_DIR}" "${CONFIG_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}" "${STATE_DIR}/ava" "${STATE_DIR}/ava/sessions" "${DATA_DIR}"
+     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 file(WRITE "${WORKSPACE}/AGENTS.md" "headless e2e smoke project instructions\n")
 file(WRITE "${TARGET_FILE}" "status: TODO\ndetail: replace TODO with DONE and verify.\n")
 file(WRITE "${MUTATION_FILE}" "status: TODO\ndetail: replace TODO with DONE and verify.\n")

@@ -72,6 +72,7 @@ PermissionAuditEvent audit_event(ToolContext const& context, std::string permiss
                               .resolution_reason = "",
                               .actor = context.permission_actor.empty() ? std::string("agent") : context.permission_actor,
                               .rule_id = "",
+                              .command_arguments_redacted = context.redact_permission_audit_arguments,
                               .command_metadata = std::move(command_metadata)};
 }
 
@@ -464,9 +465,21 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event)
   {
     data += ",\"target_path\":\"" + ava::core::json::escape(event.target_path.string()) + "\"";
   }
-  if (!event.command.empty())
+  if (event.command_arguments_redacted || !event.command.empty())
   {
-    data += ",\"command\":\"" + ava::core::json::escape(event.command) + "\"";
+    auto command = event.command;
+    if (event.command_arguments_redacted)
+    {
+      command = "[redacted]";
+    }
+    else if (event.operation == ava::permissions::Operation::RunCommand && event.command_metadata)
+    {
+      // Audits retain the safe stable recipe display for reusable commands.
+      // One-shot commands may contain credentials in argv, so never persist
+      // their original command text.
+      command = event.command_metadata->recipe_display.empty() ? "<redacted one-shot command>" : event.command_metadata->recipe_display;
+    }
+    data += ",\"command\":\"" + ava::core::json::escape(command) + "\"";
   }
   if (!event.resolution.empty())
   {
@@ -501,8 +514,21 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event)
             ava::core::json::escape(ava::command::to_string(metadata.executable_origin)) + "\",\"cwd\":\"" + ava::core::json::escape(metadata.cwd.string()) +
             "\",\"containment_available\":" + (metadata.containment_available ? "true" : "false") + ",\"containment_status\":\"" +
             ava::core::json::escape(ava::permissions::to_string(metadata.containment_status)) + "\",\"backend_maximum_scope\":\"" +
-            ava::core::json::escape(ava::command::to_string(metadata.backend_maximum_scope)) + "\",\"containment_profile_id\":\"" +
-            ava::core::json::escape(metadata.containment_profile_id) +
+            ava::core::json::escape(ava::command::to_string(metadata.backend_maximum_scope)) + "\",\"recipe_payload_version\":\"" +
+            ava::core::json::escape(metadata.recipe_payload_version) + "\",\"global_recipe_key\":\"" + ava::core::json::escape(metadata.global_recipe_key) +
+            "\",\"workspace_recipe_key\":\"" + ava::core::json::escape(metadata.workspace_recipe_key) + "\"";
+    if (!event.command_arguments_redacted)
+    {
+      data += ",\"recipe_display\":\"" + ava::core::json::escape(metadata.recipe_display) + "\"";
+    }
+    data += ",\"effective_allowed_scopes\":[";
+    for (std::size_t index = 0; index < metadata.effective_allowed_scopes.size(); ++index)
+    {
+      if (index > 0)
+        data += ',';
+      data += "\"" + ava::core::json::escape(ava::command::to_string(metadata.effective_allowed_scopes[index])) + "\"";
+    }
+    data += "],\"containment_profile_id\":\"" + ava::core::json::escape(metadata.containment_profile_id) +
             "\",\"containment_network_allowed\":" + (metadata.containment_network_allowed ? "true" : "false") + ",\"environment_profile_id\":\"" +
             ava::core::json::escape(metadata.environment_profile_id) + "\",\"environment_digest\":\"" + ava::core::json::escape(metadata.environment_digest) +
             "\",\"executor_identity_verified\":" + (metadata.executor_identity_verified ? "true" : "false") + '}';

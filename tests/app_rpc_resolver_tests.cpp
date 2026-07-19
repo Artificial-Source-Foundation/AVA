@@ -583,6 +583,14 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
   ThreadSafeStringBuf output_buffer;
   std::ostream output_stream(&output_buffer);
   ava::app::rpc::output_ts output(output_stream, [] { });
+  ava::permissions::CommandPermissionMetadata metadata;
+  metadata.level = ava::command::CommandLevel::Standard;
+  metadata.containment_status = ava::permissions::CommandContainmentStatus::Available;
+  metadata.backend_maximum_scope = ava::command::InteractiveScope::Workspace;
+  metadata.global_recipe_key = "sha256:ava-command-recipe-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  metadata.workspace_recipe_key = "sha256:ava-command-workspace-recipe-v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  metadata.effective_allowed_scopes = {ava::command::InteractiveScope::Once, ava::command::InteractiveScope::Session,
+                                       ava::command::InteractiveScope::Workspace};
   ava::permissions::PermissionPrompt const prompt{.permission_request_id = "permreq_build_test",
                                                   .operation = ava::permissions::Operation::RunCommand,
                                                   .mode = ava::agent::Mode::Build,
@@ -591,7 +599,8 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
                                                   .command = "ctest --test-dir build",
                                                   .tool_name = "bash",
                                                   .reason = "repository test execution requires explicit approval",
-                                                  .risk = ava::permissions::PermissionRisk::High};
+                                                  .risk = ava::permissions::PermissionRisk::High,
+                                                  .command_metadata = metadata};
   {
     std::lock_guard lock(pending_state.mutex);
     pending_state.permission_session_grants.push_back(ava::app::rpc::PermissionSessionGrant{
@@ -603,7 +612,8 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
         .tool_name = prompt.tool_name,
         .target_path = prompt.target_path,
         .command = prompt.command,
-        .command_fingerprint = {},
+        .command_recipe_key = metadata.workspace_recipe_key,
+        .command_recipe_display = "ctest",
         .reason = "explicit current-session test grant",
         .risk = prompt.risk,
     });
@@ -611,7 +621,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
   auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session, session_mutex, nullptr, "prompt_1");
   auto matched = resolver(prompt);
   expect(matched && *matched == ava::permissions::PermissionResolution::AllowSessionGrant,
-         "a session grant authorizes only its exact repository test invocation");
+         "a session grant authorizes a matching stable workspace recipe rather than an execution fingerprint");
 
   auto wait_for_permission_request = [&] {
     bool const published = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(5));
@@ -658,7 +668,8 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
         .tool_name = prompt.tool_name,
         .target_path = prompt.target_path,
         .command = prompt.command,
-        .command_fingerprint = {},
+        .command_recipe_key = metadata.workspace_recipe_key,
+        .command_recipe_display = "ctest",
         .reason = "explicit current-session test grant",
         .risk = prompt.risk,
     });

@@ -1354,6 +1354,17 @@ PermissionPromptView permission_prompt_view(ava::permissions::PermissionPrompt c
   view.request_id = prompt.permission_request_id;
   view.diff_preview = prompt.diff_preview;
   view.diff_truncated = prompt.diff_truncated;
+  if (prompt.command_metadata)
+  {
+    view.recipe_display = prompt.command_metadata->recipe_display;
+    view.workspace_recipe_key = prompt.command_metadata->workspace_recipe_key;
+    for (std::size_t index = 0; index < prompt.command_metadata->effective_allowed_scopes.size(); ++index)
+    {
+      if (index > 0)
+        view.effective_allowed_scopes += ", ";
+      view.effective_allowed_scopes += ava::command::to_string(prompt.command_metadata->effective_allowed_scopes[index]);
+    }
+  }
   return view;
 }
 
@@ -1944,12 +1955,18 @@ int run_interactive_composer(TuiRuntimeOptions options)
     if (prompt.target_path.has_filename())
       permission_label += " " + prompt.target_path.generic_string();
     emit_prompt_audit("tui:permission_request", std::move(permission_label), prompt.permission_request_id, prompt.tool_name, prompt.reason);
+    // A durable Deny never grants execution authority, so preserve it even
+    // when one-shot Critical/unverified commands cannot be remembered as Allows.
+    auto const remember_availability = permission_prompt_remember_availability(prompt, static_cast<bool>(options.remember_permission_rule));
+    auto const allow_remember_available = remember_availability.allow_remember_available;
+    auto const deny_remember_available = remember_availability.deny_remember_available;
     {
       std::lock_guard<std::recursive_mutex> lock(ui_mutex);
       snapshot.permission_prompt = permission_prompt_view(prompt);
       snapshot.permission_prompt->selected_choice = PermissionPromptChoice::Deny;
-      snapshot.permission_prompt->remember_available = static_cast<bool>(options.remember_permission_rule);
-      snapshot.status = options.remember_permission_rule
+      snapshot.permission_prompt->allow_remember_available = allow_remember_available;
+      snapshot.permission_prompt->deny_remember_available = deny_remember_available;
+      snapshot.status = allow_remember_available || deny_remember_available
                             ? "permission required: A=allow once D=reject R=remember Tab/Left/Right choose Enter confirm Esc reject"
                             : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
     }
@@ -1965,7 +1982,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       std::string remembered_rule_id;
       if (remember)
       {
-        if (!options.remember_permission_rule)
+        if (!options.remember_permission_rule || (allow ? !allow_remember_available : !deny_remember_available))
         {
           emit_prompt_audit("tui:permission_deny", "permission denied: remember unavailable", prompt.permission_request_id, prompt.tool_name, prompt.reason,
                             "remember unavailable");
@@ -2083,7 +2100,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
       }
 
       auto input_result = snapshot.permission_prompt ? handle_permission_prompt_input(snapshot.permission_prompt->selected_choice, choice_input.event,
-                                                                                      snapshot.permission_prompt->remember_available)
+                                                                                      snapshot.permission_prompt->allow_remember_available,
+                                                                                      snapshot.permission_prompt->deny_remember_available)
                                                      : PermissionPromptInputResult{};
       if (input_result.action == PermissionPromptInputAction::ResolveAllow)
       {
@@ -2114,9 +2132,10 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-        snapshot.status = options.remember_permission_rule
-                              ? "permission required: A=allow once D=reject R=remember Tab/Left/Right choose Enter confirm Esc reject"
-                              : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
+        snapshot.status =
+            snapshot.permission_prompt && (snapshot.permission_prompt->allow_remember_available || snapshot.permission_prompt->deny_remember_available)
+                ? "permission required: A=allow once D=reject R=remember Tab/Left/Right choose Enter confirm Esc reject"
+                : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
       }
       if (!render())
       {

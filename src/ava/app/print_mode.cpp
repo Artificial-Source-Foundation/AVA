@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/app/EventEnvelope.h"
 #include "ava/app/print_mode.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/tui/composer.h"
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
@@ -103,15 +104,6 @@ runtime::RunOptions print_runtime_options(runtime::RunOptions options)
   return options;
 }
 
-ava::permissions::PermissionRuleStore permission_rule_store_for_print_session(runtime::Session const& session)
-{
-  return ava::permissions::PermissionRuleStore{
-      .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-      .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-      .workspace_dir = session.workspace_dir,
-  };
-}
-
 runtime::Event runtime_error_event(runtime::Session const& session, ava::core::Error const& error)
 {
   runtime::Event event;
@@ -148,7 +140,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session
 {
   bool emitted_error = false;
   auto runtime_options = print_runtime_options(options.runtime_options);
-  runtime_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_print_session(session),
+  runtime_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(session),
                                                                                                     std::move(runtime_options.permission_resolver));
   EventBus event_bus;
   if (options.output_format == PrintOutputFormat::Json)

@@ -320,7 +320,7 @@ void test_app_rpc_prompt_payload_serialization()
              command_permission_json.find("\"executor_identity_verified\":false") != std::string::npos,
          "RPC permission request payload includes additive optional command_metadata fields for sealed commands");
 
-  // The command_fingerprint is additive in session grant serialization: it is
+  // The command_recipe_key is additive in session grant serialization: it is
   // omitted when empty and present when a sealed command plan is bound.
   ava::app::rpc::PendingResolverState grant_pending_state;
   grant_pending_state.permission_session_grants.push_back(ava::app::rpc::PermissionSessionGrant{.grant_id = "permgrant_1",
@@ -331,16 +331,21 @@ void test_app_rpc_prompt_payload_serialization()
                                                                                                 .tool_name = "bash",
                                                                                                 .target_path = {},
                                                                                                 .command = "true",
-                                                                                                .command_fingerprint = {},
+                                                                                                .command_recipe_key = {},
+                                                                                                .command_recipe_display = {},
                                                                                                 .reason = "one-shot",
                                                                                                 .risk = ava::permissions::PermissionRisk::Critical});
-  auto const grants_json_no_fp = ava::app::rpc::permission_session_grants_result_json(grant_pending_state);
-  expect(grants_json_no_fp.find("\"command_fingerprint\"") == std::string::npos,
-         "RPC session grant serialization omits command_fingerprint when no sealed plan is bound");
-  grant_pending_state.permission_session_grants.front().command_fingerprint = "sha256:ava-command-plan-v3:grant-fingerprint";
-  auto const grants_json_with_fp = ava::app::rpc::permission_session_grants_result_json(grant_pending_state);
-  expect(grants_json_with_fp.find("\"command_fingerprint\":\"sha256:ava-command-plan-v3:grant-fingerprint\"") != std::string::npos,
-         "RPC session grant serialization includes command_fingerprint when a sealed plan is bound");
+  auto const grants_json_no_recipe = ava::app::rpc::permission_session_grants_result_json(grant_pending_state);
+  expect(grants_json_no_recipe.find("\"command_recipe_key\"") == std::string::npos,
+         "RPC session grant serialization omits command_recipe_key when no sealed plan is bound");
+  grant_pending_state.permission_session_grants.front().command_recipe_key =
+      "sha256:ava-command-workspace-recipe-v1:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+  grant_pending_state.permission_session_grants.front().command_recipe_display = "ctest";
+  auto const grants_json_with_recipe = ava::app::rpc::permission_session_grants_result_json(grant_pending_state);
+  expect(grants_json_with_recipe.find(
+             "\"command_recipe_key\":\"sha256:ava-command-workspace-recipe-v1:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"") !=
+             std::string::npos,
+         "RPC session grant serialization includes command_recipe_key when a sealed plan is bound");
 
   auto const question_json = ava::app::rpc::question_request_payload_json(
       "question_1", ava::agent::QuestionPrompt{.header = "Choose",
@@ -2206,7 +2211,7 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
   auto const audited_allow = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
                                return entry.type == ava::session::EntryType::PermissionDecision &&
                                       entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
-                                      entry.data_json.find("\"command\":\"printf rpc-direct\"") != std::string::npos &&
+                                      entry.data_json.find("\"command\":\"<redacted one-shot command>\"") != std::string::npos &&
                                       entry.data_json.find("\"resolution\":\"allow\"") != std::string::npos;
                              });
   expect(result.has_value(), "RPC direct command loop completes successfully");
@@ -2267,12 +2272,12 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
 
   auto const jsonl = output_buffer.str();
   auto entries = session->store.load();
-  auto const audited_deny = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
-                              return entry.type == ava::session::EntryType::PermissionDecision &&
-                                     entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
-                                     entry.data_json.find("\"command\":\"touch denied.txt\"") != std::string::npos &&
-                                     entry.data_json.find("\"resolution\":\"deny\"") != std::string::npos;
-                            });
+  auto const audited_deny =
+      entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+        return entry.type == ava::session::EntryType::PermissionDecision && entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
+               entry.data_json.find("\"command\":\"sensitive-workspace_mutation (workspace_mutation): literal=denied.txt\"") != std::string::npos &&
+               entry.data_json.find("\"resolution\":\"deny\"") != std::string::npos;
+      });
   expect(result.has_value(), "RPC direct command denial loop completes successfully");
   expect(denied && jsonl.find("\"id\":\"cmd-deny\"") != std::string::npos && jsonl.find("\"tool\":\"bash\"") != std::string::npos,
          "RPC direct command denial returns a structured bash tool error");

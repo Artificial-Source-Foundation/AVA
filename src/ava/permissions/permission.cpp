@@ -1,7 +1,9 @@
 #include "sys.h"
+#include "ava/command/environment.h"
 #include "ava/permissions/permission.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <string>
 #include <utility>
@@ -359,6 +361,294 @@ PermissionDecision decision(PermissionAction action, std::string reason, Permiss
   return PermissionDecision{.action = action, .reason = std::move(reason), .risk = risk};
 }
 
+bool path_is_within(std::filesystem::path const& root, std::filesystem::path const& candidate)
+{
+  auto const relative = candidate.lexically_relative(root);
+  auto const text = relative.generic_string();
+  return !relative.empty() && relative != ".." && !text.starts_with("../");
+}
+
+struct RecipeArgument
+{
+  // `kind` and `value` are independently framed hash fields. Never encode the
+  // kind into a value prefix: a caller-controlled literal must not collide with
+  // a normalized workspace path such as "workspace:foo".
+  std::string_view kind;
+  std::string value;
+  std::string display;
+};
+
+RecipeArgument recipe_argument(std::string_view value, std::filesystem::path const& workspace)
+{
+  auto const path = std::filesystem::path(value);
+  if (!path.is_absolute())
+    return RecipeArgument{.kind = "literal", .value = std::string(value), .display = std::string(value)};
+
+  auto const normalized = path.lexically_normal();
+  auto const normalized_workspace = workspace.lexically_normal();
+  if (!path_is_within(normalized_workspace, normalized))
+  {
+    auto text = normalized.generic_string();
+    return RecipeArgument{.kind = "literal", .value = text, .display = std::move(text)};
+  }
+  auto relative = normalized.lexically_relative(normalized_workspace).generic_string();
+  if (relative == ".")
+    relative.clear();
+  return RecipeArgument{.kind = "workspace_path", .value = relative, .display = "workspace:" + (relative.empty() ? "." : relative)};
+}
+
+bool is_credential_bearing_long_option(std::string_view lower)
+{
+  // Matches the lowercased long option name, with or without a trailing
+  // =value suffix.  Covers separate (--user value) and --option=value forms.
+  static constexpr std::array<std::string_view, 27> kCredentialOptions{
+      // curl/wget credential-bearing long options
+      "--user",
+      "--proxy-user",
+      "--header",
+      "--proxy-header",
+      "--cookie",
+      "--oauth2-bearer",
+      "--aws-sigv4",
+      "--cert",
+      "--key",
+      "--pass",
+      "--cacert",
+      "--form-string",
+      // wget-specific credential options
+      "--http-user",
+      "--http-password",
+      "--http-header",
+      "--proxy-password",
+      // general credential-like option names
+      "--token",
+      "--secret",
+      "--password",
+      "--api-key",
+      "--api_key",
+      "--apikey",
+      "--authorization",
+      "--auth",
+      "--credential",
+      "--bearer",
+      "--signature",
+  };
+  auto const eq = lower.find('=');
+  auto const name = eq != std::string_view::npos ? lower.substr(0, eq) : lower;
+  return std::ranges::find(kCredentialOptions, name) != kCredentialOptions.end();
+}
+
+bool is_credential_bearing_short_option(std::string_view arg)
+{
+  // Short options are case-sensitive in curl/wget.  Check every character in
+  // a short-option cluster to catch separate (-u value), concatenated
+  // (-uvalue), and combined (-vu) forms conservatively.
+  if (arg.size() < 2 || arg[0] != '-' || arg[1] == '-')
+    return false;
+  for (std::size_t index = 1; index < arg.size(); ++index)
+  {
+    switch (arg[index])
+    {
+      case 'u':  // curl --user
+      case 'H':  // curl --header
+      case 'b':  // curl --cookie
+      case 'E':  // curl --cert
+      case 'U':  // curl --proxy-user
+        return true;
+      default:
+        break;
+    }
+  }
+  return false;
+}
+
+bool contains_secret_like_argument(std::string_view value)
+{
+  auto const lower = lowercase(value);
+  auto const scheme = lower.find("://");
+  // URL userinfo and arbitrary query strings may carry credentials under
+  // application-specific names that AVA cannot enumerate safely. Keep simple
+  // endpoint URLs reusable, but make every queried URL one-shot rather than
+  // persisting its text in a recipe display or rule.
+  if (scheme != std::string::npos && (lower.find('@', scheme + 3) != std::string::npos || lower.find('?', scheme + 3) != std::string::npos))
+    return true;
+  // Credential-like key=value patterns cover inline assignments and
+  // non-URL option values. False positives only narrow reusable authority.
+  static constexpr std::array<std::string_view, 18> kCredentialPatterns{
+      "token=", "secret=",     "password=", "passwd=",    "api_key=", "apikey=", "api-key=", "access_token=", "authorization=",
+      "auth=",  "credential=", "bearer=",   "signature=", "key=",     "sig=",    "cookie=",  "session=",      "sessionid=",
+  };
+  return std::ranges::any_of(kCredentialPatterns, [lower](std::string_view pattern) { return lower.find(pattern) != std::string::npos; });
+}
+
+bool is_payload_bearing_long_option(std::string_view lower)
+{
+  // curl/wget request-body, form, config, and query options whose argument is
+  // an arbitrary payload that may carry secrets. Stable recipe minting must
+  // refuse these conservatively (favoring false positives) rather than parsing
+  // bodies. Matches the lowercased long option name with or without =value.
+  static constexpr std::array<std::string_view, 15> kPayloadOptions{
+      // curl request-body and form options
+      "--data",
+      "--data-ascii",
+      "--data-binary",
+      "--data-raw",
+      "--data-urlencode",
+      "--json",
+      "--form",
+      "--form-string",
+      "--url-query",
+      "--config",
+      // wget request-body options (--header is also credential-bearing but is
+      // listed here so wget header payloads are refused too)
+      "--post-data",
+      "--post-file",
+      "--body-data",
+      "--body-file",
+      "--header",
+  };
+  auto const eq = lower.find('=');
+  auto const name = eq != std::string_view::npos ? lower.substr(0, eq) : lower;
+  return std::ranges::find(kPayloadOptions, name) != kPayloadOptions.end();
+}
+
+bool is_payload_bearing_short_option(std::string_view arg)
+{
+  // Short-option clusters for curl payload/config flags: -d (--data),
+  // -F (--form), -K (--config). Check every character to catch separate
+  // (-d value), concatenated (-dvalue), and combined (-vd) forms.
+  if (arg.size() < 2 || arg[0] != '-' || arg[1] == '-')
+    return false;
+  for (std::size_t index = 1; index < arg.size(); ++index)
+  {
+    switch (arg[index])
+    {
+      case 'd':  // curl --data
+      case 'F':  // curl --form
+      case 'K':  // curl --config
+        return true;
+      default:
+        break;
+    }
+  }
+  return false;
+}
+
+bool contains_secret_like_arguments(std::vector<std::string> const& argv)
+{
+  return std::ranges::any_of(argv, [](std::string const& argument) {
+    auto const lower = lowercase(argument);
+    return is_credential_bearing_long_option(lower) || is_credential_bearing_short_option(argument) || is_payload_bearing_long_option(lower) ||
+           is_payload_bearing_short_option(argument) || contains_secret_like_argument(argument);
+  });
+}
+
+struct StableRecipeIdentity
+{
+  std::string global_key;
+  std::string workspace_key;
+  std::string display;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+std::optional<StableRecipeIdentity> stable_recipe_identity(ava::command::CommandPlan const& plan, CommandContainmentInfo const& containment)
+{
+  static constexpr std::string_view kPayloadVersion = "ava-command-recipe-payload-v1";
+  auto const& classification = plan.classification();
+  if (plan.execution_domain() != ava::command::CommandExecutionDomain::DirectArgv ||
+      (classification.level != ava::command::CommandLevel::Standard && classification.level != ava::command::CommandLevel::Sensitive) ||
+      !plan.resolved_executable())
+    return std::nullopt;
+
+  std::string recipe_name;
+  std::vector<std::string> argv;
+  if (classification.recipe)
+  {
+    recipe_name = std::string(ava::command::to_string(classification.recipe->recipe));
+    argv = classification.recipe->canonical_argv;
+  }
+  else
+  {
+    // Sensitive classifications have no policy recipe descriptor today, but
+    // only a fully direct, secret-free argv is eligible for an exact typed
+    // recipe key. Unknown/critical/raw plans never reach this branch.
+    recipe_name = "sensitive-" + std::string(ava::command::to_string(classification.family));
+    argv = plan.argv();
+    if (argv.empty())
+      return std::nullopt;
+    argv.front() = plan.resolved_executable()->executable.canonical_path.generic_string();
+  }
+  if (argv.empty() || contains_secret_like_arguments(argv))
+    return std::nullopt;
+
+  std::vector<RecipeArgument> normalized_argv;
+  normalized_argv.reserve(argv.size());
+  for (auto const& value : argv) normalized_argv.push_back(recipe_argument(value, plan.workspace()));
+
+  auto append_payload = [&](ava::command::detail::Sha256Builder& hash, bool include_workspace) {
+    hash.append_field(kPayloadVersion);
+    hash.append_field(recipe_name);
+    hash.append_field(ava::command::to_string(classification.family));
+    hash.append_field(plan.resolved_executable()->executable.canonical_path.generic_string());
+    hash.append_field(ava::command::to_string(plan.resolved_executable()->origin));
+    hash.append_field(plan.environment_profile_id());
+    hash.append_field(containment.profile_id.empty() ? "not-required" : containment.profile_id);
+    hash.append_field(containment.network_allowed ? "network-allowed" : "network-blocked");
+    hash.append_number(normalized_argv.size());
+    for (auto const& value : normalized_argv)
+    {
+      hash.append_field(value.kind);
+      hash.append_field(value.value);
+    }
+    if (include_workspace)
+      hash.append_field(plan.workspace().lexically_normal().generic_string());
+  };
+
+  ava::command::detail::Sha256Builder global_hash;
+  append_payload(global_hash, false);
+  ava::command::detail::Sha256Builder workspace_hash;
+  append_payload(workspace_hash, true);
+
+  std::string display = recipe_name + " (" + std::string(ava::command::to_string(classification.family)) + ")";
+  if (normalized_argv.size() > 1)
+  {
+    display += ":";
+    for (std::size_t index = 1; index < normalized_argv.size(); ++index)
+    {
+      // Standard recipes retain their established concise display. Sensitive
+      // direct argv includes each safe normalized argument and its domain, so
+      // visually similar workspace paths and literals stay distinguishable.
+      auto const& argument = normalized_argv[index];
+      display += " " + (classification.recipe ? argument.display : std::string(argument.kind) + "=" + argument.display);
+    }
+  }
+  return StableRecipeIdentity{.global_key = "sha256:ava-command-recipe-v1:" + global_hash.hex(),
+                              .workspace_key = "sha256:ava-command-workspace-recipe-v1:" + workspace_hash.hex(),
+                              .display = std::move(display)};
+}
+
+std::vector<ava::command::InteractiveScope> effective_scopes(CommandPermissionMetadata const& metadata)
+{
+  std::vector<ava::command::InteractiveScope> scopes{ava::command::InteractiveScope::Once};
+  if (!metadata.global_recipe_key.empty() && !metadata.workspace_recipe_key.empty() && metadata.executor_identity_verified &&
+      metadata.containment_status != CommandContainmentStatus::Unavailable &&
+      metadata.containment_status != CommandContainmentStatus::UnverifiedDelegatedExecutor &&
+      (metadata.level == ava::command::CommandLevel::Standard || metadata.level == ava::command::CommandLevel::Sensitive))
+  {
+    if (metadata.backend_maximum_scope == ava::command::InteractiveScope::Session ||
+        metadata.backend_maximum_scope == ava::command::InteractiveScope::Workspace)
+    {
+      scopes.push_back(ava::command::InteractiveScope::Session);
+    }
+    if (metadata.backend_maximum_scope == ava::command::InteractiveScope::Workspace)
+    {
+      scopes.push_back(ava::command::InteractiveScope::Workspace);
+    }
+  }
+  return scopes;
+}
+
 PermissionRisk default_allow_risk(Operation operation)
 {
   switch (operation)
@@ -388,6 +678,11 @@ PermissionRisk default_allow_risk(Operation operation)
 }
 
 }  // namespace
+
+std::vector<ava::command::InteractiveScope> command_permission_effective_scopes(CommandPermissionMetadata const& metadata)
+{
+  return effective_scopes(metadata);
+}
 
 PermissionDecision decide(PermissionRequest const& request)
 {
@@ -513,21 +808,23 @@ CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan 
       .containment_profile_id = containment.profile_id,
       .containment_network_allowed = containment.network_allowed,
       .backend_maximum_scope = classification.max_interactive_scope,
+      .recipe_payload_version = {},
+      .global_recipe_key = {},
+      .workspace_recipe_key = {},
+      .recipe_display = {},
+      .effective_allowed_scopes = {},
       .environment_profile_id = plan.environment_profile_id(),
       .environment_digest = plan.environment_digest(),
       .executor_identity_verified = !unverified_delegated_executor};
-  if (!unverified_delegated_executor && metadata.containment_status == CommandContainmentStatus::Unavailable &&
-      (classification.capabilities.executes_mutable_project_code || classification.level == ava::command::CommandLevel::Sensitive))
+  bool const containment_required = classification.capabilities.requires_containment || classification.capabilities.executes_mutable_project_code;
+  if (!unverified_delegated_executor && metadata.containment_status == CommandContainmentStatus::Unavailable)
   {
-    // The original family remains visible, but the effective permission level
-    // must match the one-shot uncontained warning shown to the user.
+    // Any command that requires containment, including otherwise non-mutable
+    // Sensitive network commands, is an explicit one-shot Critical decision
+    // when the containment contract cannot be prepared.
     metadata.level = ava::command::CommandLevel::Critical;
+    metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
   }
-  // Until the separate stable recipe identity/store exists, every planned
-  // command is one-shot only regardless of classification, containment, or
-  // executor verification. No command may receive a reusable session or
-  // workspace grant during this milestone.
-  metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
   if (unverified_delegated_executor)
   {
     metadata.level = ava::command::CommandLevel::Critical;
@@ -536,6 +833,21 @@ CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan 
     metadata.containment_status = CommandContainmentStatus::UnverifiedDelegatedExecutor;
     metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
   }
+
+  if (metadata.executor_identity_verified && metadata.level != ava::command::CommandLevel::Critical &&
+      metadata.containment_status != CommandContainmentStatus::Unavailable &&
+      (!containment_required || metadata.containment_status == CommandContainmentStatus::Available ||
+       metadata.containment_status == CommandContainmentStatus::NotRequired))
+  {
+    if (auto identity = stable_recipe_identity(plan, containment))
+    {
+      metadata.recipe_payload_version = "ava-command-recipe-payload-v1";
+      metadata.global_recipe_key = std::move(identity->global_key);
+      metadata.workspace_recipe_key = std::move(identity->workspace_key);
+      metadata.recipe_display = std::move(identity->display);
+    }
+  }
+  metadata.effective_allowed_scopes = command_permission_effective_scopes(metadata);
   return metadata;
 }
 
@@ -544,6 +856,12 @@ PermissionDecision decide(CommandPermissionMetadata const& metadata)
   if (!metadata.executor_identity_verified || metadata.containment_status == CommandContainmentStatus::UnverifiedDelegatedExecutor)
   {
     return decision(PermissionAction::Ask, "delegated command executor identity and environment are unverified", PermissionRisk::Critical);
+  }
+  if (metadata.containment_status == CommandContainmentStatus::Unavailable)
+  {
+    return decision(PermissionAction::Ask,
+                    "sealed command requires containment, but containment is unavailable; explicit one-shot approval will run it uncontained",
+                    PermissionRisk::Critical);
   }
   if (metadata.level == ava::command::CommandLevel::Standard && !metadata.executes_mutable_project_code)
   {
@@ -577,15 +895,24 @@ PermissionDecision decide(CommandPermissionMetadata const& metadata)
 
 bool command_permission_allows_reusable_grant(CommandPermissionMetadata const& metadata) noexcept
 {
-  // Every planned command is one-shot only during this milestone, so no
-  // command metadata may receive a reusable session or workspace grant.
-  static_cast<void>(metadata);
-  return false;
+  if (!metadata.executor_identity_verified || metadata.containment_status == CommandContainmentStatus::Unavailable ||
+      metadata.containment_status == CommandContainmentStatus::UnverifiedDelegatedExecutor || metadata.level == ava::command::CommandLevel::Critical ||
+      metadata.backend_maximum_scope == ava::command::InteractiveScope::Once || metadata.global_recipe_key.empty() || metadata.workspace_recipe_key.empty())
+    return false;
+  if ((metadata.executes_mutable_project_code || metadata.containment_status == CommandContainmentStatus::Available) &&
+      metadata.containment_status != CommandContainmentStatus::Available)
+    return false;
+  return std::ranges::find(metadata.effective_allowed_scopes, ava::command::InteractiveScope::Session) != metadata.effective_allowed_scopes.end() ||
+         std::ranges::find(metadata.effective_allowed_scopes, ava::command::InteractiveScope::Workspace) != metadata.effective_allowed_scopes.end();
 }
 
 bool command_prompt_allows_persistent_allow(PermissionPrompt const& prompt) noexcept
 {
-  return !prompt.command_metadata || command_permission_allows_reusable_grant(*prompt.command_metadata);
+  if (!prompt.command_metadata)
+    return true;
+  auto const& metadata = *prompt.command_metadata;
+  return command_permission_allows_reusable_grant(metadata) &&
+         std::ranges::find(metadata.effective_allowed_scopes, ava::command::InteractiveScope::Workspace) != metadata.effective_allowed_scopes.end();
 }
 
 bool is_repository_controlled_build_or_test_command(std::string_view command)

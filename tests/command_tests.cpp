@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
 #include "ava/command/command.h"
+#include "ava/permissions/permission.h"
 
 #include <algorithm>
 #include <concepts>
@@ -590,6 +591,140 @@ void test_ancestor_freshness_detects_mode_and_replacement()
          "sealed workspace, executable, and recipe ancestor identities go stale or error after unsafe chmod or lexical-ancestor replacement");
 }
 
+void test_stable_recipe_identity_is_scope_aware_and_secret_free()
+{
+  CommandFixture fixture("stable-recipe-identity");
+  for (auto const name : {"cmake", "cargo", "npm", "python"}) fixture.executable(name);
+  std::filesystem::create_directories(fixture.workspace / "build-other");
+  ::chmod((fixture.workspace / "build-other").c_str(), S_IRWXU);
+
+  ava::permissions::CommandContainmentInfo const contained{.available = true, .profile_id = "ava-development-v1", .network_allowed = false};
+  auto const first = command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build"}), fixture.options("recipe-profile-v1"));
+  auto const normalized =
+      command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "./build"}), fixture.options("recipe-profile-v1"));
+  auto const other_build =
+      command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build-other"}), fixture.options("recipe-profile-v1"));
+
+  auto changed_roots = fixture.options("recipe-profile-v1");
+  changed_roots.environment.tmpdir = fixture.root / "different-synthetic-tmp";
+  std::filesystem::create_directories(changed_roots.environment.tmpdir);
+  ::chmod(changed_roots.environment.tmpdir.c_str(), S_IRWXU);
+  auto const synthetic_changed = command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build"}), changed_roots);
+
+  auto const workspace_two = fixture.root / "workspace-two";
+  std::filesystem::create_directories(workspace_two / "build");
+  ::chmod(workspace_two.c_str(), S_IRWXU);
+  ::chmod((workspace_two / "build").c_str(), S_IRWXU);
+  auto workspace_two_options = fixture.options("recipe-profile-v1");
+  workspace_two_options.workspace = workspace_two;
+  auto const workspace_two_plan = command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build"}), workspace_two_options);
+
+  auto const other_bin = fixture.root / "other-bin";
+  fixture.executable_in(other_bin, "cmake");
+  auto changed_executable_options = fixture.options("recipe-profile-v1");
+  changed_executable_options.startup_path = other_bin.string();
+  auto const changed_executable = command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build"}), changed_executable_options);
+
+  auto const cargo_build = command::seal_command_plan(*command::CommandIntent::structured({"cargo", "build"}), fixture.options("recipe-profile-v1"));
+  auto const cargo_test = command::seal_command_plan(*command::CommandIntent::structured({"cargo", "test"}), fixture.options("recipe-profile-v1"));
+  auto const npm_test = command::seal_command_plan(*command::CommandIntent::structured({"npm", "run", "test"}), fixture.options("recipe-profile-v1"));
+  auto const npm_lint = command::seal_command_plan(*command::CommandIntent::structured({"npm", "run", "lint"}), fixture.options("recipe-profile-v1"));
+  auto const secret_npm = command::seal_command_plan(*command::CommandIntent::structured({"npm", "run", "test", "--", "--token", "never-display"}),
+                                                     fixture.options("recipe-profile-v1"));
+  auto const secret_raw = command::seal_command_plan(*command::CommandIntent::structured({"python", "-c", "print('token=never-display')"}), fixture.options());
+
+  auto metadata = [&](ava::core::Result<command::CommandPlan> const& plan) {
+    return plan ? ava::permissions::command_permission_metadata(*plan, contained) : ava::permissions::CommandPermissionMetadata{};
+  };
+  auto const first_metadata = metadata(first);
+  auto const normalized_metadata = metadata(normalized);
+  auto const other_build_metadata = metadata(other_build);
+  auto const synthetic_changed_metadata = metadata(synthetic_changed);
+  auto const workspace_two_metadata = metadata(workspace_two_plan);
+  auto const changed_executable_metadata = metadata(changed_executable);
+  auto const cargo_build_metadata = metadata(cargo_build);
+  auto const cargo_test_metadata = metadata(cargo_test);
+  auto const npm_test_metadata = metadata(npm_test);
+  auto const npm_lint_metadata = metadata(npm_lint);
+  auto const secret_npm_metadata = metadata(secret_npm);
+  auto const secret_raw_metadata = metadata(secret_raw);
+
+  expect(first && normalized && other_build && synthetic_changed && workspace_two_plan && changed_executable && cargo_build && cargo_test && npm_test &&
+             npm_lint && secret_npm && secret_raw && first_metadata.global_recipe_key.starts_with("sha256:ava-command-recipe-v1:") &&
+             first_metadata.workspace_recipe_key.starts_with("sha256:ava-command-workspace-recipe-v1:") &&
+             first_metadata.global_recipe_key == normalized_metadata.global_recipe_key &&
+             first_metadata.workspace_recipe_key == normalized_metadata.workspace_recipe_key &&
+             first_metadata.global_recipe_key == synthetic_changed_metadata.global_recipe_key &&
+             first_metadata.workspace_recipe_key == synthetic_changed_metadata.workspace_recipe_key &&
+             first_metadata.global_recipe_key == workspace_two_metadata.global_recipe_key &&
+             first_metadata.workspace_recipe_key != workspace_two_metadata.workspace_recipe_key &&
+             first_metadata.global_recipe_key != changed_executable_metadata.global_recipe_key &&
+             first_metadata.global_recipe_key != other_build_metadata.global_recipe_key &&
+             cargo_build_metadata.global_recipe_key != cargo_test_metadata.global_recipe_key &&
+             npm_test_metadata.global_recipe_key != npm_lint_metadata.global_recipe_key &&
+             ava::permissions::command_permission_allows_reusable_grant(first_metadata) &&
+             first_metadata.recipe_display.find(fixture.workspace.string()) == std::string::npos && secret_npm_metadata.global_recipe_key.empty() &&
+             secret_npm_metadata.workspace_recipe_key.empty() && secret_npm_metadata.recipe_display.empty() && secret_raw_metadata.global_recipe_key.empty() &&
+             secret_raw_metadata.workspace_recipe_key.empty() && secret_raw_metadata.recipe_display.empty(),
+         "stable recipe identities normalize workspace paths, ignore synthetic roots, bind executable and workspace scope, distinguish typed actions, and "
+         "never mint or display secrets for standard or critical commands");
+}
+
+void test_recipe_argument_domains_and_unavailable_containment()
+{
+  CommandFixture fixture("recipe-argument-domains");
+  fixture.executable("git");
+  fixture.executable("curl");
+  auto const remote_path = fixture.workspace / "origin";
+  std::filesystem::create_directories(remote_path);
+  ::chmod(remote_path.c_str(), S_IRWXU);
+
+  auto const absolute_remote =
+      command::seal_command_plan(*command::CommandIntent::structured({"git", "push", remote_path.string(), "refs/heads/main"}), fixture.options());
+  auto const literal_remote =
+      command::seal_command_plan(*command::CommandIntent::structured({"git", "push", "workspace:origin", "refs/heads/main"}), fixture.options());
+  ava::permissions::CommandContainmentInfo const contained{.available = true, .profile_id = "ava-development-v1", .network_allowed = false};
+  auto const absolute_metadata =
+      absolute_remote ? ava::permissions::command_permission_metadata(*absolute_remote, contained) : ava::permissions::CommandPermissionMetadata{};
+  auto const literal_metadata =
+      literal_remote ? ava::permissions::command_permission_metadata(*literal_remote, contained) : ava::permissions::CommandPermissionMetadata{};
+
+  auto const curl = command::seal_command_plan(*command::CommandIntent::structured({"curl", "https://example.test/releases"}), fixture.options());
+  auto const unavailable = curl ? ava::permissions::command_permission_metadata(*curl) : ava::permissions::CommandPermissionMetadata{};
+  auto const unavailable_decision = ava::permissions::decide(unavailable);
+  auto forged_unavailable = absolute_metadata;
+  forged_unavailable.level = command::CommandLevel::Sensitive;
+  forged_unavailable.backend_maximum_scope = command::InteractiveScope::Workspace;
+  forged_unavailable.containment_status = ava::permissions::CommandContainmentStatus::Unavailable;
+  forged_unavailable.effective_allowed_scopes = {command::InteractiveScope::Once, command::InteractiveScope::Session, command::InteractiveScope::Workspace};
+  auto const forged_unavailable_scopes = ava::permissions::command_permission_effective_scopes(forged_unavailable);
+
+  ava::permissions::CommandPermissionMetadata session_bounded = absolute_metadata;
+  session_bounded.backend_maximum_scope = command::InteractiveScope::Session;
+  auto const session_scopes = ava::permissions::command_permission_effective_scopes(session_bounded);
+  session_bounded.effective_allowed_scopes = session_scopes;
+  ava::permissions::PermissionPrompt session_prompt;
+  session_prompt.operation = ava::permissions::Operation::RunCommand;
+  session_prompt.command_metadata = session_bounded;
+
+  expect(absolute_remote && literal_remote && absolute_metadata.global_recipe_key != literal_metadata.global_recipe_key &&
+             absolute_metadata.workspace_recipe_key != literal_metadata.workspace_recipe_key &&
+             absolute_metadata.recipe_display.find("workspace_path=workspace:origin") != std::string::npos &&
+             literal_metadata.recipe_display.find("literal=workspace:origin") != std::string::npos && curl &&
+             unavailable.level == command::CommandLevel::Critical && unavailable.backend_maximum_scope == command::InteractiveScope::Once &&
+             unavailable.global_recipe_key.empty() && unavailable.workspace_recipe_key.empty() &&
+             unavailable.effective_allowed_scopes == std::vector<command::InteractiveScope>{command::InteractiveScope::Once} &&
+             unavailable_decision.risk == ava::permissions::PermissionRisk::Critical &&
+             !ava::permissions::command_permission_allows_reusable_grant(unavailable) &&
+             forged_unavailable_scopes == std::vector<command::InteractiveScope>{command::InteractiveScope::Once} &&
+             !ava::permissions::command_permission_allows_reusable_grant(forged_unavailable) &&
+             session_scopes == std::vector<command::InteractiveScope>{command::InteractiveScope::Once, command::InteractiveScope::Session} &&
+             ava::permissions::command_permission_allows_reusable_grant(session_bounded) &&
+             !ava::permissions::command_prompt_allows_persistent_allow(session_prompt),
+         "recipe hashes domain-separate workspace paths from git-push literals; unavailable Sensitive network commands are Critical one-shot without stable "
+         "authority; and a Session backend maximum grants Session but never Workspace or a persistent workspace allow");
+}
+
 void test_redacted_diagnostics_and_value_equality()
 {
   CommandFixture fixture("redacted-diagnostics");
@@ -601,15 +736,19 @@ void test_redacted_diagnostics_and_value_equality()
   auto raw_plan = command::seal_command_plan(*raw_intent, fixture.options());
   auto direct_summary = first ? first->plan().redacted_summary() : std::string{};
   auto raw_summary = raw_plan ? raw_plan->redacted_summary() : std::string{};
-  expect(first && second && *first == *second && direct_summary.find("secret-tool") == std::string::npos &&
-             direct_summary.find("argv-secret") == std::string::npos && direct_summary.find(fixture.workspace.string()) == std::string::npos && raw_plan &&
-             raw_plan->display_json().find("raw-shell-secret") != std::string::npos && raw_summary.find("raw-shell-secret") == std::string::npos &&
-             command::to_string(static_cast<command::CommandRuntimeMode>(999)) == "unknown" &&
-             command::to_string(static_cast<command::CommandLevel>(999)) == "unknown" &&
-             command::to_string(static_cast<command::CommandFamily>(999)) == "unknown" &&
-             command::to_string(static_cast<command::InteractiveScope>(999)) == "unknown",
-         "prepared environments compare by value, display JSON remains local-sensitive, diagnostics redact request payloads, and unknown enum values stay "
-         "explicit");
+  expect(first && second, "direct command preparation succeeds for both invocations");
+  expect(first && second && *first == *second, "prepared command environments compare by value across invocations");
+  expect(direct_summary.find("secret-tool") == std::string::npos, "redacted summary excludes the resolved executable name");
+  expect(direct_summary.find("argv-secret") == std::string::npos, "redacted summary excludes secret-bearing argv values");
+  expect(direct_summary.find(fixture.workspace.string()) == std::string::npos, "redacted summary excludes the local workspace path");
+  expect(raw_plan.has_value(), "raw shell plan seals successfully");
+  expect(raw_plan && raw_plan->display_json().find("raw-shell-secret") != std::string::npos,
+         "raw shell display JSON retains local-sensitive request payloads for local diagnostics");
+  expect(raw_summary.find("raw-shell-secret") == std::string::npos, "redacted summary redacts raw shell request payloads");
+  expect(command::to_string(static_cast<command::CommandRuntimeMode>(999)) == "unknown", "unknown CommandRuntimeMode stays explicit as 'unknown'");
+  expect(command::to_string(static_cast<command::CommandLevel>(999)) == "unknown", "unknown CommandLevel stays explicit as 'unknown'");
+  expect(command::to_string(static_cast<command::CommandFamily>(999)) == "unknown", "unknown CommandFamily stays explicit as 'unknown'");
+  expect(command::to_string(static_cast<command::InteractiveScope>(999)) == "unknown", "unknown InteractiveScope stays explicit as 'unknown'");
 }
 
 void test_unsafe_executables_and_ancestors_are_rejected_without_blocking()
@@ -638,6 +777,62 @@ void test_unsafe_executables_and_ancestors_are_rejected_without_blocking()
          "unsafe executable modes, link counts, writable ancestors, and FIFO candidates are rejected through nonblocking metadata inspection");
 }
 
+void test_credential_bearing_commands_never_mint_recipes()
+{
+  CommandFixture fixture("credential-recipe-refusal");
+  for (auto const name : {"curl", "wget", "cmake"}) fixture.executable(name);
+  ava::permissions::CommandContainmentInfo const contained{.available = true, .profile_id = "ava-development-v1", .network_allowed = false};
+  auto metadata = [&](ava::core::Result<command::CommandPlan> const& plan) {
+    return plan ? ava::permissions::command_permission_metadata(*plan, contained) : ava::permissions::CommandPermissionMetadata{};
+  };
+
+  struct SecretCase
+  {
+    std::string label;
+    std::vector<std::string> argv;
+    std::string secret_value;
+  };
+  std::vector<SecretCase> const cases{
+      {"curl -u separate", {"curl", "-u", "alice:s3cr3t", "https://example.test/releases"}, "s3cr3t"},
+      {"curl --user= concat", {"curl", "--user=alice:s3cr3t", "https://example.test/releases"}, "s3cr3t"},
+      {"curl -H Authorization", {"curl", "-H", "Authorization: Bearer tok_abc123", "https://example.test/releases"}, "tok_abc123"},
+      {"curl --header= concat", {"curl", "--header=Authorization: Bearer tok_abc123", "https://example.test/releases"}, "tok_abc123"},
+      {"curl --cookie", {"curl", "--cookie", "session=cooksecret", "https://example.test/releases"}, "cooksecret"},
+      {"curl --oauth2-bearer", {"curl", "--oauth2-bearer", "bear_tok", "https://example.test/releases"}, "bear_tok"},
+      {"curl --proxy-user", {"curl", "--proxy-user", "proxy:proxypass", "https://example.test/releases"}, "proxypass"},
+      {"curl --cert --key --pass", {"curl", "--cert", "client.pem", "--key", "client.key", "--pass", "certpass", "https://example.test/releases"}, "certpass"},
+      {"curl --aws-sigv4", {"curl", "--aws-sigv4", "aws:amz:region:service", "https://example.test/releases"}, "amz"},
+      {"wget --http-user --http-password", {"wget", "--http-user", "alice", "--http-password", "wpass", "https://example.test/releases"}, "wpass"},
+      {"wget --http-header", {"wget", "--http-header", "Authorization: Bearer tok_wget", "https://example.test/releases"}, "tok_wget"},
+      {"url query token", {"curl", "https://example.test/api?token=querysecret"}, "querysecret"},
+      {"url query api_key", {"curl", "https://example.test/api?api_key=keysecret"}, "keysecret"},
+      {"url query access_token", {"curl", "https://example.test/api?access_token=accsecret"}, "accsecret"},
+      {"url query key", {"curl", "https://example.test/api?key=opaquequerysecret"}, "opaquequerysecret"},
+      {"arbitrary queried URL", {"curl", "https://example.test/api?custom_name=customquerysecret"}, "customquerysecret"},
+      {"url userinfo", {"curl", "https://alice:userpass@example.test/releases"}, "userpass"},
+  };
+
+  bool all_refused = true;
+  for (auto const& test_case : cases)
+  {
+    auto plan = command::seal_command_plan(*command::CommandIntent::structured(test_case.argv), fixture.options("cred-profile"));
+    auto const m = metadata(plan);
+    all_refused = all_refused && m.global_recipe_key.empty() && m.workspace_recipe_key.empty() && m.recipe_display.empty();
+    if (!m.global_recipe_key.empty() || !m.workspace_recipe_key.empty() || !m.recipe_display.empty())
+    {
+      expect(false, std::string("recipe minting must be refused for credential-bearing command: ") + std::string(test_case.label));
+    }
+  }
+
+  // A non-secret curl URL must still mint a recipe when contained.
+  auto safe_curl = command::seal_command_plan(*command::CommandIntent::structured({"curl", "https://example.test/releases"}), fixture.options("cred-profile"));
+  auto const safe_metadata = metadata(safe_curl);
+  expect(all_refused && safe_curl && !safe_metadata.global_recipe_key.empty() && !safe_metadata.recipe_display.empty(),
+         "credential-bearing curl/wget commands with separate short, concatenated long, --option=value, cookie, oauth2, proxy-user, cert/key/pass, aws-sigv4, "
+         "wget "
+         "auth, arbitrary URL query, and URL userinfo forms never mint recipe keys or display, while a plain curl URL still does");
+}
+
 }  // namespace
 
 void run_command_tests()
@@ -655,6 +850,9 @@ void run_command_tests()
   test_capabilities_scopes_and_standard_recipes();
   test_workspace_origin_capabilities_apply_to_every_family();
   test_ancestor_freshness_detects_mode_and_replacement();
+  test_stable_recipe_identity_is_scope_aware_and_secret_free();
+  test_credential_bearing_commands_never_mint_recipes();
+  test_recipe_argument_domains_and_unavailable_containment();
   test_redacted_diagnostics_and_value_equality();
   test_unsafe_executables_and_ancestors_are_rejected_without_blocking();
 }

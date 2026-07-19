@@ -65,6 +65,9 @@ struct RpcCommand
   std::optional<std::string> target_path;
   std::optional<std::string> command;
   std::optional<std::string> tool_name;
+  std::optional<std::string> command_recipe_key;
+  std::optional<std::string> recipe_display;
+  std::optional<bool> critical_acknowledged;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

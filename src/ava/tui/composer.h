@@ -11,6 +11,10 @@
 #include <string_view>
 #include <vector>
 
+namespace ava::permissions {
+struct PermissionPrompt;
+}  // namespace ava::permissions
+
 namespace ava::tui {
 
 struct TuiKeyBindings;
@@ -279,6 +283,14 @@ struct PermissionPromptInputResult
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct PermissionPromptRememberAvailability
+{
+  bool allow_remember_available = false;
+  bool deny_remember_available = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct PermissionPromptView
 {
   std::string tool_name;
@@ -289,7 +301,11 @@ struct PermissionPromptView
   std::string risk = {};
   std::string diff_preview = {};
   bool diff_truncated = false;
-  bool remember_available = false;
+  bool allow_remember_available = false;
+  bool deny_remember_available = false;
+  std::string recipe_display = {};
+  std::string workspace_recipe_key = {};
+  std::string effective_allowed_scopes = {};
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
   std::string request_id = {};
 
@@ -519,8 +535,10 @@ struct PathCompletionSelectionText
 [[nodiscard]] bool draw_screen(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::string sanitize_terminal_text(std::string_view text);
 [[nodiscard]] std::vector<std::string> split_lines(std::string_view text);
+[[nodiscard]] PermissionPromptRememberAvailability permission_prompt_remember_availability(ava::permissions::PermissionPrompt const& prompt,
+                                                                                           bool rule_storage_available) noexcept;
 [[nodiscard]] PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event,
-                                                                         bool remember_available = false);
+                                                                         bool allow_remember_available = false, bool deny_remember_available = false);
 [[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt, InputEvent event);
 [[nodiscard]] std::vector<std::size_t> filter_select_list_items(SelectListView const& view);
 [[nodiscard]] std::size_t clamp_select_list_selection(SelectListView const& view, std::size_t selected_index);

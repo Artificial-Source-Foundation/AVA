@@ -6,10 +6,12 @@
 #include "ava/tools/spill_files.h"
 #include "ava/tools/webfetch_tool.h"
 #include "ava/tools/websearch_tool.h"
+#include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/provider.h"
 #include "ava/core/error.h"
+#include "ava/core/ids.h"
 
 #include <algorithm>
 #include <array>
@@ -480,6 +482,9 @@ void test_sealed_local_bash_contract()
                                                                                                          .tool_name = "bash",
                                                                                                          .target_path = {},
                                                                                                          .command = "ls",
+                                                                                                         .command_recipe_key = {},
+                                                                                                         .recipe_display = {},
+                                                                                                         .critical_acknowledged = false,
                                                                                                          .reason = "test operator deny",
                                                                                                          .actor = "test"});
   auto denied_context = context;
@@ -491,17 +496,36 @@ void test_sealed_local_bash_contract()
 
   auto exact = ava::tools::run_bash(context, "inspect '' second", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   auto audit_json = audits.empty() ? std::string{} : ava::tools::permission_audit_data_json(audits.front());
-  std::array<std::string_view, 10> const audit_fields{
-      "\"level\"",  "\"family\"", "\"fingerprint\"",           "\"execution_domain\"",   "\"resolved_executable\"",
-      "\"origin\"", "\"cwd\"",    "\"containment_available\"", "\"containment_status\"", "\"backend_maximum_scope\""};
+  std::array<std::string_view, 15> const audit_fields{"\"level\"",
+                                                      "\"family\"",
+                                                      "\"fingerprint\"",
+                                                      "\"execution_domain\"",
+                                                      "\"resolved_executable\"",
+                                                      "\"origin\"",
+                                                      "\"cwd\"",
+                                                      "\"containment_available\"",
+                                                      "\"containment_status\"",
+                                                      "\"backend_maximum_scope\"",
+                                                      "\"global_recipe_key\"",
+                                                      "\"workspace_recipe_key\"",
+                                                      "\"recipe_display\"",
+                                                      "\"effective_allowed_scopes\"",
+                                                      "\"environment_profile_id\""};
   bool const complete_audit_metadata =
       std::ranges::all_of(audit_fields, [&audit_json](std::string_view field) { return audit_json.find(field) != std::string::npos; });
+  auto secret_audit_event = audits.empty() ? ava::tools::PermissionAuditEvent{} : audits.front();
+  secret_audit_event.operation = ava::permissions::Operation::RunCommand;
+  secret_audit_event.command = "npm run test -- --token never-persist-this";
+  secret_audit_event.command_metadata = ava::permissions::CommandPermissionMetadata{};
+  secret_audit_event.command_metadata->level = ava::command::CommandLevel::Critical;
+  auto const secret_audit_json = ava::tools::permission_audit_data_json(secret_audit_event);
   auto env_python = ava::tools::run_bash(context, "env-python", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   expect(exact && exact->output.find("argc=2 first=<> second=<second>") != std::string::npos && exact->output.find("sentinels=absent") != std::string::npos &&
              exact->output.find("stdin=eof") != std::string::npos && env_python && env_python->output == "env-python-ran\n" && prompts.size() == 2 &&
              prompts.front().command_metadata && !audits.empty() && audits.front().command_metadata &&
              prompts.front().command_metadata->fingerprint == audits.front().command_metadata->fingerprint && complete_audit_metadata &&
-             audit_json.find("must-not-reach-child") == std::string::npos && audit_json.find("AVA_BASH_SECRET_SENTINEL") == std::string::npos,
+             audit_json.find("must-not-reach-child") == std::string::npos && audit_json.find("AVA_BASH_SECRET_SENTINEL") == std::string::npos &&
+             secret_audit_json.find("never-persist-this") == std::string::npos && secret_audit_json.find("<redacted one-shot command>") != std::string::npos,
          "one sealed plan carries exact empty argv, stdin EOF, redacted environment, and the same fingerprint through prompt and audit");
 
   ava::tools::ToolContext no_relookup_context = context;
@@ -881,6 +905,129 @@ void test_websearch_tool()
 }
 }  // namespace
 
+void test_credential_command_audit_omits_secrets()
+{
+  // Local (non-ACP) audit surfaces must never persist unique secret values
+  // from credential-bearing commands. When secret detection refuses recipe
+  // minting, recipe_display is empty and the audit command field is replaced
+  // with a redacted marker.
+  struct SecretCase
+  {
+    std::string_view label;
+    std::string command;
+    std::string secret;
+  };
+  std::vector<SecretCase> const cases{
+      {"curl -u separate", "curl -u alice:s3cr3t https://example.test/releases", "s3cr3t"},
+      {"curl --user= concat", "curl --user=alice:s3cr3t https://example.test/releases", "s3cr3t"},
+      {"curl -H Authorization", "curl -H 'Authorization: Bearer tok_audit_1' https://example.test/releases", "tok_audit_1"},
+      {"curl --header= concat", "curl --header='Authorization: Bearer tok_audit_2' https://example.test/releases", "tok_audit_2"},
+      {"wget --http-password", "wget --http-user=alice --http-password=wgetpass https://example.test/releases", "wgetpass"},
+      {"url query token", "curl 'https://example.test/api?token=query_audit_secret'", "query_audit_secret"},
+  };
+
+  for (auto const& test_case : cases)
+  {
+    ava::tools::PermissionAuditEvent event;
+    event.permission_request_id = std::string("permreq_") + std::string(test_case.label);
+    event.operation = ava::permissions::Operation::RunCommand;
+    event.mode = ava::agent::Mode::Build;
+    event.tool_name = "bash";
+    event.action = ava::permissions::PermissionAction::Ask;
+    event.reason = "command requires approval";
+    event.risk = ava::permissions::PermissionRisk::High;
+    event.command = test_case.command;
+    event.resolution_source = "policy";
+    ava::permissions::CommandPermissionMetadata metadata;
+    // Simulate a contained Sensitive command whose secret detection refused
+    // recipe minting: recipe keys and display are empty.
+    metadata.level = ava::command::CommandLevel::Sensitive;
+    metadata.global_recipe_key = {};
+    metadata.workspace_recipe_key = {};
+    metadata.recipe_display = {};
+    event.command_metadata = std::move(metadata);
+    auto const json = ava::tools::permission_audit_data_json(event);
+    expect(json.find(test_case.secret) == std::string::npos,
+           std::string("local audit JSON must not contain credential secret for: ") + std::string(test_case.label));
+    expect(json.find("<redacted one-shot command>") != std::string::npos || json.find("\"command\":\"\"") != std::string::npos,
+           std::string("local audit JSON must redact credential-bearing one-shot command for: ") + std::string(test_case.label));
+  }
+}
+
+void test_payload_command_audits_persist_no_markers_or_recipes()
+{
+  auto const test_root = temp_root();
+  expect(::chmod(test_root.c_str(), S_IRWXU) == 0, "payload audit test secures its test-root ancestor");
+  auto const root = test_root / "payload-command-audit";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0, "payload audit fixture keeps sealed planning roots owner-only");
+
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "payload-audit"});
+  auto lease = ava::session::SessionLease::create_and_acquire(store.session_path());
+  expect(lease.has_value(), "payload audit fixture acquires its persistent session lease");
+  if (!lease)
+    return;
+
+  struct PayloadCase
+  {
+    std::string label;
+    std::string command;
+    std::string marker;
+  };
+  std::vector<PayloadCase> const cases{
+      {.label = "json body",
+       .command = "curl --json '{\"body\":\"payload-json-marker-492e\"}' https://example.test/upload",
+       .marker = "payload-json-marker-492e"},
+      {.label = "file payload", .command = "curl --data-binary @payload-file-marker-26ca https://example.test/upload", .marker = "payload-file-marker-26ca"},
+      {.label = "config payload", .command = "curl --config payload-config-marker-8b17 https://example.test/upload", .marker = "payload-config-marker-8b17"},
+      {.label = "opaque URL query", .command = "curl 'https://example.test/upload?key=payload-query-marker-c213'", .marker = "payload-query-marker-c213"},
+  };
+
+  bool all_denied_before_execution = true;
+  for (auto const& test_case : cases)
+  {
+    ava::tools::ToolContext context{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+          return ava::permissions::PermissionResolution::Deny;
+        },
+        .permission_audit_sink = [&store, &lease](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+          return store.append(*lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                 .parent_id = {},
+                                                                 .type = ava::session::EntryType::PermissionDecision,
+                                                                 .timestamp = ava::session::now_timestamp(),
+                                                                 .data_json = ava::tools::permission_audit_data_json(event)});
+        },
+        .redact_permission_audit_arguments = false,
+    };
+    auto result = ava::tools::run_bash(context, test_case.command);
+    all_denied_before_execution = all_denied_before_execution && !result && result.error().format().find("resolution: deny") != std::string::npos;
+  }
+
+  auto entries = store.load(*lease);
+  bool markers_absent = entries.has_value();
+  bool stable_recipe_keys_absent = entries.has_value();
+  bool recipe_displays_empty = entries.has_value();
+  if (entries)
+  {
+    for (auto const& entry : *entries)
+    {
+      if (entry.type != ava::session::EntryType::PermissionDecision)
+        continue;
+      for (auto const& test_case : cases) markers_absent = markers_absent && entry.data_json.find(test_case.marker) == std::string::npos;
+      stable_recipe_keys_absent = stable_recipe_keys_absent && entry.data_json.find("\"global_recipe_key\":\"\"") != std::string::npos &&
+                                  entry.data_json.find("\"workspace_recipe_key\":\"\"") != std::string::npos;
+      recipe_displays_empty = recipe_displays_empty && entry.data_json.find("\"recipe_display\":\"\"") != std::string::npos;
+    }
+  }
+  expect(all_denied_before_execution && entries && markers_absent && stable_recipe_keys_absent && recipe_displays_empty,
+         "JSON body and file/config payload commands persist one-shot redacted audits with no payload markers or stable recipe keys");
+}
+
 void run_tools_process_network_tests()
 {
   test_bash_tool();
@@ -889,4 +1036,6 @@ void run_tools_process_network_tests()
   test_sealed_process_group_sentinel_and_grace();
   test_webfetch_tool();
   test_websearch_tool();
+  test_credential_command_audit_omits_secrets();
+  test_payload_command_audits_persist_no_markers_or_recipes();
 }

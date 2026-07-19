@@ -8,6 +8,7 @@ from pathlib import Path
 import selectors
 import signal
 import subprocess
+import tempfile
 import time
 
 
@@ -173,8 +174,9 @@ def main():
     parser.add_argument("--fake-mcp", required=True)
     parser.add_argument("--root", required=True)
     args = parser.parse_args()
-    root = Path(args.root)
-    root.mkdir(parents=True, exist_ok=True)
+    # Command plans validate workspace ancestry. Use a private /tmp root rather
+    # than the build tree, whose checkout ancestor can deliberately be shared.
+    root = Path(tempfile.mkdtemp(prefix="ava-acp-subprocess-"))
 
     conflict = subprocess.run([args.ava, "--acp", "--rpc"], input=b"", capture_output=True, env=environment(root), timeout=5)
     assert conflict.returncode != 0 and conflict.stdout == b"" and b"standalone" in conflict.stderr
@@ -302,6 +304,8 @@ def main():
     outside = root / "outside"
     nested.mkdir(parents=True, exist_ok=True)
     outside.mkdir(parents=True, exist_ok=True)
+    os.chmod(root, 0o700)
+    os.chmod(workspace, 0o700)
     configure_fake_model(lifecycle_root)
     server, port, request_log = start_fake_provider(args.fake_provider, root / "provider", delay_ms=250)
     lifecycle = start(

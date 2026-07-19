@@ -10,8 +10,10 @@
 #include "ava/core/error.h"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -126,18 +128,23 @@ void test_bash_tool()
   std::error_code remove_error;
   std::filesystem::remove_all(temp_root(), remove_error);
   std::filesystem::create_directories(temp_root());
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0, "bash fixture root is owner-only for sealed command planning");
+  {
+    std::ofstream visible(temp_root() / "visible-entry", std::ios::binary | std::ios::trunc);
+    visible << "visible\n";
+  }
 
   ava::tools::ToolContext const context{.workspace_dir = temp_root(), .mode = ava::agent::Mode::Build};
 
-  auto pwd = ava::tools::run_bash(context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
-  expect(pwd.has_value(), "run_bash allows safe command");
+  auto pwd = ava::tools::run_bash(context, "ls", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+  expect(pwd.has_value(), "run_bash auto-allows a sealed standard inspection command");
   if (pwd)
   {
     expect(pwd->exit_code == 0, "run_bash records exit code");
-    expect(pwd->output.find(temp_root().string()) != std::string::npos, "run_bash uses workspace directory");
+    expect(pwd->output.find("visible-entry") != std::string::npos, "run_bash uses the sealed workspace directory");
   }
 
-  auto capped_output = ava::tools::run_bash(context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_bytes = 4});
+  auto capped_output = ava::tools::run_bash(context, "ls", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_bytes = 4});
   expect(capped_output && capped_output->exit_code == 0 && capped_output->truncated && capped_output->byte_limited && capped_output->totals_known &&
              capped_output->output.size() == 4 && capped_output->output_bytes == capped_output->output.size() &&
              capped_output->total_bytes > capped_output->output.size(),
@@ -164,7 +171,7 @@ void test_bash_tool()
                                                  },
                                                  .current_tool_name = "bash",
                                                  .current_call_id = "call_progress"};
-  auto progress_pwd = ava::tools::run_bash(progress_context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+  auto progress_pwd = ava::tools::run_bash(progress_context, "ls", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   expect(progress_pwd && std::ranges::any_of(bash_progress,
                                              [](ava::tools::ToolProgressEvent const& event) {
                                                return event.call_id == "call_progress" && event.tool_name == "bash" && event.status == "completed";
@@ -206,10 +213,9 @@ void test_bash_tool()
   expect(chmod(hijack_path.c_str(), 0700) == 0, "test can create executable PATH hijack fixture");
   {
     ScopedEnvVar const path_guard("PATH", temp_root().string() + ":.:relative");
-    auto sanitized_pwd = ava::tools::run_bash(context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
-    expect(sanitized_pwd && sanitized_pwd->exit_code == 0 && sanitized_pwd->output.find("hijacked-path") == std::string::npos &&
-               sanitized_pwd->output.find(temp_root().string()) != std::string::npos,
-           "run_bash does not inherit unsafe PATH entries for auto-allowed commands");
+    auto sanitized_pwd = ava::tools::run_bash(context, "ls", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+    expect(!sanitized_pwd && sanitized_pwd.error().format().find("PATH") != std::string::npos,
+           "run_bash rejects an unsafe inherited startup PATH before it can influence a sealed command");
   }
 
   auto denied = ava::tools::run_bash(context, "rm -rf important");
@@ -226,7 +232,19 @@ void test_bash_tool()
 
   auto const repository_test_dir = temp_root() / "repository-test-fixture";
   auto const repository_test_marker = repository_test_dir / "executed-marker";
+  auto const safe_command_bin = temp_root() / "sealed-command-bin";
   std::filesystem::create_directories(repository_test_dir);
+  std::filesystem::create_directories(safe_command_bin);
+  expect(::chmod(repository_test_dir.c_str(), S_IRWXU) == 0 && ::chmod(safe_command_bin.c_str(), S_IRWXU) == 0,
+         "repository command fixture paths are owner-only for sealed recipe planning");
+  for (auto const name : {"cmake", "ctest"})
+  {
+    std::ofstream executable(safe_command_bin / name, std::ios::binary | std::ios::trunc);
+    executable << "#!/bin/sh\nexit 0\n";
+    executable.close();
+    expect(::chmod((safe_command_bin / name).c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0, "repository command fixture can create a sealed executable identity");
+  }
+  ScopedEnvVar const repository_path("PATH", safe_command_bin.string() + ":/usr/bin:/bin");
   {
     std::ofstream test_file(repository_test_dir / "CTestTestfile.cmake", std::ios::binary | std::ios::trunc);
     test_file << "add_test(NAME repository_controlled_code COMMAND /usr/bin/touch " << repository_test_marker.generic_string() << ")\n";
@@ -241,7 +259,13 @@ void test_bash_tool()
              !std::filesystem::exists(repository_test_marker),
          "repository test code cannot execute automatically without an explicit resolver approval");
 
-  auto timeout = ava::tools::run_bash(context, "sleep 2", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(50)});
+  ava::tools::ToolContext const timeout_context{
+      .workspace_dir = temp_root(),
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      }};
+  auto timeout = ava::tools::run_bash(timeout_context, "sleep 2", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(50)});
   expect(timeout && timeout->timed_out, "run_bash times out long command");
 
   auto const timeout_group_file = temp_root() / "bash-timeout-child-pgid.txt";
@@ -263,10 +287,17 @@ void test_bash_tool()
          "run_bash timeout terminates child processes in the command process group");
 
   int cancel_checks = 0;
-  ava::tools::ToolContext const cancel_context{.workspace_dir = temp_root(), .mode = ava::agent::Mode::Build, .cancel_requested = [&cancel_checks] {
-                                                 ++cancel_checks;
-                                                 return cancel_checks >= 3;
-                                               }};
+  ava::tools::ToolContext const cancel_context{
+      .workspace_dir = temp_root(),
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .cancel_requested =
+          [&cancel_checks] {
+            ++cancel_checks;
+            return cancel_checks >= 3;
+          }};
   auto canceled = ava::tools::run_bash(cancel_context, "sleep 2", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(canceled && canceled->canceled && !canceled->timed_out && canceled->exit_code == -1,
          "run_bash observes tool cancellation and reports a canceled process result");
@@ -332,39 +363,174 @@ void test_injected_command_executor()
 {
   auto const workspace = temp_root() / "injected-command-workspace";
   std::filesystem::create_directories(workspace);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "injected command workspace is owner-only for sealed command planning");
   auto executor = std::make_shared<RecordingCommandExecutor>();
   executor->result = ava::tools::CommandExecutionResult{.exit_code = 0, .output = "one\ntwo\nthree\n"};
   int prompts = 0;
+  std::string permission_fingerprint;
   ava::tools::ToolContext context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+      .permission_resolver = [&prompts, &permission_fingerprint](
+                                 ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++prompts;
         expect(prompt.operation == ava::permissions::Operation::RunCommand, "injected command permission uses the command operation");
+        expect(prompt.command_metadata && prompt.command_metadata->level == ava::command::CommandLevel::Critical &&
+                   !prompt.command_metadata->executor_identity_verified &&
+                   prompt.command_metadata->backend_maximum_scope == ava::command::InteractiveScope::Once,
+               "injected command permission treats the executor as unverified and one-shot only");
+        permission_fingerprint = prompt.command_metadata ? prompt.command_metadata->fingerprint : std::string{};
         return ava::permissions::PermissionResolution::Allow;
       },
       .command_executor = executor};
   auto result =
       ava::tools::run_bash(context, "printf 'one two'", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(900), .max_bytes = 8, .max_lines = 2});
-  expect(result && prompts == 1 && executor->requests.size() == 1 && executor->requests.front().argv == std::vector<std::string>({"printf", "one two"}) &&
+  expect(result && prompts == 1 && executor->requests.size() == 1 && executor->requests.front().argv.size() == 3 &&
+             executor->requests.front().argv[1] == "-c" && executor->requests.front().argv[2] == "printf 'one two'" &&
              executor->requests.front().cwd == std::filesystem::canonical(workspace) && executor->requests.front().timeout == std::chrono::milliseconds(900) &&
-             executor->requests.front().output_byte_limit == 8 && result->line_limited && result->totals_known && result->total_lines == 3 &&
-             result->total_bytes == executor->result.output.size() && result->output == "three\n",
-         "non-truncated injected command execution receives parsed argv and canonical cwd while local bounds retain exact totals");
+             executor->requests.front().output_byte_limit == 8 && executor->requests.front().plan_metadata &&
+             executor->requests.front().plan_metadata->fingerprint.starts_with("sha256:ava-command-plan-") &&
+             executor->requests.front().plan_metadata->fingerprint == permission_fingerprint &&
+             !executor->requests.front().plan_metadata->executor_identity_verified && executor->requests.front().environment_profile &&
+             !executor->requests.front().environment_profile->local_execution_authority && result->line_limited && result->totals_known &&
+             result->total_lines == 3 && result->total_bytes == executor->result.output.size() && result->output == "three\n",
+         "unverified injected execution receives the raw one-shot plan fingerprint and redacted environment contract while local bounds retain exact totals");
 
   ava::tools::ToolContext denied = context;
   denied.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Deny;
   };
   auto denied_result = ava::tools::run_bash(denied, "touch denied-marker");
-  auto malformed = ava::tools::run_bash(context, "printf ok; touch denied-marker");
-  expect(!denied_result && !malformed && executor->requests.size() == 1 && !std::filesystem::exists(workspace / "denied-marker"),
-         "permission denial and local argv rejection happen before an injected command callback");
+  auto raw_shell = ava::tools::run_bash(context, "printf ok; touch denied-marker");
+  expect(!denied_result && raw_shell && executor->requests.size() == 2 && executor->requests.back().argv.size() == 3 &&
+             executor->requests.back().argv[1] == "-c" && executor->requests.back().argv[2] == "printf ok; touch denied-marker" &&
+             !std::filesystem::exists(workspace / "denied-marker"),
+         "permission denial blocks callbacks, while an approved raw shell plan reaches the injected executor without local execution");
 
   executor->fail = true;
   auto failed = ava::tools::run_bash(context, "true");
   expect(!failed && failed.error().message() == "injected command execution failed",
          "an installed command executor failure never falls back to local fork/exec");
+}
+
+void test_sealed_local_bash_contract()
+{
+  auto const root = temp_root() / "sealed-local-bash-contract";
+  auto const workspace = root / "workspace";
+  auto const first_bin = root / "first-bin";
+  auto const second_bin = root / "second-bin";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(first_bin);
+  std::filesystem::create_directories(second_bin);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0 &&
+             ::chmod(first_bin.c_str(), S_IRWXU) == 0 && ::chmod(second_bin.c_str(), S_IRWXU) == 0,
+         "sealed local bash fixture owns every planning root");
+  auto write_executable = [](std::filesystem::path const& path, std::string_view body) {
+    std::ofstream executable(path, std::ios::binary | std::ios::trunc);
+    executable << body;
+    executable.close();
+    return ::chmod(path.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0;
+  };
+  expect(write_executable(first_bin / "inspect",
+                          "#!/bin/sh\nprintf 'argc=%s first=<%s> second=<%s>\\n' \"$#\" \"$1\" \"$2\"\n"
+                          "if [ -z \"${AVA_BASH_SECRET_SENTINEL+x}\" ]; then printf 'sentinels=absent\\n'; else printf 'sentinels=present\\n'; fi\n"
+                          "if IFS= read -r line; then printf 'stdin=data\\n'; else printf 'stdin=eof\\n'; fi\n") &&
+             write_executable(first_bin / "chosen", "#!/bin/sh\nprintf 'first-choice\\n'\n") &&
+             write_executable(second_bin / "chosen", "#!/bin/sh\nprintf 'second-choice\\n'\n") &&
+             write_executable(first_bin / "stale", "#!/bin/sh\nprintf old-stale\\n") && write_executable(first_bin / "npm", "#!/bin/sh\nprintf npm-ran\\n") &&
+             write_executable(first_bin / "python", "#!/bin/sh\nprintf python-ran\\n") &&
+             write_executable(first_bin / "bash", "#!/bin/sh\nprintf bash-ran\\n") && write_executable(first_bin / "rm", "#!/bin/sh\nprintf rm-ran\\n"),
+         "sealed local bash fixture creates executable identities");
+
+  ScopedEnvVar const path_guard("PATH", first_bin.string() + ":/usr/bin:/bin");
+  ScopedEnvVar const sentinel_guard("AVA_BASH_SECRET_SENTINEL", "must-not-reach-child");
+  std::vector<ava::permissions::PermissionPrompt> prompts;
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  ava::tools::ToolContext const context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        prompts.push_back(prompt);
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+        audits.push_back(event);
+        return {};
+      }};
+  auto exact = ava::tools::run_bash(context, "inspect '' second", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+  auto audit_json = audits.empty() ? std::string{} : ava::tools::permission_audit_data_json(audits.front());
+  std::array<std::string_view, 10> const audit_fields{
+      "\"level\"",  "\"family\"", "\"fingerprint\"",           "\"execution_domain\"",   "\"resolved_executable\"",
+      "\"origin\"", "\"cwd\"",    "\"containment_available\"", "\"containment_status\"", "\"backend_maximum_scope\""};
+  bool const complete_audit_metadata =
+      std::ranges::all_of(audit_fields, [&audit_json](std::string_view field) { return audit_json.find(field) != std::string::npos; });
+  expect(exact && exact->output.find("argc=2 first=<> second=<second>") != std::string::npos && exact->output.find("sentinels=absent") != std::string::npos &&
+             exact->output.find("stdin=eof") != std::string::npos && prompts.size() == 1 && prompts.front().command_metadata && !audits.empty() &&
+             audits.front().command_metadata && prompts.front().command_metadata->fingerprint == audits.front().command_metadata->fingerprint &&
+             complete_audit_metadata && audit_json.find("must-not-reach-child") == std::string::npos &&
+             audit_json.find("AVA_BASH_SECRET_SENTINEL") == std::string::npos,
+         "one sealed plan carries exact empty argv, stdin EOF, redacted environment, and the same fingerprint through prompt and audit");
+
+  ava::tools::ToolContext no_relookup_context = context;
+  no_relookup_context.permission_resolver =
+      [&second_bin](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    static_cast<void>(::setenv("PATH", (second_bin.string() + ":/usr/bin:/bin").c_str(), 1));
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto no_relookup = ava::tools::run_bash(no_relookup_context, "chosen", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+  expect(no_relookup && no_relookup->output == "first-choice\n", "local execution uses the prepared executable without a post-permission PATH lookup");
+
+  static_cast<void>(::setenv("PATH", (first_bin.string() + ":/usr/bin:/bin").c_str(), 1));
+  ava::tools::ToolContext stale_context = context;
+  stale_context.permission_resolver =
+      [&first_bin, &write_executable](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return write_executable(first_bin / "stale", "#!/bin/sh\nprintf replacement\\n")
+               ? ava::core::Result<ava::permissions::PermissionResolutionDecision>(ava::permissions::PermissionResolution::Allow)
+               : ava::core::Result<ava::permissions::PermissionResolutionDecision>(
+                     std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to replace stale executable")));
+  };
+  auto stale = ava::tools::run_bash(stale_context, "stale", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+  expect(!stale && stale.error().format().find("stale") != std::string::npos, "stale executable identity blocks execution after permission");
+
+  std::vector<ava::permissions::PermissionPrompt> critical_prompts;
+  ava::tools::ToolContext deny_critical_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver =
+          [&critical_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        critical_prompts.push_back(prompt);
+        return ava::permissions::PermissionResolution::Deny;
+      }};
+  auto npm = ava::tools::run_bash(ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build}, "npm run test");
+  auto python_bare = ava::tools::run_bash(deny_critical_context, "python -c 'print(1)'");
+  auto python_absolute = ava::tools::run_bash(deny_critical_context, (first_bin / "python").string() + " -c 'print(1)'");
+  auto bash_inline = ava::tools::run_bash(deny_critical_context, "bash -c true");
+  auto destructive = ava::tools::run_bash(deny_critical_context, "rm -rf remove-me");
+  auto raw = ava::tools::run_bash(deny_critical_context, "printf raw; true");
+  bool const all_critical = critical_prompts.size() == 5 && std::ranges::all_of(critical_prompts, [](ava::permissions::PermissionPrompt const& prompt) {
+                              return prompt.command_metadata && prompt.command_metadata->level == ava::command::CommandLevel::Critical &&
+                                     prompt.command_metadata->backend_maximum_scope == ava::command::InteractiveScope::Once;
+                            });
+  expect(!npm && npm.error().format().find("resolution: no_resolver") != std::string::npos && !python_bare && !python_absolute && !bash_inline &&
+             !destructive && !raw && all_critical && critical_prompts[0].command_metadata->family == critical_prompts[1].command_metadata->family &&
+             critical_prompts[0].command_metadata->resolved_executable == critical_prompts[1].command_metadata->resolved_executable,
+         "npm project code asks, and bare/absolute Python, bash, destructive, and raw-shell commands are critical one-shot prompts rather than hard denies");
+
+  auto const normal_group_file = workspace / "normal-background-pgid";
+  ava::tools::ToolContext const group_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      }};
+  auto normal_group = ava::tools::run_bash(group_context, "sleep 30 & printf $$ > " + normal_group_file.string(),
+                                           ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+  auto const normal_pgid = read_pid_file_for_test(normal_group_file);
+  expect(normal_group && normal_group->exit_code == 0 && normal_pgid && wait_for_process_group_exit(*normal_pgid),
+         "normal leader completion cleans verified background children before returning");
 }
 
 void test_webfetch_tool()
@@ -540,6 +706,7 @@ void run_tools_process_network_tests()
 {
   test_bash_tool();
   test_injected_command_executor();
+  test_sealed_local_bash_contract();
   test_webfetch_tool();
   test_websearch_tool();
 }

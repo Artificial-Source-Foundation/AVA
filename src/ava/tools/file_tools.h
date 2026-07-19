@@ -47,6 +47,7 @@ struct PermissionAuditEvent
   std::string resolution_reason;
   std::string actor = "agent";
   std::string rule_id;
+  std::optional<ava::permissions::CommandPermissionMetadata> command_metadata = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -102,6 +103,9 @@ struct ToolContext
   std::filesystem::path workspace_dir;
   std::filesystem::path spill_dir = {};
   ava::agent::Mode mode = ava::agent::Mode::Build;
+  // Local bash uses sealed planning in PromptOnly mode for this milestone.
+  // It does not imply containment or a reusable command-policy store.
+  ava::command::CommandRuntimeOptions command_runtime{.mode = ava::command::CommandRuntimeMode::PromptOnly};
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   PermissionAuditSink permission_audit_sink = nullptr;
   ToolProgressSink progress_sink = nullptr;
@@ -216,7 +220,14 @@ struct WriteOptions
 [[nodiscard]] ava::core::VoidResult announce_tool_execution_start(ToolContext const& context);
 [[nodiscard]] ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permissions::Operation operation,
                                                       std::filesystem::path const& target_path, std::string_view command, std::string_view tool_name,
-                                                      std::string_view error_message, std::string_view diff_preview = {}, bool diff_truncated = false);
+                                                      std::string_view error_message, std::string_view diff_preview = {}, bool diff_truncated = false,
+                                                      std::optional<ava::permissions::CommandPermissionMetadata> command_metadata = std::nullopt);
+// Command approval receives an already prepared plan. The caller retains that
+// exact preparation through execution, so resolver, audit, and executor share
+// one sealed identity rather than reparsing compatibility text.
+[[nodiscard]] ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command,
+                                                              ava::command::CommandPreparation const& preparation, bool unverified_delegated_executor,
+                                                              std::string_view tool_name, std::string_view error_message);
 [[nodiscard]] std::string permission_audit_data_json(PermissionAuditEvent const& event);
 [[nodiscard]] ava::core::VoidResult replace_file_with_staged_file(std::filesystem::path const& staged_path, std::filesystem::path const& target_path);
 void remove_staged_file_best_effort(std::filesystem::path const& staged_path);

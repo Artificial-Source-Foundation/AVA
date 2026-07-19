@@ -4,155 +4,130 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cerrno>
 #include <chrono>
-#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <optional>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
+#include <dirent.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <pwd.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 namespace ava::tools {
-
 namespace {
 
-constexpr char kTrustedExecPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+constexpr char kDefaultStartupPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 constexpr std::size_t kBashProgressByteInterval = 128 * 1024;
 constexpr auto kBashProgressTimeInterval = std::chrono::seconds(2);
+constexpr auto kProcessGroupGrace = std::chrono::milliseconds(75);
+constexpr auto kProcessGroupKillWait = std::chrono::milliseconds(500);
+constexpr auto kGateTimeout = std::chrono::milliseconds(1000);
+constexpr std::size_t kCleanupEntryLimit = 4096;
 
-class UniqueFd
+class UniqueFd final
 {
  public:
-  explicit UniqueFd(int fd = -1) : fd_(fd) { }
+  explicit UniqueFd(int fd = -1) noexcept : fd_(fd) { }
+  ~UniqueFd() { reset(); }
   UniqueFd(UniqueFd const&) = delete;
   UniqueFd& operator=(UniqueFd const&) = delete;
-  UniqueFd(UniqueFd&& other) noexcept : fd_(other.release()) { }
+  UniqueFd(UniqueFd&& other) noexcept : fd_(std::exchange(other.fd_, -1)) { }
   UniqueFd& operator=(UniqueFd&& other) noexcept
   {
     if (this != &other)
-    {
-      reset(other.release());
-    }
+      reset(std::exchange(other.fd_, -1));
     return *this;
   }
-  ~UniqueFd() { reset(); }
 
   [[nodiscard]] int get() const noexcept { return fd_; }
-  [[nodiscard]] int release() noexcept
-  {
-    int const fd = fd_;
-    fd_ = -1;
-    return fd;
-  }
+  [[nodiscard]] int release() noexcept { return std::exchange(fd_, -1); }
   void reset(int fd = -1) noexcept
   {
     if (fd_ >= 0)
-    {
-      close(fd_);
-    }
+      static_cast<void>(::close(fd_));
     fd_ = fd;
   }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   int fd_ = -1;
 };
 
-bool is_shell_metacharacter(char ch)
+ava::core::Error errno_error(std::string message)
 {
-  switch (ch)
+  auto error = ava::core::Error(ava::core::ErrorCategory::Io, std::move(message));
+  error.with_context("cause", std::strerror(errno));
+  return error;
+}
+
+ssize_t read_retry(int fd, void* data, std::size_t size)
+{
+  while (true)
   {
-    case ';':
-    case '&':
-    case '|':
-    case '<':
-    case '>':
-    case '`':
-    case '$':
-    case '(':
-    case ')':
-      return true;
-    default:
-      return false;
+    auto const bytes = ::read(fd, data, size);
+    if (bytes < 0 && errno == EINTR)
+      continue;
+    return bytes;
   }
 }
 
-ava::core::Result<std::vector<std::string>> parse_command_argv(std::string_view command)
+ssize_t write_retry(int fd, void const* data, std::size_t size)
 {
-  std::vector<std::string> argv;
-  std::string current;
-  char quote = '\0';
-  bool escaping = false;
+  auto const* cursor = static_cast<char const*>(data);
+  std::size_t remaining = size;
+  while (remaining > 0)
+  {
+    auto const bytes = ::write(fd, cursor, remaining);
+    if (bytes < 0 && errno == EINTR)
+      continue;
+    if (bytes <= 0)
+      return bytes;
+    cursor += bytes;
+    remaining -= static_cast<std::size_t>(bytes);
+  }
+  return static_cast<ssize_t>(size);
+}
 
-  for (char const ch : command)
+pid_t waitpid_retry(pid_t pid, int* status, int options)
+{
+  while (true)
   {
-    if (escaping)
-    {
-      current.push_back(ch);
-      escaping = false;
+    auto const waited = ::waitpid(pid, status, options);
+    if (waited < 0 && errno == EINTR)
       continue;
-    }
-    if (ch == '\\')
-    {
-      escaping = true;
-      continue;
-    }
-    if (quote != '\0')
-    {
-      if (ch == quote)
-      {
-        quote = '\0';
-      }
-      else
-      {
-        current.push_back(ch);
-      }
-      continue;
-    }
-    if (ch == '\'' || ch == '"')
-    {
-      quote = ch;
-      continue;
-    }
-    if (is_shell_metacharacter(ch))
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "shell metacharacters are not supported by the command tool");
-      error.with_context("command", std::string(command));
-      return std::unexpected(std::move(error));
-    }
-    if (std::isspace(static_cast<unsigned char>(ch)))
-    {
-      if (!current.empty())
-      {
-        argv.push_back(current);
-        current.clear();
-      }
-      continue;
-    }
-    current.push_back(ch);
+    return waited;
   }
+}
 
-  if (escaping || quote != '\0')
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "unterminated command escape or quote");
-    error.with_context("command", std::string(command));
-    return std::unexpected(std::move(error));
-  }
-  if (!current.empty())
-  {
-    argv.push_back(current);
-  }
-  if (argv.empty())
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "command must not be empty");
-    return std::unexpected(std::move(error));
-  }
-  return argv;
+ava::core::Result<std::array<int, 2>> make_pipe_cloexec()
+{
+  std::array<int, 2> pipe_fds{-1, -1};
+  if (::pipe2(pipe_fds.data(), O_CLOEXEC) != 0)
+    return std::unexpected(errno_error("failed to create close-on-exec process pipe"));
+  return pipe_fds;
+}
+
+void close_nonstandard_fds()
+{
+  long const open_max = ::sysconf(_SC_OPEN_MAX);
+  int const max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
+  for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) static_cast<void>(::close(fd));
+}
+
+bool is_canceled(ToolContext const& context)
+{
+  return context.cancel_requested && context.cancel_requested();
 }
 
 std::size_t logical_line_count(std::string_view text)
@@ -192,12 +167,12 @@ void trim_to_last_lines(BashResult& result, std::size_t max_lines)
   }
   if (output_lines <= max_lines)
     return;
-  auto const start_line = output_lines - max_lines + 1;
-  auto const offset = byte_offset_for_line(result.output, start_line);
-  if (offset == 0)
-    return;
-  result.output.erase(0, offset);
-  result.line_limited = true;
+  auto const offset = byte_offset_for_line(result.output, output_lines - max_lines + 1);
+  if (offset != 0)
+  {
+    result.output.erase(0, offset);
+    result.line_limited = true;
+  }
 }
 
 void trim_to_max_bytes(BashResult& result, std::size_t max_bytes)
@@ -212,13 +187,10 @@ void trim_to_max_bytes(BashResult& result, std::size_t max_bytes)
   }
   if (result.output.size() <= max_bytes)
     return;
-
   auto offset = result.output.size() - max_bytes;
   auto const newline = result.output.find('\n', offset);
   if (newline != std::string::npos && newline + 1 < result.output.size())
-  {
     offset = newline + 1;
-  }
   result.output.erase(0, offset);
   result.byte_limited = true;
 }
@@ -236,9 +208,7 @@ void append_output(BashResult& result, std::string_view chunk, BashOptions const
       previous_was_newline = true;
     }
     else
-    {
       previous_was_newline = false;
-    }
   }
   result.output.append(chunk);
   trim_to_last_lines(result, options.max_lines);
@@ -257,98 +227,293 @@ void finalize_output(BashResult& result, BashOptions const& options, bool saw_ou
   result.truncated = result.truncated || result.byte_limited || result.line_limited || result.output_bytes < result.total_bytes;
 }
 
-ssize_t read_retry(int fd, char* data, std::size_t size)
+ava::core::VoidResult remove_tree_at(int directory_fd, std::size_t& remaining_entries)
 {
-  while (true)
+  auto duplicate = ::dup(directory_fd);
+  if (duplicate < 0)
+    return std::unexpected(errno_error("failed to duplicate synthetic environment cleanup directory"));
+  DIR* directory = ::fdopendir(duplicate);
+  if (!directory)
   {
-    auto const bytes = read(fd, data, size);
-    if (bytes < 0 && errno == EINTR)
-    {
+    static_cast<void>(::close(duplicate));
+    return std::unexpected(errno_error("failed to inspect synthetic environment cleanup directory"));
+  }
+  while (dirent* entry = ::readdir(directory))
+  {
+    std::string_view const name(entry->d_name);
+    if (name == "." || name == "..")
       continue;
-    }
-    return bytes;
-  }
-}
-
-pid_t waitpid_retry(pid_t pid, int* status, int options)
-{
-  while (true)
-  {
-    auto const waited = waitpid(pid, status, options);
-    if (waited < 0 && errno == EINTR)
+    if (remaining_entries == 0)
     {
+      static_cast<void>(::closedir(directory));
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "synthetic environment cleanup exceeded its bounded entry limit"));
+    }
+    --remaining_entries;
+    struct stat status{};
+    if (::fstatat(directory_fd, entry->d_name, &status, AT_SYMLINK_NOFOLLOW) != 0)
       continue;
-    }
-    return waited;
-  }
-}
-
-ava::core::Result<std::array<int, 2>> make_pipe()
-{
-  std::array<int, 2> pipe_fds{-1, -1};
-  if (pipe(pipe_fds.data()) != 0)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to create process pipe");
-    error.with_context("cause", std::strerror(errno));
-    return std::unexpected(std::move(error));
-  }
-  return pipe_fds;
-}
-
-void close_nonstandard_fds()
-{
-  long const open_max = sysconf(_SC_OPEN_MAX);
-  int const max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
-  for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd)
-  {
-    close(fd);
-  }
-}
-
-ava::core::Error pipe_read_error(std::string_view command)
-{
-  auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to read process output");
-  error.with_context("command", std::string(command));
-  error.with_context("cause", std::strerror(errno));
-  return error;
-}
-
-ava::core::Error waitpid_error(std::string_view command)
-{
-  auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to wait for process");
-  error.with_context("command", std::string(command));
-  error.with_context("cause", std::strerror(errno));
-  return error;
-}
-
-void signal_process(pid_t pid, bool can_signal_group, int signal)
-{
-  kill(can_signal_group ? -pid : pid, signal);
-}
-
-ava::core::VoidResult stop_process(pid_t pid, bool can_signal_group, int& status, std::string_view command)
-{
-  signal_process(pid, can_signal_group, SIGTERM);
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  pid_t const terminated = waitpid_retry(pid, &status, WNOHANG);
-  if (terminated < 0)
-  {
-    return std::unexpected(waitpid_error(command));
-  }
-  if (terminated == 0)
-  {
-    signal_process(pid, can_signal_group, SIGKILL);
-    if (waitpid_retry(pid, &status, 0) < 0)
+    if (S_ISDIR(status.st_mode))
     {
-      return std::unexpected(waitpid_error(command));
+      UniqueFd child(::openat(directory_fd, entry->d_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+      if (child.get() >= 0)
+        static_cast<void>(remove_tree_at(child.get(), remaining_entries));
+      static_cast<void>(::unlinkat(directory_fd, entry->d_name, AT_REMOVEDIR));
     }
+    else
+      static_cast<void>(::unlinkat(directory_fd, entry->d_name, 0));
   }
+  static_cast<void>(::closedir(directory));
   return {};
 }
 
-bool is_canceled(ToolContext const& context)
+class SyntheticEnvironmentRoot final
 {
-  return context.cancel_requested && context.cancel_requested();
+ public:
+  SyntheticEnvironmentRoot() = default;
+  ~SyntheticEnvironmentRoot() { cleanup(); }
+  SyntheticEnvironmentRoot(SyntheticEnvironmentRoot const&) = delete;
+  SyntheticEnvironmentRoot& operator=(SyntheticEnvironmentRoot const&) = delete;
+  SyntheticEnvironmentRoot(SyntheticEnvironmentRoot&& other) noexcept
+      : root_(std::move(other.root_)), device_(std::exchange(other.device_, 0)), inode_(std::exchange(other.inode_, 0))
+  {
+  }
+  SyntheticEnvironmentRoot& operator=(SyntheticEnvironmentRoot&& other) noexcept
+  {
+    if (this != &other)
+    {
+      cleanup();
+      root_ = std::move(other.root_);
+      device_ = std::exchange(other.device_, 0);
+      inode_ = std::exchange(other.inode_, 0);
+    }
+    return *this;
+  }
+
+  [[nodiscard]] static ava::core::Result<SyntheticEnvironmentRoot> create()
+  {
+    std::array<char, sizeof("/tmp/ava-command-XXXXXX")> pattern{};
+    std::strcpy(pattern.data(), "/tmp/ava-command-XXXXXX");
+    char* const created = ::mkdtemp(pattern.data());
+    if (!created)
+      return std::unexpected(errno_error("failed to create private synthetic command environment root"));
+
+    SyntheticEnvironmentRoot result;
+    result.root_ = created;
+    if (::chmod(result.root_.c_str(), S_IRWXU) != 0)
+      return std::unexpected(errno_error("failed to secure private synthetic command environment root"));
+    struct stat status{};
+    if (::lstat(result.root_.c_str(), &status) != 0 || !S_ISDIR(status.st_mode) || S_ISLNK(status.st_mode) || status.st_uid != ::geteuid() ||
+        (status.st_mode & (S_IRWXG | S_IRWXO)) != 0)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
+                                              "private synthetic command environment root is not an owner-only non-symlink directory"));
+    }
+    result.device_ = status.st_dev;
+    result.inode_ = status.st_ino;
+    for (auto const name : {"home", "xdg-config", "xdg-cache", "xdg-data", "xdg-state", "tmp"})
+    {
+      auto const child = result.root_ / name;
+      if (::mkdir(child.c_str(), S_IRWXU) != 0 || ::chmod(child.c_str(), S_IRWXU) != 0)
+        return std::unexpected(errno_error("failed to create private synthetic command environment directory"));
+      struct stat child_status{};
+      if (::lstat(child.c_str(), &child_status) != 0 || !S_ISDIR(child_status.st_mode) || S_ISLNK(child_status.st_mode) || child_status.st_uid != ::geteuid() ||
+          (child_status.st_mode & (S_IRWXG | S_IRWXO)) != 0)
+      {
+        return std::unexpected(
+            ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "private synthetic command environment directory is not owner-only and non-symlink"));
+      }
+    }
+    return result;
+  }
+
+  [[nodiscard]] std::filesystem::path const& root() const noexcept { return root_; }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
+ private:
+  void cleanup() noexcept
+  {
+    if (root_.empty())
+      return;
+    UniqueFd root_fd(::open(root_.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    struct stat status{};
+    if (root_fd.get() >= 0 && ::fstat(root_fd.get(), &status) == 0 && S_ISDIR(status.st_mode) && status.st_uid == ::geteuid() && status.st_dev == device_ &&
+        status.st_ino == inode_)
+    {
+      std::size_t remaining_entries = kCleanupEntryLimit;
+      static_cast<void>(remove_tree_at(root_fd.get(), remaining_entries));
+      static_cast<void>(::rmdir(root_.c_str()));
+    }
+    root_.clear();
+  }
+
+  std::filesystem::path root_;
+  dev_t device_ = 0;
+  ino_t inode_ = 0;
+};
+
+ava::core::Result<std::pair<std::filesystem::path, std::string>> trusted_home_and_user()
+{
+  long const suggested = ::sysconf(_SC_GETPW_R_SIZE_MAX);
+  std::vector<char> storage(static_cast<std::size_t>(suggested > 0 ? suggested : 16 * 1024));
+  passwd record{};
+  passwd* resolved = nullptr;
+  int const status = ::getpwuid_r(::geteuid(), &record, storage.data(), storage.size(), &resolved);
+  if (status != 0 || !resolved || !resolved->pw_dir || !resolved->pw_name || resolved->pw_dir[0] == '\0' || resolved->pw_name[0] == '\0')
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to discover the trusted local account for command planning");
+    if (status != 0)
+      error.with_context("cause", std::strerror(status));
+    return std::unexpected(std::move(error));
+  }
+  return std::pair{std::filesystem::path(resolved->pw_dir), std::string(resolved->pw_name)};
+}
+
+ava::core::Result<ava::command::CommandBuildOptions> local_command_build_options(ToolContext const& context, SyntheticEnvironmentRoot const& synthetic)
+{
+  auto account = trusted_home_and_user();
+  if (!account)
+    return std::unexpected(std::move(account.error()));
+  // Read exactly one inherited value: startup PATH. Bound the read before
+  // copying it into planning options; no child inherits it directly and no
+  // execution-time PATH lookup occurs.
+  ava::command::CommandLimits limits;
+  char const* const inherited_path = ::getenv("PATH");
+  std::string startup_path = kDefaultStartupPath;
+  if (inherited_path)
+  {
+    auto const length = ::strnlen(inherited_path, limits.max_path_bytes + 1);
+    if (length > limits.max_path_bytes)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "inherited startup PATH exceeds the bounded input size"));
+    }
+    startup_path.assign(inherited_path, length);
+  }
+  auto const& root = synthetic.root();
+  return ava::command::CommandBuildOptions{.workspace = context.workspace_dir,
+                                           .trusted_home = account->first,
+                                           .startup_path = std::move(startup_path),
+                                           .shell = "/bin/sh",
+                                           .ava_authority_roots = {},
+                                           .environment = ava::command::CommandEnvironmentOptions{.profile_id = "ava-local-bash-prompt-v1",
+                                                                                                  .user = account->second,
+                                                                                                  .logname = account->second,
+                                                                                                  .home = root / "home",
+                                                                                                  .xdg_config_home = root / "xdg-config",
+                                                                                                  .xdg_cache_home = root / "xdg-cache",
+                                                                                                  .xdg_data_home = root / "xdg-data",
+                                                                                                  .xdg_state_home = root / "xdg-state",
+                                                                                                  .tmpdir = root / "tmp"},
+                                           .workspace_script_recipes = {},
+                                           .limits = limits};
+}
+
+ava::core::Result<std::vector<std::string>> execution_argv(ava::command::CommandPlan const& plan)
+{
+  if (!plan.resolved_executable())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "sealed command plan has no resolved executable"));
+  if (plan.execution_domain() == ava::command::CommandExecutionDomain::RawShell)
+  {
+    return std::vector<std::string>{plan.resolved_executable()->executable.canonical_path.string(), "-c", plan.raw_shell_text()};
+  }
+  if (plan.argv().empty())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "sealed command plan has no argv"));
+  return plan.argv();
+}
+
+ava::tools::CommandExecutionPlanMetadata execution_metadata(ava::command::CommandPlan const& plan,
+                                                            ava::permissions::CommandPermissionMetadata const& permission)
+{
+  return ava::tools::CommandExecutionPlanMetadata{.fingerprint = plan.fingerprint(),
+                                                  .execution_domain = plan.execution_domain(),
+                                                  .level = permission.level,
+                                                  .family = permission.family,
+                                                  .backend_maximum_scope = permission.backend_maximum_scope,
+                                                  .resolved_executable = permission.resolved_executable,
+                                                  .cwd = plan.cwd(),
+                                                  .executor_identity_verified = false};
+}
+
+bool group_exists(pid_t pgid)
+{
+  if (::kill(-pgid, 0) == 0)
+    return true;
+  return errno == EPERM;
+}
+
+ava::core::VoidResult wait_for_group_exit(pid_t pgid, std::chrono::steady_clock::time_point deadline)
+{
+  while (group_exists(pgid))
+  {
+    if (std::chrono::steady_clock::now() >= deadline)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "verified command process group did not exit within its finite cleanup deadline"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  if (errno != ESRCH && errno != EPERM)
+    return std::unexpected(errno_error("failed to verify command process-group cleanup"));
+  return {};
+}
+
+ava::core::VoidResult signal_verified_group(pid_t pgid, int signal_number)
+{
+  if (::kill(-pgid, signal_number) == 0 || errno == ESRCH)
+    return {};
+  return std::unexpected(errno_error("failed to signal verified command process group"));
+}
+
+ava::core::VoidResult terminate_verified_group(pid_t pgid, pid_t leader, int& status, bool& leader_reaped)
+{
+  if (auto signaled = signal_verified_group(pgid, SIGTERM); !signaled)
+    return signaled;
+  auto const grace_deadline = std::chrono::steady_clock::now() + kProcessGroupGrace;
+  while (!leader_reaped && std::chrono::steady_clock::now() < grace_deadline)
+  {
+    auto const waited = waitpid_retry(leader, &status, WNOHANG);
+    if (waited == leader)
+      leader_reaped = true;
+    else if (waited < 0 && errno != ECHILD)
+      return std::unexpected(errno_error("failed to wait for command process leader during cleanup"));
+    if (!leader_reaped)
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  if (group_exists(pgid))
+  {
+    if (auto signaled = signal_verified_group(pgid, SIGKILL); !signaled)
+      return signaled;
+  }
+  if (!leader_reaped)
+  {
+    auto const waited = waitpid_retry(leader, &status, 0);
+    if (waited == leader)
+      leader_reaped = true;
+    else if (waited < 0 && errno != ECHILD)
+      return std::unexpected(errno_error("failed to reap command process leader during cleanup"));
+  }
+  return wait_for_group_exit(pgid, std::chrono::steady_clock::now() + kProcessGroupKillWait);
+}
+
+ava::core::VoidResult gate_failure_cleanup(pid_t child, UniqueFd& control_write)
+{
+  // Closing the gate is the child-side cleanup signal before exec. Do not
+  // signal a process group until parent and child have both verified it.
+  control_write.reset();
+  int status = 0;
+  auto const deadline = std::chrono::steady_clock::now() + kProcessGroupGrace;
+  while (std::chrono::steady_clock::now() < deadline)
+  {
+    auto const waited = waitpid_retry(child, &status, WNOHANG);
+    if (waited == child || (waited < 0 && errno == ECHILD))
+      return {};
+    if (waited < 0)
+      return std::unexpected(errno_error("failed to wait for gated command child"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  // The leader itself is a verified PID returned by fork; this is deliberately
+  // not a PGID signal. The pre-exec child closes its gate and reaps its private
+  // sentinel on normal gate failure.
+  static_cast<void>(::kill(child, SIGKILL));
+  static_cast<void>(waitpid_retry(child, &status, 0));
+  return {};
 }
 
 }  // namespace
@@ -356,27 +521,47 @@ bool is_canceled(ToolContext const& context)
 ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_view command, BashOptions options)
 {
   if (command.empty())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "command must not be empty"));
+  if (!ava::command::command_mode_is_prompt_only(context.command_runtime))
   {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "command must not be empty");
-    return std::unexpected(std::move(error));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                            "local sealed bash execution is available only in explicit PromptOnly runtime mode during this milestone"));
   }
+
+  auto synthetic = SyntheticEnvironmentRoot::create();
+  if (!synthetic)
+    return std::unexpected(std::move(synthetic.error()));
+  auto build_options = local_command_build_options(context, *synthetic);
+  if (!build_options)
+    return std::unexpected(std::move(build_options.error()));
+  auto intent = ava::command::CommandIntent::compatibility(std::string(command), build_options->limits);
+  if (!intent)
+    return std::unexpected(std::move(intent.error()));
+  // Prepare exactly once, before permission. The scoped synthetic root remains
+  // live through freshness validation, fork, and child completion.
+  auto preparation = ava::command::prepare_command(*intent, *build_options);
+  if (!preparation)
+    return std::unexpected(std::move(preparation.error()));
+  auto argv_strings = execution_argv(preparation->plan());
+  if (!argv_strings)
+    return std::unexpected(std::move(argv_strings.error()));
+
   auto const tool_name = context.permission_tool_name.empty() ? std::string("bash") : context.permission_tool_name;
-  if (auto permission =
-          ensure_permission(context, ava::permissions::Operation::RunCommand, context.workspace_dir, command, tool_name, "command requires permission");
+  bool const unverified_delegated_executor = static_cast<bool>(context.command_executor);
+  if (auto permission = ensure_command_permission(context, command, *preparation, unverified_delegated_executor, tool_name, "command requires permission");
       !permission)
   {
-    return std::unexpected(permission.error());
+    return std::unexpected(std::move(permission.error()));
   }
+
   BashResult result;
   std::string process_outcome = "error";
-  // Provider call IDs are product data. A direct process invocation receives
-  // its own observer-only correlation ID rather than leaking that raw value.
   auto trace_process_call_id = context.trace_call_id;
   if (context.observation && trace_process_call_id.empty())
     trace_process_call_id = context.observation->next_id("process");
   struct ProcessTraceScope
   {
-    ava::tools::ToolContext const& context;
+    ToolContext const& context;
     std::string const& call_id;
     std::string& outcome;
     BashResult const& result;
@@ -401,12 +586,9 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
         event.fields = {{.key = "tool", .value = "bash"}};
       });
   };
-  // Permission approval is the operation boundary: every subsequent cancel,
-  // parse, pipe, or fork failure receives this matching observer-only pair.
   observe_process_start();
   if (is_canceled(context))
   {
-    result.exit_code = -1;
     result.canceled = true;
     process_outcome = "canceled";
     return result;
@@ -414,38 +596,18 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   if (auto started = announce_tool_execution_start(context); !started)
     return std::unexpected(std::move(started.error()));
 
-  auto argv_strings = parse_command_argv(command);
-  if (!argv_strings)
-  {
-    return std::unexpected(argv_strings.error());
-  }
-
   if (context.command_executor)
   {
-    std::error_code status_error;
-    auto const workspace_status = std::filesystem::symlink_status(context.workspace_dir, status_error);
-    if (status_error || !std::filesystem::is_directory(workspace_status) || std::filesystem::is_symlink(workspace_status))
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "command workspace must be an existing non-symlink directory");
-      error.with_context("path", context.workspace_dir.string());
-      if (status_error)
-        error.with_context("cause", status_error.message());
-      return std::unexpected(std::move(error));
-    }
-    std::error_code canonical_error;
-    auto canonical_cwd = std::filesystem::canonical(context.workspace_dir, canonical_error);
-    if (canonical_error)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to canonicalize command workspace");
-      error.with_context("path", context.workspace_dir.string());
-      error.with_context("cause", canonical_error.message());
-      return std::unexpected(std::move(error));
-    }
-    auto executed = context.command_executor->execute(CommandExecutionRequest{.argv = std::move(*argv_strings),
-                                                                              .cwd = std::move(canonical_cwd),
-                                                                              .timeout = options.timeout,
-                                                                              .output_byte_limit = options.max_bytes,
-                                                                              .cancel_requested = context.cancel_requested});
+    auto permission_metadata = ava::permissions::command_permission_metadata(preparation->plan(), true);
+    auto executed = context.command_executor->execute(CommandExecutionRequest{
+        .argv = std::move(*argv_strings),
+        .cwd = preparation->plan().cwd(),
+        .timeout = options.timeout,
+        .output_byte_limit = options.max_bytes,
+        .cancel_requested = context.cancel_requested,
+        .plan_metadata = execution_metadata(preparation->plan(), permission_metadata),
+        .environment_profile = CommandEnvironmentProfileContract{
+            .profile_id = preparation->environment().profile_id(), .digest = preparation->environment().digest(), .local_execution_authority = false}});
     if (!executed)
       return std::unexpected(std::move(executed.error()));
 
@@ -490,78 +652,161 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     return result;
   }
 
+  auto fresh = ava::command::plan_is_fresh(preparation->plan());
+  if (!fresh)
+    return std::unexpected(std::move(fresh.error()));
+  if (!*fresh)
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "sealed command plan is stale; prepare a new command under a fresh permission decision"));
+  }
+
   std::vector<char*> argv;
   argv.reserve(argv_strings->size() + 1);
-  for (auto& arg : *argv_strings)
-  {
-    argv.push_back(arg.data());
-  }
+  for (auto& argument : *argv_strings) argv.push_back(argument.data());
   argv.push_back(nullptr);
+  std::vector<std::string> environment_strings;
+  environment_strings.reserve(preparation->environment().entries().size());
+  for (auto const& entry : preparation->environment().entries()) environment_strings.push_back(entry.key + "=" + entry.value);
+  std::vector<char*> environment;
+  environment.reserve(environment_strings.size() + 1);
+  for (auto& entry : environment_strings) environment.push_back(entry.data());
+  environment.push_back(nullptr);
+  auto const executable = preparation->plan().resolved_executable()->executable.canonical_path.string();
+  auto const cwd = preparation->plan().cwd().string();
 
-  auto const workspace_text = context.workspace_dir.string();
+  auto output_pipe = make_pipe_cloexec();
+  if (!output_pipe)
+    return std::unexpected(std::move(output_pipe.error()));
+  auto status_pipe = make_pipe_cloexec();
+  if (!status_pipe)
+    return std::unexpected(std::move(status_pipe.error()));
+  auto control_pipe = make_pipe_cloexec();
+  if (!control_pipe)
+    return std::unexpected(std::move(control_pipe.error()));
+  UniqueFd read_fd((*output_pipe)[0]);
+  UniqueFd write_fd((*output_pipe)[1]);
+  UniqueFd status_read((*status_pipe)[0]);
+  UniqueFd status_write((*status_pipe)[1]);
+  UniqueFd control_read((*control_pipe)[0]);
+  UniqueFd control_write((*control_pipe)[1]);
 
-  auto pipe_result = make_pipe();
-  if (!pipe_result)
-  {
-    return std::unexpected(pipe_result.error());
-  }
-  UniqueFd read_fd((*pipe_result)[0]);
-  UniqueFd write_fd((*pipe_result)[1]);
-
-  pid_t const pid = fork();
+  pid_t const pid = ::fork();
   if (pid < 0)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to fork process");
-    error.with_context("cause", std::strerror(errno));
-    process_outcome = "spawn_error";
-    return std::unexpected(std::move(error));
-  }
-
+    return std::unexpected(errno_error("failed to fork sealed command process"));
   if (pid == 0)
   {
-    setpgid(0, 0);
-    close(read_fd.get());
-    dup2(write_fd.get(), STDOUT_FILENO);
-    dup2(write_fd.get(), STDERR_FILENO);
-    close(write_fd.get());
-    if (chdir(workspace_text.c_str()) != 0)
+    read_fd.reset();
+    status_read.reset();
+    control_write.reset();
+    int gate_status = 0;
+    if (::setpgid(0, 0) != 0)
+    {
+      gate_status = errno == 0 ? EIO : errno;
+      static_cast<void>(write_retry(status_write.get(), &gate_status, sizeof(gate_status)));
+      _exit(127);
+    }
+    pid_t const sentinel = ::fork();
+    if (sentinel < 0)
+    {
+      gate_status = errno == 0 ? EIO : errno;
+      static_cast<void>(write_retry(status_write.get(), &gate_status, sizeof(gate_status)));
+      _exit(127);
+    }
+    if (sentinel == 0)
+    {
+      // The sentinel keeps the verified group identity from being recycled
+      // between leader completion and descendant cleanup. It has no stdio or
+      // control descriptors and never execs user code.
+      write_fd.reset();
+      status_write.reset();
+      control_read.reset();
+      while (true) static_cast<void>(::pause());
+    }
+    static_cast<void>(write_retry(status_write.get(), &gate_status, sizeof(gate_status)));
+    char release = '\0';
+    if (read_retry(control_read.get(), &release, 1) != 1 || release != 'G')
+    {
+      static_cast<void>(::kill(sentinel, SIGKILL));
+      int sentinel_status = 0;
+      static_cast<void>(waitpid_retry(sentinel, &sentinel_status, 0));
+      _exit(127);
+    }
+    control_read.reset();
+    status_write.reset();
+    UniqueFd null_input(::open("/dev/null", O_RDONLY | O_CLOEXEC));
+    if (null_input.get() < 0 || ::dup2(null_input.get(), STDIN_FILENO) < 0 || ::dup2(write_fd.get(), STDOUT_FILENO) < 0 ||
+        ::dup2(write_fd.get(), STDERR_FILENO) < 0 || ::chdir(cwd.c_str()) != 0)
     {
       _exit(127);
     }
-    if (setenv("PATH", kTrustedExecPath, 1) != 0)
-    {
-      _exit(127);
-    }
+    write_fd.reset();
+    if (null_input.get() != STDIN_FILENO)
+      null_input.reset();
     close_nonstandard_fds();
-    execvp(argv[0], argv.data());
+    ::execve(executable.c_str(), argv.data(), environment.data());
     _exit(127);
   }
 
-  bool const can_signal_group = setpgid(pid, pid) == 0 || errno == EACCES;
-  int status = 0;
   write_fd.reset();
-  int const flags = fcntl(read_fd.get(), F_GETFL, 0);
-  if (flags < 0)
+  status_write.reset();
+  control_read.reset();
+  bool parent_setpgid = false;
+  for (int attempt = 0; attempt < 20; ++attempt)
   {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to read process pipe flags");
-    error.with_context("command", std::string(command));
-    error.with_context("cause", std::strerror(errno));
-    signal_process(pid, can_signal_group, SIGKILL);
-    waitpid_retry(pid, &status, 0);
-    return std::unexpected(std::move(error));
+    if (::setpgid(pid, pid) == 0)
+    {
+      parent_setpgid = true;
+      break;
+    }
+    if (errno != EINTR)
+      break;
   }
-  if (fcntl(read_fd.get(), F_SETFL, flags | O_NONBLOCK) < 0)
+  pollfd gate_poll{.fd = status_read.get(), .events = POLLIN, .revents = 0};
+  int poll_result = 0;
+  do
   {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to set process pipe nonblocking");
-    error.with_context("command", std::string(command));
-    error.with_context("cause", std::strerror(errno));
-    signal_process(pid, can_signal_group, SIGKILL);
-    waitpid_retry(pid, &status, 0);
-    return std::unexpected(std::move(error));
+    poll_result = ::poll(&gate_poll, 1, static_cast<int>(kGateTimeout.count()));
+  } while (poll_result < 0 && errno == EINTR);
+  int gate_status = EIO;
+  if (poll_result <= 0 || (gate_poll.revents & POLLIN) == 0 || read_retry(status_read.get(), &gate_status, sizeof(gate_status)) != sizeof(gate_status))
+  {
+    static_cast<void>(gate_failure_cleanup(pid, control_write));
+    return std::unexpected(poll_result == 0 ? ava::core::Error(ava::core::ErrorCategory::Io, "sealed command process-group setup timed out")
+                                            : errno_error("sealed command process-group setup failed"));
+  }
+  status_read.reset();
+  pid_t const observed_pgid = ::getpgid(pid);
+  bool const group_verified = gate_status == 0 && observed_pgid == pid && (parent_setpgid || observed_pgid == pid) && ::kill(-pid, 0) == 0;
+  if (!group_verified)
+  {
+    static_cast<void>(gate_failure_cleanup(pid, control_write));
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::Io, "failed to establish a parent/child-acknowledged verified command process group before exec"));
+  }
+  char const release = 'G';
+  if (write_retry(control_write.get(), &release, 1) != 1)
+  {
+    int status = 0;
+    bool reaped = false;
+    static_cast<void>(terminate_verified_group(pid, pid, status, reaped));
+    return std::unexpected(errno_error("failed to release sealed command process for exec"));
+  }
+  control_write.reset();
+
+  int const flags = ::fcntl(read_fd.get(), F_GETFL, 0);
+  if (flags < 0 || ::fcntl(read_fd.get(), F_SETFL, flags | O_NONBLOCK) < 0)
+  {
+    int status = 0;
+    bool reaped = false;
+    static_cast<void>(terminate_verified_group(pid, pid, status, reaped));
+    return std::unexpected(errno_error("failed to configure sealed command output pipe"));
   }
 
   SpillBuffer spill_buffer;
   bool running = true;
+  bool leader_reaped = false;
+  int status = 0;
   bool saw_output = false;
   bool previous_was_newline = false;
   std::size_t newline_count = 0;
@@ -569,8 +814,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   auto last_progress = std::chrono::steady_clock::now();
   std::size_t next_progress_bytes = kBashProgressByteInterval;
   std::array<char, 4096> buffer{};
-
-  auto const maybe_emit_progress = [&]() -> ava::core::VoidResult {
+  auto maybe_emit_progress = [&]() -> ava::core::VoidResult {
     if (!context.progress_sink)
       return {};
     auto const now = std::chrono::steady_clock::now();
@@ -579,6 +823,10 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     while (result.total_bytes >= next_progress_bytes) next_progress_bytes += kBashProgressByteInterval;
     last_progress = now;
     return emit_tool_progress(context, "bash output " + std::to_string(result.total_bytes) + " bytes", "running");
+  };
+  auto fail_after_cleanup = [&](ava::core::Error error) -> ava::core::Result<BashResult> {
+    static_cast<void>(terminate_verified_group(pid, pid, status, leader_reaped));
+    return std::unexpected(std::move(error));
   };
 
   while (running)
@@ -592,56 +840,43 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
         spill_buffer.append(chunk);
         append_output(result, chunk, options, saw_output, previous_was_newline, newline_count);
         if (auto progress = maybe_emit_progress(); !progress)
-        {
-          signal_process(pid, can_signal_group, SIGKILL);
-          waitpid_retry(pid, &status, 0);
-          return std::unexpected(std::move(progress.error()));
-        }
+          return fail_after_cleanup(std::move(progress.error()));
         continue;
       }
       if (bytes == 0 || errno == EAGAIN || errno == EWOULDBLOCK)
-      {
         break;
-      }
-      auto error = pipe_read_error(command);
-      signal_process(pid, can_signal_group, SIGKILL);
-      waitpid_retry(pid, &status, 0);
-      return std::unexpected(std::move(error));
+      return fail_after_cleanup(errno_error("failed to read sealed command output"));
     }
 
     if (is_canceled(context))
     {
       result.canceled = true;
-      if (auto stopped = stop_process(pid, can_signal_group, status, command); !stopped)
-      {
+      if (auto stopped = terminate_verified_group(pid, pid, status, leader_reaped); !stopped)
         return std::unexpected(std::move(stopped.error()));
-      }
       running = false;
       break;
     }
-
-    pid_t const waited = waitpid_retry(pid, &status, WNOHANG);
+    auto const waited = waitpid_retry(pid, &status, WNOHANG);
     if (waited == pid)
     {
+      leader_reaped = true;
+      // Even a successful leader may have background descendants. The private
+      // sentinel preserves the verified PGID until TERM-to-KILL cleanup ends.
+      if (auto stopped = terminate_verified_group(pid, pid, status, leader_reaped); !stopped)
+        return std::unexpected(std::move(stopped.error()));
       running = false;
       break;
     }
     if (waited < 0)
-    {
-      return std::unexpected(waitpid_error(command));
-    }
-
+      return fail_after_cleanup(errno_error("failed to wait for sealed command process"));
     if (std::chrono::steady_clock::now() >= deadline)
     {
       result.timed_out = true;
-      if (auto stopped = stop_process(pid, can_signal_group, status, command); !stopped)
-      {
+      if (auto stopped = terminate_verified_group(pid, pid, status, leader_reaped); !stopped)
         return std::unexpected(std::move(stopped.error()));
-      }
       running = false;
       break;
     }
-
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
@@ -651,10 +886,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     if (bytes <= 0)
     {
       if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
-      {
-        auto error = pipe_read_error(command);
-        return std::unexpected(std::move(error));
-      }
+        return std::unexpected(errno_error("failed to drain sealed command output"));
       break;
     }
     std::string_view const chunk(buffer.data(), static_cast<std::size_t>(bytes));
@@ -666,17 +898,11 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   read_fd.reset();
 
   if (result.timed_out || result.canceled)
-  {
     result.exit_code = -1;
-  }
   else if (WIFEXITED(status))
-  {
     result.exit_code = WEXITSTATUS(status);
-  }
   else if (WIFSIGNALED(status))
-  {
     result.exit_code = 128 + WTERMSIG(status);
-  }
   finalize_output(result, options, saw_output, previous_was_newline, newline_count);
   if (result.truncated && !context.spill_dir.empty())
   {
@@ -686,16 +912,12 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     result.spill_path = spill->path;
     result.spill_truncated = spill->truncated;
     if (auto progress = emit_tool_progress(context, "bash output spilled " + std::to_string(spill->bytes_written) + " bytes", "running"); !progress)
-    {
       return std::unexpected(std::move(progress.error()));
-    }
   }
   if (result.total_bytes > 0)
   {
     if (auto progress = emit_tool_progress(context, "bash completed with " + std::to_string(result.total_bytes) + " output bytes", "completed"); !progress)
-    {
       return std::unexpected(std::move(progress.error()));
-    }
   }
   process_outcome = result.canceled ? "canceled" : (result.timed_out ? "timed_out" : (result.exit_code == 0 ? "success" : "error"));
   return result;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/command/command.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
@@ -89,6 +90,32 @@ class ExactFileAccess
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
+// Delegated executors receive a compact plan binding and an explicit
+// environment-profile contract. They never receive the local environment
+// entries or authority to reuse a local approval.
+struct CommandEnvironmentProfileContract
+{
+  std::string profile_id;
+  std::string digest;
+  bool local_execution_authority = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+struct CommandExecutionPlanMetadata
+{
+  std::string fingerprint;
+  ava::command::CommandExecutionDomain execution_domain = ava::command::CommandExecutionDomain::DirectArgv;
+  ava::command::CommandLevel level = ava::command::CommandLevel::Critical;
+  ava::command::CommandFamily family = ava::command::CommandFamily::UnknownWrapper;
+  ava::command::InteractiveScope backend_maximum_scope = ava::command::InteractiveScope::Once;
+  std::filesystem::path resolved_executable;
+  std::filesystem::path cwd;
+  bool executor_identity_verified = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct CommandExecutionRequest
 {
   std::vector<std::string> argv;
@@ -96,6 +123,8 @@ struct CommandExecutionRequest
   std::chrono::milliseconds timeout{0};
   std::size_t output_byte_limit = 0;
   ToolIoCancelCallback cancel_requested = nullptr;
+  std::optional<CommandExecutionPlanMetadata> plan_metadata = std::nullopt;
+  std::optional<CommandEnvironmentProfileContract> environment_profile = std::nullopt;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 

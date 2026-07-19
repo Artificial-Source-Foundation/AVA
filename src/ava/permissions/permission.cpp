@@ -411,6 +411,8 @@ PermissionDecision decide(PermissionRequest const& request)
 
   if (request.operation == Operation::RunCommand)
   {
+    if (request.command_metadata)
+      return decide(*request.command_metadata);
     return classify_command(request.command);
   }
 
@@ -480,6 +482,74 @@ PermissionDecision decide(PermissionRequest const& request)
   }
 
   return decision(PermissionAction::Allow, "allowed by default workspace policy", default_allow_risk(request.operation));
+}
+
+CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan const& plan, bool unverified_delegated_executor)
+{
+  auto const& classification = plan.classification();
+  CommandPermissionMetadata metadata{
+      .level = classification.level,
+      .family = classification.family,
+      .fingerprint = plan.fingerprint(),
+      .execution_domain = plan.execution_domain(),
+      .resolved_executable = plan.resolved_executable() ? plan.resolved_executable()->executable.canonical_path : std::filesystem::path{},
+      .executable_origin = plan.resolved_executable() ? plan.resolved_executable()->origin : ava::command::ExecutableOrigin::System,
+      .cwd = plan.cwd(),
+      .executes_mutable_project_code = classification.capabilities.executes_mutable_project_code,
+      .containment_available = false,
+      .containment_status = classification.capabilities.requires_containment ? CommandContainmentStatus::Unavailable : CommandContainmentStatus::NotRequired,
+      .backend_maximum_scope = classification.max_interactive_scope,
+      .environment_profile_id = plan.environment_profile_id(),
+      .environment_digest = plan.environment_digest(),
+      .executor_identity_verified = !unverified_delegated_executor};
+  // This milestone has no containment implementation. Mutable project code
+  // must therefore remain a one-shot prompt even when its recipe would later
+  // support a broader scope under containment.
+  if (metadata.level == ava::command::CommandLevel::Critical || (metadata.executes_mutable_project_code && !metadata.containment_available))
+  {
+    metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  }
+  if (unverified_delegated_executor)
+  {
+    metadata.level = ava::command::CommandLevel::Critical;
+    metadata.family = ava::command::CommandFamily::UnverifiedDelegatedExecutor;
+    metadata.containment_available = false;
+    metadata.containment_status = CommandContainmentStatus::UnverifiedDelegatedExecutor;
+    metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  }
+  return metadata;
+}
+
+PermissionDecision decide(CommandPermissionMetadata const& metadata)
+{
+  if (!metadata.executor_identity_verified || metadata.containment_status == CommandContainmentStatus::UnverifiedDelegatedExecutor)
+  {
+    return decision(PermissionAction::Ask, "delegated command executor identity and environment are unverified", PermissionRisk::Critical);
+  }
+  if (metadata.level == ava::command::CommandLevel::Standard && !metadata.executes_mutable_project_code)
+  {
+    return decision(PermissionAction::Allow, "sealed command is a standard inspection recipe", PermissionRisk::Low);
+  }
+  if (metadata.level == ava::command::CommandLevel::Standard)
+  {
+    return decision(PermissionAction::Ask, "sealed command executes mutable project code; containment is unavailable", PermissionRisk::High);
+  }
+  if (metadata.level == ava::command::CommandLevel::Sensitive)
+  {
+    return decision(PermissionAction::Ask, "sealed command has sensitive capabilities", PermissionRisk::High);
+  }
+  return decision(PermissionAction::Ask, "sealed command is critical", PermissionRisk::Critical);
+}
+
+bool command_permission_allows_reusable_grant(CommandPermissionMetadata const& metadata) noexcept
+{
+  return metadata.executor_identity_verified && metadata.level != ava::command::CommandLevel::Critical &&
+         metadata.backend_maximum_scope != ava::command::InteractiveScope::Once && !(metadata.executes_mutable_project_code && !metadata.containment_available);
+}
+
+bool command_prompt_allows_persistent_allow(PermissionPrompt const& prompt) noexcept
+{
+  return !prompt.command_metadata || command_permission_allows_reusable_grant(*prompt.command_metadata);
 }
 
 bool is_repository_controlled_build_or_test_command(std::string_view command)
@@ -609,6 +679,20 @@ std::string to_string(PermissionResolution resolution)
 std::string to_string(PermissionResolutionDecision const& decision)
 {
   return to_string(decision.resolution);
+}
+
+std::string to_string(CommandContainmentStatus status)
+{
+  switch (status)
+  {
+    case CommandContainmentStatus::NotRequired:
+      return "not_required";
+    case CommandContainmentStatus::Unavailable:
+      return "unavailable";
+    case CommandContainmentStatus::UnverifiedDelegatedExecutor:
+      return "unverified_delegated_executor";
+  }
+  return "unavailable";
 }
 
 std::string to_string(PermissionRisk risk)

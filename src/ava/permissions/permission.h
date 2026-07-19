@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/command/command.h"
 #include "ava/agent/mode.h"
 #include "ava/core/result.h"
 
@@ -24,6 +25,36 @@ enum class PermissionRisk
   Medium,
   High,
   Critical,
+};
+
+enum class CommandContainmentStatus
+{
+  NotRequired,
+  Unavailable,
+  UnverifiedDelegatedExecutor,
+};
+
+// Command planning is owned by ava_command. This value object deliberately
+// copies only the approval/audit contract, so permissions can depend on the
+// planner without creating a command-to-permissions cycle.
+struct CommandPermissionMetadata
+{
+  ava::command::CommandLevel level = ava::command::CommandLevel::Critical;
+  ava::command::CommandFamily family = ava::command::CommandFamily::UnknownWrapper;
+  std::string fingerprint;
+  ava::command::CommandExecutionDomain execution_domain = ava::command::CommandExecutionDomain::DirectArgv;
+  std::filesystem::path resolved_executable;
+  ava::command::ExecutableOrigin executable_origin = ava::command::ExecutableOrigin::System;
+  std::filesystem::path cwd;
+  bool executes_mutable_project_code = false;
+  bool containment_available = false;
+  CommandContainmentStatus containment_status = CommandContainmentStatus::Unavailable;
+  ava::command::InteractiveScope backend_maximum_scope = ava::command::InteractiveScope::Once;
+  std::string environment_profile_id;
+  std::string environment_digest;
+  bool executor_identity_verified = true;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 enum class Operation
@@ -55,6 +86,7 @@ struct PermissionRequest
   std::filesystem::path workspace_dir;
   std::filesystem::path target_path;
   std::string command;
+  std::optional<CommandPermissionMetadata> command_metadata = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -105,13 +137,18 @@ struct PermissionPrompt
   PermissionRisk risk = PermissionRisk::Low;
   std::string diff_preview = {};
   bool diff_truncated = false;
+  std::optional<CommandPermissionMetadata> command_metadata = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using PermissionResolver = std::function<ava::core::Result<PermissionResolutionDecision>(PermissionPrompt const&)>;
 
+[[nodiscard]] CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan const& plan, bool unverified_delegated_executor = false);
 [[nodiscard]] PermissionDecision decide(PermissionRequest const& request);
+[[nodiscard]] PermissionDecision decide(CommandPermissionMetadata const& metadata);
+[[nodiscard]] bool command_permission_allows_reusable_grant(CommandPermissionMetadata const& metadata) noexcept;
+[[nodiscard]] bool command_prompt_allows_persistent_allow(PermissionPrompt const& prompt) noexcept;
 [[nodiscard]] PermissionDecision classify_command(std::string_view command);
 [[nodiscard]] bool is_repository_controlled_build_or_test_command(std::string_view command);
 [[nodiscard]] bool operator==(PermissionResolutionDecision const& decision, PermissionResolution resolution);
@@ -122,6 +159,7 @@ using PermissionResolver = std::function<ava::core::Result<PermissionResolutionD
 [[nodiscard]] std::string to_string(PermissionResolution resolution);
 [[nodiscard]] std::string to_string(PermissionResolutionDecision const& decision);
 [[nodiscard]] std::string to_string(PermissionRisk risk);
+[[nodiscard]] std::string to_string(CommandContainmentStatus status);
 [[nodiscard]] std::string to_string(Operation operation);
 
 }  // namespace ava::permissions

@@ -44,6 +44,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #ifndef AVA_FAKE_MCP_SERVER_PATH
@@ -2089,12 +2090,15 @@ void test_app_rpc_command_responses_for_context_compact_export()
 
 void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
 {
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0, "RPC direct command temporary parent is owner-only for sealed planning");
   auto const root = temp_root() / "app-rpc-direct-run-command";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "RPC direct command fixture workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -2150,12 +2154,15 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
 
 void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
 {
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0, "RPC direct command denial temporary parent is owner-only for sealed planning");
   auto const root = temp_root() / "app-rpc-direct-run-command-deny";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "RPC direct command denial fixture workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -2209,12 +2216,15 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
 
 void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
 {
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0, "RPC direct command cancellation temporary parent is owner-only for sealed planning");
   auto const root = temp_root() / "app-rpc-direct-run-command-cancel";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "RPC direct command cancellation fixture workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -2239,9 +2249,14 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
   std::jthread rpc_thread(
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
-  input_buffer.push(R"JSON({"id":"cmd-sleep","type":"run_command","command":"sleep 5"})JSON"
-                    "\n");
+  auto const sleep_marker = workspace / "sleep-started";
+  auto const sleep_command = "/bin/sh -c 'touch " + sleep_marker.string() + "; sleep 5'";
+  input_buffer.push("{\"id\":\"cmd-sleep\",\"type\":\"run_command\",\"command\":\"" + ava::core::json::escape(sleep_command) + "\"}\n");
   bool const started = output_buffer.wait_contains("\"name\":\"tool_start\"", std::chrono::seconds(2));
+  auto const launch_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!std::filesystem::exists(sleep_marker) && std::chrono::steady_clock::now() < launch_deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  bool const process_started = std::filesystem::exists(sleep_marker);
   input_buffer.push(R"JSON({"id":"cmd-second","type":"run_bash","command":"printf should-not-run"})JSON"
                     "\n");
   bool const active_rejected = output_buffer.wait_contains("RPC command is unavailable while a prompt is active", std::chrono::seconds(2));
@@ -2254,7 +2269,7 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
   auto const jsonl = output_buffer.str();
   expect(result.has_value(), "RPC direct command cancellation loop completes successfully");
   expect(transport.requests().empty(), "RPC direct command cancellation does not dispatch provider requests");
-  expect(started && active_rejected && canceled && jsonl.find("\"id\":\"cmd-second\"") != std::string::npos &&
+  expect(started && process_started && active_rejected && canceled && jsonl.find("\"id\":\"cmd-second\"") != std::string::npos &&
              jsonl.find("should-not-run") == std::string::npos && jsonl.find("\"id\":\"cmd-sleep\"") != std::string::npos,
          "RPC direct command rejects concurrent commands and cancels the running process through the bash tool context");
 }

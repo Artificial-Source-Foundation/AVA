@@ -605,6 +605,8 @@ std::string_view to_string(CommandFamily value) noexcept
       return "unknown_wrapper";
     case CommandFamily::RawShell:
       return "raw_shell";
+    case CommandFamily::UnverifiedDelegatedExecutor:
+      return "unverified_delegated_executor";
   }
   return "unknown";
 }

@@ -1,7 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
 #include "ava/tools/file_tools.h"
-
 #include "ava/permissions/permission_rules.h"
 
 #include <array>
@@ -256,6 +255,59 @@ void test_repository_build_test_persistent_allows_are_rejected_but_denies_win()
          "persistent deny rules continue to override repository build and test approvals");
 }
 
+void test_legacy_command_allows_do_not_authorize_sealed_critical_or_unverified_plans()
+{
+  auto const root = temp_root() / "permission-rules-sealed-command-v1";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto prompt = command_prompt(store, "python -c 'print(1)'");
+  ava::permissions::PersistentPermissionRule const legacy_allow{.rule_id = "permrule_legacy_command_allow",
+                                                                .scope = ava::permissions::PermissionRuleScope::Global,
+                                                                .workspace_dir = {},
+                                                                .action = ava::permissions::PermissionAction::Allow,
+                                                                .operation = ava::permissions::Operation::RunCommand,
+                                                                .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                .tool_name = "bash",
+                                                                .target_path = {},
+                                                                .command = prompt.command,
+                                                                .reason = "legacy exact command allow",
+                                                                .actor = "test",
+                                                                .created_at = "2026-07-19T00:00:00Z"};
+  ava::permissions::PersistentPermissionRule legacy_deny = legacy_allow;
+  legacy_deny.rule_id = "permrule_legacy_command_deny";
+  legacy_deny.action = ava::permissions::PermissionAction::Deny;
+  legacy_deny.reason = "legacy exact command deny";
+
+  auto verify_legacy_allow_blocked = [&](ava::permissions::CommandPermissionMetadata metadata, std::string_view label) {
+    prompt.command_metadata = std::move(metadata);
+    write_file_with_mode(store.global_rules_file,
+                         std::string("{\"schema_version\":1,\"rules\":[") + ava::permissions::permission_rule_json(legacy_allow) + "]}", S_IRUSR | S_IWUSR);
+    auto ignored_allow = ava::permissions::match_persistent_permission_rule(store, prompt);
+    expect(ignored_allow && !*ignored_allow, std::string("legacy v1 exact Allow cannot authorize ") + std::string(label) + " sealed command plans");
+
+    write_file_with_mode(store.global_rules_file,
+                         std::string("{\"schema_version\":1,\"rules\":[") + ava::permissions::permission_rule_json(legacy_allow) + "," +
+                             ava::permissions::permission_rule_json(legacy_deny) + "]}",
+                         S_IRUSR | S_IWUSR);
+    auto matched_deny = ava::permissions::match_persistent_permission_rule(store, prompt);
+    expect(matched_deny && *matched_deny && (*matched_deny)->rule_id == legacy_deny.rule_id,
+           std::string("legacy v1 exact Deny remains authoritative for ") + std::string(label) + " sealed command plans");
+  };
+
+  ava::permissions::CommandPermissionMetadata critical;
+  critical.level = ava::command::CommandLevel::Critical;
+  critical.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  verify_legacy_allow_blocked(critical, "critical");
+
+  ava::permissions::CommandPermissionMetadata unverified;
+  unverified.level = ava::command::CommandLevel::Critical;
+  unverified.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  unverified.executor_identity_verified = false;
+  unverified.containment_status = ava::permissions::CommandContainmentStatus::UnverifiedDelegatedExecutor;
+  verify_legacy_allow_blocked(unverified, "unverified delegated");
+}
+
 void test_permission_rule_storage_fail_closed()
 {
   auto const root = temp_root() / "permission-rules-corrupt";
@@ -438,6 +490,7 @@ void run_permission_rules_tests()
   test_permission_rule_precedence_prefers_specific_same_scope_rules();
   test_permission_rule_matches_command_operations_without_path_targets();
   test_repository_build_test_persistent_allows_are_rejected_but_denies_win();
+  test_legacy_command_allows_do_not_authorize_sealed_critical_or_unverified_plans();
   test_permission_rule_storage_fail_closed();
   test_permission_rule_broad_permissions_rejected();
   test_permission_rule_workspace_legacy_path_is_not_enforceable();

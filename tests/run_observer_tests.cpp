@@ -634,6 +634,8 @@ void test_dispatcher_trace_correlation_and_ordering()
   ava::tools::ToolContext context;
   context.workspace_dir = temp_root() / "dispatcher-trace";
   std::filesystem::create_directories(context.workspace_dir);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(context.workspace_dir.c_str(), S_IRWXU) == 0,
+         "dispatcher trace workspace is owner-only for sealed command planning");
   context.observation = observation;
   context.trace_context = {.run_id = "run",
                            .turn_id = "turn",
@@ -810,6 +812,8 @@ void test_session_and_process_boundaries_are_independent()
   ava::tools::ToolContext context;
   context.workspace_dir = temp_root() / "process-boundary";
   std::filesystem::create_directories(context.workspace_dir);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(context.workspace_dir.c_str(), S_IRWXU) == 0,
+         "process boundary workspace is owner-only for sealed command planning");
   context.observation = observation;
   context.permission_resolver = [](ava::permissions::PermissionPrompt const&) {
     return ava::core::Result<ava::permissions::PermissionResolutionDecision>(

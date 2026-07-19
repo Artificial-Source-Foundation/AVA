@@ -15,7 +15,7 @@ add_library(ava_tools
 )
 
 target_include_directories(ava_tools PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(ava_tools PUBLIC ava_observability)
+target_link_libraries(ava_tools PUBLIC ava_command ava_observability ava_permissions)
 ava_apply_debugging(ava_tools)
 ava_apply_warnings(ava_tools)
 ava_apply_sanitizers(ava_tools)

@@ -277,6 +277,7 @@ AcpSessionHost::PermissionGrantKey AcpSessionHost::permission_grant_key(ava::per
                             .workspace = normalized_absolute(options_.launch_root, prompt.workspace_dir).string(),
                             .target = prompt.target_path.empty() ? std::string{} : normalized_absolute(prompt.workspace_dir, prompt.target_path).string(),
                             .command = prompt.command,
+                            .command_fingerprint = prompt.command_metadata ? prompt.command_metadata->fingerprint : std::string{},
                             .tool_name = prompt.tool_name};
 }
 
@@ -328,7 +329,9 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> AcpSessionHost
         session_.mcp_config && acp_mcp_operation(prompt.operation) && (*persistent)->action == PermissionAction::Allow;
     bool const exact_session_mcp_allow =
         !session_mcp_allow_requires_exact_command || (!(*persistent)->command.empty() && (*persistent)->command == prompt.command);
-    if ((*persistent)->action == PermissionAction::Deny || exact_session_mcp_allow)
+    bool const sealed_command_allow =
+        prompt.operation != ava::permissions::Operation::RunCommand || ava::permissions::command_prompt_allows_persistent_allow(prompt);
+    if ((*persistent)->action == PermissionAction::Deny || (exact_session_mcp_allow && sealed_command_allow))
     {
       auto const resolution = (*persistent)->action == PermissionAction::Allow ? PermissionResolution::Allow : PermissionResolution::Deny;
       PermissionResolutionDecision decision(resolution, (*persistent)->reason);

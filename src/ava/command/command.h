@@ -81,6 +81,7 @@ enum class CommandFamily
   DestructiveOrPrivileged,
   UnknownWrapper,
   RawShell,
+  UnverifiedDelegatedExecutor,
 };
 
 enum class CommandRecipe

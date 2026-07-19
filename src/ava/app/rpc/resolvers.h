@@ -31,6 +31,8 @@ struct PendingPermissionRequest
   std::string tool_name;
   std::filesystem::path target_path;
   std::string command;
+  std::string command_fingerprint;
+  bool command_allows_reusable_grant = true;
   std::string reason;
   ava::permissions::PermissionRisk risk = ava::permissions::PermissionRisk::Low;
   std::optional<ava::permissions::PermissionResolutionDecision> resolution;
@@ -49,6 +51,7 @@ struct PermissionSessionGrant
   std::string tool_name;
   std::filesystem::path target_path;
   std::string command;
+  std::string command_fingerprint;
   std::string reason;
   ava::permissions::PermissionRisk risk = ava::permissions::PermissionRisk::Low;
 

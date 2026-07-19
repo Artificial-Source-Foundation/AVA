@@ -462,8 +462,16 @@ ava::core::Result<std::vector<CommandPathEntry>> discover_path(CommandBuildOptio
       if (entry.empty())
         return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "startup PATH contains an empty entry"));
       auto safe = safe_path_directory(std::filesystem::path(entry), PathProvenance::StartupPath);
+      // A startup PATH commonly contains optional toolchain locations. Keep
+      // only directories that pass the sealed-path checks. Missing, symlinked,
+      // or writable absolute entries add no executable authority and are
+      // omitted; empty or relative entries are ambiguous and fail closed.
       if (!safe)
-        return std::unexpected(std::move(safe.error()));
+      {
+        if (safe.error().category() == ava::core::ErrorCategory::InvalidArgument)
+          return std::unexpected(std::move(safe.error()));
+        continue;
+      }
       append_unique_path(entries, std::move(*safe));
     }
   }

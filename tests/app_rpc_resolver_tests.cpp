@@ -603,6 +603,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
         .tool_name = prompt.tool_name,
         .target_path = prompt.target_path,
         .command = prompt.command,
+        .command_fingerprint = {},
         .reason = "explicit current-session test grant",
         .risk = prompt.risk,
     });
@@ -657,6 +658,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
         .tool_name = prompt.tool_name,
         .target_path = prompt.target_path,
         .command = prompt.command,
+        .command_fingerprint = {},
         .reason = "explicit current-session test grant",
         .risk = prompt.risk,
     });

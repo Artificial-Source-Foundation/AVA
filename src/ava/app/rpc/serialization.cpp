@@ -865,6 +865,37 @@ std::string permission_request_payload_json(std::string_view resolver_request_id
   json += string_field_json("reason", prompt.reason);
   json += ',';
   json += string_field_json("risk", ava::permissions::to_string(prompt.risk));
+  if (prompt.command_metadata)
+  {
+    auto const& metadata = *prompt.command_metadata;
+    json += ",\"command_metadata\":{";
+    json += string_field_json("level", ava::command::to_string(metadata.level));
+    json += ',';
+    json += string_field_json("family", ava::command::to_string(metadata.family));
+    json += ',';
+    json += string_field_json("fingerprint", metadata.fingerprint);
+    json += ',';
+    json += string_field_json("execution_domain", ava::command::to_string(metadata.execution_domain));
+    json += ',';
+    json += string_field_json("resolved_executable", metadata.resolved_executable.string());
+    json += ',';
+    json += string_field_json("origin", ava::command::to_string(metadata.executable_origin));
+    json += ',';
+    json += string_field_json("cwd", metadata.cwd.string());
+    json += ",\"containment_available\":";
+    json += metadata.containment_available ? "true" : "false";
+    json += ',';
+    json += string_field_json("containment_status", ava::permissions::to_string(metadata.containment_status));
+    json += ',';
+    json += string_field_json("backend_maximum_scope", ava::command::to_string(metadata.backend_maximum_scope));
+    json += ',';
+    json += string_field_json("environment_profile_id", metadata.environment_profile_id);
+    json += ',';
+    json += string_field_json("environment_digest", metadata.environment_digest);
+    json += ",\"executor_identity_verified\":";
+    json += metadata.executor_identity_verified ? "true" : "false";
+    json += '}';
+  }
   if (!prompt.diff_preview.empty())
   {
     json += ',';

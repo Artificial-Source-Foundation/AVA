@@ -55,7 +55,8 @@ ava::core::VoidResult record_permission_audit(ToolContext const& context, Permis
 }
 
 PermissionAuditEvent audit_event(ToolContext const& context, std::string permission_request_id, ava::permissions::Operation operation, std::string tool_name,
-                                 ava::permissions::PermissionDecision const& decision, std::filesystem::path const& target_path, std::string_view command)
+                                 ava::permissions::PermissionDecision const& decision, std::filesystem::path const& target_path, std::string_view command,
+                                 std::optional<ava::permissions::CommandPermissionMetadata> command_metadata)
 {
   return PermissionAuditEvent{.permission_request_id = std::move(permission_request_id),
                               .operation = operation,
@@ -70,7 +71,8 @@ PermissionAuditEvent audit_event(ToolContext const& context, std::string permiss
                               .resolution_source = "policy",
                               .resolution_reason = "",
                               .actor = context.permission_actor.empty() ? std::string("agent") : context.permission_actor,
-                              .rule_id = ""};
+                              .rule_id = "",
+                              .command_metadata = std::move(command_metadata)};
 }
 
 ava::core::Error permission_denied_error(std::string_view error_message, ava::permissions::PermissionDecision const& decision,
@@ -261,7 +263,7 @@ ava::core::VoidResult announce_tool_execution_start(ToolContext const& context)
 
 ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permissions::Operation operation, std::filesystem::path const& target_path,
                                         std::string_view command, std::string_view tool_name, std::string_view error_message, std::string_view diff_preview,
-                                        bool diff_truncated)
+                                        bool diff_truncated, std::optional<ava::permissions::CommandPermissionMetadata> command_metadata)
 {
   auto permission_target = target_path;
   if (context.secure_workspace && (operation == ava::permissions::Operation::ReadFile || operation == ava::permissions::Operation::EditFile ||
@@ -293,6 +295,7 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
       .workspace_dir = context.workspace_dir,
       .target_path = permission_target,
       .command = std::string(command),
+      .command_metadata = command_metadata,
   });
   if (context.require_explicit_file_permissions && decision.action == ava::permissions::PermissionAction::Allow &&
       (operation == ava::permissions::Operation::ReadFile || operation == ava::permissions::Operation::EditFile))
@@ -302,7 +305,7 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
     decision.risk = operation == ava::permissions::Operation::EditFile ? ava::permissions::PermissionRisk::Medium : ava::permissions::PermissionRisk::Low;
   }
 
-  auto policy_event = audit_event(context, permission_request_id, operation, request_tool_name, decision, permission_target, command);
+  auto policy_event = audit_event(context, permission_request_id, operation, request_tool_name, decision, permission_target, command, command_metadata);
   if (decision.action == ava::permissions::PermissionAction::Allow || decision.action == ava::permissions::PermissionAction::Deny)
   {
     policy_event.resolution = ava::permissions::to_string(decision.action);
@@ -345,7 +348,16 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
       .risk = decision.risk,
       .diff_preview = std::string(diff_preview),
       .diff_truncated = diff_truncated,
+      .command_metadata = command_metadata,
   });
+  if (resolution && *resolution == ava::permissions::PermissionResolution::AllowSessionGrant && command_metadata &&
+      !ava::permissions::command_permission_allows_reusable_grant(*command_metadata))
+  {
+    ava::permissions::PermissionResolutionDecision denied(ava::permissions::PermissionResolution::Deny,
+                                                          "the sealed command backend permits only one-shot approval");
+    denied.resolution_source = "backend_scope";
+    resolution = std::move(denied);
+  }
 
   auto outcome_event = policy_event;
   outcome_event.resolution_source =
@@ -381,6 +393,14 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   auto const resolution_reason = resolution ? resolution->reason : resolution.error().format();
   return std::unexpected(
       permission_denied_error(error_message, decision, permission_target, command, resolution_context, resolution_reason, permission_request_id));
+}
+
+ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command, ava::command::CommandPreparation const& preparation,
+                                                bool unverified_delegated_executor, std::string_view tool_name, std::string_view error_message)
+{
+  auto metadata = ava::permissions::command_permission_metadata(preparation.plan(), unverified_delegated_executor);
+  return ensure_permission(context, ava::permissions::Operation::RunCommand, preparation.plan().cwd(), command, tool_name, error_message, {}, false,
+                           std::move(metadata));
 }
 
 std::string permission_audit_data_json(PermissionAuditEvent const& event)
@@ -421,6 +441,23 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event)
   if (!event.rule_id.empty())
   {
     data += ",\"rule_id\":\"" + ava::core::json::escape(event.rule_id) + "\"";
+  }
+  if (event.command_metadata)
+  {
+    auto const& metadata = *event.command_metadata;
+    // This is local audit metadata, not a process environment dump. The
+    // profile identifier and digest bind the contract without serializing any
+    // HOME/XDG/TMP/PATH or other environment values.
+    data += ",\"command_metadata\":{\"level\":\"" + ava::core::json::escape(ava::command::to_string(metadata.level)) + "\",\"family\":\"" +
+            ava::core::json::escape(ava::command::to_string(metadata.family)) + "\",\"fingerprint\":\"" + ava::core::json::escape(metadata.fingerprint) +
+            "\",\"execution_domain\":\"" + ava::core::json::escape(ava::command::to_string(metadata.execution_domain)) + "\",\"resolved_executable\":\"" +
+            ava::core::json::escape(metadata.resolved_executable.string()) + "\",\"origin\":\"" +
+            ava::core::json::escape(ava::command::to_string(metadata.executable_origin)) + "\",\"cwd\":\"" + ava::core::json::escape(metadata.cwd.string()) +
+            "\",\"containment_available\":" + (metadata.containment_available ? "true" : "false") + ",\"containment_status\":\"" +
+            ava::core::json::escape(ava::permissions::to_string(metadata.containment_status)) + "\",\"backend_maximum_scope\":\"" +
+            ava::core::json::escape(ava::command::to_string(metadata.backend_maximum_scope)) + "\",\"environment_profile_id\":\"" +
+            ava::core::json::escape(metadata.environment_profile_id) + "\",\"environment_digest\":\"" + ava::core::json::escape(metadata.environment_digest) +
+            "\",\"executor_identity_verified\":" + (metadata.executor_identity_verified ? "true" : "false") + '}';
   }
   data += '}';
   return data;

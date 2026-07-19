@@ -1547,6 +1547,8 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "runtime tool progress workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -1579,6 +1581,9 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
   std::vector<ava::app::runtime::Event> events;
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
+  run_options.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Allow;
+  };
   run_options.event_sink = [&events](ava::app::runtime::Event const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
@@ -1738,6 +1743,8 @@ void test_app_command_dispatcher()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace / "src");
   std::filesystem::create_directories(paths.ava_config_dir);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "command dispatcher workspace is owner-only for sealed command planning");
   write_app_test_file(paths.models_file,
                       "{\n"
                       "  \"models\": [\n"
@@ -2189,16 +2196,24 @@ void test_app_command_dispatcher()
              help->output[0].find("Ctrl+M") != std::string::npos,
          "command dispatcher /help includes catalog commands and effective hotkeys");
 
-  auto bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!pwd"});
+  int shell_prompts = 0;
+  auto const shell_resolver =
+      [&shell_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    ++shell_prompts;
+    expect(prompt.command_metadata && prompt.command_metadata->level == ava::command::CommandLevel::Critical,
+           "Pi-style shell helper receives a critical sealed command prompt");
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!pwd", .permission_resolver = shell_resolver});
   expect(bang_shell && bang_shell->handled && bang_shell->tool_timeline.size() == 2 && bang_shell->tool_timeline[0].name == "bash" &&
              bang_shell->tool_timeline[0].argument_summary == "pwd" && bang_shell->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success &&
              !bang_shell->output.empty() && bang_shell->output[0].find("exit: 0") != std::string::npos,
          "Pi-style ! shell helper runs through the permissioned bash command path");
-  auto hidden_bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!! pwd"});
+  auto hidden_bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!! pwd", .permission_resolver = shell_resolver});
   expect(hidden_bang_shell && hidden_bang_shell->handled && hidden_bang_shell->tool_timeline.size() == 2 &&
              hidden_bang_shell->tool_timeline[0].name == "bash" && hidden_bang_shell->tool_timeline[0].argument_summary == "pwd" &&
-             hidden_bang_shell->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success,
-         "Pi-style !! shell helper is accepted as the hidden-output bash helper without bypassing permissions");
+             hidden_bang_shell->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success && shell_prompts == 2,
+         "Pi-style !! shell helper is accepted as the critical one-shot bash helper without bypassing permissions");
   auto missing_bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!"});
   expect(missing_bang_shell && missing_bang_shell->handled && !missing_bang_shell->output.empty() &&
              missing_bang_shell->output[0].find("!<command> or !!<command>") != std::string::npos,

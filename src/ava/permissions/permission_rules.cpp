@@ -1,6 +1,5 @@
 #include "sys.h"
 #include "ava/permissions/permission_rules.h"
-
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
@@ -18,7 +17,6 @@
 #include <sstream>
 #include <string>
 #include <utility>
-
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -1195,6 +1193,11 @@ ava::core::Result<std::optional<PersistentPermissionRule>> match_persistent_perm
       continue;
     }
     if (is_repository_build_or_test_allow(rule))
+      continue;
+    // v1 rules predate sealed command identity. They retain authoritative
+    // Denies, but cannot silently authorize critical, unverified, or
+    // uncontained mutable plans on the new command path.
+    if (rule.operation == Operation::RunCommand && !command_prompt_allows_persistent_allow(prompt))
       continue;
     matched_allow = matched_allow ? prefer_more_specific(*matched_allow, rule) : rule;
   }

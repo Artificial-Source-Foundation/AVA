@@ -45,6 +45,7 @@
 #include <thread>
 #include <utility>
 #include <variant>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -1957,6 +1958,8 @@ void test_acp_negotiated_client_filesystem_and_terminal_routing()
   auto const root = std::filesystem::temp_directory_path() / ava::core::make_id("acp-client-tools");
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "ACP terminal fixture workspace is owner-only for sealed command planning");
   configure_acp_tool_test_model(root);
   auto const paths = ava::tests::app_test_paths(root);
   auto const note = workspace / "note.txt";
@@ -2691,6 +2694,8 @@ void test_acp_client_tool_dtos_lifecycle_and_cancellation()
   auto const truncated_root = std::filesystem::temp_directory_path() / ava::core::make_id("acp-terminal-truncated-tail");
   auto const truncated_workspace = truncated_root / "workspace";
   std::filesystem::create_directories(truncated_workspace);
+  expect(::chmod(truncated_root.c_str(), S_IRWXU) == 0 && ::chmod(truncated_workspace.c_str(), S_IRWXU) == 0,
+         "ACP terminal truncated fixture workspace is owner-only for sealed command planning");
   std::vector<ava::tools::ToolProgressEvent> truncated_progress;
   ava::tools::ToolContext truncated_context{
       .workspace_dir = std::filesystem::canonical(truncated_workspace),

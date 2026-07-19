@@ -32,6 +32,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <sys/stat.h>
 
 namespace {
 
@@ -1479,6 +1480,8 @@ void test_agent_loop_permission_resolver_threads_to_tools()
   std::filesystem::remove_all(root, remove_error);
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "agent command permission workspace is owner-only for sealed planning");
   auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
@@ -1544,6 +1547,8 @@ void test_agent_loop_permission_resolver_threads_to_tools()
     std::filesystem::remove_all(bash_root, remove_error);
     auto const bash_workspace = bash_root / "workspace";
     std::filesystem::create_directories(bash_workspace);
+    expect(::chmod(bash_root.c_str(), S_IRWXU) == 0 && ::chmod(bash_workspace.c_str(), S_IRWXU) == 0,
+           "agent bash allow workspace is owner-only for sealed planning");
     ava::session::SessionStore bash_store(
         ava::session::SessionStoreOptions{.root_dir = bash_root / "sessions", .workspace_dir = bash_workspace, .session_id = "bash-allow"});
     ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
@@ -1582,6 +1587,8 @@ void test_agent_loop_permission_resolver_threads_to_tools()
     std::filesystem::remove_all(bash_root, remove_error);
     auto const bash_workspace = bash_root / "workspace";
     std::filesystem::create_directories(bash_workspace);
+    expect(::chmod(bash_root.c_str(), S_IRWXU) == 0 && ::chmod(bash_workspace.c_str(), S_IRWXU) == 0,
+           "agent bash deny workspace is owner-only for sealed planning");
     ava::session::SessionStore bash_store(
         ava::session::SessionStoreOptions{.root_dir = bash_root / "sessions", .workspace_dir = bash_workspace, .session_id = "bash-deny"});
     ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
@@ -1625,6 +1632,8 @@ void test_agent_loop_permission_resolver_threads_to_tools()
     std::filesystem::remove_all(bash_root, remove_error);
     auto const bash_workspace = bash_root / "workspace";
     std::filesystem::create_directories(bash_workspace);
+    expect(::chmod(bash_root.c_str(), S_IRWXU) == 0 && ::chmod(bash_workspace.c_str(), S_IRWXU) == 0,
+           "agent bash resolver failure workspace is owner-only for sealed planning");
     ava::session::SessionStore bash_store(
         ava::session::SessionStoreOptions{.root_dir = bash_root / "sessions", .workspace_dir = bash_workspace, .session_id = "bash-fail"});
     ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_bash\",\"name\":\"bash\"}\n\n"

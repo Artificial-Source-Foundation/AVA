@@ -186,7 +186,8 @@ void ClientRequestGateway::abort(std::string reason) const
 
 bool permission_request_offers_session_decisions(ava::permissions::PermissionPrompt const& prompt)
 {
-  if (prompt.operation == ava::permissions::Operation::EditFile)
+  if (prompt.operation == ava::permissions::Operation::EditFile ||
+      (prompt.command_metadata && prompt.command_metadata->backend_maximum_scope == ava::command::InteractiveScope::Once))
     return false;
   bool truncated = false;
   static_cast<void>(bounded_indented_literal(prompt.command, 6U * 1024U, truncated));

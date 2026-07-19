@@ -6,6 +6,7 @@
 #include "ava/tui/event_state.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/session_grants.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/theme.h"
@@ -59,6 +60,20 @@ constexpr std::string_view kSettingsTrustProject = "settings:trust.project";
 constexpr std::string_view kSettingsTrustDeny = "settings:trust.deny";
 constexpr std::string_view kSettingsTrustClear = "settings:trust.clear";
 constexpr std::string_view kBase64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+std::string permission_prompt_status(bool allow_session_available, bool allow_remember_available, bool deny_remember_available)
+{
+  bool const remember_available = allow_remember_available || deny_remember_available;
+  std::string status = "permission required: A=allow once";
+  if (allow_session_available)
+    status += " S=allow session";
+  status += " D=reject";
+  if (remember_available)
+    status += " R=remember";
+  status += " Tab/Left/Right choose Enter confirm Esc reject";
+  return status;
+}
+
 class SignalBlockGuard
 {
  public:
@@ -1597,16 +1612,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
                           .context_source_count = options.context_source_count,
                           .session_path = options.session_path};
   std::vector<ava::session::ImageAttachmentRef> pending_image_attachments;
-
-  struct CommandSessionGrant
-  {
-    std::string session_id;
-    std::string mode;
-    std::string tool_name;
-    std::string workspace_recipe_key;
-  };
-  static constexpr std::size_t kMaxCommandSessionGrants = 64;
-  std::vector<CommandSessionGrant> command_session_grants;
+  TuiSessionGrantRegistry command_session_grants;
 
   auto refresh_token_status = [&]() {
     snapshot.token_status = options.token_status_provider ? options.token_status_provider() : std::nullopt;
@@ -1617,12 +1623,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
     sidebar.reasoning_status = snapshot.reasoning_status;
   };
   auto apply_runtime_state_snapshot = [&](TuiRuntimeStateSnapshot state) {
-    auto const session_changed = !state.session_id.empty() && state.session_id != snapshot.session_id;
+    auto const session_changed = command_session_grants.clear_for_session_transition(snapshot.session_id, state.session_id);
     if (session_changed)
     {
       pending_image_attachments.clear();
       snapshot.pending_attachments.clear();
-      command_session_grants.clear();
     }
     snapshot.mode = std::move(state.mode);
     snapshot.provider = std::move(state.provider);
@@ -1972,34 +1977,19 @@ int run_interactive_composer(TuiRuntimeOptions options)
     auto const remember_availability = permission_prompt_remember_availability(prompt, static_cast<bool>(options.remember_permission_rule));
     auto const allow_remember_available = remember_availability.allow_remember_available;
     auto const deny_remember_available = remember_availability.deny_remember_available;
-    bool const allow_session_available = [&] {
-      if (prompt.operation != ava::permissions::Operation::RunCommand || !prompt.command_metadata)
-        return false;
-      auto const& metadata = *prompt.command_metadata;
-      if (!ava::permissions::command_permission_allows_reusable_grant(metadata))
-        return false;
-      return std::ranges::find(metadata.effective_allowed_scopes, ava::command::InteractiveScope::Session) != metadata.effective_allowed_scopes.end();
-    }();
-    if (allow_session_available)
+    bool const allow_session_available = tui_session_grant_eligible(prompt);
+    if (allow_session_available && command_session_grants.matches(snapshot.session_id, prompt))
     {
-      auto const& recipe_key = prompt.command_metadata->workspace_recipe_key;
-      auto const found = std::ranges::find_if(command_session_grants, [&](CommandSessionGrant const& grant) {
-        return grant.session_id == snapshot.session_id && grant.mode == ava::agent::to_string(prompt.mode) && grant.tool_name == prompt.tool_name &&
-               grant.workspace_recipe_key == recipe_key;
-      });
-      if (found != command_session_grants.end())
+      emit_prompt_audit("tui:permission_allow", "permission allowed for this session: " + prompt.tool_name, prompt.permission_request_id, prompt.tool_name,
+                        prompt.reason, "reused tui session grant");
       {
-        emit_prompt_audit("tui:permission_allow", "permission allowed for this session: " + prompt.tool_name, prompt.permission_request_id, prompt.tool_name,
-                          prompt.reason, "reused tui session grant");
-        {
-          std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-          snapshot.status = "permission allowed for this session";
-        }
-        static_cast<void>(render());
-        ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::AllowSessionGrant};
-        decision.resolution_source = "tui_session_grant";
-        return decision;
+        std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+        snapshot.status = "permission allowed for this session";
       }
+      static_cast<void>(render());
+      ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::AllowSessionGrant};
+      decision.resolution_source = "tui_session_grant";
+      return decision;
     }
     {
       std::lock_guard<std::recursive_mutex> lock(ui_mutex);
@@ -2009,9 +1999,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       snapshot.permission_prompt->allow_remember_available = allow_remember_available;
       snapshot.permission_prompt->deny_remember_available = deny_remember_available;
       snapshot.status = allow_session_available || allow_remember_available || deny_remember_available
-                            ? (allow_session_available
-                                   ? "permission required: A=allow once S=allow session D=reject R=remember Tab/Left/Right choose Enter confirm Esc reject"
-                                   : "permission required: A=allow once D=reject R=remember Tab/Left/Right choose Enter confirm Esc reject")
+                            ? permission_prompt_status(allow_session_available, allow_remember_available, deny_remember_available)
                             : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
     }
     static_cast<void>(beep());
@@ -2069,29 +2057,27 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
       if (selected == PermissionPromptChoice::AllowSession)
       {
-        if (!allow_session_available || command_session_grants.size() >= kMaxCommandSessionGrants)
+        auto const grant_result = command_session_grants.add(snapshot.session_id, prompt);
+        if (grant_result == TuiSessionGrantInsertResult::Ineligible || grant_result == TuiSessionGrantInsertResult::Full)
         {
+          bool const cap_reached = grant_result == TuiSessionGrantInsertResult::Full;
           emit_prompt_audit("tui:permission_deny", "permission denied: session grant unavailable", prompt.permission_request_id, prompt.tool_name,
-                            prompt.reason, allow_session_available ? "session grant cap reached" : "session grant no longer eligible");
+                            prompt.reason, cap_reached ? "session grant cap reached" : "session grant no longer eligible");
           {
             std::lock_guard<std::recursive_mutex> lock(ui_mutex);
             snapshot.permission_prompt.reset();
-            snapshot.status = allow_session_available ? "permission session grant cap reached; denied" : "permission session grant no longer eligible; denied";
+            snapshot.status = cap_reached ? "permission session grant cap reached; denied" : "permission session grant no longer eligible; denied";
           }
           if (!render())
           {
             return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to clear permission prompt"));
           }
           ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::Deny};
-          decision.resolution_source = allow_session_available ? "tui_session_grant_cap_reached" : "tui_session_grant_ineligible";
+          decision.resolution_source = cap_reached ? "tui_session_grant_cap_reached" : "tui_session_grant_ineligible";
           return decision;
         }
-        command_session_grants.push_back(CommandSessionGrant{.session_id = snapshot.session_id,
-                                                               .mode = ava::agent::to_string(prompt.mode),
-                                                               .tool_name = prompt.tool_name,
-                                                               .workspace_recipe_key = prompt.command_metadata->workspace_recipe_key});
         emit_prompt_audit("tui:permission_allow", "permission allowed for this session: " + prompt.tool_name, prompt.permission_request_id, prompt.tool_name,
-                          prompt.reason, "selected allow session");
+                          prompt.reason, grant_result == TuiSessionGrantInsertResult::Added ? "selected allow session" : "reused tui session grant");
         {
           std::lock_guard<std::recursive_mutex> lock(ui_mutex);
           snapshot.permission_prompt.reset();
@@ -2225,11 +2211,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
         bool const has_extended = snapshot.permission_prompt &&
                                     (snapshot.permission_prompt->allow_session_available || snapshot.permission_prompt->allow_remember_available ||
                                      snapshot.permission_prompt->deny_remember_available);
-        bool const has_session = snapshot.permission_prompt && snapshot.permission_prompt->allow_session_available;
-        snapshot.status = has_extended ? (has_session ? "permission required: A=allow once S=allow session D=reject R=remember Tab/Left/Right choose Enter "
-                                                                      "confirm Esc reject"
-                                                    : "permission required: A=allow once D=reject R=remember Tab/Left/Right choose Enter confirm Esc reject")
-                                       : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
+        snapshot.status = has_extended
+                              ? permission_prompt_status(snapshot.permission_prompt->allow_session_available,
+                                                         snapshot.permission_prompt->allow_remember_available,
+                                                         snapshot.permission_prompt->deny_remember_available)
+                              : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
       }
       if (!render())
       {
@@ -4264,6 +4250,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
           }
         }
         result = submit_future.get();
+        if (result.state_snapshot)
+        {
+          // Submit workers own ShellState. Apply their authoritative snapshot
+          // on the TUI thread before another prompt can consult UI-local
+          // session grants or attachments.
+          std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+          apply_runtime_state_snapshot(std::move(*result.state_snapshot));
+        }
         if (active_queues && active_queues->finish)
         {
           if (auto finished = active_queues->finish(run_cancel_requested.load()); !finished)

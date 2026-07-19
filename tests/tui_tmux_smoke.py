@@ -1933,7 +1933,7 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     if "[Reject rule]" not in permission or "[Always]" not in permission:
         raise RuntimeError(f"permission prompt did not expose remembered rule choices\nscreen:\n{permission}")
     save_evidence(root, "permission-prompt-risk-request", permission)
-    send_keys(tmux_exe, session, "Tab", "Tab", "Enter")
+    send_keys(tmux_exe, session, "R", "Enter")
     wait_for_absent(tmux_exe, session, r"Permission required", "permission prompt denied")
     denied_card = wait_for(
         tmux_exe,

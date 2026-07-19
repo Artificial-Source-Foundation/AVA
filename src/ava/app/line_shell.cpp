@@ -1123,7 +1123,10 @@ int run_tui(ShellState state)
                 .finish = [queue](bool canceled) { return queue->finish(canceled); }};
           },
       .on_submit =
-          [&state, &hotkeys, &refresh_display_watch_state](std::string const& submitted, ava::tui::TuiSubmitContext context) {
+          [&state, &hotkeys, &refresh_display_watch_state, &state_snapshot](std::string const& submitted, ava::tui::TuiSubmitContext context) {
+            // Persistent rules resolve before the TUI fallback resolver in
+            // context, so an exact durable Deny never reaches the in-memory
+            // session-grant registry.
             auto permission_resolver =
                 ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(state.session), context.permission_resolver);
             auto line_result = handle_line(state, submitted, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
@@ -1170,7 +1173,8 @@ int run_tui(ShellState state)
             return ava::tui::TuiSubmitResult{.quit = line_result.quit,
                                              .output = line_result.output,
                                              .tool_timeline = tui_tool_timeline(line_result.tool_timeline),
-                                             .context_source_count = state.session.context_sources.size()};
+                                             .context_source_count = state.session.context_sources.size(),
+                                             .state_snapshot = state_snapshot({})};
           },
       .on_attach_image = [&state](std::string const& path) -> ava::core::Result<ava::session::ImageAttachmentRef> {
         auto source = std::filesystem::path(path);

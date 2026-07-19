@@ -247,6 +247,23 @@ std::string permission_dock_actions(PermissionPromptChoice selected, bool allow_
 
 std::string permission_dock_keys(bool allow_session_available, bool allow_remember_available, bool deny_remember_available, std::size_t width)
 {
+  if (allow_session_available && !allow_remember_available && !deny_remember_available)
+  {
+    std::array const candidates = {
+        std::string("  ") + key_pill("A") + " allow once  " + key_pill("S") + " allow session  " + key_pill("D") + " reject  " +
+            key_pill("Enter") + " confirm  " + key_pill("Esc") + " reject",
+        std::string("  ") + key_pill("A") + " allow  " + key_pill("S") + " session  " + key_pill("D") + " reject  " + key_pill("Enter") +
+            " ok  " + key_pill("Esc") + " no",
+        std::string("  ") + key_pill("A") + "=allow " + key_pill("S") + "=session " + key_pill("D") + "=reject",
+    };
+    for (auto const& candidate : candidates)
+    {
+      if (terminal_text_columns(candidate) <= width)
+        return candidate;
+    }
+    return fit_line_preserving_sgr(candidates.back(), width);
+  }
+
   if (allow_session_available)
   {
     auto const remember_label =

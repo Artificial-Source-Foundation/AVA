@@ -480,6 +480,9 @@ void test_sealed_local_bash_contract()
                                                                                                          .tool_name = "bash",
                                                                                                          .target_path = {},
                                                                                                          .command = "ls",
+                                                                                                         .command_recipe_key = {},
+                                                                                                         .recipe_display = {},
+                                                                                                         .critical_acknowledged = false,
                                                                                                          .reason = "test operator deny",
                                                                                                          .actor = "test"});
   auto denied_context = context;
@@ -491,17 +494,36 @@ void test_sealed_local_bash_contract()
 
   auto exact = ava::tools::run_bash(context, "inspect '' second", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   auto audit_json = audits.empty() ? std::string{} : ava::tools::permission_audit_data_json(audits.front());
-  std::array<std::string_view, 10> const audit_fields{
-      "\"level\"",  "\"family\"", "\"fingerprint\"",           "\"execution_domain\"",   "\"resolved_executable\"",
-      "\"origin\"", "\"cwd\"",    "\"containment_available\"", "\"containment_status\"", "\"backend_maximum_scope\""};
+  std::array<std::string_view, 15> const audit_fields{"\"level\"",
+                                                      "\"family\"",
+                                                      "\"fingerprint\"",
+                                                      "\"execution_domain\"",
+                                                      "\"resolved_executable\"",
+                                                      "\"origin\"",
+                                                      "\"cwd\"",
+                                                      "\"containment_available\"",
+                                                      "\"containment_status\"",
+                                                      "\"backend_maximum_scope\"",
+                                                      "\"global_recipe_key\"",
+                                                      "\"workspace_recipe_key\"",
+                                                      "\"recipe_display\"",
+                                                      "\"effective_allowed_scopes\"",
+                                                      "\"environment_profile_id\""};
   bool const complete_audit_metadata =
       std::ranges::all_of(audit_fields, [&audit_json](std::string_view field) { return audit_json.find(field) != std::string::npos; });
+  auto secret_audit_event = audits.empty() ? ava::tools::PermissionAuditEvent{} : audits.front();
+  secret_audit_event.operation = ava::permissions::Operation::RunCommand;
+  secret_audit_event.command = "npm run test -- --token never-persist-this";
+  secret_audit_event.command_metadata = ava::permissions::CommandPermissionMetadata{};
+  secret_audit_event.command_metadata->level = ava::command::CommandLevel::Critical;
+  auto const secret_audit_json = ava::tools::permission_audit_data_json(secret_audit_event);
   auto env_python = ava::tools::run_bash(context, "env-python", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   expect(exact && exact->output.find("argc=2 first=<> second=<second>") != std::string::npos && exact->output.find("sentinels=absent") != std::string::npos &&
              exact->output.find("stdin=eof") != std::string::npos && env_python && env_python->output == "env-python-ran\n" && prompts.size() == 2 &&
              prompts.front().command_metadata && !audits.empty() && audits.front().command_metadata &&
              prompts.front().command_metadata->fingerprint == audits.front().command_metadata->fingerprint && complete_audit_metadata &&
-             audit_json.find("must-not-reach-child") == std::string::npos && audit_json.find("AVA_BASH_SECRET_SENTINEL") == std::string::npos,
+             audit_json.find("must-not-reach-child") == std::string::npos && audit_json.find("AVA_BASH_SECRET_SENTINEL") == std::string::npos &&
+             secret_audit_json.find("never-persist-this") == std::string::npos && secret_audit_json.find("<redacted one-shot command>") != std::string::npos,
          "one sealed plan carries exact empty argv, stdin EOF, redacted environment, and the same fingerprint through prompt and audit");
 
   ava::tools::ToolContext no_relookup_context = context;

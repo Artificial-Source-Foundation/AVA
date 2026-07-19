@@ -3771,7 +3771,7 @@ void test_tui_composer_rendering_and_input()
       std::ranges::any_of(remembered_permission_modal,
                           [](std::string const& line) {
                             auto visible = strip_sgr(line);
-                            return visible.find("[Reject rule]") != std::string::npos && visible.find("[Always]") != std::string::npos;
+                            return visible.find("[Reject rule]") != std::string::npos && visible.find("[Always in this project]") != std::string::npos;
                           }) &&
           std::ranges::any_of(remembered_permission_modal, [](std::string const& line) { return strip_sgr(line).find("R remember") != std::string::npos; }) &&
           std::ranges::all_of(remembered_permission_modal, [](std::string const& line) { return visible_columns(line) <= 96; }),

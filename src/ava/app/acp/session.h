@@ -95,7 +95,7 @@ class AcpSessionHost
     std::string workspace;
     std::string target;
     std::string command;
-    std::string command_fingerprint;
+    std::string command_recipe_key;
     std::string tool_name;
 
     friend bool operator==(PermissionGrantKey const&, PermissionGrantKey const&) = default;

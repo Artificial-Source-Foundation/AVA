@@ -1621,7 +1621,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
            "agent loop records denied bash Ask decisions as failed tool results and continues");
     auto bash_entries = bash_store.load();
     auto bash_audits = bash_entries ? permission_entries(*bash_entries) : std::vector<ava::session::SessionEntry>{};
-    expect(bash_audits.size() == 2 && ava::core::json::string_field(bash_audits[1].data_json, "command") == "true" &&
+    expect(bash_audits.size() == 2 && ava::core::json::string_field(bash_audits[1].data_json, "command") == "<redacted one-shot command>" &&
                ava::core::json::string_field(bash_audits[1].data_json, "resolution") == "deny" &&
                ava::core::json::string_field(bash_audits[1].data_json, "resolution_source") == "resolver",
            "agent loop persists resolver-denied command permission audit entries");

@@ -199,6 +199,9 @@ ava::core::Result<ava::permissions::PermissionRuleDraft> permission_rule_draft_f
                                                .tool_name = command.tool_name.value_or(""),
                                                .target_path = std::move(target_path),
                                                .command = command.command.value_or(""),
+                                               .command_recipe_key = command.command_recipe_key.value_or(""),
+                                               .recipe_display = command.recipe_display.value_or(""),
+                                               .critical_acknowledged = command.critical_acknowledged.value_or(false),
                                                .reason = *command.reason,
                                                .actor = "rpc"};
 }

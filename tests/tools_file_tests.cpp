@@ -791,7 +791,7 @@ void test_permission_audit_persistence()
   if (audits.size() >= 6)
   {
     expect(ava::core::json::string_field(audits[4].data_json, "operation") == "bash" &&
-               ava::core::json::string_field(audits[4].data_json, "command") == "rm -rf important" &&
+               ava::core::json::string_field(audits[4].data_json, "command") == "<redacted one-shot command>" &&
                ava::core::json::string_field(audits[4].data_json, "action") == "ask" &&
                ava::core::json::string_field(audits[4].data_json, "risk") == "critical" && !ava::core::json::string_field(audits[4].data_json, "target_path") &&
                ava::core::json::string_field(audits[5].data_json, "resolution") == "deny" &&

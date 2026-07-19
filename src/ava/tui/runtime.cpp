@@ -1354,6 +1354,17 @@ PermissionPromptView permission_prompt_view(ava::permissions::PermissionPrompt c
   view.request_id = prompt.permission_request_id;
   view.diff_preview = prompt.diff_preview;
   view.diff_truncated = prompt.diff_truncated;
+  if (prompt.command_metadata)
+  {
+    view.recipe_display = prompt.command_metadata->recipe_display;
+    view.workspace_recipe_key = prompt.command_metadata->workspace_recipe_key;
+    for (std::size_t index = 0; index < prompt.command_metadata->effective_allowed_scopes.size(); ++index)
+    {
+      if (index > 0)
+        view.effective_allowed_scopes += ", ";
+      view.effective_allowed_scopes += ava::command::to_string(prompt.command_metadata->effective_allowed_scopes[index]);
+    }
+  }
   return view;
 }
 
@@ -1948,8 +1959,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
       std::lock_guard<std::recursive_mutex> lock(ui_mutex);
       snapshot.permission_prompt = permission_prompt_view(prompt);
       snapshot.permission_prompt->selected_choice = PermissionPromptChoice::Deny;
-      snapshot.permission_prompt->remember_available = static_cast<bool>(options.remember_permission_rule);
-      snapshot.status = options.remember_permission_rule
+      snapshot.permission_prompt->remember_available =
+          static_cast<bool>(options.remember_permission_rule) && ava::permissions::command_prompt_allows_persistent_allow(prompt);
+      snapshot.status = snapshot.permission_prompt->remember_available
                             ? "permission required: A=allow once D=reject R=remember Tab/Left/Right choose Enter confirm Esc reject"
                             : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
     }
@@ -2114,7 +2126,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-        snapshot.status = options.remember_permission_rule
+        snapshot.status = snapshot.permission_prompt && snapshot.permission_prompt->remember_available
                               ? "permission required: A=allow once D=reject R=remember Tab/Left/Right choose Enter confirm Esc reject"
                               : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
       }

@@ -219,6 +219,9 @@ void test_session_mcp_launch_identity_is_canonical_and_exact()
                                                                                                     .tool_name = "mcp_discovery",
                                                                                                     .target_path = {},
                                                                                                     .command = identity,
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
                                                                                                     .reason = "authorize exact session MCP launch",
                                                                                                     .actor = "test_operator"});
   auto prompt = [&](std::string command) {

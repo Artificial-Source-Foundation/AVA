@@ -290,6 +290,9 @@ struct PermissionPromptView
   std::string diff_preview = {};
   bool diff_truncated = false;
   bool remember_available = false;
+  std::string recipe_display = {};
+  std::string workspace_recipe_key = {};
+  std::string effective_allowed_scopes = {};
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
   std::string request_id = {};
 

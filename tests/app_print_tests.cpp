@@ -650,6 +650,9 @@ void test_app_print_mode_uses_persistent_permission_rules()
                                                                                                     .tool_name = "",
                                                                                                     .target_path = outside_path,
                                                                                                     .command = "",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
                                                                                                     .reason = "allow exact print outside read",
                                                                                                     .actor = "test"});
   expect(added.has_value(), "print persistent permission rule test stores allow rule");

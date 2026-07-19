@@ -103,6 +103,12 @@ std::string permission_metadata_text(PermissionPromptView const& prompt)
     parts.push_back("id " + sanitize_terminal_text(prompt.request_id));
   if (!prompt.reason.empty())
     parts.push_back("reason " + sanitize_terminal_text(prompt.reason));
+  if (!prompt.recipe_display.empty())
+    parts.push_back("recipe " + sanitize_terminal_text(prompt.recipe_display));
+  if (!prompt.workspace_recipe_key.empty())
+    parts.push_back("recipe-key " + sanitize_terminal_text(prompt.workspace_recipe_key));
+  if (!prompt.effective_allowed_scopes.empty())
+    parts.push_back("scopes " + sanitize_terminal_text(prompt.effective_allowed_scopes));
   if (parts.empty())
     return {};
 
@@ -201,11 +207,11 @@ std::string permission_dock_actions(PermissionPromptChoice selected, bool rememb
         std::string("  ") + render_permission_choice("[Reject]", selected == PermissionPromptChoice::Deny) + "  " +
             render_permission_choice("[Allow once]", selected == PermissionPromptChoice::Allow) + "  " +
             render_permission_choice("[Reject rule]", selected == PermissionPromptChoice::DenyRemember) + "  " +
-            render_permission_choice("[Always]", selected == PermissionPromptChoice::AllowRemember),
+            render_permission_choice("[Always in this project]", selected == PermissionPromptChoice::AllowRemember),
         std::string("  ") + render_compact_permission_choice("[D]", selected == PermissionPromptChoice::Deny) + " " +
             render_compact_permission_choice("[A]", selected == PermissionPromptChoice::Allow) + " " +
             render_compact_permission_choice("[D rule]", selected == PermissionPromptChoice::DenyRemember) + " " +
-            render_compact_permission_choice("[Always]", selected == PermissionPromptChoice::AllowRemember),
+            render_compact_permission_choice("[Project always]", selected == PermissionPromptChoice::AllowRemember),
         std::string("  ") + render_permission_choice("[D]", selected == PermissionPromptChoice::Deny) + " " +
             render_permission_choice("[A]", selected == PermissionPromptChoice::Allow) + " " +
             render_permission_choice("[DR]", selected == PermissionPromptChoice::DenyRemember) + " " +

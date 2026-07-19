@@ -718,16 +718,31 @@ ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rul
                                                                                              ava::permissions::PermissionAction action)
 {
   auto reason = prompt.reason.empty() ? std::string("remembered from TUI permission prompt") : prompt.reason;
-  auto added = ava::permissions::add_persistent_permission_rule(permission_rule_store_for_session(session),
-                                                                ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
-                                                                                                      .action = action,
-                                                                                                      .operation = prompt.operation,
-                                                                                                      .mode = permission_rule_mode_for_agent_mode(prompt.mode),
-                                                                                                      .tool_name = prompt.tool_name,
-                                                                                                      .target_path = prompt.target_path,
-                                                                                                      .command = prompt.command,
-                                                                                                      .reason = std::move(reason),
-                                                                                                      .actor = "tui_prompt"});
+  std::string recipe_key;
+  std::string recipe_display;
+  if (prompt.operation == ava::permissions::Operation::RunCommand)
+  {
+    if (!prompt.command_metadata || !ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata))
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
+                                              "this command cannot be remembered because no reusable sealed workspace recipe is available"));
+    }
+    recipe_key = prompt.command_metadata->workspace_recipe_key;
+    recipe_display = prompt.command_metadata->recipe_display;
+  }
+  auto added = ava::permissions::add_persistent_permission_rule(
+      permission_rule_store_for_session(session),
+      ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                            .action = action,
+                                            .operation = prompt.operation,
+                                            .mode = permission_rule_mode_for_agent_mode(prompt.mode),
+                                            .tool_name = prompt.tool_name,
+                                            .target_path = prompt.target_path,
+                                            .command = prompt.operation == ava::permissions::Operation::RunCommand ? std::string{} : prompt.command,
+                                            .command_recipe_key = std::move(recipe_key),
+                                            .recipe_display = std::move(recipe_display),
+                                            .reason = std::move(reason),
+                                            .actor = "tui_prompt"});
   if (!added)
     return std::unexpected(std::move(added.error()));
   return ava::tui::TuiRememberedPermissionRule{.rule_id = added->rule_id};
@@ -845,31 +860,32 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
     line_result.tool_timeline = std::move(command_result->tool_timeline);
     if (command_result->prompt_message)
     {
-      return with_provider_runtime(state, "\nthis command expands to a prompt and needs provider auth.",
-                                   [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
-                                     run_options.permission_resolver = permission_resolver;
-                                     run_options.question_resolver = question_resolver;
-                                     run_options.event_sink = std::move(event_sink);
-                                     run_options.cancel_requested = std::move(cancel_requested);
-                                     run_options.take_steering_messages = std::move(take_steering_messages);
-                                     auto result = ava::app::run_prompt(state.session, *command_result->prompt_message, provider, transport, run_options);
-                                     LineResult prompt_result;
-                                     if (!result)
-                                     {
-                                       add_output(prompt_result, result.error().format());
-                                       return prompt_result;
-                                     }
-                                     prompt_result.tool_timeline = std::move(result->tool_timeline);
-                                     if (!result->final_text.empty())
-                                     {
-                                       add_output(prompt_result, result->final_text);
-                                     }
-                                     else
-                                     {
-                                       add_output(prompt_result, "done");
-                                     }
-                                     return prompt_result;
-                                   });
+      return with_provider_runtime(
+          state, "\nthis command expands to a prompt and needs provider auth.",
+          [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
+            run_options.permission_resolver = permission_resolver;
+            run_options.question_resolver = question_resolver;
+            run_options.event_sink = std::move(event_sink);
+            run_options.cancel_requested = std::move(cancel_requested);
+            run_options.take_steering_messages = std::move(take_steering_messages);
+            auto result = ava::app::run_prompt(state.session, *command_result->prompt_message, provider, transport, run_options);
+            LineResult prompt_result;
+            if (!result)
+            {
+              add_output(prompt_result, result.error().format());
+              return prompt_result;
+            }
+            prompt_result.tool_timeline = std::move(result->tool_timeline);
+            if (!result->final_text.empty())
+            {
+              add_output(prompt_result, result->final_text);
+            }
+            else
+            {
+              add_output(prompt_result, "done");
+            }
+            return prompt_result;
+          });
     }
     return line_result;
   }

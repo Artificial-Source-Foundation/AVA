@@ -272,12 +272,14 @@ bool AcpSessionHost::prompt_cancel_pending(std::uint64_t reservation) const noex
 
 AcpSessionHost::PermissionGrantKey AcpSessionHost::permission_grant_key(ava::permissions::PermissionPrompt const& prompt) const
 {
+  bool const command_recipe = prompt.operation == ava::permissions::Operation::RunCommand && prompt.command_metadata &&
+                              ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata);
   return PermissionGrantKey{.operation = prompt.operation,
                             .mode = prompt.mode,
                             .workspace = normalized_absolute(options_.launch_root, prompt.workspace_dir).string(),
                             .target = prompt.target_path.empty() ? std::string{} : normalized_absolute(prompt.workspace_dir, prompt.target_path).string(),
-                            .command = prompt.command,
-                            .command_fingerprint = prompt.command_metadata ? prompt.command_metadata->fingerprint : std::string{},
+                            .command = command_recipe ? std::string{} : prompt.command,
+                            .command_recipe_key = command_recipe ? prompt.command_metadata->workspace_recipe_key : std::string{},
                             .tool_name = prompt.tool_name};
 }
 

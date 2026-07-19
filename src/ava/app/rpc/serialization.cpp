@@ -889,6 +889,18 @@ std::string permission_request_payload_json(std::string_view resolver_request_id
     json += ',';
     json += string_field_json("backend_maximum_scope", ava::command::to_string(metadata.backend_maximum_scope));
     json += ',';
+    json += string_field_json("recipe_payload_version", metadata.recipe_payload_version);
+    json += ',';
+    json += string_field_json("global_recipe_key", metadata.global_recipe_key);
+    json += ',';
+    json += string_field_json("workspace_recipe_key", metadata.workspace_recipe_key);
+    json += ',';
+    json += string_field_json("recipe_display", metadata.recipe_display);
+    std::vector<std::string> allowed_scopes;
+    allowed_scopes.reserve(metadata.effective_allowed_scopes.size());
+    for (auto const scope : metadata.effective_allowed_scopes) allowed_scopes.emplace_back(ava::command::to_string(scope));
+    json += ",\"effective_allowed_scopes\":" + string_array_json(allowed_scopes);
+    json += ',';
     json += string_field_json("containment_profile_id", metadata.containment_profile_id);
     json += ',';
     json += bool_field_json("containment_network_allowed", metadata.containment_network_allowed);

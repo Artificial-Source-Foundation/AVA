@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace ava::permissions {
 
@@ -71,6 +72,14 @@ struct CommandPermissionMetadata
   std::string containment_profile_id;
   bool containment_network_allowed = false;
   ava::command::InteractiveScope backend_maximum_scope = ava::command::InteractiveScope::Once;
+  // Stable recipe identities are minted only from a sealed direct-argv plan.
+  // The global key deliberately omits workspace and synthetic environment
+  // roots; the workspace key binds the canonical workspace instead.
+  std::string recipe_payload_version;
+  std::string global_recipe_key;
+  std::string workspace_recipe_key;
+  std::string recipe_display;
+  std::vector<ava::command::InteractiveScope> effective_allowed_scopes;
   std::string environment_profile_id;
   std::string environment_digest;
   bool executor_identity_verified = true;

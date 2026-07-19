@@ -1342,10 +1342,10 @@ void test_acp_cross_process_lease_and_bounded_streaming()
   if (!store)
     return;
   static_cast<void>(append_session_entry_for_test(*store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                             .parent_id = "",
-                                                             .type = ava::session::EntryType::SessionStart,
-                                                             .timestamp = ava::session::now_timestamp(),
-                                                             .data_json = "{}"}));
+                                                                                     .parent_id = "",
+                                                                                     .type = ava::session::EntryType::SessionStart,
+                                                                                     .timestamp = ava::session::now_timestamp(),
+                                                                                     .data_json = "{}"}));
   auto lease = ava::session::SessionLease::acquire(store->session_path());
   auto same_process = ava::session::SessionLease::acquire(store->session_path());
   expect(lease && !same_process && same_process.error().message().find("already owned") != std::string::npos,
@@ -1390,11 +1390,12 @@ void test_acp_list_pagination_cancel_race_stop_reasons_and_file_safety()
     auto store = ava::session::SessionStore::create(workspace, paths.sessions_dir);
     if (!store)
       continue;
-    static_cast<void>(append_session_entry_for_test(*store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                               .parent_id = "",
-                                                               .type = ava::session::EntryType::SessionStart,
-                                                               .timestamp = "2026-07-12T12:" + std::to_string(index / 10) + std::to_string(index % 10) + ":00Z",
-                                                               .data_json = "{\"original_cwd\":\"" + ava::core::json::escape(workspace.string()) + "\"}"}));
+    static_cast<void>(append_session_entry_for_test(
+        *store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                           .parent_id = "",
+                                           .type = ava::session::EntryType::SessionStart,
+                                           .timestamp = "2026-07-12T12:" + std::to_string(index / 10) + std::to_string(index % 10) + ":00Z",
+                                           .data_json = "{\"original_cwd\":\"" + ava::core::json::escape(workspace.string()) + "\"}"}));
   }
   std::string request_body;
   AgentServiceOptions options;
@@ -1424,11 +1425,12 @@ void test_acp_list_pagination_cancel_race_stop_reasons_and_file_safety()
     auto store = ava::session::SessionStore::create(workspace, paths.sessions_dir);
     if (!store)
       continue;
-    static_cast<void>(append_session_entry_for_test(*store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                               .parent_id = "",
-                                                               .type = ava::session::EntryType::SessionStart,
-                                                               .timestamp = ava::session::now_timestamp(),
-                                                               .data_json = "{\"original_cwd\":\"" + ava::core::json::escape(workspace.string()) + "\"}"}));
+    static_cast<void>(append_session_entry_for_test(
+        *store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                           .parent_id = "",
+                                           .type = ava::session::EntryType::SessionStart,
+                                           .timestamp = ava::session::now_timestamp(),
+                                           .data_json = "{\"original_cwd\":\"" + ava::core::json::escape(workspace.string()) + "\"}"}));
     static_cast<void>(append_session_metadata_for_test(
         *store, ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(std::string(256, 't')), .actor = "test"}));
   }
@@ -1797,6 +1799,9 @@ void test_acp_strict_session_mcp_registry_and_error_propagation()
                                                           .tool_name = std::move(tool_name),
                                                           .target_path = {},
                                                           .command = std::move(command),
+                                                          .command_recipe_key = {},
+                                                          .recipe_display = {},
+                                                          .critical_acknowledged = false,
                                                           .reason = "authorize exact ACP session MCP operation",
                                                           .actor = "test_operator"});
     expect(added.has_value(), added ? "protected persistent ACP MCP rule installed" : "protected persistent ACP MCP rule installed: " + added.error().format());

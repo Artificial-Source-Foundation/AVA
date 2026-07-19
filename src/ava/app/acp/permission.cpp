@@ -116,6 +116,20 @@ std::string permission_description(ava::permissions::PermissionPrompt const& pro
     if (command_display_truncated)
       text += "\n\n[command display truncated; session-wide decisions are unavailable]";
   }
+  if (prompt.command_metadata && !prompt.command_metadata->workspace_recipe_key.empty())
+  {
+    text += "\n\nStable recipe: ";
+    text += prompt.command_metadata->recipe_display;
+    text += "\nWorkspace recipe key: ";
+    text += prompt.command_metadata->workspace_recipe_key;
+    text += "\nAllowed scopes: ";
+    for (std::size_t index = 0; index < prompt.command_metadata->effective_allowed_scopes.size(); ++index)
+    {
+      if (index > 0)
+        text += ", ";
+      text += ava::command::to_string(prompt.command_metadata->effective_allowed_scopes[index]);
+    }
+  }
   if (!prompt.diff_preview.empty())
   {
     bool truncated = prompt.diff_truncated;
@@ -186,8 +200,9 @@ void ClientRequestGateway::abort(std::string reason) const
 
 bool permission_request_offers_session_decisions(ava::permissions::PermissionPrompt const& prompt)
 {
-  if (prompt.operation == ava::permissions::Operation::EditFile ||
-      (prompt.command_metadata && prompt.command_metadata->backend_maximum_scope == ava::command::InteractiveScope::Once))
+  if (prompt.operation == ava::permissions::Operation::EditFile)
+    return false;
+  if (prompt.command_metadata && !ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata))
     return false;
   bool truncated = false;
   static_cast<void>(bounded_indented_literal(prompt.command, 6U * 1024U, truncated));

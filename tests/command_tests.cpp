@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
 #include "ava/command/command.h"
+#include "ava/permissions/permission.h"
 
 #include <algorithm>
 #include <concepts>
@@ -590,6 +591,85 @@ void test_ancestor_freshness_detects_mode_and_replacement()
          "sealed workspace, executable, and recipe ancestor identities go stale or error after unsafe chmod or lexical-ancestor replacement");
 }
 
+void test_stable_recipe_identity_is_scope_aware_and_secret_free()
+{
+  CommandFixture fixture("stable-recipe-identity");
+  for (auto const name : {"cmake", "cargo", "npm", "python"}) fixture.executable(name);
+  std::filesystem::create_directories(fixture.workspace / "build-other");
+  ::chmod((fixture.workspace / "build-other").c_str(), S_IRWXU);
+
+  ava::permissions::CommandContainmentInfo const contained{.available = true, .profile_id = "ava-development-v1", .network_allowed = false};
+  auto const first = command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build"}), fixture.options("recipe-profile-v1"));
+  auto const normalized =
+      command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "./build"}), fixture.options("recipe-profile-v1"));
+  auto const other_build =
+      command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build-other"}), fixture.options("recipe-profile-v1"));
+
+  auto changed_roots = fixture.options("recipe-profile-v1");
+  changed_roots.environment.tmpdir = fixture.root / "different-synthetic-tmp";
+  std::filesystem::create_directories(changed_roots.environment.tmpdir);
+  ::chmod(changed_roots.environment.tmpdir.c_str(), S_IRWXU);
+  auto const synthetic_changed = command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build"}), changed_roots);
+
+  auto const workspace_two = fixture.root / "workspace-two";
+  std::filesystem::create_directories(workspace_two / "build");
+  ::chmod(workspace_two.c_str(), S_IRWXU);
+  ::chmod((workspace_two / "build").c_str(), S_IRWXU);
+  auto workspace_two_options = fixture.options("recipe-profile-v1");
+  workspace_two_options.workspace = workspace_two;
+  auto const workspace_two_plan = command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build"}), workspace_two_options);
+
+  auto const other_bin = fixture.root / "other-bin";
+  fixture.executable_in(other_bin, "cmake");
+  auto changed_executable_options = fixture.options("recipe-profile-v1");
+  changed_executable_options.startup_path = other_bin.string();
+  auto const changed_executable = command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build"}), changed_executable_options);
+
+  auto const cargo_build = command::seal_command_plan(*command::CommandIntent::structured({"cargo", "build"}), fixture.options("recipe-profile-v1"));
+  auto const cargo_test = command::seal_command_plan(*command::CommandIntent::structured({"cargo", "test"}), fixture.options("recipe-profile-v1"));
+  auto const npm_test = command::seal_command_plan(*command::CommandIntent::structured({"npm", "run", "test"}), fixture.options("recipe-profile-v1"));
+  auto const npm_lint = command::seal_command_plan(*command::CommandIntent::structured({"npm", "run", "lint"}), fixture.options("recipe-profile-v1"));
+  auto const secret_npm = command::seal_command_plan(*command::CommandIntent::structured({"npm", "run", "test", "--", "--token", "never-display"}),
+                                                     fixture.options("recipe-profile-v1"));
+  auto const secret_raw = command::seal_command_plan(*command::CommandIntent::structured({"python", "-c", "print('token=never-display')"}), fixture.options());
+
+  auto metadata = [&](ava::core::Result<command::CommandPlan> const& plan) {
+    return plan ? ava::permissions::command_permission_metadata(*plan, contained) : ava::permissions::CommandPermissionMetadata{};
+  };
+  auto const first_metadata = metadata(first);
+  auto const normalized_metadata = metadata(normalized);
+  auto const other_build_metadata = metadata(other_build);
+  auto const synthetic_changed_metadata = metadata(synthetic_changed);
+  auto const workspace_two_metadata = metadata(workspace_two_plan);
+  auto const changed_executable_metadata = metadata(changed_executable);
+  auto const cargo_build_metadata = metadata(cargo_build);
+  auto const cargo_test_metadata = metadata(cargo_test);
+  auto const npm_test_metadata = metadata(npm_test);
+  auto const npm_lint_metadata = metadata(npm_lint);
+  auto const secret_npm_metadata = metadata(secret_npm);
+  auto const secret_raw_metadata = metadata(secret_raw);
+
+  expect(first && normalized && other_build && synthetic_changed && workspace_two_plan && changed_executable && cargo_build && cargo_test && npm_test &&
+             npm_lint && secret_npm && secret_raw && first_metadata.global_recipe_key.starts_with("sha256:ava-command-recipe-v1:") &&
+             first_metadata.workspace_recipe_key.starts_with("sha256:ava-command-workspace-recipe-v1:") &&
+             first_metadata.global_recipe_key == normalized_metadata.global_recipe_key &&
+             first_metadata.workspace_recipe_key == normalized_metadata.workspace_recipe_key &&
+             first_metadata.global_recipe_key == synthetic_changed_metadata.global_recipe_key &&
+             first_metadata.workspace_recipe_key == synthetic_changed_metadata.workspace_recipe_key &&
+             first_metadata.global_recipe_key == workspace_two_metadata.global_recipe_key &&
+             first_metadata.workspace_recipe_key != workspace_two_metadata.workspace_recipe_key &&
+             first_metadata.global_recipe_key != changed_executable_metadata.global_recipe_key &&
+             first_metadata.global_recipe_key != other_build_metadata.global_recipe_key &&
+             cargo_build_metadata.global_recipe_key != cargo_test_metadata.global_recipe_key &&
+             npm_test_metadata.global_recipe_key != npm_lint_metadata.global_recipe_key &&
+             ava::permissions::command_permission_allows_reusable_grant(first_metadata) &&
+             first_metadata.recipe_display.find(fixture.workspace.string()) == std::string::npos && secret_npm_metadata.global_recipe_key.empty() &&
+             secret_npm_metadata.workspace_recipe_key.empty() && secret_npm_metadata.recipe_display.empty() && secret_raw_metadata.global_recipe_key.empty() &&
+             secret_raw_metadata.workspace_recipe_key.empty() && secret_raw_metadata.recipe_display.empty(),
+         "stable recipe identities normalize workspace paths, ignore synthetic roots, bind executable and workspace scope, distinguish typed actions, and "
+         "never mint or display secrets for standard or critical commands");
+}
+
 void test_redacted_diagnostics_and_value_equality()
 {
   CommandFixture fixture("redacted-diagnostics");
@@ -655,6 +735,7 @@ void run_command_tests()
   test_capabilities_scopes_and_standard_recipes();
   test_workspace_origin_capabilities_apply_to_every_family();
   test_ancestor_freshness_detects_mode_and_replacement();
+  test_stable_recipe_identity_is_scope_aware_and_secret_free();
   test_redacted_diagnostics_and_value_equality();
   test_unsafe_executables_and_ancestors_are_rejected_without_blocking();
 }

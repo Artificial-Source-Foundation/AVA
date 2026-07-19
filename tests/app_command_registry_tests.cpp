@@ -60,9 +60,8 @@ bool has_diagnostic(ava::app::CommandRegistry const& registry, std::string_view 
 
 void test_prompt_commands_load_project_global_and_expand_arguments()
 {
-  auto const root = temp_root() / "command-registry-prompts";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("command-registry-prompts");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -103,9 +102,8 @@ void test_prompt_commands_load_project_global_and_expand_arguments()
 
 void test_skill_commands_are_registry_entries_and_permissioned_prompts()
 {
-  auto const root = temp_root() / "command-registry-skills";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("command-registry-skills");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   ScopedEnvVar home("HOME", (root / "home").string());
@@ -132,9 +130,8 @@ void test_skill_commands_are_registry_entries_and_permissioned_prompts()
 
 void test_plugin_commands_are_registry_entries()
 {
-  auto const root = temp_root() / "command-registry-plugins";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("command-registry-plugins");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
@@ -159,9 +156,9 @@ void test_mcp_prompts_are_registry_entries_and_permissioned_prompts()
   if (std::string_view(AVA_FAKE_MCP_SERVER_PATH).empty())
     return;
 
-  auto const root = temp_root() / "command-registry-mcp";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("command-registry-mcp");
+
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
@@ -193,9 +190,8 @@ void test_mcp_prompts_are_registry_entries_and_permissioned_prompts()
 
 void test_builtin_session_alias_registers_as_current_stats_command()
 {
-  auto const root = temp_root() / "command-registry-builtin-session-alias";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("command-registry-builtin-session-alias");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
@@ -228,9 +224,8 @@ void test_builtin_session_alias_registers_as_current_stats_command()
 
 void test_project_trust_gates_project_resource_commands()
 {
-  auto const root = temp_root() / "command-registry-project-trust";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("command-registry-project-trust");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);

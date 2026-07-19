@@ -64,9 +64,8 @@ bool contains_string(std::vector<std::string> const& values, std::string_view va
 
 void test_xdg_paths()
 {
-  auto const root = temp_root() / "xdg";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("xdg");
+
   std::filesystem::create_directories(root);
 
   setenv("HOME", (root / "home").c_str(), 1);
@@ -110,7 +109,8 @@ void test_xdg_paths()
 
 void test_context_loader()
 {
-  auto const root = temp_root() / "context";
+  auto const root = create_empty_root("context");
+
   auto const workspace = root / "workspace";
   auto const nested = workspace / "src" / "feature";
   auto const config = root / "config" / "ava";
@@ -343,11 +343,11 @@ void test_context_loader()
 
 void test_skill_loader()
 {
-  auto const root = temp_root() / "skills";
+  auto const root = create_empty_root("skills");
+
+  auto const workspace = root / "workspace";
   auto const global = root / "global" / "skills";
   auto const project = root / "workspace" / ".ava" / "skills";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
   std::filesystem::create_directories(global / "release");
   std::filesystem::create_directories(project / "release");
   std::filesystem::create_directories(project / "debugging" / "scripts");
@@ -474,9 +474,8 @@ void test_auth_record_helpers()
 
 void test_auth_load_and_store()
 {
-  auto const root = temp_root() / "auth";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("auth");
+
   std::filesystem::create_directories(root / "config" / "ava");
   setenv("HOME", (root / "home").c_str(), 1);
   setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
@@ -498,6 +497,7 @@ void test_auth_load_and_store()
     expect((*loaded)->source_path == paths.auth_file, "credential source path records location only");
   }
 
+  std::error_code remove_error;
   std::filesystem::remove(paths.auth_file, remove_error);
   auto const compatible_auth_path = ava::config::legacy_compatible_auth_path();
   std::filesystem::create_directories(compatible_auth_path.parent_path());
@@ -948,9 +948,9 @@ void test_openai_oauth_refresh()
   expect(!malformed && malformed.error().message().find("malformed JSON") != std::string::npos,
          "OpenAI OAuth refresh reports malformed JSON responses clearly");
 
-  auto const root = temp_root() / "oauth-refresh";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("oauth-refresh");
+
+
   setenv("HOME", (root / "home").c_str(), 1);
   setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
   setenv("XDG_STATE_HOME", (root / "state").c_str(), 1);
@@ -1008,9 +1008,8 @@ void test_openai_oauth_refresh()
 
 void test_anthropic_oauth_request_resolution()
 {
-  auto const root = temp_root() / "anthropic-oauth-resolution";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("anthropic-oauth-resolution");
+
   setenv("HOME", (root / "home").c_str(), 1);
   setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
   setenv("XDG_STATE_HOME", (root / "state").c_str(), 1);
@@ -1423,9 +1422,7 @@ void test_builtin_provider_model_metadata_contracts()
 
 void test_model_and_prompt_config()
 {
-  auto const root = temp_root() / "model";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("model");
   setenv("HOME", (root / "home").c_str(), 1);
   setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
   setenv("XDG_STATE_HOME", (root / "state").c_str(), 1);
@@ -1621,6 +1618,7 @@ void test_model_and_prompt_config()
   registry = ava::config::load_model_registry(paths);
   expect(registry && !registry->scoped_model_cycle, "model registry treats a missing scoped model cycle as all registered models enabled");
 
+  std::error_code remove_error;
   std::filesystem::remove(paths.models_file, remove_error);
   auto saved_new_scope = ava::config::store_scoped_model_cycle(paths, std::vector<std::string>{"openai/gpt-5.5"});
   expect(saved_new_scope.has_value(), "model config creates models.json for scoped model cycle persistence");

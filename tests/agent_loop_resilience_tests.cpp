@@ -58,9 +58,8 @@ void test_agent_loop_cancellation_boundaries()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
 
   {
-    auto const root = temp_root() / "agent-cancel-before-turn-start";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-cancel-before-turn-start");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(
@@ -96,9 +95,8 @@ void test_agent_loop_cancellation_boundaries()
   }
 
   {
-    auto const root = temp_root() / "agent-cancel-before-provider";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-cancel-before-provider");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(
@@ -134,9 +132,8 @@ void test_agent_loop_cancellation_boundaries()
   }
 
   {
-    auto const root = temp_root() / "agent-cancel-before-tool";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-cancel-before-tool");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     {
@@ -182,9 +179,8 @@ void test_agent_loop_cancellation_boundaries()
   }
 
   {
-    auto const root = temp_root() / "agent-cancel-during-bash-tool";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-cancel-during-bash-tool");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(
@@ -243,9 +239,8 @@ void test_agent_loop_error_paths_and_bounds()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
 
   {
-    auto const root = temp_root() / "agent-provider-error";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-provider-error");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(
@@ -266,9 +261,8 @@ void test_agent_loop_error_paths_and_bounds()
   }
 
   {
-    auto const root = temp_root() / "agent-empty-transport";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-empty-transport");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(
@@ -289,9 +283,8 @@ void test_agent_loop_error_paths_and_bounds()
   }
 
   {
-    auto const root = temp_root() / "agent-empty-response";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-empty-response");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(
@@ -312,9 +305,8 @@ void test_agent_loop_error_paths_and_bounds()
   }
 
   {
-    auto const root = temp_root() / "agent-event-bound";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-event-bound");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "event-bound"});
@@ -337,9 +329,8 @@ void test_agent_loop_error_paths_and_bounds()
   }
 
   {
-    auto const root = temp_root() / "agent-text-bound";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-text-bound");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "text-bound"});
@@ -362,9 +353,8 @@ void test_agent_loop_error_paths_and_bounds()
   }
 
   {
-    auto const root = temp_root() / "agent-arg-bound";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-arg-bound");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "arg-bound"});
@@ -390,9 +380,8 @@ void test_agent_loop_error_paths_and_bounds()
   }
 
   {
-    auto const root = temp_root() / "agent-control-call-id";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-control-call-id");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(
@@ -424,9 +413,8 @@ void test_agent_loop_error_paths_and_bounds()
   }
 
   {
-    auto const root = temp_root() / "agent-long-call-id";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-long-call-id");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(
@@ -452,9 +440,8 @@ void test_agent_loop_error_paths_and_bounds()
 
 void test_agent_loop_max_iteration_guard()
 {
-  auto const root = temp_root() / "agent-max";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-max");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "max"});

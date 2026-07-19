@@ -123,18 +123,19 @@ class CancelAwareTransport final : public ava::provider::Transport
 
 void test_bash_tool()
 {
-  std::error_code remove_error;
-  std::filesystem::remove_all(temp_root(), remove_error);
-  std::filesystem::create_directories(temp_root());
+  auto const root = create_empty_root("test_bash_tool");
 
-  ava::tools::ToolContext const context{.workspace_dir = temp_root(), .mode = ava::agent::Mode::Build};
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(root);
+
+  ava::tools::ToolContext const context{.workspace_dir = root, .mode = ava::agent::Mode::Build};
 
   auto pwd = ava::tools::run_bash(context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   expect(pwd.has_value(), "run_bash allows safe command");
   if (pwd)
   {
     expect(pwd->exit_code == 0, "run_bash records exit code");
-    expect(pwd->output.find(temp_root().string()) != std::string::npos, "run_bash uses workspace directory");
+    expect(pwd->output.find(root.string()) != std::string::npos, "run_bash uses workspace directory");
   }
 
   auto capped_output = ava::tools::run_bash(context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_bytes = 4});
@@ -144,7 +145,7 @@ void test_bash_tool()
          "local run_bash bounds retained output while reporting exact total bytes");
 
   ava::tools::ToolContext const line_context{
-      .workspace_dir = temp_root(),
+      .workspace_dir = root,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
@@ -156,7 +157,7 @@ void test_bash_tool()
          "local run_bash retains output by line tail and reports exact totals before applying byte caps");
 
   std::vector<ava::tools::ToolProgressEvent> bash_progress;
-  ava::tools::ToolContext const progress_context{.workspace_dir = temp_root(),
+  ava::tools::ToolContext const progress_context{.workspace_dir = root,
                                                  .mode = ava::agent::Mode::Build,
                                                  .progress_sink = [&bash_progress](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
                                                    bash_progress.push_back(event);
@@ -171,9 +172,9 @@ void test_bash_tool()
                                              }),
          "run_bash emits bounded progress events with current call metadata");
 
-  auto const bash_spill_dir = temp_root() / "session" / "bash-spill";
+  auto const bash_spill_dir = root / "session" / "bash-spill";
   ava::tools::ToolContext const bash_spill_context{
-      .workspace_dir = temp_root(),
+      .workspace_dir = root,
       .spill_dir = bash_spill_dir,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
@@ -198,17 +199,17 @@ void test_bash_tool()
              std::filesystem::file_size(capped_spill->spill_path) == ava::tools::kMaxSpillFileBytes,
          "run_bash caps individual spill files and reports spill truncation");
 
-  auto const hijack_path = temp_root() / "pwd";
+  auto const hijack_path = root / "pwd";
   {
     std::ofstream hijack(hijack_path, std::ios::binary | std::ios::trunc);
     hijack << "#!/bin/sh\nprintf hijacked-path\n";
   }
   expect(chmod(hijack_path.c_str(), 0700) == 0, "test can create executable PATH hijack fixture");
   {
-    ScopedEnvVar const path_guard("PATH", temp_root().string() + ":.:relative");
+    ScopedEnvVar const path_guard("PATH", root.string() + ":.:relative");
     auto sanitized_pwd = ava::tools::run_bash(context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
     expect(sanitized_pwd && sanitized_pwd->exit_code == 0 && sanitized_pwd->output.find("hijacked-path") == std::string::npos &&
-               sanitized_pwd->output.find(temp_root().string()) != std::string::npos,
+               sanitized_pwd->output.find(root.string()) != std::string::npos,
            "run_bash does not inherit unsafe PATH entries for auto-allowed commands");
   }
 
@@ -224,7 +225,7 @@ void test_bash_tool()
   expect(!ava::tools::run_bash(context, "cmake -P docs/plan.md"), "run_bash denies cmake script execution before execution");
   expect(!ava::tools::run_bash(context, "cmake -E copy docs/plan.md src/new.cpp"), "run_bash denies cmake copy helper before execution");
 
-  auto const repository_test_dir = temp_root() / "repository-test-fixture";
+  auto const repository_test_dir = root / "repository-test-fixture";
   auto const repository_test_marker = repository_test_dir / "executed-marker";
   std::filesystem::create_directories(repository_test_dir);
   {
@@ -244,11 +245,12 @@ void test_bash_tool()
   auto timeout = ava::tools::run_bash(context, "sleep 2", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(50)});
   expect(timeout && timeout->timed_out, "run_bash times out long command");
 
-  auto const timeout_group_file = temp_root() / "bash-timeout-child-pgid.txt";
+  auto const timeout_group_file = root / "bash-timeout-child-pgid.txt";
+  std::error_code remove_error;
   std::filesystem::remove(timeout_group_file, remove_error);
   int timeout_tree_prompts = 0;
   ava::tools::ToolContext const timeout_tree_context{
-      .workspace_dir = temp_root(),
+      .workspace_dir = root,
       .mode = ava::agent::Mode::Build,
       .permission_resolver =
           [&timeout_tree_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
@@ -263,7 +265,7 @@ void test_bash_tool()
          "run_bash timeout terminates child processes in the command process group");
 
   int cancel_checks = 0;
-  ava::tools::ToolContext const cancel_context{.workspace_dir = temp_root(), .mode = ava::agent::Mode::Build, .cancel_requested = [&cancel_checks] {
+  ava::tools::ToolContext const cancel_context{.workspace_dir = root, .mode = ava::agent::Mode::Build, .cancel_requested = [&cancel_checks] {
                                                  ++cancel_checks;
                                                  return cancel_checks >= 3;
                                                }};
@@ -271,11 +273,11 @@ void test_bash_tool()
   expect(canceled && canceled->canceled && !canceled->timed_out && canceled->exit_code == -1,
          "run_bash observes tool cancellation and reports a canceled process result");
 
-  auto const cancel_group_file = temp_root() / "bash-cancel-child-pgid.txt";
+  auto const cancel_group_file = root / "bash-cancel-child-pgid.txt";
   std::filesystem::remove(cancel_group_file, remove_error);
   int cancel_tree_prompts = 0;
   ava::tools::ToolContext const cancel_tree_context{
-      .workspace_dir = temp_root(),
+      .workspace_dir = root,
       .mode = ava::agent::Mode::Build,
       .permission_resolver =
           [&cancel_tree_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
@@ -297,7 +299,7 @@ void test_bash_tool()
 
   int bash_prompts = 0;
   ava::tools::ToolContext allow_context{
-      .workspace_dir = temp_root(),
+      .workspace_dir = root,
       .mode = ava::agent::Mode::Build,
       .permission_resolver =
           [&bash_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
@@ -310,7 +312,7 @@ void test_bash_tool()
   expect(ask_allowed && ask_allowed->exit_code == 0 && bash_prompts == 1, "run_bash allows ask decisions when resolver allows once");
 
   ava::tools::ToolContext deny_context{
-      .workspace_dir = temp_root(),
+      .workspace_dir = root,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Deny;
@@ -319,7 +321,7 @@ void test_bash_tool()
   expect(!ask_denied && ask_denied.error().format().find("resolution: deny") != std::string::npos, "run_bash fails closed when resolver denies ask decisions");
 
   ava::tools::ToolContext failing_context{
-      .workspace_dir = temp_root(),
+      .workspace_dir = root,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
@@ -330,7 +332,9 @@ void test_bash_tool()
 
 void test_injected_command_executor()
 {
-  auto const workspace = temp_root() / "injected-command-workspace";
+  auto const root = create_empty_root("test_injected_command_executor");
+
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto executor = std::make_shared<RecordingCommandExecutor>();
   executor->result = ava::tools::CommandExecutionResult{.exit_code = 0, .output = "one\ntwo\nthree\n"};
@@ -369,10 +373,9 @@ void test_injected_command_executor()
 
 void test_webfetch_tool()
 {
-  std::error_code remove_error;
-  std::filesystem::remove_all(temp_root(), remove_error);
-  std::filesystem::create_directories(temp_root());
-  auto const workspace = temp_root() / "webfetch-workspace";
+  auto const root = create_empty_root("test_webfetch_tool");
+
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
   StaticTransport transport(ava::provider::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain; charset=utf-8"}}, .body = "abcdef"});
@@ -484,9 +487,9 @@ void test_webfetch_tool()
 
 void test_websearch_tool()
 {
-  std::error_code remove_error;
-  std::filesystem::remove_all(temp_root(), remove_error);
-  auto const workspace = temp_root() / "websearch-workspace";
+  auto const root = create_empty_root("test_websearch_tool");
+
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
   StaticTransport transport(

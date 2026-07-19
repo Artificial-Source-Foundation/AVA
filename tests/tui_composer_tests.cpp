@@ -2048,7 +2048,7 @@ void test_tui_composer_rendering_and_input()
       ++index;
     }
   }
-  expect(std::ranges::any_of(styled_table_transcript, [](std::string const& line) { return has_active_sgr_at_text(line, "avery", kWarningSgr); }) &&
+  expect(std::ranges::any_of(styled_table_transcript, [&kWarningSgr](std::string const& line) { return has_active_sgr_at_text(line, "avery", kWarningSgr); }) &&
              styled_table_text.find("averyveryveryverylongidentifier") != std::string::npos && styled_table_text.find("`") == std::string::npos &&
              std::ranges::all_of(styled_table_transcript, [](std::string const& line) { return visible_columns(line) <= 36; }) &&
              std::ranges::all_of(styled_table_transcript,
@@ -3426,7 +3426,8 @@ void test_tui_composer_rendering_and_input()
           ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::Submit, ava::tui::Key::Enter),
       "tui keybind default config template uses Pi-style ids and remains valid with intentional shared defaults");
 
-  auto const keybind_root = temp_root() / "tui-keybinds";
+  auto const root = create_empty_root("tui-keybinds");
+  auto const keybind_root = root / "tui-keybinds";
   std::filesystem::remove_all(keybind_root);
   std::filesystem::create_directories(keybind_root);
   auto const keybinds_file = keybind_root / "keybinds.json";

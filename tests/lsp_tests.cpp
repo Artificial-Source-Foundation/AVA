@@ -41,9 +41,9 @@ std::vector<std::string> fake_lsp_argv(std::vector<std::string> extra = {})
 
 std::filesystem::path make_lsp_workspace(std::string_view name)
 {
-  auto const workspace = temp_root() / std::string(name);
-  std::error_code remove_error;
-  std::filesystem::remove_all(workspace, remove_error);
+  auto const root = create_empty_root(name);
+
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   std::ofstream file(workspace / "main.cpp", std::ios::binary | std::ios::trunc);
   file << "int main() { return 0; }\n";
@@ -1172,9 +1172,8 @@ void test_lsp_configured_provider_loads_project_config_lazily()
 
 void test_lsp_configured_provider_loads_global_config_from_safe_cwd()
 {
-  auto const root = temp_root() / "lsp-global-safe-cwd";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("lsp-global-safe-cwd");
+
   auto const workspace = root / "workspace";
   auto const global_config_dir = root / "global-config";
   std::filesystem::create_directories(workspace);

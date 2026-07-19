@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace ava::test {
@@ -32,7 +33,8 @@ class FailingStreambuf final : public std::streambuf
   std::streamsize xsputn(char const* s, std::streamsize count) override;
 };
 
-std::filesystem::path temp_root();
+// Create an empty root. If the directory already exists it will be cleaned out.
+std::filesystem::path create_empty_root(std::filesystem::path root_name);
 
 class ScopedEnvVar
 {

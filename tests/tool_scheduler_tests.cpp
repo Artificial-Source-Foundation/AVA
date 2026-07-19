@@ -957,9 +957,8 @@ void test_run_parallel_tool_schedule_keeps_non_eligible_slots_sequential()
 
 void test_run_parallel_tool_schedule_dispatches_real_read_search_tools()
 {
-  auto const root = temp_root() / "tool_scheduler_real_parallel";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("tool_scheduler_real_parallel");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace / "src");
   {

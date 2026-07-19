@@ -113,9 +113,8 @@ void test_app_rpc_follow_up_transition_state_machine_is_atomic()
 
 void test_app_rpc_cancel_affects_subsequent_prompt()
 {
-  auto const root = temp_root() / "app-rpc-cancel";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-cancel");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -160,9 +159,8 @@ void test_app_rpc_cancel_affects_subsequent_prompt()
 
 void test_app_rpc_active_prompt_cancel_unblocks_pending_permission()
 {
-  auto const root = temp_root() / "app-rpc-active-cancel";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-active-cancel");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -216,9 +214,8 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission()
 
 void test_app_rpc_steer_applies_before_next_provider_request()
 {
-  auto const root = temp_root() / "app-rpc-steer";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-steer");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -272,9 +269,8 @@ void test_app_rpc_steer_applies_before_next_provider_request()
 
 void test_app_rpc_follow_up_runs_after_active_prompt()
 {
-  auto const root = temp_root() / "app-rpc-follow-up";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-follow-up");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -331,9 +327,8 @@ void test_app_rpc_follow_up_runs_after_active_prompt()
 
 void test_app_rpc_prompt_start_failure_cleans_queued_messages()
 {
-  auto const root = temp_root() / "app-rpc-prompt-start-fail-queue";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-prompt-start-fail-queue");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -387,9 +382,8 @@ void test_app_rpc_prompt_start_failure_cleans_queued_messages()
 
 void test_app_rpc_steer_after_follow_up_started_targets_follow_up()
 {
-  auto const root = temp_root() / "app-rpc-follow-up-steer";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-follow-up-steer");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -452,9 +446,8 @@ void test_app_rpc_steer_after_follow_up_started_targets_follow_up()
 
 void test_app_rpc_queue_limit_rejects_new_items()
 {
-  auto const root = temp_root() / "app-rpc-queue-limit";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-queue-limit");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -507,9 +500,8 @@ void test_app_rpc_queue_limit_rejects_new_items()
 
 void test_app_rpc_eof_clears_queued_follow_up_without_running()
 {
-  auto const root = temp_root() / "app-rpc-eof-clears-follow-up";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-eof-clears-follow-up");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -560,9 +552,8 @@ void test_app_rpc_eof_clears_queued_follow_up_without_running()
 
 void test_app_rpc_cancel_clears_queued_steer_and_follow_up()
 {
-  auto const root = temp_root() / "app-rpc-queue-cancel";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-queue-cancel");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -628,9 +619,8 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up()
 
 void test_app_rpc_direct_command_rejects_prompt_only_queue_commands()
 {
-  auto const root = temp_root() / "app-rpc-direct-queue-reject";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-direct-queue-reject");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -676,9 +666,8 @@ void test_app_rpc_direct_command_rejects_prompt_only_queue_commands()
 
 void test_app_rpc_duplicate_outstanding_id_does_not_replace_original()
 {
-  auto const root = temp_root() / "app-rpc-duplicate-outstanding";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-duplicate-outstanding");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -725,9 +714,8 @@ void test_app_rpc_duplicate_outstanding_id_does_not_replace_original()
 
 void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
 {
-  auto const root = temp_root() / "app-rpc-active-rejects";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-active-rejects");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);

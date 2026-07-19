@@ -103,9 +103,8 @@ bool schemas_contain_tool(std::vector<std::string> const& schemas, std::string_v
 
 void test_tool_dispatcher()
 {
-  auto const root = temp_root() / "dispatcher";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("dispatcher");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const permission_bits = [](std::filesystem::path const& permission_path) {
@@ -1255,9 +1254,8 @@ void test_tool_dispatcher()
 
 void test_tool_dispatcher_plan_mode_denies_mutation()
 {
-  auto const root = temp_root() / "dispatcher-plan";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("dispatcher-plan");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 

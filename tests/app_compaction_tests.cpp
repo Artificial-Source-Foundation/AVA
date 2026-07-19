@@ -58,9 +58,8 @@ class CancelAfterRequestTransport final : public ava::provider::Transport
 
 void test_app_compact_provider_summary_success()
 {
-  auto const root = temp_root() / "app-compact-provider-success";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-compact-provider-success");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -138,9 +137,8 @@ void test_app_compact_provider_summary_success()
 
 void test_app_compact_rejects_replaced_current_session_history()
 {
-  auto const root = temp_root() / "app-compact-path-replacement";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-compact-path-replacement");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -197,9 +195,8 @@ void test_app_compact_rejects_replaced_current_session_history()
 
 void test_app_compact_openai_oauth_streaming_summary_success()
 {
-  auto const root = temp_root() / "app-compact-oauth-streaming";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-compact-oauth-streaming");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -240,9 +237,8 @@ void test_app_compact_openai_oauth_streaming_summary_success()
 
 void test_app_compact_provider_failure_leaves_session_untouched()
 {
-  auto const root = temp_root() / "app-compact-provider-failure";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-compact-provider-failure");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -279,7 +275,8 @@ void test_app_compact_provider_failure_leaves_session_untouched()
 
 void test_compaction_observation_preserves_cancellation_callback_contract()
 {
-  auto const root = temp_root() / "app-compaction-observer-callback";
+  auto const root = create_empty_root("app-compaction-observer-callback");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -337,9 +334,8 @@ void test_compaction_observation_preserves_cancellation_callback_contract()
 
 void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
 {
-  auto const root = temp_root() / "app-auto-compact-canceled";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-auto-compact-canceled");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -374,9 +370,8 @@ void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
 
 void test_app_compact_oversized_summary_leaves_session_untouched()
 {
-  auto const root = temp_root() / "app-compact-oversized";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-compact-oversized");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -409,9 +404,8 @@ void test_app_compact_oversized_summary_leaves_session_untouched()
 
 void test_app_compact_cancellation_before_append_leaves_session_untouched()
 {
-  auto const root = temp_root() / "app-compact-cancel-before-append";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-compact-cancel-before-append");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -466,9 +460,8 @@ void test_app_compaction_prompt_builder_sections()
 
 void test_app_auto_compaction_appends_summary_and_rebuilds_context()
 {
-  auto const root = temp_root() / "app-auto-compact";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-auto-compact");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -525,9 +518,8 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context()
 
 void test_app_auto_compaction_recent_context_respects_token_budget()
 {
-  auto const root = temp_root() / "app-auto-compact-recent-budget";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-auto-compact-recent-budget");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -573,9 +565,8 @@ void test_app_auto_compaction_recent_context_respects_token_budget()
 
 void test_app_auto_compaction_recent_context_truncates_utf8_safely()
 {
-  auto const root = temp_root() / "app-auto-compact-recent-utf8";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-auto-compact-recent-utf8");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -623,9 +614,8 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely()
 
 void test_app_auto_compaction_explicit_zero_disables()
 {
-  auto const root = temp_root() / "app-auto-compact-disabled";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-auto-compact-disabled");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -664,9 +654,8 @@ void test_app_auto_compaction_explicit_zero_disables()
 
 void test_app_auto_compaction_uses_default_threshold_without_context_window_metadata()
 {
-  auto const root = temp_root() / "app-auto-compact-default-threshold";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-auto-compact-default-threshold");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -706,9 +695,8 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
 
 void test_app_auto_compaction_retries_stale_snapshot_before_append()
 {
-  auto const root = temp_root() / "app-auto-compact-revalidate";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-auto-compact-revalidate");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -752,9 +740,8 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
 
 void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
 {
-  auto const root = temp_root() / "app-auto-compact-repeated-stale";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-auto-compact-repeated-stale");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -793,9 +780,8 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
 
 void test_app_context_overflow_compacts_and_retries_once_successfully()
 {
-  auto const root = temp_root() / "app-context-overflow-retry";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-context-overflow-retry");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -863,9 +849,8 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
 
 void test_app_context_overflow_compaction_failure_leaves_no_partial_entry()
 {
-  auto const root = temp_root() / "app-context-overflow-compaction-fails";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-context-overflow-compaction-fails");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -897,9 +882,8 @@ void test_app_context_overflow_compaction_failure_leaves_no_partial_entry()
 
 void test_app_non_overflow_provider_error_does_not_compact_or_retry()
 {
-  auto const root = temp_root() / "app-non-overflow-error";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-non-overflow-error");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -932,9 +916,8 @@ void test_app_non_overflow_provider_error_does_not_compact_or_retry()
 
 void test_app_context_overflow_retry_is_bounded()
 {
-  auto const root = temp_root() / "app-context-overflow-bounded";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-context-overflow-bounded");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);

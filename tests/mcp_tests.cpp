@@ -162,23 +162,23 @@ void test_mcp_config_parsing()
          project_relative ? "MCP project config may use workspace-relative commands after project trust"
                           : "MCP project config may use workspace-relative commands after project trust: " + project_relative.error().format());
 
-  auto const root = temp_root() / "mcp-config";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("mcp-config");
+
+
+  auto const workspace = root / "workspace";
   auto const global_path = root / "global" / "mcp.json";
-  auto const project_path = root / "workspace" / ".ava" / "mcp.json";
+  auto const project_path = workspace / ".ava" / "mcp.json";
   write_text(global_path, mcp_config_json("same", "/bin/demo"));
   write_text(project_path, mcp_config_json("same", "/bin/demo", true));
   auto duplicate = ava::mcp::load_mcp_config(
-      ava::mcp::McpConfigLoadOptions{.workspace_dir = root / "workspace", .global_config_file = global_path, .project_config_file = project_path});
+      ava::mcp::McpConfigLoadOptions{.workspace_dir = workspace, .global_config_file = global_path, .project_config_file = project_path});
   expect(!duplicate && duplicate.error().message().find("duplicate") != std::string::npos, "MCP config rejects duplicate server ids across scopes");
 }
 
 void test_session_mcp_launch_identity_is_canonical_and_exact()
 {
-  auto const root = temp_root() / "mcp-session-launch-identity";
-  std::error_code cleanup;
-  std::filesystem::remove_all(root, cleanup);
+  auto const root = create_empty_root("mcp-session-launch-identity");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const canonical_cwd = std::filesystem::canonical(workspace);
@@ -238,6 +238,7 @@ void test_session_mcp_launch_identity_is_canonical_and_exact()
   expect(rule && exact_match && *exact_match && (*exact_match)->rule_id == rule->rule_id && env_mismatch && !*env_mismatch && argv_mismatch && !*argv_mismatch,
          "persistent session MCP launch Allow does not match a changed env value or colliding space-joined argv boundary");
 
+  std::error_code cleanup;
   std::filesystem::remove_all(root, cleanup);
 }
 
@@ -293,9 +294,8 @@ void test_mcp_permission_audit_golden_shape()
 
 void test_mcp_stdio_client_lists_and_calls_tools()
 {
-  auto const root = temp_root() / "mcp-client";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("mcp-client");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
@@ -638,9 +638,8 @@ void test_mcp_stdio_client_lists_and_calls_tools()
 
 void test_mcp_tool_dispatcher()
 {
-  auto const root = temp_root() / "mcp-dispatcher";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("mcp-dispatcher");
+
   auto const workspace = root / "workspace";
   auto const project_config = workspace / ".ava" / "mcp.json";
   std::filesystem::create_directories(workspace);
@@ -745,9 +744,8 @@ void test_mcp_tool_dispatcher()
 void test_mcp_tool_dispatcher_audits_permission_denials()
 {
   auto run_denial_case = [](std::string const& suffix, ava::permissions::Operation denied_operation, std::string const& expected_error) {
-    auto const root = temp_root() / ("mcp-denial-" + suffix);
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("mcp-denial-" + suffix);
+
     auto const workspace = root / "workspace";
     auto const project_config = workspace / ".ava" / "mcp.json";
     std::filesystem::create_directories(workspace);
@@ -835,9 +833,8 @@ void test_mcp_headless_policy_allows_resource_reads()
 
 void test_mcp_tool_dispatcher_contains_tool_errors()
 {
-  auto const root = temp_root() / "mcp-dispatcher-tool-error";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("mcp-dispatcher-tool-error");
+
   auto const workspace = root / "workspace";
   auto const project_config = workspace / ".ava" / "mcp.json";
   std::filesystem::create_directories(workspace);
@@ -865,8 +862,9 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
                     : "MCP tool dispatcher contains tool-level error results as semantic payloads: " + dispatched.error().format());
   expect(!prompts.empty(), "MCP tool dispatcher still gates tool-level error calls through permission prompts");
 
-  auto const text_root = temp_root() / "mcp-dispatcher-canceled-text-error";
-  std::filesystem::remove_all(text_root, remove_error);
+  auto const text_root = create_empty_root("mcp-dispatcher-canceled-text-error");
+
+
   auto const text_workspace = text_root / "workspace";
   auto const text_project_config = text_workspace / ".ava" / "mcp.json";
   std::filesystem::create_directories(text_workspace);
@@ -891,7 +889,8 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
 
 void test_mcp_strict_session_registry_failures_and_nested_cwd()
 {
-  auto const root = temp_root() / "mcp-strict-session";
+  auto const root = create_empty_root("mcp-strict-session");
+
   auto const workspace = root / "workspace";
   auto const nested = workspace / "nested";
   std::error_code remove_error;
@@ -1017,9 +1016,8 @@ void test_mcp_strict_session_registry_failures_and_nested_cwd()
 
 void test_mcp_session_environment_is_clean()
 {
-  auto const root = temp_root() / "mcp-session-clean-env";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("mcp-session-clean-env");
+
   std::filesystem::create_directories(root);
   auto const marker = root / "environment.txt";
   ScopedEnvVar const parent_secret("AVA_MCP_PARENT_SECRET", "must-not-leak");
@@ -1059,15 +1057,15 @@ void test_mcp_session_environment_is_clean()
          explicit_path ? "immutable session MCP forwards an explicit bounded PATH without parent environment leakage"
                        : "immutable session MCP explicit-PATH discovery failed: " + explicit_path.error().format());
 
+  std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
 }
 
 void test_mcp_ordinary_global_and_project_environment_is_inherited()
 {
-  auto const root = temp_root() / "mcp-ordinary-inherited-env";
+  auto const root = create_empty_root("mcp-ordinary-inherited-env");
+
   auto const workspace = root / "workspace";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
   std::filesystem::create_directories(workspace);
   auto const marker = root / "environment.txt";
   ScopedEnvVar const parent_marker("AVA_MCP_PARENT_MARKER", "parent-marker");
@@ -1105,12 +1103,13 @@ void test_mcp_ordinary_global_and_project_environment_is_inherited()
              explicit_marker.find("PATH=/bounded/project/path") != std::string::npos,
          "ordinary project MCP retains inherited variables while applying exact explicit value and PATH overrides");
 
+  std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
 }
 
 void test_mcp_stdio_environment_validation()
 {
-  auto const root = temp_root() / "mcp-environment-validation";
+  auto const root = create_empty_root("mcp-environment-validation");
   auto server = fake_server_config(root);
   server.env = {{"DUPLICATE", "one"}, {"DUPLICATE", "two"}};
   auto duplicate = ava::mcp::McpStdioClient::start(server, fake_client_options(root));

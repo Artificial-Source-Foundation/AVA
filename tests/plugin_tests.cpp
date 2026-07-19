@@ -478,9 +478,8 @@ void test_sample_todo_plugin_manifest_and_resources()
 void test_sample_todo_plugin_protocol_path()
 {
   auto manifest = load_sample_todo_manifest();
-  auto const root = temp_root() / "sample-todo-plugin";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("sample-todo-plugin");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
@@ -620,18 +619,18 @@ void test_plugin_runner_protocol_parsing()
 
 void test_plugin_discovery()
 {
-  auto const root = temp_root() / "plugins";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugins");
+
+  auto const workspace = root / "workspace";
   auto const global_manifest = root / "config" / "ava" / "plugins" / "com.example.global" / "plugin.json";
-  auto const project_manifest = root / "workspace" / ".ava" / "plugins" / "com.example.project" / "plugin.json";
+  auto const project_manifest = workspace / ".ava" / "plugins" / "com.example.project" / "plugin.json";
   write_text(global_manifest, valid_manifest_json("com.example.global"));
   write_text(project_manifest, valid_manifest_json("com.example.project"));
-  write_text(root / "workspace" / ".ava" / "plugins" / "com.example.project" / "should_not_run", "not executable");
+  write_text(workspace / ".ava" / "plugins" / "com.example.project" / "should_not_run", "not executable");
 
   auto discovered = ava::plugin::discover_plugins(ava::plugin::PluginDiscoveryOptions{
       .global_plugins_dir = root / "config" / "ava" / "plugins",
-      .project_plugins_dir = root / "workspace" / ".ava" / "plugins",
+      .project_plugins_dir = workspace / ".ava" / "plugins",
   });
   expect(discovered.has_value(), discovered ? "plugin discovery loads global and project manifests"
                                             : "plugin discovery loads global and project manifests: " + discovered.error().format());
@@ -688,11 +687,10 @@ void test_plugin_discovery()
 
 void test_plugin_enablement()
 {
-  auto const root = temp_root() / "plugin-enable";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const state_file = root / "state" / "ava" / "plugin-enablement.json";
+  auto const root = create_empty_root("plugin-enable");
+
   auto const workspace = root / "workspace";
+  auto const state_file = root / "state" / "ava" / "plugin-enablement.json";
   std::filesystem::create_directories(workspace);
 
   auto initially_enabled = ava::plugin::plugin_enabled(state_file, workspace, "com.example.todo");
@@ -740,9 +738,8 @@ void test_plugin_enablement()
 
 void test_plugin_runner_initializes_and_shuts_down()
 {
-  auto const root = temp_root() / "plugin-runner";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugin-runner");
+
   auto const workspace = root / "workspace";
   auto const plugin_dir = root / "plugins" / "com.example.runner";
   std::filesystem::create_directories(workspace);
@@ -780,9 +777,8 @@ void test_plugin_runner_initializes_and_shuts_down()
 
 void test_plugin_runner_accepts_buffered_extra_records()
 {
-  auto const root = temp_root() / "plugin-runner-buffered";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugin-runner-buffered");
+
   auto const workspace = root / "workspace";
   auto const plugin_dir = root / "plugins" / "com.example.buffered";
   std::filesystem::create_directories(workspace);
@@ -810,9 +806,8 @@ void test_plugin_runner_accepts_buffered_extra_records()
 
 void test_plugin_runner_contained_failures()
 {
-  auto const root = temp_root() / "plugin-runner-failures";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugin-runner-failures");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
@@ -893,9 +888,8 @@ void test_plugin_runner_contained_failures()
 
 void test_plugin_runner_tool_calls()
 {
-  auto const root = temp_root() / "plugin-runner-tools";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugin-runner-tools");
+
   auto const workspace = root / "workspace";
   auto const plugin_dir = root / "plugins" / "com.example.toolrunner";
   std::filesystem::create_directories(workspace);
@@ -1006,9 +1000,8 @@ void test_plugin_runner_tool_calls()
 
 void test_plugin_runner_command_calls()
 {
-  auto const root = temp_root() / "plugin-runner-commands";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugin-runner-commands");
+
   auto const workspace = root / "workspace";
   auto const plugin_dir = root / "plugins" / "com.example.commandrunner";
   std::filesystem::create_directories(workspace);
@@ -1043,9 +1036,8 @@ void test_plugin_runner_command_calls()
 
 void test_plugin_runner_event_observation()
 {
-  auto const root = temp_root() / "plugin-runner-events";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugin-runner-events");
+
   auto const workspace = root / "workspace";
   auto const plugin_dir = root / "plugins" / "com.example.eventrunner";
   std::filesystem::create_directories(workspace);
@@ -1081,11 +1073,10 @@ void test_plugin_runner_event_observation()
 
 void test_enabled_plugin_dynamic_resources_list_and_read()
 {
-  auto const root = temp_root() / "plugin-dynamic-resources";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const paths = ava::tests::app_test_paths(root);
+  auto const root = create_empty_root("plugin-dynamic-resources");
+
   auto const workspace = root / "workspace";
+  auto const paths = ava::tests::app_test_paths(root);
   auto const project_plugins = workspace / ".ava" / "plugins";
   auto const plugin_dir = project_plugins / "com.example.dynamic";
   auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
@@ -1158,11 +1149,10 @@ void test_enabled_plugin_dynamic_resources_list_and_read()
 
 void test_disabled_plugin_dynamic_resources_do_not_execute()
 {
-  auto const root = temp_root() / "plugin-dynamic-disabled";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const paths = ava::tests::app_test_paths(root);
+  auto const root = create_empty_root("plugin-dynamic-disabled");
+
   auto const workspace = root / "workspace";
+  auto const paths = ava::tests::app_test_paths(root);
   auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.disabled";
   std::filesystem::create_directories(workspace);
 
@@ -1195,11 +1185,10 @@ void test_disabled_plugin_dynamic_resources_do_not_execute()
 
 void test_dynamic_resources_require_explicit_manifest_capability()
 {
-  auto const root = temp_root() / "plugin-dynamic-capability";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const paths = ava::tests::app_test_paths(root);
+  auto const root = create_empty_root("plugin-dynamic-capability");
+
   auto const workspace = root / "workspace";
+  auto const paths = ava::tests::app_test_paths(root);
   auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.nodynamic";
   auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
   std::filesystem::create_directories(workspace);
@@ -1235,11 +1224,10 @@ void test_dynamic_resources_require_explicit_manifest_capability()
 
 void test_dynamic_resource_read_rejects_invalid_names_before_launch()
 {
-  auto const root = temp_root() / "plugin-dynamic-invalid-name";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const paths = ava::tests::app_test_paths(root);
+  auto const root = create_empty_root("plugin-dynamic-invalid-name");
+
   auto const workspace = root / "workspace";
+  auto const paths = ava::tests::app_test_paths(root);
   auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.dynamicname";
   auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
   std::filesystem::create_directories(workspace);
@@ -1266,11 +1254,10 @@ void test_dynamic_resource_read_rejects_invalid_names_before_launch()
 
 void test_dynamic_resource_proxy_requests_use_core_service_handler()
 {
-  auto const root = temp_root() / "plugin-dynamic-proxy";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const paths = ava::tests::app_test_paths(root);
+  auto const root = create_empty_root("plugin-dynamic-proxy");
+
   auto const workspace = root / "workspace";
+  auto const paths = ava::tests::app_test_paths(root);
   auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.dynamicproxy";
   auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
   auto const response_file = plugin_dir / "proxy-response.txt";
@@ -1315,11 +1302,10 @@ void test_dynamic_resource_proxy_requests_use_core_service_handler()
 
 void test_plugin_reported_dynamic_resource_errors_surface_text()
 {
-  auto const root = temp_root() / "plugin-dynamic-reported-errors";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const paths = ava::tests::app_test_paths(root);
+  auto const root = create_empty_root("plugin-dynamic-reported-errors");
+
   auto const workspace = root / "workspace";
+  auto const paths = ava::tests::app_test_paths(root);
   auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.dynamicerrors";
   auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
   std::filesystem::create_directories(workspace);
@@ -1358,11 +1344,10 @@ void test_plugin_reported_dynamic_resource_errors_surface_text()
 
 void test_dynamic_resource_commands_respect_prelaunch_cancellation()
 {
-  auto const root = temp_root() / "plugin-dynamic-cancel";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const paths = ava::tests::app_test_paths(root);
+  auto const root = create_empty_root("plugin-dynamic-cancel");
+
   auto const workspace = root / "workspace";
+  auto const paths = ava::tests::app_test_paths(root);
   auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.dynamiccancel";
   auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
   std::filesystem::create_directories(workspace);
@@ -1400,11 +1385,10 @@ void test_dynamic_resource_commands_respect_prelaunch_cancellation()
 
 void test_malformed_dynamic_resource_result_fails_safely()
 {
-  auto const root = temp_root() / "plugin-dynamic-malformed";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const paths = ava::tests::app_test_paths(root);
+  auto const root = create_empty_root("plugin-dynamic-malformed");
+
   auto const workspace = root / "workspace";
+  auto const paths = ava::tests::app_test_paths(root);
   auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.malformedresource";
   auto const state_file = paths.ava_state_dir / "plugin-enablement.json";
   std::filesystem::create_directories(workspace);
@@ -1433,11 +1417,10 @@ void test_malformed_dynamic_resource_result_fails_safely()
 
 void test_static_plugin_resources_remain_manifest_only()
 {
-  auto const root = temp_root() / "plugin-static-resource-manifest-only";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const paths = ava::tests::app_test_paths(root);
+  auto const root = create_empty_root("plugin-static-resource-manifest-only");
+
   auto const workspace = root / "workspace";
+  auto const paths = ava::tests::app_test_paths(root);
   auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.staticresource";
   std::filesystem::create_directories(workspace);
 
@@ -1458,9 +1441,8 @@ void test_static_plugin_resources_remain_manifest_only()
 
 void test_enabled_plugin_event_hooks_observe_runtime_events()
 {
-  auto const root = temp_root() / "plugin-event-hooks";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugin-event-hooks");
+
   auto const workspace = root / "workspace";
   auto const project_plugins = workspace / ".ava" / "plugins";
   auto const plugin_dir = project_plugins / "com.example.events";
@@ -1530,9 +1512,9 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
     std::string details;
   };
 
-  auto const root = temp_root() / "plugin-event-hook-failures";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugin-event-hook-failures");
+
+
   auto const workspace = root / "workspace";
   auto const project_plugins = workspace / ".ava" / "plugins";
   auto const plugin_dir = project_plugins / "com.example.eventdiag";
@@ -1603,9 +1585,8 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
 
 void test_plugin_tool_dispatcher()
 {
-  auto const root = temp_root() / "plugin-tool-dispatcher";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugin-tool-dispatcher");
+
   auto const workspace = root / "workspace";
   auto const project_plugins = workspace / ".ava" / "plugins";
   auto const plugin_dir = project_plugins / "com.example.todo";
@@ -1729,9 +1710,8 @@ void test_plugin_tool_dispatcher()
 
 void test_plugin_core_service_proxy_read_search_slice()
 {
-  auto const root = temp_root() / "plugin-core-proxy";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugin-core-proxy");
+
   auto const workspace = root / "workspace";
   auto const project_plugins = workspace / ".ava" / "plugins";
   auto const state_file = root / "state" / "plugin-enablement.json";
@@ -2076,9 +2056,8 @@ void test_plugin_core_service_proxy_read_search_slice()
 
 void test_plugin_tool_dispatcher_rejects_invalid_result()
 {
-  auto const root = temp_root() / "plugin-tool-invalid-result";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugin-tool-invalid-result");
+
   auto const workspace = root / "workspace";
   auto const project_plugins = workspace / ".ava" / "plugins";
   auto const plugin_dir = project_plugins / "com.example.invalid";
@@ -2113,9 +2092,8 @@ void test_plugin_tool_dispatcher_rejects_invalid_result()
 
 void test_plugin_tool_registry_skips_name_collisions()
 {
-  auto const root = temp_root() / "plugin-tool-collisions";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("plugin-tool-collisions");
+
   auto const workspace = root / "workspace";
   auto const project_plugins = workspace / ".ava" / "plugins";
   auto const state_file = root / "state" / "plugin-enablement.json";

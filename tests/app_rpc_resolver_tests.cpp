@@ -131,9 +131,8 @@ void test_app_rpc_resolver_payload_builders_preserve_wire_shapes()
 
 void test_app_rpc_resolver_output_failure_callback_preserves_lock_order()
 {
-  auto const root = temp_root() / "app-rpc-resolver-write-failure";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-resolver-write-failure");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
@@ -305,9 +304,9 @@ void test_app_rpc_resolver_exact_request_identity_gates_publication_and_cleanup(
     gate_preserved_replacement = found != gate_state.permission_requests.end() && found->second == gate_replacement;
   }
 
-  auto const root = temp_root() / "app-rpc-resolver-exact-identity";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-resolver-exact-identity");
+
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
@@ -372,9 +371,8 @@ void test_app_rpc_resolver_exact_request_identity_gates_publication_and_cleanup(
 
 void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
 {
-  auto const root = temp_root() / "app-rpc-policy-auto-allow";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-policy-auto-allow");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -424,9 +422,8 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
   for (std::string_view decision : {"allow", "deny"})
   {
     auto const decision_text = std::string(decision);
-    auto const root = temp_root() / ("app-rpc-permission-" + decision_text);
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("app-rpc-permission-" + decision_text);
+
     auto const workspace = root / "workspace";
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
@@ -496,9 +493,8 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
 
 void test_app_rpc_permission_reply_session_grant_flow()
 {
-  auto const root = temp_root() / "app-rpc-permission-session-grant";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-permission-session-grant");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -562,9 +558,8 @@ void test_app_rpc_permission_reply_session_grant_flow()
 
 void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_deny()
 {
-  auto const root = temp_root() / "app-rpc-session-grant-bounds";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-session-grant-bounds");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
@@ -676,9 +671,8 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
 
 void test_app_rpc_permission_request_includes_mutation_diff_preview()
 {
-  auto const root = temp_root() / "app-rpc-permission-diff";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-permission-diff");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -732,9 +726,8 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
 
 void test_app_rpc_persistent_permission_rule_lifecycle()
 {
-  auto const root = temp_root() / "app-rpc-persistent-permission-rule";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-persistent-permission-rule");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -817,9 +810,8 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
 
 void test_app_rpc_question_reply_flow()
 {
-  auto const root = temp_root() / "app-rpc-question";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-question");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -865,9 +857,8 @@ void test_app_rpc_question_reply_flow()
 
 void test_app_rpc_question_reply_selected_option_flow()
 {
-  auto const root = temp_root() / "app-rpc-question-selected";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-question-selected");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -918,9 +909,8 @@ void test_app_rpc_question_reply_selected_option_flow()
 
 void test_app_rpc_question_reply_selected_options_flow()
 {
-  auto const root = temp_root() / "app-rpc-question-selected-options";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-rpc-question-selected-options");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);

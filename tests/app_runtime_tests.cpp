@@ -315,10 +315,9 @@ void test_app_event_serialization()
 
 void test_app_runtime_open_session_and_context_prompt()
 {
-  auto const root = temp_root() / "app-runtime-open";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const workspace = root / "workspace";
+  auto root = create_empty_root("app-runtime-open");
+
+  auto workspace = root / "workspace";
   auto const current = workspace / "src";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(current);
@@ -382,9 +381,8 @@ void test_app_runtime_open_session_and_context_prompt()
 
 void test_app_runtime_no_session_mode()
 {
-  auto const root = temp_root() / "app-runtime-no-session";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-no-session");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -423,9 +421,8 @@ void test_app_runtime_no_session_mode()
 
 void test_app_runtime_session_startup_options()
 {
-  auto const root = temp_root() / "app-runtime-session-startup-options";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-session-startup-options");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -524,9 +521,8 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
 {
   for (std::string const mode : {"exact", "prefix", "continue"})
   {
-    auto const root = temp_root() / ("app-runtime-torn-resume-" + mode);
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("app-runtime-torn-resume-" + mode);
+
     auto const workspace = root / "workspace";
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
@@ -562,9 +558,9 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
            "runtime " + mode + " resume acquires the lease, quarantines the torn tail, and then loads validated history");
   }
 
-  auto const root = temp_root() / "app-runtime-torn-startup-fork";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-torn-startup-fork");
+
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -606,8 +602,9 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
     return true;
   };
 
-  auto const bounded_root = temp_root() / "app-runtime-bounded-torn-resume";
-  std::filesystem::remove_all(bounded_root, remove_error);
+  auto const bounded_root = create_empty_root("app-runtime-bounded-torn-resume");
+
+
   auto const bounded_workspace = bounded_root / "workspace";
   auto const bounded_paths = app_test_paths(bounded_root);
   std::filesystem::create_directories(bounded_workspace);
@@ -669,9 +666,8 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
 
 void test_app_runtime_cli_prompt_overrides()
 {
-  auto const root = temp_root() / "app-runtime-cli-prompt-overrides";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-cli-prompt-overrides");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -741,9 +737,8 @@ void test_app_runtime_cli_prompt_overrides()
 
 void test_app_runtime_project_trust_malformed_diagnostics()
 {
-  auto const root = temp_root() / "app-runtime-project-trust-malformed";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-project-trust-malformed");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -788,9 +783,8 @@ void test_app_runtime_project_trust_malformed_diagnostics()
 
 void test_app_runtime_enabled_plugin_resources_autoload()
 {
-  auto const root = temp_root() / "app-runtime-plugin-resource-autoload";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-plugin-resource-autoload");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   auto const marker = root / "plugin-entrypoint-executed";
@@ -917,9 +911,8 @@ void test_app_runtime_enabled_plugin_resources_autoload()
 
 void test_app_runtime_project_plugin_resources_follow_trust_gate()
 {
-  auto const root = temp_root() / "app-runtime-plugin-resource-trust-gate";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-plugin-resource-trust-gate");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   auto const global_marker = root / "global-plugin-entrypoint-executed";
@@ -980,9 +973,8 @@ void test_app_runtime_project_plugin_resources_follow_trust_gate()
 
 void test_app_runtime_enabled_plugin_resource_failures_are_context_visible()
 {
-  auto const root = temp_root() / "app-runtime-plugin-resource-failures";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-plugin-resource-failures");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   auto const marker = root / "plugin-entrypoint-executed";
@@ -1037,9 +1029,8 @@ void test_app_runtime_enabled_plugin_resource_failures_are_context_visible()
 
 void test_app_runtime_plugin_install_remove_commands()
 {
-  auto const root = temp_root() / "app-runtime-plugin-install-remove";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-plugin-install-remove");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   auto const marker = root / "installed-plugin-entrypoint-executed";
@@ -1154,9 +1145,8 @@ void test_app_runtime_plugin_install_remove_commands()
 
 void test_app_context_reports_lsp_config_load_errors()
 {
-  auto const root = temp_root() / "app-runtime-lsp-config-diagnostics";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-lsp-config-diagnostics");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -1189,9 +1179,8 @@ void test_app_context_reports_lsp_config_load_errors()
 
 void test_app_run_prompt_emits_events()
 {
-  auto const root = temp_root() / "app-runtime-run";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-run");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -1241,9 +1230,8 @@ void test_app_run_prompt_emits_events()
 
 void test_app_run_prompt_expands_file_references()
 {
-  auto const root = temp_root() / "app-runtime-file-reference";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-file-reference");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace / "src");
@@ -1303,9 +1291,8 @@ void test_app_run_prompt_expands_file_references()
 
 void test_app_run_prompt_sends_imported_image_attachment()
 {
-  auto const root = temp_root() / "app-runtime-image-attachment";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-image-attachment");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -1354,9 +1341,8 @@ void test_app_run_prompt_sends_imported_image_attachment()
 
 void test_app_clipboard_image_file_override_imports_attachment()
 {
-  auto const root = temp_root() / "app-runtime-clipboard-image";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-clipboard-image");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -1386,9 +1372,8 @@ void test_app_clipboard_image_file_override_imports_attachment()
 
 void test_app_run_prompt_emits_provider_retry_events_when_enabled()
 {
-  auto const root = temp_root() / "app-runtime-provider-retry";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-provider-retry");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -1452,9 +1437,8 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
 
 void test_app_run_prompt_observation_shares_context_across_compaction_and_retry()
 {
-  auto const root = temp_root() / "app-runtime-observation-context";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-observation-context");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -1541,9 +1525,8 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
 
 void test_app_run_prompt_emits_tool_progress_and_session_spill()
 {
-  auto const root = temp_root() / "app-runtime-tool-progress";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-tool-progress");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -1618,11 +1601,10 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
 
 void test_app_first_run_auth_onboarding()
 {
-  auto const root = temp_root() / "app-first-run-onboarding";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const paths = app_test_paths(root);
+  auto const root = create_empty_root("app-first-run-onboarding");
+
   auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   auto const home = root / "home";
   std::filesystem::create_directories(workspace);
   std::filesystem::create_directories(paths.ava_config_dir);
@@ -1673,9 +1655,8 @@ void test_app_first_run_auth_onboarding()
 
 void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
 {
-  auto const root = temp_root() / "app-runtime-event-sink-cancel";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-event-sink-cancel");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -1731,9 +1712,8 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
 
 void test_app_command_dispatcher()
 {
-  auto const root = temp_root() / "app-command-dispatcher";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-command-dispatcher");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace / "src");
@@ -3080,9 +3060,8 @@ void test_app_command_dispatcher()
 
 void test_app_session_jsonl_import_export_attachment_caveat()
 {
-  auto const root = temp_root() / "app-session-jsonl-attachment-caveat";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-session-jsonl-attachment-caveat");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -3169,9 +3148,8 @@ void test_app_session_jsonl_import_export_attachment_caveat()
 
 void test_app_session_branch_commands()
 {
-  auto const root = temp_root() / "app-session-branch-commands";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-session-branch-commands");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -3245,9 +3223,8 @@ void test_app_session_branch_commands()
 
 void test_app_session_new_resume_commands()
 {
-  auto const root = temp_root() / "app-session-new-resume-commands";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-session-new-resume-commands");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -3292,9 +3269,8 @@ void test_app_session_new_resume_commands()
 
 void test_app_session_metadata_commands()
 {
-  auto const root = temp_root() / "app-session-metadata-commands";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-session-metadata-commands");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -3394,9 +3370,8 @@ void test_app_session_metadata_commands()
 
 void test_app_runtime_model_switch_persists_and_reopens()
 {
-  auto const root = temp_root() / "app-runtime-model-switch";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-model-switch");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -3472,6 +3447,7 @@ void test_app_runtime_model_switch_persists_and_reopens()
 
   ava::app::runtime::OpenOptions reopen_options = open_options;
   reopen_options.requested_session_id = session_id;
+  std::error_code remove_error;
   std::filesystem::remove(paths.models_file, remove_error);
   auto same_process_contested = ava::app::open_runtime_session(reopen_options);
   expect(!same_process_contested && same_process_contested.error().message().find("already owned") != std::string::npos,
@@ -3523,9 +3499,8 @@ void test_app_runtime_model_switch_persists_and_reopens()
 
 void test_app_runtime_model_switch_rejects_incompatible_history()
 {
-  auto const root = temp_root() / "app-runtime-model-switch-compatibility";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-model-switch-compatibility");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -3721,9 +3696,8 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
 
 void test_app_runtime_reasoning_selection_persists_and_requests()
 {
-  auto const root = temp_root() / "app-runtime-reasoning-selection";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-reasoning-selection");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -3925,9 +3899,8 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
   };
 
   {
-    auto const root = temp_root() / "app-runtime-tui-branch-rollback";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("app-runtime-tui-branch-rollback");
+
     auto const workspace = root / "workspace";
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
@@ -3966,9 +3939,8 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
   }
 
   {
-    auto const root = temp_root() / "app-runtime-startup-fork-rollback";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("app-runtime-startup-fork-rollback");
+
     auto const workspace = root / "workspace";
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
@@ -4012,9 +3984,8 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
 
 void test_app_runtime_initial_reasoning_level_option()
 {
-  auto const root = temp_root() / "app-runtime-initial-reasoning-level";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-runtime-initial-reasoning-level");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);

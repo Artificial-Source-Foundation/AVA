@@ -35,7 +35,8 @@ class CallbackRunObserver final : public ava::observability::RunObserver
 
 std::shared_ptr<ava::session::SessionAppendTarget> ephemeral_controller_target()
 {
-  auto store = ava::session::SessionStore::create_ephemeral(temp_root() / "controller-ephemeral-workspace");
+  auto const root = create_empty_root("ephemeral_controller_target");
+  auto store = ava::session::SessionStore::create_ephemeral(root / "controller-ephemeral-workspace");
   if (!store)
     return {};
   auto target = ava::session::SessionAppendTarget::create_ephemeral(*store);
@@ -141,9 +142,8 @@ ava::session::SessionEntry append_entry(std::string id)
 
 void test_session_run_controller_owner_and_generation_routes()
 {
-  std::error_code error;
-  auto root = temp_root() / "session-run-controller";
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("session-run-controller");
+
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   expect(store.has_value(), "controller append fixture store creates");
   if (!store)
@@ -188,9 +188,8 @@ void test_session_run_controller_owner_and_generation_routes()
 
 void test_runtime_session_destroys_background_before_owner_route()
 {
-  std::error_code error;
-  auto root = temp_root() / "session-run-controller-teardown";
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("session-run-controller-teardown");
+
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   expect(store.has_value(), "teardown fixture store creates");
   if (!store)
@@ -317,9 +316,8 @@ void test_session_run_controller_stable_join_and_command_kinds()
 
 void test_session_run_controller_effective_failure_and_stop_reentry()
 {
-  std::error_code error;
-  auto root = temp_root() / "session-run-controller-latch";
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("session-run-controller-latch");
+
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   expect(store.has_value(), "latch fixture store creates");
   if (!store)
@@ -371,9 +369,9 @@ struct PartialAppendControl
 
 void test_session_run_controller_recovers_persistent_and_ephemeral_targets()
 {
-  std::error_code error;
-  auto const root = temp_root() / "session-run-controller-recovery";
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("session-run-controller-recovery");
+
+  auto const workspace = root / "workspace";
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
                      : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
@@ -417,9 +415,7 @@ void test_session_run_controller_recovers_persistent_and_ephemeral_targets()
 
 void test_session_run_controller_failed_and_inflight_recovery()
 {
-  std::error_code error;
-  auto const root = temp_root() / "session-run-controller-recovery-races";
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("session-run-controller-recovery-races");
 
   {
     auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root / "failed");
@@ -500,9 +496,7 @@ void test_session_run_controller_failed_and_inflight_recovery()
 
 void test_session_run_controller_shutdown_during_recovery_and_queued_append()
 {
-  std::error_code error;
-  auto const root = temp_root() / "session-run-controller-shutdown-races";
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("session-run-controller-shutdown-races");
 
   {
     auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root / "reset");
@@ -634,9 +628,9 @@ void test_session_run_controller_cross_thread_observer_shutdown_is_nonblocking()
     std::optional<ava::core::VoidResult> second_result;
   };
 
-  std::error_code error;
-  auto const root = temp_root() / "session-run-controller-observer-shutdown";
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("session-run-controller-observer-shutdown");
+
+
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
                      : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
@@ -801,9 +795,9 @@ void test_session_run_controller_observer_reset_is_immediate_for_unrelated_obser
     std::optional<ava::core::VoidResult> append_result;
   };
 
-  std::error_code error;
-  auto const root = temp_root() / "session-run-controller-observer-reset";
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("session-run-controller-observer-reset");
+
+
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
                      : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
@@ -894,8 +888,10 @@ void test_session_run_controller_nested_controller_membership_is_stack_aware()
   };
 
   auto state = std::make_shared<NestedState>();
-  auto store_a = ava::session::SessionStore::create_ephemeral(temp_root() / "controller-nested-a");
-  auto store_b = ava::session::SessionStore::create_ephemeral(temp_root() / "controller-nested-b");
+  auto const root = create_empty_root("test_session_run_controller_nested_controller_membership_is_stack_aware");
+
+  auto store_a = ava::session::SessionStore::create_ephemeral(root / "controller-nested-a");
+  auto store_b = ava::session::SessionStore::create_ephemeral(root / "controller-nested-b");
   expect(store_a && store_b, "nested controller fixture creates two ephemeral sessions");
   if (!store_a || !store_b)
     return;
@@ -990,9 +986,9 @@ void test_session_run_controller_unrelated_observer_shutdown_without_active_appe
     bool callback_context = false;
   };
 
-  std::error_code error;
-  auto const root = temp_root() / "session-run-controller-unrelated-observer-shutdown";
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("session-run-controller-unrelated-observer-shutdown");
+
+
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
                      : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
@@ -1031,9 +1027,8 @@ void test_session_run_controller_unrelated_observer_shutdown_without_active_appe
 
 void test_session_run_controller_failure_drains_tickets_with_exact_accounting()
 {
-  std::error_code error;
-  auto const root = temp_root() / "session-run-controller-failure-tickets";
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("session-run-controller-failure-tickets");
+
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
                      : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
@@ -1118,9 +1113,8 @@ void test_session_run_controller_failure_drains_tickets_with_exact_accounting()
 
 void test_session_run_controller_concurrent_fifo_appends()
 {
-  std::error_code error;
-  auto root = temp_root() / "session-run-controller-fifo";
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("session-run-controller-fifo");
+
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   expect(store.has_value(), "fifo fixture store creates");
   if (!store)
@@ -1162,7 +1156,8 @@ void test_session_run_controller_concurrent_fifo_appends()
 
 void test_session_run_controller_routes_release_target_on_shutdown()
 {
-  auto store = ava::session::SessionStore::create_ephemeral(temp_root() / "controller-route-teardown");
+  auto const root = create_empty_root("test_session_run_controller_routes_release_target_on_shutdown");
+  auto store = ava::session::SessionStore::create_ephemeral(root / "controller-route-teardown");
   expect(store.has_value(), "sessionless route teardown fixture creates an ephemeral store");
   if (!store)
     return;

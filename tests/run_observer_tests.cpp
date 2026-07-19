@@ -292,16 +292,18 @@ void test_trace_canonical_redaction_and_determinism()
 
 void test_observer_failures_bounds_and_disabled_artifacts()
 {
+  auto const root = create_empty_root("test_observer_failures_bounds_and_disabled_artifacts");
+
   auto clock = std::make_shared<CountingClock>();
   auto ids = std::make_shared<CountingIds>();
   ava::observability::RunObservation disabled(nullptr, clock, ids);
   expect(!disabled.enabled(), "observer is disabled by default");
   bool enricher_called = false;
   disabled.emit(ava::observability::TraceEventType::AgentRunStart, {}, [&enricher_called](auto&) { enricher_called = true; });
-  auto const disabled_path = temp_root() / "disabled-observer" / "trace.jsonl";
+  auto const disabled_path = root / "disabled-observer" / "trace.jsonl";
   expect(!enricher_called && clock->calls == 0 && ids->calls == 0 && !std::filesystem::exists(disabled_path),
          "disabled emit returns before event allocation/enrichment, clock/ID access, or observer file writes");
-  auto disabled_store = ava::session::SessionStore::create_ephemeral(temp_root());
+  auto disabled_store = ava::session::SessionStore::create_ephemeral(root);
   expect(disabled_store.has_value(), "create disabled-path session store");
   if (disabled_store)
   {
@@ -317,7 +319,7 @@ void test_observer_failures_bounds_and_disabled_artifacts()
   isolated.emit(ava::observability::TraceEventType::AgentRunStart, {});
   expect(isolated.counters().callback_failures == 1, "throwing observer is accounted and isolated");
 
-  auto const path = temp_root() / "observer-bounds" / "trace.jsonl";
+  auto const path = root / "observer-bounds" / "trace.jsonl";
   auto writer = std::make_shared<ava::observability::JsonlRunObserver>(
       ava::observability::JsonlObserverOptions{.path = path, .max_events = 1, .max_bytes = 1024, .max_event_bytes = 512});
   ava::observability::RunObservation bounded(writer, std::make_shared<FixedClock>(1), std::make_shared<ava::observability::CounterIdGenerator>());
@@ -334,7 +336,7 @@ void test_observer_failures_bounds_and_disabled_artifacts()
   std::getline(file, line);
   expect(!line.empty() && line.size() <= 512 && ava::core::json::is_valid_object(line), "hostile event remains valid bounded JSONL");
 
-  auto const parent_safety_root = temp_root() / "observer-parent-safety";
+  auto const parent_safety_root = root / "observer-parent-safety";
   std::error_code cleanup_error;
   std::filesystem::remove_all(parent_safety_root, cleanup_error);
   auto const unsafe_parent = parent_safety_root / "unsafe";
@@ -369,7 +371,7 @@ void test_observer_failures_bounds_and_disabled_artifacts()
              ::stat(owner_only_parent.c_str(), &owner_only_after) == 0 && (owner_only_before.st_mode & 0777) == (owner_only_after.st_mode & 0777),
          "mkdirat EEXIST race path treats the existing owner-only parent as uncreated and never chmods it");
 
-  auto const failure_path = temp_root() / "observer-failure" / "directory-as-trace";
+  auto const failure_path = root / "observer-failure" / "directory-as-trace";
   std::filesystem::create_directories(failure_path);
   auto failing_writer = std::make_shared<ava::observability::JsonlRunObserver>(ava::observability::JsonlObserverOptions{.path = failure_path});
   ava::observability::RunObservation failing_observation(failing_writer);
@@ -498,9 +500,7 @@ void test_trace_validator_and_scoring_manifest()
 
 void test_queued_writer_bounds_and_unsafe_targets()
 {
-  auto const close_root = temp_root() / "queued-observer-close";
-  std::error_code close_error;
-  std::filesystem::remove_all(close_root, close_error);
+  auto const close_root = create_empty_root("queued-observer-close");
   ava::observability::QueuedJsonlObserverOptions immediate_options;
   immediate_options.path = close_root / "trace.jsonl";
   immediate_options.max_events = 8;
@@ -539,9 +539,9 @@ void test_queued_writer_bounds_and_unsafe_targets()
              !ava::observability::queue_has_capacity(1, 6, 5, 2, 10),
          "pure queue capacity predicate deterministically rejects event and byte overflow");
 
-  auto const root = temp_root() / "queued-observer";
-  std::error_code error;
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("queued-observer");
+
+
   constexpr int kProducerCount = 4;
   constexpr int kEventsPerProducer = 50;
   constexpr auto kAcceptedRecords = kProducerCount * kEventsPerProducer;
@@ -628,11 +628,13 @@ void test_queued_writer_bounds_and_unsafe_targets()
 
 void test_dispatcher_trace_correlation_and_ordering()
 {
+  auto const root = create_empty_root("test_dispatcher_trace_correlation_and_ordering");
+
   auto collector = std::make_shared<CollectingObserver>();
   auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
   ava::tools::ToolContext context;
-  context.workspace_dir = temp_root() / "dispatcher-trace";
+  context.workspace_dir = root / "dispatcher-trace";
   std::filesystem::create_directories(context.workspace_dir);
   context.observation = observation;
   context.trace_context = {.run_id = "run",
@@ -679,12 +681,16 @@ void test_session_attachment_generation_alias_stress()
   static_assert(noexcept(std::declval<ava::session::SessionStore&>().set_run_observation(
       std::declval<std::shared_ptr<ava::observability::RunObservation> const&>(), std::declval<ava::observability::TraceContext const&>())));
 
+  auto const root = create_empty_root("test_session_attachment_generation_alias_stress");
+
+
+
   auto collector = std::make_shared<CollectingObserver>();
   auto first = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
                                                                     std::make_shared<ava::observability::CounterIdGenerator>());
   auto second = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1000),
                                                                      std::make_shared<ava::observability::CounterIdGenerator>());
-  auto store = ava::session::SessionStore::create_ephemeral(temp_root());
+  auto store = ava::session::SessionStore::create_ephemeral(root);
   expect(store.has_value(), "create aliased ephemeral store for attachment stress");
   auto alias = *store;
   auto stale_generation = store->set_run_observation(first, {.run_id = "parent",
@@ -759,7 +765,7 @@ void test_session_attachment_generation_alias_stress()
   expect(collector->events.size() == events_before_terminal,
          "copied background-style store emits no session event after parent terminal clear and concurrent attachment snapshots remain safe");
 
-  auto overlap_store = ava::session::SessionStore::create_ephemeral(temp_root());
+  auto overlap_store = ava::session::SessionStore::create_ephemeral(root);
   expect(overlap_store.has_value(), "create session for A/B background attachment overlap");
   if (overlap_store)
   {
@@ -795,7 +801,9 @@ void test_session_and_process_boundaries_are_independent()
   auto collector = std::make_shared<CollectingObserver>();
   auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
-  auto store = ava::session::SessionStore::create_ephemeral(temp_root());
+  auto const root = create_empty_root("test_session_and_process_boundaries_are_independent");
+
+  auto store = ava::session::SessionStore::create_ephemeral(root);
   expect(static_cast<bool>(store), "create ephemeral session for trace boundary test");
   ava::observability::TraceContext session_context;
   session_context.run_id = "run";
@@ -808,7 +816,7 @@ void test_session_and_process_boundaries_are_independent()
   auto loaded = store->load();
   expect(static_cast<bool>(loaded), "session load succeeds with observer");
   ava::tools::ToolContext context;
-  context.workspace_dir = temp_root() / "process-boundary";
+  context.workspace_dir = root / "process-boundary";
   std::filesystem::create_directories(context.workspace_dir);
   context.observation = observation;
   context.permission_resolver = [](ava::permissions::PermissionPrompt const&) {
@@ -856,14 +864,16 @@ void test_agent_fake_provider_boundaries()
   auto collector = std::make_shared<CollectingObserver>();
   auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
-  auto const root = temp_root() / "observer-agent";
-  std::filesystem::create_directories(root / "workspace");
-  ava::session::SessionStore store({.root_dir = root / "sessions", .workspace_dir = root / "workspace", .session_id = "observer-agent"});
+  auto const root = create_empty_root("observer-agent");
+
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store({.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "observer-agent"});
   ava::provider::OpenAIProvider provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200, .headers = {}, .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: [DONE]\n\n"}});
   ava::agent::AgentLoopOptions options;
-  options.workspace_dir = root / "workspace";
+  options.workspace_dir = workspace;
   options.provider_id = "openai";
   options.model_id = "gpt-5.5";
   options.system_prompt = "system";
@@ -897,9 +907,8 @@ void test_disabled_and_enabled_runs_preserve_authoritative_session_semantics()
     std::string session_jsonl;
     std::string observer_jsonl;
   };
-  auto const root = temp_root() / "observer-session-semantics";
-  std::error_code cleanup_error;
-  std::filesystem::remove_all(root, cleanup_error);
+  auto const root = create_empty_root("observer-session-semantics");
+
 
   auto run_scripted = [&root](bool enabled) {
     auto const run_root = root / (enabled ? "enabled" : "disabled");
@@ -959,9 +968,8 @@ void test_disabled_and_enabled_runs_preserve_authoritative_session_semantics()
 
 void test_jsonl_event_ordering_is_byte_identical()
 {
-  auto const root = temp_root() / "observer-deterministic";
-  std::error_code error;
-  std::filesystem::remove_all(root, error);
+  auto const root = create_empty_root("observer-deterministic");
+
   auto write_trace = [](std::filesystem::path const& path) {
     auto writer = std::make_shared<ava::observability::JsonlRunObserver>(ava::observability::JsonlObserverOptions{.path = path});
     ava::observability::RunObservation observation(writer, std::make_shared<FixedClock>(77), std::make_shared<ava::observability::CounterIdGenerator>(0));
@@ -1181,13 +1189,15 @@ void test_agent_terminal_uses_returned_control_state_without_callback_repoll()
   auto collector = std::make_shared<CollectingObserver>();
   auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
-  auto const root = temp_root() / "observer-terminal-cancel-callback";
-  std::filesystem::create_directories(root / "workspace");
-  ava::session::SessionStore store({.root_dir = root / "sessions", .workspace_dir = root / "workspace", .session_id = "terminal-cancel"});
+  auto const root = create_empty_root("observer-terminal-cancel-callback");
+
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store({.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "terminal-cancel"});
   ava::provider::OpenAIProvider provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
   unsigned cancellation_callback_calls = 0;
-  ava::agent::AgentLoop loop({.workspace_dir = root / "workspace",
+  ava::agent::AgentLoop loop({.workspace_dir = workspace,
                               .provider_id = "openai",
                               .model_id = "gpt-5.5",
                               .system_prompt = "system",
@@ -1224,14 +1234,16 @@ void test_agent_lifecycle_survives_observation_attachment_failure()
   auto collector = std::make_shared<CollectingObserver>();
   auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
-  auto const root = temp_root() / "observer-attachment-failure";
-  std::filesystem::create_directories(root / "workspace");
-  ava::session::SessionStore store({.root_dir = root / "sessions", .workspace_dir = root / "workspace", .session_id = "attachment-failure"});
+  auto const root = create_empty_root("observer-attachment-failure");
+
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store({.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "attachment-failure"});
   store.fail_next_run_observation_attachment_for_test();
   ava::provider::OpenAIProvider provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200, .headers = {}, .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: [DONE]\n\n"}});
-  ava::agent::AgentLoop loop({.workspace_dir = root / "workspace",
+  ava::agent::AgentLoop loop({.workspace_dir = workspace,
                               .provider_id = "openai",
                               .model_id = "gpt-5.5",
                               .system_prompt = "system",
@@ -1253,24 +1265,32 @@ void test_agent_lifecycle_survives_observation_attachment_failure()
 void test_session_results_and_agent_terminal_cleanup()
 {
   auto collector = std::make_shared<CollectingObserver>();
-  auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
+  auto const observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
-  ava::session::SessionStore invalid({.root_dir = temp_root() / "session-observer-failure", .workspace_dir = temp_root(), .session_id = "bad/id"});
-  static_cast<void>(invalid.set_run_observation(
-      observation,
-      {.run_id = "run", .turn_id = "turn", .session_id = {}, .provider_id = {}, .parent_run_id = {}, .parent_turn_id = {}, .parent_session_id = {}}));
-  auto append = invalid.append(ava::session::SessionLease{},
-                               {.id = "entry", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"});
-  auto load = invalid.load();
-  expect(!append && !load, "invalid session store produces append and load failures");
+  {
+    auto const root = create_empty_root("session-observer-failure");
 
-  auto const root = temp_root() / "observer-agent-terminal";
-  std::filesystem::create_directories(root / "workspace");
-  ava::session::SessionStore store({.root_dir = root / "sessions", .workspace_dir = root / "workspace", .session_id = "terminal"});
+    auto const workspace = root / "workspace";
+    ava::session::SessionStore invalid({.root_dir = root, .workspace_dir = root, .session_id = "bad/id"});
+    static_cast<void>(invalid.set_run_observation(
+        observation,
+        {.run_id = "run", .turn_id = "turn", .session_id = {}, .provider_id = {}, .parent_run_id = {}, .parent_turn_id = {}, .parent_session_id = {}}));
+    auto append = invalid.append(ava::session::SessionLease{},
+                                 {.id = "entry", .parent_id = "", .type = ava::session::EntryType::SessionStart, .timestamp = "now", .data_json = "{}"});
+    auto load = invalid.load();
+    expect(!append && !load, "invalid session store produces append and load failures");
+  }
+
+  auto const root = create_empty_root("observer-agent-terminal");
+
+
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store({.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "terminal"});
   ava::provider::OpenAIProvider provider("https://api.example.test");
   ava::tests::FakeTransport provider_failure({});
   auto append_route = append_route_for_test(store);
-  ava::agent::AgentLoop failed_loop({.workspace_dir = root / "workspace",
+  ava::agent::AgentLoop failed_loop({.workspace_dir = workspace,
                                      .provider_id = "openai",
                                      .model_id = "gpt-5.5",
                                      .system_prompt = "system",
@@ -1281,7 +1301,7 @@ void test_session_results_and_agent_terminal_cleanup()
   auto failed = failed_loop.run_turn("prompt", store, provider, provider_failure);
   expect(!failed, "fake provider failure reaches the agent terminal observer");
   ava::tests::FakeTransport canceled_transport({});
-  ava::agent::AgentLoop canceled_loop({.workspace_dir = root / "workspace",
+  ava::agent::AgentLoop canceled_loop({.workspace_dir = workspace,
                                        .provider_id = "openai",
                                        .model_id = "gpt-5.5",
                                        .system_prompt = "system",
@@ -1294,7 +1314,7 @@ void test_session_results_and_agent_terminal_cleanup()
   expect(!canceled, "canceled agent run reaches the terminal observer");
   auto const events_after_observed_runs = collector->events.size();
   ava::agent::AgentLoop disabled_loop({
-      .workspace_dir = root / "workspace",
+      .workspace_dir = workspace,
       .provider_id = "openai",
       .model_id = "gpt-5.5",
       .system_prompt = "system",
@@ -1329,11 +1349,14 @@ void test_session_results_and_agent_terminal_cleanup()
 
 void test_process_cancellation_and_bounded_output_observation()
 {
+  auto const root = create_empty_root("test_process_cancellation_and_bounded_output_observation");
+
+
   auto collector = std::make_shared<CollectingObserver>();
   auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
   ava::tools::ToolContext context;
-  context.workspace_dir = temp_root();
+  context.workspace_dir = root;
   context.current_call_id = "process-call";
   context.observation = observation;
   context.trace_context = {
@@ -1359,7 +1382,9 @@ void test_process_cancellation_and_bounded_output_observation()
 
 void test_jsonl_close_with_concurrent_producers()
 {
-  auto const path = temp_root() / "observer-concurrent" / "trace.jsonl";
+  auto const root = create_empty_root("test_jsonl_close_with_concurrent_producers");
+
+  auto const path = root / "observer-concurrent" / "trace.jsonl";
   auto writer = std::make_shared<ava::observability::JsonlRunObserver>(
       ava::observability::JsonlObserverOptions{.path = path, .max_events = 1000, .max_bytes = 1024 * 1024});
   std::vector<std::thread> threads;
@@ -1382,6 +1407,8 @@ void test_jsonl_close_with_concurrent_producers()
 
 void test_concurrent_observation_ordering_and_reentrancy()
 {
+  auto const root = create_empty_root("test_concurrent_observation_ordering_and_reentrancy");
+
   auto reentrant_observer = std::make_shared<ReentrantObserver>();
   ava::observability::RunObservation reentrant(reentrant_observer, std::make_shared<FixedClock>(1), std::make_shared<ava::observability::CounterIdGenerator>());
   reentrant_observer->observation = &reentrant;
@@ -1437,7 +1464,7 @@ void test_concurrent_observation_ordering_and_reentrancy()
   expect(collector->events.size() == 2 && collector->events[0].sequence == 1 && collector->events[1].sequence == 2,
          "concurrent callbacks are delivered in the same strict order as assigned sequences");
 
-  auto const file_path = temp_root() / "observer-concurrent-sequence" / "trace.jsonl";
+  auto const file_path = root / "observer-concurrent-sequence" / "trace.jsonl";
   std::error_code remove_error;
   std::filesystem::remove_all(file_path.parent_path(), remove_error);
   auto writer = std::make_shared<ava::observability::JsonlRunObserver>(ava::observability::JsonlObserverOptions{.path = file_path});
@@ -1504,14 +1531,15 @@ void test_provider_stream_event_outcomes_are_exhaustive()
                                                      std::move(error)};
     }
   };
+  auto const root = create_empty_root("test_provider_stream_event_outcomes_are_exhaustive");
   auto collector = std::make_shared<CollectingObserver>();
   auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
-  auto store = ava::session::SessionStore::create_ephemeral(temp_root());
+  auto store = ava::session::SessionStore::create_ephemeral(root);
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
   AllEventsProvider provider;
   ava::agent::AgentLoopOptions options;
-  options.workspace_dir = temp_root();
+  options.workspace_dir = root;
   options.provider_id = "test";
   options.model_id = "test";
   options.stream = false;

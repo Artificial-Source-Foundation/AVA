@@ -89,10 +89,10 @@ std::string read_binary_file(std::filesystem::path const& path)
 
 void test_session_store_round_trip()
 {
-  std::error_code remove_error;
-  std::filesystem::remove_all(temp_root(), remove_error);
+  auto const root = create_empty_root("test_session_store_round_trip");
 
-  auto store = ava::session::SessionStore::create(std::filesystem::current_path(), temp_root());
+
+  auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   expect(store.has_value(), "session store creates");
   if (!store)
     return;
@@ -128,7 +128,7 @@ void test_session_store_round_trip()
   expect((*loaded)[0].type == ava::session::EntryType::SessionStart, "entry type round trips");
   expect((*loaded)[0].version == ava::session::kCurrentSessionEntryVersion, "session entry version round trips from current JSONL records");
 
-  auto text_store = ava::session::SessionStore::create(std::filesystem::current_path(), temp_root());
+  auto text_store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   expect(text_store.has_value(), "text session store creates");
   if (!text_store)
     return;
@@ -161,7 +161,7 @@ void test_session_store_round_trip()
                                                                                      });
   expect(!raw_carriage_return_append, "session data_json rejects raw carriage returns to preserve JSONL entries");
 
-  auto large_store = ava::session::SessionStore::create(std::filesystem::current_path(), temp_root());
+  auto large_store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   expect(large_store.has_value(), "large session store creates");
   if (large_store)
   {
@@ -178,7 +178,7 @@ void test_session_store_round_trip()
   }
 
   ava::session::SessionStore oversized_load_store(ava::session::SessionStoreOptions{
-      .root_dir = temp_root(),
+      .root_dir = root,
       .workspace_dir = std::filesystem::current_path(),
       .session_id = "oversized-load",
   });
@@ -194,7 +194,7 @@ void test_session_store_round_trip()
   for (auto const& bad_session_id : bad_session_ids)
   {
     ava::session::SessionStore bad_store(ava::session::SessionStoreOptions{
-        .root_dir = temp_root(),
+        .root_dir = root,
         .workspace_dir = std::filesystem::current_path(),
         .session_id = bad_session_id,
     });
@@ -210,7 +210,7 @@ void test_session_store_round_trip()
   }
 
   ava::session::SessionStore traversal_store(ava::session::SessionStoreOptions{
-      .root_dir = temp_root(),
+      .root_dir = root,
       .workspace_dir = std::filesystem::current_path(),
       .session_id = "../escape",
   });
@@ -227,7 +227,7 @@ void test_session_store_round_trip()
   expect(!traversal_append && !std::filesystem::exists(attempted_traversal_path), "session traversal id append is rejected before creating attempted path");
 
   ava::session::SessionStore unicode_store(ava::session::SessionStoreOptions{
-      .root_dir = temp_root(),
+      .root_dir = root,
       .workspace_dir = std::filesystem::current_path(),
       .session_id = "unicode",
   });
@@ -241,7 +241,7 @@ void test_session_store_round_trip()
   expect(unicode_loaded && !unicode_loaded->empty() && (*unicode_loaded)[0].id == std::string("entry_\xC3\xA9"), "session unicode escapes decode as utf-8");
 
   ava::session::SessionStore surrogate_store(ava::session::SessionStoreOptions{
-      .root_dir = temp_root(),
+      .root_dir = root,
       .workspace_dir = std::filesystem::current_path(),
       .session_id = "surrogate",
   });
@@ -256,7 +256,7 @@ void test_session_store_round_trip()
          "session surrogate pairs decode as utf-8");
 
   ava::session::SessionStore bad_surrogate_store(ava::session::SessionStoreOptions{
-      .root_dir = temp_root(),
+      .root_dir = root,
       .workspace_dir = std::filesystem::current_path(),
       .session_id = "bad-surrogate",
   });
@@ -271,7 +271,7 @@ void test_session_store_round_trip()
          "session lone surrogate decodes as replacement character");
 
   ava::session::SessionStore nested_key_store(ava::session::SessionStoreOptions{
-      .root_dir = temp_root(),
+      .root_dir = root,
       .workspace_dir = std::filesystem::current_path(),
       .session_id = "nested-key",
   });
@@ -289,7 +289,7 @@ void test_session_store_round_trip()
          "session load ignores key-looking strings and nested data keys");
 
   ava::session::SessionStore missing_version_store(ava::session::SessionStoreOptions{
-      .root_dir = temp_root(),
+      .root_dir = root,
       .workspace_dir = std::filesystem::current_path(),
       .session_id = "missing-version",
   });
@@ -305,7 +305,7 @@ void test_session_store_round_trip()
          "session loader treats missing entry version as legacy-compatible");
 
   ava::session::SessionStore future_version_store(ava::session::SessionStoreOptions{
-      .root_dir = temp_root(),
+      .root_dir = root,
       .workspace_dir = std::filesystem::current_path(),
       .session_id = "future-version",
   });
@@ -321,7 +321,7 @@ void test_session_store_round_trip()
          "session loader rejects unsupported future entry versions");
 
   ava::session::SessionStore bad_parent_store(ava::session::SessionStoreOptions{
-      .root_dir = temp_root(),
+      .root_dir = root,
       .workspace_dir = std::filesystem::current_path(),
       .session_id = "bad-parent",
   });
@@ -346,9 +346,8 @@ void test_session_store_round_trip()
 
 void test_bounded_session_reads_strictly_classify_framed_records()
 {
-  auto const root = temp_root() / "bounded-strict-session-records";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("bounded-strict-session-records");
+
   auto const workspace = root / "workspace";
   auto const sessions = root / "sessions";
   std::filesystem::create_directories(workspace);
@@ -381,7 +380,9 @@ void test_bounded_session_reads_strictly_classify_framed_records()
 
 void test_ephemeral_session_store_stays_in_memory()
 {
-  auto const workspace = temp_root() / "ephemeral-session-store" / "workspace";
+  auto const root = create_empty_root("ephemeral-session-store");
+
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
   std::filesystem::path scratch_root;
@@ -646,9 +647,8 @@ void test_session_tree_metadata_entries_validate_and_export()
 
 void test_session_tree_index_derives_branches()
 {
-  auto const root = temp_root() / "session-tree-index";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("session-tree-index");
+
   auto const workspace = root / "workspace";
   auto const sessions_dir = root / "sessions";
   std::filesystem::create_directories(workspace);
@@ -754,9 +754,8 @@ void test_session_tree_index_derives_branches()
 
 void test_session_tree_index_handles_parent_cycles()
 {
-  auto const root = temp_root() / "session-tree-cycle";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("session-tree-cycle");
+
   auto const workspace = root / "workspace";
   auto const sessions_dir = root / "sessions";
   std::filesystem::create_directories(workspace);
@@ -815,9 +814,8 @@ void test_session_tree_index_handles_parent_cycles()
 
 void test_session_branch_fork_and_clone_copy_source_safely()
 {
-  auto const root = temp_root() / "session-branch-copy";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("session-branch-copy");
+
   auto const workspace = root / "workspace";
   auto const sessions_dir = root / "sessions";
   std::filesystem::create_directories(workspace);
@@ -960,9 +958,8 @@ void test_session_branch_fork_and_clone_copy_source_safely()
 
 void test_session_branch_summary_appends_to_source_session()
 {
-  auto const root = temp_root() / "session-branch-summary";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("session-branch-summary");
+
   auto const workspace = root / "workspace";
   auto const sessions_dir = root / "sessions";
   std::filesystem::create_directories(workspace);
@@ -1676,9 +1673,8 @@ void test_session_replay_validation()
 
 void test_session_lease_creation_and_link_safety()
 {
-  auto const root = temp_root() / "session-lease-creation";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("session-lease-creation");
+
   auto const workspace = root / "workspace";
   auto const sessions = root / "sessions";
   std::filesystem::create_directories(workspace);
@@ -1720,9 +1716,8 @@ void test_session_lease_creation_and_link_safety()
 
 void test_session_torn_tail_recovery()
 {
-  auto const root = temp_root() / "session-torn-tail-recovery";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("session-torn-tail-recovery");
+
   auto const workspace = root / "workspace";
   auto const sessions = root / "sessions";
   std::filesystem::create_directories(workspace);
@@ -2231,9 +2226,8 @@ void test_session_torn_tail_recovery()
 
 void test_session_torn_tail_listing()
 {
-  auto const root = temp_root() / "session-torn-tail-listing";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("session-torn-tail-listing");
+
   auto const workspace = root / "workspace";
   auto const sessions = root / "sessions";
   std::filesystem::create_directories(workspace);
@@ -2319,9 +2313,8 @@ void test_session_torn_tail_listing()
 
 void test_session_resume_and_listing()
 {
-  auto const root = temp_root() / "session-resume";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("session-resume");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const session_root = root / "sessions";
@@ -2447,9 +2440,8 @@ void test_session_resume_and_listing()
 
 void test_session_compaction_entry_round_trip()
 {
-  auto const root = temp_root() / "compaction-round-trip";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("compaction-round-trip");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
@@ -2662,9 +2654,8 @@ void test_session_markdown_export()
 
 void test_compaction_config_and_thresholds()
 {
-  auto const root = temp_root() / "compaction-config";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("compaction-config");
+
   setenv("HOME", (root / "home").c_str(), 1);
   setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
   setenv("XDG_STATE_HOME", (root / "state").c_str(), 1);
@@ -3371,9 +3362,8 @@ void test_image_attachment_message_reconstruction_and_validation()
 
 void test_image_attachment_storage_boundary()
 {
-  auto const root = temp_root() / "image-attachment-storage";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("image-attachment-storage");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto store = ava::session::SessionStore::create(workspace, root / "sessions");
@@ -3462,9 +3452,8 @@ void test_image_attachment_storage_boundary()
 
 void test_image_attachment_import()
 {
-  auto const root = temp_root() / "image-attachment-import";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("image-attachment-import");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto store = ava::session::SessionStore::create(workspace, root / "sessions");
@@ -3518,9 +3507,8 @@ std::optional<std::filesystem::path> created_session_rollback_quarantine(std::fi
 
 void test_created_session_rollback_is_identity_safe_and_preserves_attachments()
 {
-  auto const root = temp_root() / "created-session-rollback";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("created-session-rollback");
+
   auto const workspace = root / "workspace";
   auto const sessions_dir = root / "sessions";
   std::filesystem::create_directories(workspace);
@@ -3681,9 +3669,8 @@ std::optional<std::string> error_context_value(ava::core::Error const& error, st
 
 void test_lease_bound_session_reads_hold_exact_authority()
 {
-  auto const root = temp_root() / "lease-bound-session-reads";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("lease-bound-session-reads");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
@@ -3779,9 +3766,8 @@ void test_lease_bound_session_reads_hold_exact_authority()
 
 void test_session_read_authority_binding_and_descriptor_lifetime()
 {
-  auto const root = temp_root() / "session-read-authority";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("session-read-authority");
+
   auto const workspace = root / "workspace";
   auto const sessions = root / "sessions";
   std::filesystem::create_directories(workspace);
@@ -3911,9 +3897,8 @@ void test_session_read_authority_binding_and_descriptor_lifetime()
 
 void test_session_append_authority_and_commit_state()
 {
-  auto const root = temp_root() / "session-append-authority";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("session-append-authority");
+
   auto const workspace = root / "workspace";
   auto const sessions = root / "sessions";
   std::filesystem::create_directories(workspace);

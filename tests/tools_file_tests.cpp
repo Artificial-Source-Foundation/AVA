@@ -151,9 +151,9 @@ class MemoryExactFileAccess final : public ava::tools::ExactFileAccess
 
 void test_mutation_queue_cleans_drained_path_entries()
 {
-  std::error_code remove_error;
-  std::filesystem::remove_all(temp_root(), remove_error);
-  auto const workspace = temp_root() / "mutation-queue";
+  auto const root = create_empty_root("test_mutation_queue_cleans_drained_path_entries");
+
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
   ava::tools::MutationQueue queue;
@@ -176,11 +176,9 @@ void test_mutation_queue_cleans_drained_path_entries()
 
 void test_file_tools()
 {
-  std::error_code remove_error;
-  std::filesystem::remove_all(temp_root(), remove_error);
-  std::filesystem::create_directories(temp_root());
+  auto const root = create_empty_root("test_file_tools");
 
-  auto const workspace = temp_root() / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace / "docs");
   auto const source_path = workspace / "src.txt";
   ava::tools::ToolContext const build_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
@@ -466,7 +464,7 @@ void test_file_tools()
     std::ofstream canceled_file(canceled_existing_path, std::ios::binary | std::ios::trunc);
     canceled_file << "keep original";
   }
-  auto const canceled_outside_path = temp_root() / "canceled-outside.txt";
+  auto const canceled_outside_path = root / "canceled-outside.txt";
   {
     std::ofstream canceled_outside(canceled_outside_path, std::ios::binary | std::ios::trunc);
     canceled_outside << "outside original";
@@ -504,7 +502,7 @@ void test_file_tools()
              !has_write_temp(workspace),
          "write_file cleans staged data when cancellation arrives during chunked writes");
 
-  auto const outside_path = temp_root() / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream outside_file(outside_path, std::ios::binary | std::ios::trunc);
     outside_file << "outside content";
@@ -547,7 +545,7 @@ void test_file_tools()
   expect(!outside_failed && outside_failed.error().format().find("resolution: resolver_failed") != std::string::npos,
          "read_file fails closed when resolver fails");
 
-  auto const outside_write_path = temp_root() / "outside-write.txt";
+  auto const outside_write_path = root / "outside-write.txt";
   auto outside_write_without_resolver = ava::tools::write_file(build_context, outside_write_path, "bad");
   expect(!outside_write_without_resolver && !std::filesystem::exists(outside_write_path) &&
              outside_write_without_resolver.error().format().find("resolution: no_resolver") != std::string::npos,
@@ -573,7 +571,7 @@ void test_file_tools()
            "write_file includes backend-generated diff preview for denied new-file mutation prompts");
   }
 
-  auto const outside_existing_write_path = temp_root() / "outside-existing-write.txt";
+  auto const outside_existing_write_path = root / "outside-existing-write.txt";
   {
     std::ofstream file(outside_existing_write_path, std::ios::binary | std::ios::trunc);
     file << "external secret";
@@ -693,9 +691,8 @@ void test_file_tools()
 
 void test_permission_audit_persistence()
 {
-  auto const root = temp_root() / "permission-audit";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-audit");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
@@ -827,10 +824,9 @@ void test_permission_audit_persistence()
 
 void test_secure_workspace_staged_write_contracts()
 {
-  auto const root = temp_root() / "secure-workspace-staged-write";
-  std::error_code cleanup;
-  std::filesystem::remove_all(root, cleanup);
-  auto const workspace = root / "workspace";
+  auto root = create_empty_root("secure-workspace-staged-write");
+
+  auto workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto secure = ava::tools::SecureWorkspace::open(std::filesystem::canonical(workspace));
   expect(secure.has_value(), "staged write contract test anchors a canonical workspace");
@@ -1009,9 +1005,8 @@ void test_secure_workspace_staged_write_contracts()
 
 void test_injected_exact_file_access()
 {
-  auto const root = temp_root() / "injected-exact-file-access";
-  std::error_code cleanup;
-  std::filesystem::remove_all(root, cleanup);
+  auto const root = create_empty_root("injected-exact-file-access");
+
   auto const workspace = root / "workspace";
   auto const outside = root / "outside";
   std::filesystem::create_directories(workspace);
@@ -1071,9 +1066,8 @@ void test_injected_exact_file_access()
 
 void test_secure_workspace_file_tools()
 {
-  auto const root = temp_root() / "secure-workspace-files";
-  std::error_code cleanup;
-  std::filesystem::remove_all(root, cleanup);
+  auto const root = create_empty_root("secure-workspace-files");
+
   auto const workspace = root / "workspace";
   auto const outside = root / "outside";
   std::filesystem::create_directories(workspace);
@@ -1141,9 +1135,9 @@ void test_secure_workspace_symlinked_root()
   // symlink (e.g. /home/user/projects/github -> /usr/src/projects_github).
   // The anchor descriptor is opened at startup and must follow such symlinks;
   // only the relative paths resolved against the anchor are contained.
-  auto const root = temp_root() / "symlinked-root";
-  std::error_code cleanup;
-  std::filesystem::remove_all(root, cleanup);
+  auto const root = create_empty_root("symlinked-root");
+
+  auto const workspace = root / "workspace";
   auto const real_target = root / "real-projects-github";
   auto const projects = root / "projects";
   auto const real_workspace = real_target / "ai-cli" / "AVA";
@@ -1190,9 +1184,9 @@ void test_secure_workspace_symlinked_root()
 // fd; every symlink below is evaluated against that single anchor.
 void test_secure_workspace_symlink_containment()
 {
-  auto const root = temp_root() / "symlink-containment";
-  std::error_code cleanup;
-  std::filesystem::remove_all(root, cleanup);
+  auto const root = create_empty_root("symlink-containment");
+
+  auto const workspace = root / "workspace";
   // Anchor: ws is the workspace root opened as the SecureWorkspace descriptor.
   auto const ws = root / "ws";
   auto const outside = root / "outside";
@@ -1306,9 +1300,9 @@ void test_secure_workspace_symlink_containment()
 //   - Non-escaping symlinks within an anchor are followed
 void test_anchor_set_multi_anchor()
 {
-  auto const root = temp_root() / "anchor-set";
-  std::error_code cleanup;
-  std::filesystem::remove_all(root, cleanup);
+  auto const root = create_empty_root("anchor-set");
+
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(root);
 
   // Create two anchor directories.
@@ -1429,9 +1423,8 @@ void test_anchor_set_multi_anchor()
 // configured path, not the resolved target.
 void test_anchor_set_symlinked_root()
 {
-  auto const root = temp_root() / "anchor-set-symlinked-root";
-  std::error_code cleanup;
-  std::filesystem::remove_all(root, cleanup);
+  auto const root = create_empty_root("anchor-set-symlinked-root");
+
   std::filesystem::create_directories(root);
 
   // Create a real directory with content, and a symlink pointing to it.
@@ -1512,11 +1505,13 @@ struct Info
   std::string content;                  // The content of the file that opening this path reads.
 
   void print_on(std::ostream& os) const;
-  friend std::ostream& operator<<(std::ostream& os, Info const& info)
+#ifdef CWDEBUG
+  [[maybe_unused]] friend std::ostream& operator<<(std::ostream& os, Info const& info)
   {
     info.print_on(os);
     return os;
   }
+#endif
 };
 
 void Info::print_on(std::ostream& os) const
@@ -1543,10 +1538,10 @@ void test_anchor_open()
 {
   namespace fs = std::filesystem;
 
-  auto const root = temp_root() / "anchor-open";
+  auto const root = create_empty_root("anchor-open");
 
-  std::error_code cleanup;
-  fs::remove_all(root, cleanup);
+
+  auto const workspace = root / "workspace";
   fs::create_directories(root);
 
   // Two writable anchors and an external (outside-all-anchors) directory.
@@ -1812,6 +1807,7 @@ void test_anchor_open()
       std::string s;
       target >> s;
       expect(s == "created", "open_writable (create): created file contains the written data");
+      std::error_code cleanup;
       fs::remove(info.target_path, cleanup);
     }
     else

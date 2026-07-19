@@ -73,8 +73,9 @@ void test_app_print_prompt_merging()
 
 void test_headless_permission_policy()
 {
-  auto const workspace = temp_root() / "headless-policy" / "workspace";
-  auto const outside = temp_root() / "headless-policy" / "outside.txt";
+  auto const root = create_empty_root("test_headless_permission_policy");
+  auto const workspace = root / "headless-policy" / "workspace";
+  auto const outside = root / "headless-policy" / "outside.txt";
 
   ava::permissions::PermissionPrompt const read_prompt{.operation = ava::permissions::Operation::ReadFile,
                                                        .mode = ava::agent::Mode::Build,
@@ -331,9 +332,8 @@ void test_headless_permission_policy()
 
 void test_app_print_text_mode_outputs_final_text_only()
 {
-  auto const root = temp_root() / "app-print-text";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-print-text");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -369,9 +369,8 @@ void test_app_print_text_mode_outputs_final_text_only()
 
 void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_requested()
 {
-  auto const root = temp_root() / "app-print-text-terminal-sanitize";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-print-text-terminal-sanitize");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -427,9 +426,8 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
 
 void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
 {
-  auto const root = temp_root() / "app-print-text-streaming";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-print-text-streaming");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -459,9 +457,8 @@ void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
 
 void test_app_print_text_mode_reports_stdout_write_failure()
 {
-  auto const root = temp_root() / "app-print-text-write-failure";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-print-text-write-failure");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -496,9 +493,8 @@ void test_app_print_text_mode_reports_stdout_write_failure()
 
 void test_app_print_mode_uses_headless_permission_policy()
 {
-  auto const root = temp_root() / "app-print-policy";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-print-policy");
+
   auto const workspace = root / "workspace";
   auto const outside_path = root / "outside.txt";
   auto const paths = app_test_paths(root);
@@ -557,9 +553,8 @@ void test_app_print_mode_uses_headless_permission_policy()
 
 void test_app_print_mode_default_permission_denial_is_actionable()
 {
-  auto const root = temp_root() / "app-print-default-permission-deny";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-print-default-permission-deny");
+
   auto const workspace = root / "workspace";
   auto const outside_path = root / "outside.txt";
   auto const paths = app_test_paths(root);
@@ -619,9 +614,8 @@ void test_app_print_mode_default_permission_denial_is_actionable()
 
 void test_app_print_mode_uses_persistent_permission_rules()
 {
-  auto const root = temp_root() / "app-print-persistent-permission-rule";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-print-persistent-permission-rule");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -681,9 +675,8 @@ void test_app_print_mode_uses_persistent_permission_rules()
 
 void test_app_print_mode_refreshes_expired_oauth_before_provider_request()
 {
-  auto const root = temp_root() / "app-print-oauth-refresh";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-print-oauth-refresh");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -738,9 +731,8 @@ void test_app_print_mode_refreshes_expired_oauth_before_provider_request()
 
 void test_app_print_offline_fails_before_auth_refresh_or_provider_request()
 {
-  auto const root = temp_root() / "app-print-offline";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-print-offline");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -777,9 +769,8 @@ void test_app_print_offline_fails_before_auth_refresh_or_provider_request()
 void test_app_connect_provider_credentials_headlessly()
 {
   ScopedStdinTerminalState terminal_state;
-  auto const root = temp_root() / "app-connect-provider-credentials";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-connect-provider-credentials");
+
   auto const paths = app_test_paths(root);
 
   std::istringstream anthropic_input("anthropic-api-key\n");
@@ -849,9 +840,7 @@ void test_app_connect_provider_credentials_headlessly()
   expect(empty_stdin_exit == 1 && empty_stdin_out.str().empty() && empty_stdin_err.str().find("credential stdin was empty") != std::string::npos,
          "headless provider connect rejects empty stdin credentials");
 
-  auto const wizard_root = temp_root() / "app-connect-provider-wizard";
-  std::error_code wizard_remove_error;
-  std::filesystem::remove_all(wizard_root, wizard_remove_error);
+  auto const wizard_root = create_empty_root("app-connect-provider-wizard");
   auto const wizard_paths = app_test_paths(wizard_root);
   std::istringstream wizard_input("anthropic\nwizard-api-key\n");
   std::ostringstream wizard_out;
@@ -866,9 +855,7 @@ void test_app_connect_provider_credentials_headlessly()
   expect(wizard_anthropic && wizard_anthropic->has_value() && (*wizard_anthropic)->access_token == "wizard-api-key",
          "interactive provider wizard stores a loadable credential");
 
-  auto const openai_wizard_root = temp_root() / "app-connect-openai-wizard";
-  std::error_code openai_wizard_remove_error;
-  std::filesystem::remove_all(openai_wizard_root, openai_wizard_remove_error);
+  auto const openai_wizard_root = create_empty_root("app-connect-openai-wizard");
   auto const openai_wizard_paths = app_test_paths(openai_wizard_root);
   std::istringstream openai_wizard_input("3\nwizard-openai-api-key\n");
   std::ostringstream openai_wizard_out;
@@ -943,9 +930,8 @@ void test_app_connect_provider_credentials_headlessly()
 
 void test_app_print_json_mode_outputs_runtime_events()
 {
-  auto const root = temp_root() / "app-print-json";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-print-json");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -1005,9 +991,8 @@ void test_app_print_json_mode_outputs_runtime_events()
 
 void test_app_print_json_mode_streams_provider_deltas_before_final_message()
 {
-  auto const root = temp_root() / "app-print-json-streaming";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("app-print-json-streaming");
+
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);

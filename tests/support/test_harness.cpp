@@ -130,6 +130,14 @@ std::filesystem::path temp_root()
   return std::filesystem::temp_directory_path() / ("ava_core_tests_" + build_name.string() + "_" + std::to_string(process_id));
 }
 
+std::filesystem::path create_empty_root(std::filesystem::path root_name)
+{
+  auto const root = temp_root() / root_name;
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  return root;
+}
+
 ScopedEnvVar::ScopedEnvVar(std::string name, std::string value) : name_(std::move(name))
 {
   if (char const* current = std::getenv(name_.c_str()))

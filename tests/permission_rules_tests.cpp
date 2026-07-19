@@ -54,9 +54,9 @@ ava::permissions::PermissionPrompt read_prompt(ava::permissions::PermissionRuleS
 
 void test_permission_rule_storage_add_list_remove()
 {
-  auto const root = temp_root() / "permission-rules-storage";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-rules-storage");
+
+  auto const workspace = root / "workspace";
   auto const store = test_store(root);
   auto const outside = root / "outside.txt";
 
@@ -91,9 +91,9 @@ void test_permission_rule_storage_add_list_remove()
 
 void test_permission_rule_precedence_denies_win()
 {
-  auto const root = temp_root() / "permission-rules-precedence";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-rules-precedence");
+
+  auto const workspace = root / "workspace";
   auto const store = test_store(root);
   auto const outside = root / "outside.txt";
 
@@ -139,9 +139,8 @@ ava::permissions::PermissionPrompt command_prompt(ava::permissions::PermissionRu
 
 void test_permission_rule_precedence_prefers_specific_same_scope_rules()
 {
-  auto const root = temp_root() / "permission-rules-specificity";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-rules-specificity");
+
   auto const store = test_store(root);
   auto const outside = root / "outside.txt";
 
@@ -174,9 +173,8 @@ void test_permission_rule_precedence_prefers_specific_same_scope_rules()
 
 void test_permission_rule_matches_command_operations_without_path_targets()
 {
-  auto const root = temp_root() / "permission-rules-command-operation";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-rules-command-operation");
+
   auto const store = test_store(root);
 
   auto allow_echo =
@@ -200,9 +198,8 @@ void test_permission_rule_matches_command_operations_without_path_targets()
 
 void test_repository_build_test_persistent_allows_are_rejected_but_denies_win()
 {
-  auto const root = temp_root() / "permission-rules-build-test";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-rules-build-test");
+
   auto const store = test_store(root);
 
   for (auto const& command : std::array{"ctest --test-dir build", "cmake --build=build", "cmake --build-and-test source build --build-generator Ninja",
@@ -258,9 +255,8 @@ void test_repository_build_test_persistent_allows_are_rejected_but_denies_win()
 
 void test_permission_rule_storage_fail_closed()
 {
-  auto const root = temp_root() / "permission-rules-corrupt";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-rules-corrupt");
+
   auto const store = test_store(root);
   write_file_with_mode(store.global_rules_file, "{\"schema_version\":2,\"rules\":[]}", S_IRUSR | S_IWUSR);
 
@@ -281,9 +277,8 @@ void test_permission_rule_storage_fail_closed()
 
 void test_permission_rule_broad_permissions_rejected()
 {
-  auto const root = temp_root() / "permission-rules-broad";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-rules-broad");
+
   auto const store = test_store(root);
   write_file_with_mode(store.global_rules_file, "{\"schema_version\":1,\"rules\":[]}", S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
@@ -293,9 +288,9 @@ void test_permission_rule_broad_permissions_rejected()
 
 void test_permission_rule_workspace_legacy_path_is_not_enforceable()
 {
-  auto const root = temp_root() / "permission-rules-legacy-workspace-path";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-rules-legacy-workspace-path");
+
+  auto const workspace = root / "workspace";
   auto const store = test_store(root);
   auto const outside = root / "outside.txt";
   ava::permissions::PersistentPermissionRule const forged{.rule_id = "permrule_forged",
@@ -320,9 +315,8 @@ void test_permission_rule_workspace_legacy_path_is_not_enforceable()
 
 void test_file_tools_reject_workspace_permission_rule_writes()
 {
-  auto const root = temp_root() / "permission-rules-file-tool-guard";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-rules-file-tool-guard");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace / ".ava");
 
@@ -336,9 +330,8 @@ void test_file_tools_reject_workspace_permission_rule_writes()
 
 void test_file_tools_reject_enforceable_permission_rule_writes()
 {
-  auto const root = temp_root() / "permission-rules-enforceable-file-tool-guard";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-rules-enforceable-file-tool-guard");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const store = ava::permissions::PermissionRuleStore{.global_rules_file = workspace / ".config" / "ava" / "permission-rules.json",
@@ -385,9 +378,8 @@ void test_file_tools_reject_enforceable_permission_rule_writes()
 
 void test_file_tools_reject_enforceable_permission_rule_writes_before_registration()
 {
-  auto const root = temp_root() / "permission-rules-unregistered-file-tool-guard";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-rules-unregistered-file-tool-guard");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const config_dir = workspace / ".config" / "ava";
@@ -411,9 +403,8 @@ void test_file_tools_reject_enforceable_permission_rule_writes_before_registrati
 
 void test_registered_permission_rule_paths_protect_agent_loop_context()
 {
-  auto const root = temp_root() / "permission-rules-agent-loop-file-tool-guard";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("permission-rules-agent-loop-file-tool-guard");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const store = ava::permissions::PermissionRuleStore{.global_rules_file = workspace / ".config" / "ava" / "permission-rules.json",

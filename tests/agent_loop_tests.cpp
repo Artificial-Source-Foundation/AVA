@@ -195,9 +195,8 @@ class BlockingBackgroundTransport final : public ava::provider::Transport
 
 void test_agent_loop_text_only_turn()
 {
-  auto const root = temp_root() / "agent-text";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-text");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "text"});
@@ -236,9 +235,8 @@ void test_agent_loop_text_only_turn()
 
 void test_agent_loop_model_capability_gating()
 {
-  auto const root = temp_root() / "agent-capabilities";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-capabilities");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "capabilities"});
@@ -269,9 +267,8 @@ void test_agent_loop_model_capability_gating()
 
 void test_agent_loop_rejects_persistent_store_without_append_route()
 {
-  auto const root = temp_root() / "agent-missing-append-route";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-missing-append-route");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "missing-route"});
@@ -291,9 +288,8 @@ void test_agent_loop_rejects_persistent_store_without_append_route()
 
 void test_agent_loop_rejects_replaced_history_before_provider_use()
 {
-  auto const root = temp_root() / "agent-history-path-replacement";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-history-path-replacement");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(
@@ -339,9 +335,8 @@ void test_agent_loop_rejects_replaced_history_before_provider_use()
 
 void test_agent_loop_image_attachment_load_failure_records_error()
 {
-  auto const root = temp_root() / "agent-image-load-failure";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-image-load-failure");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(
@@ -387,9 +382,8 @@ void test_agent_loop_image_attachment_load_failure_records_error()
 
 void test_agent_loop_usage_and_cost_persistence()
 {
-  auto const root = temp_root() / "agent-usage";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-usage");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::provider::OpenAIProvider const provider("https://api.example.test");
@@ -469,9 +463,8 @@ void test_agent_loop_usage_and_cost_persistence()
 
 void test_agent_loop_tool_turn_and_continuation()
 {
-  auto const root = temp_root() / "agent-tool";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-tool");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
@@ -552,9 +545,8 @@ void test_agent_loop_tool_turn_and_continuation()
 
 void test_agent_loop_task_subagent_runs_child_session()
 {
-  auto const root = temp_root() / "agent-task-subagent";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-task-subagent");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const session_root = root / "sessions";
@@ -672,9 +664,8 @@ void test_agent_loop_task_subagent_runs_child_session()
 
 void test_agent_loop_task_subagent_recovers_torn_child_before_resume()
 {
-  auto const root = temp_root() / "agent-task-subagent-torn-resume";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-task-subagent-torn-resume");
+
   auto const workspace = root / "workspace";
   auto const session_root = root / "sessions";
   std::filesystem::create_directories(workspace);
@@ -744,9 +735,8 @@ void test_agent_loop_task_subagent_recovers_torn_child_before_resume()
 
 void test_subagent_config_loads_project_definitions()
 {
-  auto const root = temp_root() / "subagent-config";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("subagent-config");
+
   auto const workspace = root / "workspace";
   auto const agent_dir = workspace / ".ava" / "agents";
   std::filesystem::create_directories(agent_dir);
@@ -787,9 +777,8 @@ void test_subagent_config_loads_project_definitions()
 
 void test_agent_loop_custom_subagent_definition_controls_prompt_and_tools()
 {
-  auto const root = temp_root() / "agent-task-custom-subagent";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-task-custom-subagent");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const session_root = root / "sessions";
@@ -838,9 +827,8 @@ void test_agent_loop_custom_subagent_definition_controls_prompt_and_tools()
 
 void test_agent_loop_background_task_starts_child_session()
 {
-  auto const root = temp_root() / "agent-task-background";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-task-background");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const session_root = root / "sessions";
@@ -982,9 +970,8 @@ void test_agent_loop_background_task_starts_child_session()
 
 void test_agent_loop_background_task_failure_records_parent_and_child_errors()
 {
-  auto const root = temp_root() / "agent-task-background-failure";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-task-background-failure");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const session_root = root / "sessions";
@@ -1076,9 +1063,8 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
 
 void test_agent_loop_background_task_cancel_requests_child_cancellation()
 {
-  auto const root = temp_root() / "agent-task-background-cancel";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-task-background-cancel");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const session_root = root / "sessions";
@@ -1155,9 +1141,8 @@ void test_agent_loop_background_task_cancel_requests_child_cancellation()
 
 void test_agent_loop_background_task_requires_registry_owner()
 {
-  auto const root = temp_root() / "agent-task-background-no-registry";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-task-background-no-registry");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "no-registry"});
@@ -1452,9 +1437,8 @@ void test_background_job_registry_destructor_stops_running_jobs()
 
 void test_agent_loop_permission_resolver_threads_to_tools()
 {
-  auto const root = temp_root() / "agent-permission-resolver";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-permission-resolver");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const outside_path = root / "outside.txt";
@@ -1518,8 +1502,8 @@ void test_agent_loop_permission_resolver_threads_to_tools()
          "agent loop exposes permission request ids on tool timeline entries");
 
   {
-    auto const bash_root = temp_root() / "agent-bash-ask-allow";
-    std::filesystem::remove_all(bash_root, remove_error);
+    auto const bash_root = create_empty_root("agent-bash-ask-allow");
+
     auto const bash_workspace = bash_root / "workspace";
     std::filesystem::create_directories(bash_workspace);
     ava::session::SessionStore bash_store(
@@ -1556,8 +1540,8 @@ void test_agent_loop_permission_resolver_threads_to_tools()
   }
 
   {
-    auto const bash_root = temp_root() / "agent-bash-ask-deny";
-    std::filesystem::remove_all(bash_root, remove_error);
+    auto const bash_root = create_empty_root("agent-bash-ask-deny");
+
     auto const bash_workspace = bash_root / "workspace";
     std::filesystem::create_directories(bash_workspace);
     ava::session::SessionStore bash_store(
@@ -1599,8 +1583,8 @@ void test_agent_loop_permission_resolver_threads_to_tools()
   }
 
   {
-    auto const bash_root = temp_root() / "agent-bash-ask-fail";
-    std::filesystem::remove_all(bash_root, remove_error);
+    auto const bash_root = create_empty_root("agent-bash-ask-fail");
+
     auto const bash_workspace = bash_root / "workspace";
     std::filesystem::create_directories(bash_workspace);
     ava::session::SessionStore bash_store(
@@ -1638,9 +1622,8 @@ void test_agent_loop_permission_resolver_threads_to_tools()
 
 void test_agent_loop_question_resolver_threads_to_tools()
 {
-  auto const root = temp_root() / "agent-question-resolver";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-question-resolver");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(
@@ -1679,9 +1662,8 @@ void test_agent_loop_question_resolver_threads_to_tools()
 
 void test_agent_loop_non_stream_response()
 {
-  auto const root = temp_root() / "agent-non-stream";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-non-stream");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "nonstream"});
@@ -1707,9 +1689,8 @@ void test_agent_loop_non_stream_response()
 
 void test_agent_loop_compaction_status_metadata()
 {
-  auto const root = temp_root() / "agent-compaction-status";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-compaction-status");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(
@@ -1743,9 +1724,8 @@ void test_agent_loop_compaction_status_metadata()
 
 void test_agent_loop_replays_steering_after_mid_turn_auto_compaction()
 {
-  auto const root = temp_root() / "agent-steering-compaction-replay";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-steering-compaction-replay");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(
@@ -1811,9 +1791,8 @@ void test_agent_loop_replays_steering_after_mid_turn_auto_compaction()
 
 void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction()
 {
-  auto const root = temp_root() / "agent-overflow-skip-auto";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-overflow-skip-auto");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(
@@ -1895,9 +1874,8 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction()
 
 void test_agent_loop_multiple_tools_and_denied_continuation()
 {
-  auto const root = temp_root() / "agent-multi-tools";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-multi-tools");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
@@ -1984,8 +1962,9 @@ void test_agent_loop_multiple_tools_and_denied_continuation()
            "agent loop keeps provider call ids attached to their immediate provider-order tool results");
   }
 
-  auto const denied_root = temp_root() / "agent-denied-continuation";
-  std::filesystem::remove_all(denied_root, remove_error);
+  auto const denied_root = create_empty_root("agent-denied-continuation");
+
+
   auto const denied_workspace = denied_root / "workspace";
   std::filesystem::create_directories(denied_workspace);
   ava::session::SessionStore denied_store(
@@ -2024,9 +2003,8 @@ void test_agent_loop_multiple_tools_and_denied_continuation()
 
 void test_agent_loop_parallel_read_search_preserves_provider_order_and_replay()
 {
-  auto const root = temp_root() / "agent-parallel-read-search";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-parallel-read-search");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace / "a");
   std::filesystem::create_directories(workspace / "b");
@@ -2138,9 +2116,8 @@ void test_agent_loop_parallel_read_search_preserves_provider_order_and_replay()
 
 void test_agent_loop_parallel_read_search_zero_max_workers_clamps_to_one()
 {
-  auto const root = temp_root() / "agent-parallel-zero-workers";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-parallel-zero-workers");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
@@ -2180,9 +2157,8 @@ void test_agent_loop_parallel_read_search_zero_max_workers_clamps_to_one()
 
 void test_agent_loop_parallel_read_search_falls_back_for_ask_preflight()
 {
-  auto const root = temp_root() / "agent-parallel-ask-fallback";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-parallel-ask-fallback");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const outside_path = root / "outside.txt";
@@ -2266,9 +2242,8 @@ void test_agent_loop_parallel_read_search_falls_back_for_ask_preflight()
 
 void test_agent_loop_parallel_read_search_active_cancellation_stops_unstarted_slots()
 {
-  auto const root = temp_root() / "agent-parallel-active-cancel";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-parallel-active-cancel");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   for (int index = 1; index <= 4; ++index)
@@ -2398,9 +2373,8 @@ void test_agent_loop_parallel_read_search_active_cancellation_stops_unstarted_sl
 
 void test_agent_loop_parallel_read_search_cancellation_stops_later_barrier()
 {
-  auto const root = temp_root() / "agent-parallel-cancel";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-parallel-cancel");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
@@ -2472,9 +2446,8 @@ void test_agent_loop_parallel_read_search_cancellation_stops_later_barrier()
 
 void test_agent_loop_cancellation_stops_later_sequential_tools()
 {
-  auto const root = temp_root() / "agent-multi-tools-cancel";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-multi-tools-cancel");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
@@ -2554,9 +2527,8 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
 
   {
-    auto const root = temp_root() / "agent-delta-before-start";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-delta-before-start");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     {
@@ -2606,9 +2578,8 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
   }
 
   {
-    auto const root = temp_root() / "agent-cross-iteration-duplicate-call-id";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-cross-iteration-duplicate-call-id");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     {
@@ -2655,9 +2626,8 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
   }
 
   {
-    auto const root = temp_root() / "agent-cross-prompt-duplicate-call-id";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-cross-prompt-duplicate-call-id");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     {
@@ -2715,9 +2685,8 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
   }
 
   {
-    auto const root = temp_root() / "agent-empty-call-id";
-    std::error_code remove_error;
-    std::filesystem::remove_all(root, remove_error);
+    auto const root = create_empty_root("agent-empty-call-id");
+
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(
@@ -2752,9 +2721,8 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
 
 void test_agent_loop_truncates_tool_context()
 {
-  auto const root = temp_root() / "agent-tool-truncate";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("agent-tool-truncate");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {

@@ -123,9 +123,9 @@ void test_process_arg_workspace_relative_detection()
   expect(ava::core::is_workspace_relative_process_arg(".ava/server.js"), "slash-containing relative process arg is workspace-relative");
   expect(ava::core::is_workspace_relative_process_arg("--loader=.ava/loader.js"), "flag value paths are checked for workspace-relative launches");
 
-  auto const root = temp_root() / "core-process-cwd";
-  std::error_code cleanup_error;
-  std::filesystem::remove_all(root, cleanup_error);
+  auto const root = create_empty_root("core-process-cwd");
+
+
   auto const workspace = root / "workspace";
   auto const global_config_dir = root / "config";
   std::filesystem::create_directories(workspace / ".ava");
@@ -138,9 +138,8 @@ void test_process_arg_workspace_relative_detection()
 
 void test_atomic_text_file_write()
 {
-  auto const root = temp_root() / "core-atomic-file";
-  std::error_code cleanup_error;
-  std::filesystem::remove_all(root, cleanup_error);
+  auto const root = create_empty_root("core-atomic-file");
+
   auto const target = root / "config" / "settings.json";
   auto first = ava::core::write_text_file_atomic(target, "{\"ok\":true}\n", "test config");
   expect(first.has_value(),
@@ -271,8 +270,9 @@ void test_permission_defaults()
   });
   expect(external_lsp.action == ava::permissions::PermissionAction::Ask, "external LSP diagnostic paths ask");
 
-  auto const symlink_workspace = temp_root() / "symlink-workspace";
-  auto const outside = temp_root() / "outside";
+  auto const root = create_empty_root("test_permission_defaults");
+  auto const symlink_workspace = root / "symlink-workspace";
+  auto const outside = root / "outside";
   std::filesystem::create_directories(symlink_workspace);
   std::filesystem::create_directories(outside);
   std::error_code symlink_error;

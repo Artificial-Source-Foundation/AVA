@@ -50,12 +50,10 @@ class CountingDifferentContentExactFileAccess final : public ava::tools::ExactFi
 
 void test_search_tools()
 {
-  std::error_code remove_error;
-  std::filesystem::remove_all(temp_root(), remove_error);
+  auto const root = create_empty_root("test_search_tools");
 
-  auto const workspace = temp_root() / "workspace";
+  auto const workspace = root / "workspace";
   ava::tools::ToolContext const context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
-
   expect(ava::tools::write_file(context, workspace / "src" / "main.cpp", "int main() { return 0; }\n").has_value(), "search setup writes source");
   expect(ava::tools::write_file(context, workspace / "root.cpp", "int root() { return 0; }\n").has_value(), "search setup writes root source");
   expect(ava::tools::write_file(context, workspace / "docs" / "plan.md", "hello ava\nhello again\n").has_value(), "search setup writes docs");
@@ -93,7 +91,7 @@ void test_search_tools()
   expect(result_capped && result_capped->paths.size() == 1 && result_capped->total_matches == 2 && result_capped->truncated,
          "glob_files reports result-count truncation while counting all matches");
 
-  auto const spill_dir = temp_root() / "session" / "spill";
+  auto const spill_dir = root / "session" / "spill";
   ava::tools::ToolContext const spilling_context{
       .workspace_dir = workspace, .spill_dir = spill_dir, .mode = ava::agent::Mode::Build, .current_tool_name = "glob", .current_call_id = "call/glob"};
   auto spilling_glob = ava::tools::glob_files(spilling_context, "**/*.cpp", ava::tools::GlobOptions{.max_results = 1});
@@ -211,7 +209,7 @@ void test_search_tools()
   auto no_ignore_secret = ava::tools::grep_files(context, "secret", "**/*", ava::tools::GrepOptions{.no_ignore = true});
   expect(no_ignore_secret && no_ignore_secret->matches.empty(), "grep_files no_ignore still skips files denied by read policy");
 
-  auto const outside_search_path = temp_root() / "outside-search.txt";
+  auto const outside_search_path = root / "outside-search.txt";
   {
     std::ofstream outside_file(outside_search_path, std::ios::binary | std::ios::trunc);
     outside_file << "outside hello\n";
@@ -332,9 +330,8 @@ void test_search_tools()
 
 void test_search_gitignore_rules()
 {
-  auto const root = temp_root() / "search-ignore";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("search-ignore");
+
   auto const workspace = root / "workspace";
   ava::tools::ToolContext const context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
 
@@ -450,9 +447,8 @@ void test_search_gitignore_rules()
 
 void test_secure_workspace_search_tools()
 {
-  auto const root = temp_root() / "secure-workspace-search";
-  std::error_code cleanup;
-  std::filesystem::remove_all(root, cleanup);
+  auto const root = create_empty_root("secure-workspace-search");
+
   auto const workspace = root / "workspace";
   auto const outside = root / "outside";
   std::filesystem::create_directories(workspace / "ordinary" / "nested");

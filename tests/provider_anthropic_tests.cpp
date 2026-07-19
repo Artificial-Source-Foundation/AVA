@@ -1025,7 +1025,9 @@ void test_anthropic_registry_and_env_auth()
   auto provider = registry.create("anthropic");
   expect(provider.has_value() && *provider, "builtin provider registry creates Anthropic provider");
 
-  auto const root = temp_root() / "anthropic-auth";
+  auto const root = create_empty_root("anthropic-auth");
+
+
   auto const config_home = root / "config";
   auto const state_home = root / "state";
   auto const data_home = root / "data";
@@ -1053,9 +1055,8 @@ void test_anthropic_registry_and_env_auth()
 
 void test_anthropic_agent_tool_loop_native_replay()
 {
-  auto const root = temp_root() / "anthropic-tool-loop";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("anthropic-tool-loop");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
@@ -1113,9 +1114,8 @@ void test_anthropic_agent_tool_loop_native_replay()
 
 void test_anthropic_agent_reasoning_native_replay()
 {
-  auto const root = temp_root() / "anthropic-reasoning-replay";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("anthropic-reasoning-replay");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
@@ -1190,9 +1190,8 @@ void test_anthropic_agent_reasoning_native_replay()
 
 void test_anthropic_agent_redacted_reasoning_native_replay()
 {
-  auto const root = temp_root() / "anthropic-redacted-reasoning-replay";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("anthropic-redacted-reasoning-replay");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
@@ -1247,9 +1246,8 @@ void test_anthropic_agent_redacted_reasoning_native_replay()
 
 void test_anthropic_agent_non_stream_reasoning_events()
 {
-  auto const root = temp_root() / "anthropic-non-stream-reasoning-events";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("anthropic-non-stream-reasoning-events");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
@@ -1296,9 +1294,8 @@ void test_anthropic_agent_non_stream_reasoning_events()
 
 void test_anthropic_agent_multi_tool_native_replay()
 {
-  auto const root = temp_root() / "anthropic-multi-tool-loop";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("anthropic-multi-tool-loop");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
@@ -1376,9 +1373,8 @@ void test_anthropic_agent_multi_tool_native_replay()
 
 void test_anthropic_agent_non_stream_tool_loop_native_replay()
 {
-  auto const root = temp_root() / "anthropic-non-stream-tool-loop";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
+  auto const root = create_empty_root("anthropic-non-stream-tool-loop");
+
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {

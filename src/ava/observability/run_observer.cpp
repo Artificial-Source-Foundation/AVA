@@ -686,10 +686,10 @@ QueuedJsonlObserverCounters QueuedJsonlRunObserver::counters() const noexcept
 {
   auto base = writer_.counters();
   std::lock_guard lock(mutex_);
-  return {base.written,
-          base.dropped,
-          base.failures,
-          base.bytes_written,
+  return {{base.written,
+           base.dropped,
+           base.failures,
+           base.bytes_written},
           queue_dropped_.load(std::memory_order_relaxed),
           queue_failures_.load(std::memory_order_relaxed),
           queue_bytes_,

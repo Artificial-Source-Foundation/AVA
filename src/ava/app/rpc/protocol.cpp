@@ -574,6 +574,8 @@ std::string rpc_error_code(ava::core::Error const& error)
       return "not_found";
     case ava::core::ErrorCategory::PermissionDenied:
       return "permission_denied";
+    case ava::core::ErrorCategory::Configuration:
+      return "configuration_error";
     case ava::core::ErrorCategory::Provider:
       return "provider_error";
     case ava::core::ErrorCategory::Session:

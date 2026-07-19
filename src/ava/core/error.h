@@ -14,6 +14,7 @@ enum class ErrorCategory
   Io,
   NotFound,
   PermissionDenied,
+  Configuration,
   Provider,
   Session,
   Tool,

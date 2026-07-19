@@ -1716,11 +1716,8 @@ void test_anchor_open()
   {
     std::string dp = info.path.string();
     int dir_n = dp[dp.length() - 1] - '0';
-    Dout(dc::notice, "dirlink = " << info.path);
     for (int file_n = 0; file_n < 6; ++file_n)
     {
-      Dout(dc::notice, "file_n = " << file_n);
-
       if (file_n == dir_n)
         continue;
       std::string N(1, static_cast<char>('0' + file_n));
@@ -1728,7 +1725,7 @@ void test_anchor_open()
 
       bool const crosses_boundary = info.crosses_boundary || (file_n / 2) != (dir_n / 2);
 
-      Dout(dc::notice, "Calling open_writable(anchor_set, " << fp << ", O_RDONLY | O_CLOEXEC)");
+      //Dout(dc::notice, "Calling open_writable(anchor_set, " << fp << ", O_RDONLY | O_CLOEXEC)");
       auto writable = ava::core::open_writable(anchor_set, fp, O_RDONLY | O_CLOEXEC);
       if (writable)
       {
@@ -1748,7 +1745,7 @@ void test_anchor_open()
               (crosses_boundary ? "that it would be denied with PermissionDenied!" : "that we would be able to open it!"));
       }
 
-      Dout(dc::notice, "Calling open_readable(anchor_set, " << fp << ", O_RDONLY | O_CLOEXEC)");
+      //Dout(dc::notice, "Calling open_readable(anchor_set, " << fp << ", O_RDONLY | O_CLOEXEC)");
       auto readable = ava::core::open_readable(anchor_set, fp, O_RDONLY | O_CLOEXEC);
       expect(readable.has_value() != crosses_boundary, "open_readable (dirlink): only opens files that do not cross anchor boundaries");
       if (readable.has_value() == crosses_boundary)

@@ -3,6 +3,7 @@
 #include "ava/app/command_registry.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/app/rpc/input.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/prompt_worker.h"
@@ -334,7 +335,7 @@ ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptio
   {
     runtime_options.permission_resolver = build_headless_permission_resolver(HeadlessPermissionPolicyOptions{});
   }
-  runtime_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(rpc::permission_rule_store_for_session(session),
+  runtime_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(session),
                                                                                                     std::move(runtime_options.permission_resolver));
   std::string const injected_provider_id = session.model.provider_id;
 

@@ -66,13 +66,6 @@ ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session co
   return ProviderHandle{.provider = nullptr, .owned = std::move(*provider)};
 }
 
-ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session)
-{
-  // Delegate to the single app-owned helper so the global/workspace rule-file
-  // paths are resolved in exactly one place across all callers.
-  return ava::app::permission_rule_store_for_session(session);
-}
-
 bool is_plugin_rpc_command(std::string_view type)
 {
   return type == "list_plugins" || type == "plugin_failures" || type == "inspect_plugin" || type == "install_plugin" || type == "remove_plugin" ||

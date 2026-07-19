@@ -4,6 +4,7 @@
 #include "ava/permissions/permission_rules.h"
 
 #include <string_view>
+#include <vector>
 
 namespace ava::app {
 
@@ -12,6 +13,10 @@ namespace ava::app {
 // tool calls, ACP hosts, RPC, print/line-shell) resolves the same global and
 // workspace rule files through this helper instead of duplicating path logic.
 [[nodiscard]] ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session);
+
+// Single app-owned authority boundary for local command planning. Keep this
+// short, stable list in sync for direct commands and model ToolContexts.
+[[nodiscard]] std::vector<std::filesystem::path> command_authority_roots_for_session(runtime::Session const& session);
 
 [[nodiscard]] ava::core::Result<runtime::Session> create_runtime_session_like(runtime::Session const& current, runtime::OpenOptions const& base_options);
 [[nodiscard]] ava::core::Result<runtime::Session> open_runtime_session_like(runtime::Session const& current, runtime::OpenOptions const& base_options,

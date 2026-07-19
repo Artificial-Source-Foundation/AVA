@@ -30,8 +30,6 @@ struct ProviderHandle
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::Session const& session, RpcCommand const& command);
 [[nodiscard]] ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session const& session, std::string_view injected_provider_id,
                                                                            ava::provider::Provider const& injected_provider);
-[[nodiscard]] ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session);
-
 [[nodiscard]] bool is_plugin_rpc_command(std::string_view type);
 [[nodiscard]] bool is_mcp_rpc_command(std::string_view type);
 [[nodiscard]] ava::core::Result<std::string> plugin_rpc_slash_command(RpcCommand const& command);

@@ -112,7 +112,13 @@ def start_fake_provider(executable, root, delay_ms=0, scenario="text-three", tar
 
 def configure_fake_model(root, supports_tools=False, input_modalities=None):
     config = root / "config" / "ava"
+    session_root = root / "state" / "ava" / "sessions"
     config.mkdir(parents=True, exist_ok=True)
+    session_root.mkdir(parents=True, exist_ok=True)
+    # Local model commands seal both roots. Keep the subprocess fixture's
+    # config and session-parent hierarchy owner-private, like AVA requires.
+    for directory in (root, root / "config", config, root / "state", root / "state" / "ava", session_root):
+        os.chmod(directory, 0o700)
     (config / "models.json").write_text(json.dumps({
         "default_provider": "moonshot",
         "default_model": "acp-fake",

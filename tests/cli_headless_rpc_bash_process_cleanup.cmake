@@ -28,8 +28,11 @@ set(RPC_ERR "${TEST_ROOT}/rpc-error.log")
 set(DRIVER_FILE "${TEST_ROOT}/driver.sh")
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
-file(MAKE_DIRECTORY "${WORKSPACE}" "${HOME_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}" "${DATA_DIR}")
-file(CHMOD "${TEST_ROOT}" "${WORKSPACE}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+file(MAKE_DIRECTORY "${WORKSPACE}" "${HOME_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}/ava/sessions" "${DATA_DIR}")
+# Command planning protects AVA config/session authority roots as well as the
+# workspace; keep this process-cleanup fixture's XDG layout owner-private.
+file(CHMOD "${TEST_ROOT}" "${WORKSPACE}" "${HOME_DIR}" "${CONFIG_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}" "${STATE_DIR}/ava" "${STATE_DIR}/ava/sessions" "${DATA_DIR}"
+     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 file(WRITE "${CONFIG_DIR}/ava/models.json"
      "{\"default_provider\":\"moonshot\",\"default_model\":\"ava-headless-fake\","
      "\"models\":[{\"provider\":\"moonshot\",\"id\":\"ava-headless-fake\",\"family\":\"fake\","

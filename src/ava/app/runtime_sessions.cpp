@@ -1,10 +1,26 @@
 #include "sys.h"
 #include "ava/app/runtime_sessions.h"
 
+#include <algorithm>
+#include <filesystem>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace ava::app {
 namespace {
+
+constexpr std::size_t kMaxCommandAuthorityRoots = 8;
+
+void append_command_authority_root(std::vector<std::filesystem::path>& roots, std::filesystem::path root)
+{
+  if (root.empty())
+    return;
+  root = root.lexically_normal();
+  if (std::ranges::find(roots, root) != roots.end() || roots.size() == kMaxCommandAuthorityRoots)
+    return;
+  roots.push_back(std::move(root));
+}
 
 runtime::OpenOptions lifecycle_options(runtime::OpenOptions options, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir)
 {
@@ -25,6 +41,17 @@ ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime:
   return ava::permissions::PermissionRuleStore{.global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
                                               .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
                                               .workspace_dir = session.workspace_dir};
+}
+
+std::vector<std::filesystem::path> command_authority_roots_for_session(runtime::Session const& session)
+{
+  std::vector<std::filesystem::path> roots;
+  roots.reserve(2);
+  append_command_authority_root(roots, session.paths.ava_config_dir);
+  // This is derived from the active exact SessionStore, never reconstructed
+  // from a session ID or reacquired by pathname.
+  append_command_authority_root(roots, session.store.session_path().parent_path());
+  return roots;
 }
 
 ava::core::Result<runtime::Session> create_runtime_session_at(runtime::OpenOptions base_options, std::filesystem::path const& workspace_root,

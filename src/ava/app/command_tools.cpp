@@ -217,7 +217,7 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
                                                                            .data_json = ava::tools::permission_audit_data_json(event)};
                                    return session.append_owned(std::move(entry));
                                  },
-                                 .ava_authority_roots = {session.paths.ava_config_dir, session.store.session_path().parent_path()},
+                                 .ava_authority_roots = command_authority_roots_for_session(session),
                                  .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
                                  .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
                                  .plugin_project_plugins_dir = include_project_resources ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{},

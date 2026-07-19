@@ -127,6 +127,9 @@ struct AgentLoopOptions
   bool announce_execution_after_permission = false;
   bool redact_permission_audit_arguments = false;
   bool require_explicit_file_permissions = false;
+  // Runtime-owned AVA config/state/session directories that command sealing
+  // must keep disjoint from the model command workspace.
+  std::vector<std::filesystem::path> ava_authority_roots = {};
   std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
   std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
   std::vector<SubagentDefinition> subagents = {};
@@ -214,6 +217,7 @@ class AgentLoop
                                                                  ava::provider::Transport& transport, ava::observability::TraceContext const& trace_context);
 
   AgentLoopOptions options_;
+  bool ava_authority_roots_over_limit_ = false;
 };
 
 }  // namespace ava::agent

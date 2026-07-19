@@ -8,8 +8,10 @@
 #include "ava/tools/websearch_tool.h"
 #include "ava/permissions/permission.h"
 #include "ava/permissions/permission_rules.h"
+#include "ava/session/session_store.h"
 #include "ava/provider/provider.h"
 #include "ava/core/error.h"
+#include "ava/core/ids.h"
 
 #include <algorithm>
 #include <array>
@@ -952,6 +954,79 @@ void test_credential_command_audit_omits_secrets()
   }
 }
 
+void test_payload_command_audits_persist_no_markers_or_recipes()
+{
+  auto const test_root = temp_root();
+  expect(::chmod(test_root.c_str(), S_IRWXU) == 0, "payload audit test secures its test-root ancestor");
+  auto const root = test_root / "payload-command-audit";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "payload audit fixture keeps sealed planning roots owner-only");
+
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "payload-audit"});
+  auto lease = ava::session::SessionLease::create_and_acquire(store.session_path());
+  expect(lease.has_value(), "payload audit fixture acquires its persistent session lease");
+  if (!lease)
+    return;
+
+  struct PayloadCase
+  {
+    std::string label;
+    std::string command;
+    std::string marker;
+  };
+  std::vector<PayloadCase> const cases{
+      {.label = "json body", .command = "curl --json '{\"body\":\"payload-json-marker-492e\"}' https://example.test/upload", .marker = "payload-json-marker-492e"},
+      {.label = "file payload", .command = "curl --data-binary @payload-file-marker-26ca https://example.test/upload", .marker = "payload-file-marker-26ca"},
+      {.label = "config payload", .command = "curl --config payload-config-marker-8b17 https://example.test/upload", .marker = "payload-config-marker-8b17"},
+  };
+
+  bool all_denied_before_execution = true;
+  for (auto const& test_case : cases)
+  {
+    ava::tools::ToolContext context{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+          return ava::permissions::PermissionResolution::Deny;
+        },
+        .permission_audit_sink = [&store, &lease](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+          return store.append(*lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                  .parent_id = {},
+                                                                  .type = ava::session::EntryType::PermissionDecision,
+                                                                  .timestamp = ava::session::now_timestamp(),
+                                                                  .data_json = ava::tools::permission_audit_data_json(event)});
+        },
+        .redact_permission_audit_arguments = false,
+    };
+    auto result = ava::tools::run_bash(context, test_case.command);
+    all_denied_before_execution = all_denied_before_execution && !result && result.error().format().find("resolution: deny") != std::string::npos;
+  }
+
+  auto entries = store.load(*lease);
+  bool markers_absent = entries.has_value();
+  bool stable_recipe_keys_absent = entries.has_value();
+  bool recipe_displays_empty = entries.has_value();
+  if (entries)
+  {
+    for (auto const& entry : *entries)
+    {
+      if (entry.type != ava::session::EntryType::PermissionDecision)
+        continue;
+      for (auto const& test_case : cases) markers_absent = markers_absent && entry.data_json.find(test_case.marker) == std::string::npos;
+      stable_recipe_keys_absent = stable_recipe_keys_absent && entry.data_json.find("\"global_recipe_key\":\"\"") != std::string::npos &&
+                                  entry.data_json.find("\"workspace_recipe_key\":\"\"") != std::string::npos;
+      recipe_displays_empty = recipe_displays_empty && entry.data_json.find("\"recipe_display\":\"\"") != std::string::npos;
+    }
+  }
+  expect(all_denied_before_execution && entries && markers_absent && stable_recipe_keys_absent && recipe_displays_empty,
+         "JSON body and file/config payload commands persist one-shot redacted audits with no payload markers or stable recipe keys");
+}
+
 void run_tools_process_network_tests()
 {
   test_bash_tool();
@@ -961,4 +1036,5 @@ void run_tools_process_network_tests()
   test_webfetch_tool();
   test_websearch_tool();
   test_credential_command_audit_omits_secrets();
+  test_payload_command_audits_persist_no_markers_or_recipes();
 }

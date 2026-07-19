@@ -20,13 +20,16 @@ namespace ava::containment {
 // Landlock access masks and validation are implemented in landlock.cpp.
 // Forward declarations for the detail helpers used here.
 namespace detail {
-[[nodiscard]] std::uint64_t handled_access_fs_mask() noexcept;
-[[nodiscard]] std::uint64_t writable_root_mask() noexcept;
+[[nodiscard]] std::uint64_t handled_access_fs_mask(std::uint32_t abi_version) noexcept;
+[[nodiscard]] std::uint64_t writable_root_mask(std::uint32_t abi_version) noexcept;
 [[nodiscard]] std::uint64_t read_execute_root_mask() noexcept;
+[[nodiscard]] std::uint64_t read_execute_file_root_mask() noexcept;
 [[nodiscard]] std::uint64_t read_only_root_mask() noexcept;
 std::uint64_t device_file_mask() noexcept;
-[[nodiscard]] ava::core::VoidResult validate_directory_root(std::filesystem::path const& path);
+[[nodiscard]] ava::core::VoidResult validate_synthetic_directory_root(std::filesystem::path const& path);
+[[nodiscard]] ava::core::VoidResult validate_writable_directory_root(std::filesystem::path const& path);
 [[nodiscard]] ava::core::VoidResult validate_device_root(std::filesystem::path const& path);
+[[nodiscard]] bool path_is_within(std::filesystem::path const& child, std::filesystem::path const& parent);
 void add_filesystem_rule(std::vector<ContainmentFilesystemRule>& rules, std::filesystem::path const& path, std::uint64_t mask);
 }  // namespace detail
 
@@ -80,11 +83,6 @@ void add_device_files(std::vector<ContainmentFilesystemRule>& rules, Containment
   }
 }
 
-[[nodiscard]] ava::core::VoidResult validate_writable_root(std::filesystem::path const& path)
-{
-  return detail::validate_directory_root(path);
-}
-
 }  // namespace
 
 std::uint32_t probe_landlock_abi_version() noexcept
@@ -116,7 +114,7 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
   {
     plan.availability = ContainmentAvailability::Unavailable;
     plan.profile_id = "ava-landlock-seccomp-v1";
-    plan.unavailable_reason = "seccomp network filter is not supported on this architecture";
+    plan.unavailable_reason = "seccomp network filter is not supported on this architecture or kernel";
     return plan;
   }
 
@@ -127,18 +125,21 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
   ContainmentFilesystemScope scope;
 
   // 1. Workspace: read/write/execute (the child builds and tests here).
+  //    The workspace may be 0755/0750 (group read/execute) but must reject
+  //    group/world write, symlink, or identity mismatch.
   auto const workspace = canonical_path(command_plan.workspace());
-  if (auto valid = validate_writable_root(workspace); !valid)
+  if (auto valid = detail::validate_writable_directory_root(workspace); !valid)
   {
     plan.availability = ContainmentAvailability::Unavailable;
     plan.profile_id = "ava-landlock-seccomp-v1";
     plan.unavailable_reason = "workspace root failed containment validation";
     return plan;
   }
-  detail::add_filesystem_rule(rules, workspace, detail::writable_root_mask());
+  detail::add_filesystem_rule(rules, workspace, detail::writable_root_mask(plan.landlock_abi_version));
   scope.workspace_writable = true;
 
-  // 2. Synthetic environment roots: read/write (HOME, XDG, TMP).
+  // 2. Synthetic environment roots: read/write (HOME, XDG, TMP). These must
+  //    be exact current-user 0700 (synthetic, private, owner-only).
   auto const& env = preparation.environment();
   for (auto const* root : {&env.synthetic_roots().home, &env.synthetic_roots().xdg_config_home, &env.synthetic_roots().xdg_cache_home,
                            &env.synthetic_roots().xdg_data_home, &env.synthetic_roots().xdg_state_home, &env.synthetic_roots().tmpdir})
@@ -146,14 +147,14 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
     auto const canonical = canonical_path(root->canonical_path);
     if (canonical.empty())
       continue;
-    if (auto valid = validate_writable_root(canonical); !valid)
+    if (auto valid = detail::validate_synthetic_directory_root(canonical); !valid)
     {
       plan.availability = ContainmentAvailability::Unavailable;
       plan.profile_id = "ava-landlock-seccomp-v1";
       plan.unavailable_reason = "synthetic environment root failed containment validation";
       return plan;
     }
-    detail::add_filesystem_rule(rules, canonical, detail::writable_root_mask());
+    detail::add_filesystem_rule(rules, canonical, detail::writable_root_mask(plan.landlock_abi_version));
   }
   scope.synthetic_environment_writable = true;
 
@@ -202,23 +203,29 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
     }
   }
 
-  // 7. Recipe path arguments: read/write (build/test directories need write
-  //    access for artifacts). Only directories are added; file arguments get
-  //    read/execute.
+  // 7. Recipe path arguments: directories get writable access; regular files
+  //    get file-valid read/execute only (never READ_DIR). Redundant rules
+  //    already covered by the writable workspace are omitted to avoid
+  //    stale or conflicting masks.
   if (command_plan.classification().recipe)
   {
     for (auto const& path_arg : command_plan.classification().recipe->path_arguments)
     {
       if (path_arg.canonical_path.empty())
         continue;
+      // Omit recipe paths already beneath the writable workspace.
+      if (detail::path_is_within(path_arg.canonical_path, workspace))
+        continue;
       if (path_is_directory(path_arg.canonical_path))
       {
-        if (auto valid = validate_writable_root(path_arg.canonical_path); valid)
-          detail::add_filesystem_rule(rules, path_arg.canonical_path, detail::writable_root_mask());
+        if (auto valid = detail::validate_writable_directory_root(path_arg.canonical_path); valid)
+          detail::add_filesystem_rule(rules, path_arg.canonical_path, detail::writable_root_mask(plan.landlock_abi_version));
       }
       else
       {
-        detail::add_filesystem_rule(rules, path_arg.canonical_path, detail::read_execute_root_mask());
+        // Regular file: use file-valid rights only (READ_FILE | EXECUTE),
+        // never READ_DIR which Landlock rejects on non-directory paths.
+        detail::add_filesystem_rule(rules, path_arg.canonical_path, detail::read_execute_file_root_mask());
       }
     }
   }
@@ -229,10 +236,12 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
   // Assemble the plan.
   plan.availability = ContainmentAvailability::Available;
   plan.profile_id = "ava-landlock-seccomp-v1";
-  plan.handled_access_fs = detail::handled_access_fs_mask();
+  plan.handled_access_fs = detail::handled_access_fs_mask(plan.landlock_abi_version);
   plan.filesystem_rules = std::move(rules);
   plan.filesystem_scope = scope;
-  plan.network_filter_installed = !network_enabled;
+  // The filter is planned (not yet installed). Installation happens in the
+  // child and is verified by the parent before exec.
+  plan.network_filter_planned = !network_enabled;
   return plan;
 }
 
@@ -255,7 +264,7 @@ ava::core::VoidResult apply_containment_in_child(DevelopmentContainmentPlan cons
   // Install the seccomp network filter only when network is denied.
   // For network-enabled commands, no_new_privs is still set but the seccomp
   // network filter is omitted; filesystem containment is retained.
-  if (plan.network_filter_installed)
+  if (plan.network_filter_planned)
   {
     if (auto result = apply_seccomp_network_filter(); !result)
       return result;
@@ -266,9 +275,37 @@ ava::core::VoidResult apply_containment_in_child(DevelopmentContainmentPlan cons
 
 void close_inherited_fds_except(int keep_fd_a, int keep_fd_b) noexcept
 {
+  // Use close_range(2) where available for O(1) bulk closure, then fall back
+  // to a bounded loop. The handshake fds (keep_fd_a, keep_fd_b) are never
+  // closed; everything else above stderr is.
+  int const lo = STDERR_FILENO + 1;
+  auto const close_range_available = [](int low, int high) {
+    return ::syscall(SYS_close_range, static_cast<unsigned int>(low), static_cast<unsigned int>(high), 0u) == 0;
+  };
+
+  // Order the keep fds so we can close around them.
+  int first_keep = keep_fd_a;
+  int second_keep = keep_fd_b;
+  if (first_keep > second_keep)
+    std::swap(first_keep, second_keep);
+
+  // Attempt close_range in three segments around the keep fds. These are
+  // best-effort: if close_range is unavailable (ENOSYS), the bounded loop
+  // below catches any remaining non-keep fds.
+  if (first_keep > lo)
+    close_range_available(lo, first_keep - 1);
+  if (second_keep > first_keep + 1)
+    close_range_available(first_keep + 1, second_keep - 1);
+  // Close everything above the second keep fd (covers very high-numbered
+  // descriptors beyond the sysconf bound).
+  static_cast<void>(::syscall(SYS_close_range, static_cast<unsigned int>(second_keep + 1), ~0u, 0u));
+
+  // Bounded fallback: iterate and close any remaining non-keep fds. This
+  // catches cases where close_range is unavailable (ENOSYS) or a segment
+  // failed. The bound prevents scanning millions of entries.
   long const open_max = ::sysconf(_SC_OPEN_MAX);
   int const max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
-  for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd)
+  for (int fd = lo; fd < max_fd; ++fd)
   {
     if (fd == keep_fd_a || fd == keep_fd_b)
       continue;
@@ -291,8 +328,11 @@ std::string containment_summary(DevelopmentContainmentPlan const& plan)
   summary += std::to_string(plan.landlock_abi_version);
   summary += ",\"network_allowed\":";
   summary += plan.network_allowed ? "true" : "false";
-  summary += ",\"network_filter\":";
-  summary += plan.network_filter_installed ? "installed" : "not_installed";
+  // Before fork, the filter is "planned", not "installed". The parent only
+  // reports "installed" after verifying the child's successful handshake.
+  summary += ",\"network_filter\":\"";
+  summary += plan.network_filter_planned ? "planned" : "not_required";
+  summary += "\"";
   summary += ",\"filesystem\":{\"workspace_writable\":";
   summary += plan.filesystem_scope.workspace_writable ? "true" : "false";
   summary += ",\"synthetic_environment_writable\":";

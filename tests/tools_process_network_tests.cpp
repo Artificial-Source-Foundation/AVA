@@ -365,7 +365,8 @@ void test_injected_command_executor()
   expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
          "injected command workspace is owner-only for sealed command planning");
   auto executor = std::make_shared<RecordingCommandExecutor>();
-  executor->result = ava::tools::CommandExecutionResult{.exit_code = 0, .output = "one\ntwo\nthree\n"};
+  executor->result = ava::tools::CommandExecutionResult{
+      .exit_code = 0, .output = "one\ntwo\nthree\n", .containment_applied = false, .containment_profile_id = {}, .containment_network_mode = {}};
   int prompts = 0;
   std::string permission_fingerprint;
   ava::tools::ToolContext context{

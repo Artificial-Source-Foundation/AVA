@@ -542,6 +542,19 @@ PermissionDecision decide(CommandPermissionMetadata const& metadata)
   {
     return decision(PermissionAction::Allow, "sealed command is a standard inspection recipe", PermissionRisk::Low);
   }
+  // A mutable command whose required containment plan is unavailable is
+  // downgraded to Critical risk. It may run uncontained only after an explicit
+  // one-shot approval, with metadata/audit stating unavailable/uncontained.
+  // This preserves user authority: unavailable containment must not look like
+  // ordinary Sensitive/Standard containment.
+  bool const needs_containment = metadata.executes_mutable_project_code || metadata.containment_status == CommandContainmentStatus::Unavailable;
+  if (needs_containment && !metadata.containment_available && metadata.containment_status != CommandContainmentStatus::NotRequired)
+  {
+    return decision(
+        PermissionAction::Ask,
+        "sealed command executes mutable project code; containment is unavailable and the command will run uncontained after explicit one-shot approval",
+        PermissionRisk::Critical);
+  }
   if (metadata.level == ava::command::CommandLevel::Standard)
   {
     if (metadata.containment_available)

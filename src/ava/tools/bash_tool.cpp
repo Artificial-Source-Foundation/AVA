@@ -412,7 +412,7 @@ ava::core::Result<ava::command::CommandBuildOptions> local_command_build_options
                                            .trusted_home = account->first,
                                            .startup_path = std::move(startup_path),
                                            .shell = "/bin/sh",
-                                           .ava_authority_roots = {},
+                                           .ava_authority_roots = context.ava_authority_roots,
                                            .environment = ava::command::CommandEnvironmentOptions{.profile_id = "ava-local-bash-prompt-v1",
                                                                                                   .user = account->second,
                                                                                                   .logname = account->second,
@@ -452,7 +452,9 @@ ava::tools::CommandExecutionPlanMetadata execution_metadata(ava::command::Comman
                                                   .executor_identity_verified = false,
                                                   .containment_available = permission.containment_available,
                                                   .containment_profile_id = permission.containment_profile_id,
-                                                  .containment_network_allowed = permission.containment_network_allowed};
+                                                  .containment_network_allowed = permission.containment_network_allowed,
+                                                  .containment_applied = false,
+                                                  .containment_network_mode = {}};
 }
 
 bool group_exists(pid_t pgid)
@@ -650,6 +652,16 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
           event.outcome = outcome == "canceled" ? ava::observability::TraceOutcome::Canceled
                                                 : (outcome == "success" ? ava::observability::TraceOutcome::Success : ava::observability::TraceOutcome::Error);
           event.fields = {{.key = "tool", .value = "bash"}, {.key = "output_bytes", .value = std::to_string(result.output_bytes)}};
+          // Containment status is included only after parent verification.
+          // The profile ID is safe to emit; secret paths are never included.
+          if (result.containment_applied)
+          {
+            event.fields.push_back({.key = "containment_applied", .value = "true"});
+            if (!result.containment_profile_id.empty())
+              event.fields.push_back({.key = "containment_profile", .value = result.containment_profile_id});
+            if (!result.containment_network_mode.empty())
+              event.fields.push_back({.key = "containment_network", .value = result.containment_network_mode});
+          }
         });
     }
   } trace{context, trace_process_call_id, process_outcome, result};
@@ -697,6 +709,11 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     result.truncated = executed->truncated;
     result.byte_limited = result.byte_limited || executed->truncated;
     result.totals_known = !executed->truncated;
+    // Containment status is reported by the delegated executor only after it
+    // verifies the child installed containment before exec.
+    result.containment_applied = executed->containment_applied;
+    result.containment_profile_id = executed->containment_profile_id;
+    result.containment_network_mode = executed->containment_network_mode;
     finalize_output(result, options, saw_output, previous_was_newline, newline_count);
     if (!result.totals_known)
     {
@@ -996,6 +1013,11 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     }
     status_read.reset();
     control_write.reset();
+    // Containment was successfully applied in the child before exec. Report
+    // this only after parent verification, never in pre-permission metadata.
+    result.containment_applied = true;
+    result.containment_profile_id = containment_plan->profile_id;
+    result.containment_network_mode = containment_plan->network_allowed ? "allowed" : "denied";
   }
   else
   {

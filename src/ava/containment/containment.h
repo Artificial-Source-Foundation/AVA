@@ -59,7 +59,10 @@ struct DevelopmentContainmentPlan
   std::string unavailable_reason;
   std::uint32_t landlock_abi_version = 0;
   bool network_allowed = false;
-  bool network_filter_installed = false;
+  // True when the plan calls for a network-denial seccomp filter (planned,
+  // not yet installed). The filter is actually installed only in the child;
+  // the parent verifies success before reporting containment_applied.
+  bool network_filter_planned = false;
   ContainmentFilesystemScope filesystem_scope;
 
   // Child-side application data. These are not exposed in metadata/audit.
@@ -76,6 +79,9 @@ struct DevelopmentContainmentPlan
 [[nodiscard]] std::uint32_t probe_landlock_abi_version() noexcept;
 
 // Probe whether the seccomp network filter is supported on this architecture.
+// This performs a non-mutating kernel query (SECCOMP_GET_ACTION_AVAIL) to
+// verify that the kernel supports SECCOMP_RET_ERRNO. Returns false when
+// seccomp filter mode or the required action is unavailable.
 [[nodiscard]] bool seccomp_network_filter_supported() noexcept;
 
 // Prepare a development containment plan from the exact command preparation,

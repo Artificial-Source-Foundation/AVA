@@ -720,6 +720,16 @@ ava::core::Result<SealedCommandContext> discover_command_context(CommandIntent c
     return std::unexpected(std::move(trusted_home.error()));
   if (auto valid = validate_safe_directory(*trusted_home, true, "trusted command discovery home"); !valid)
     return std::unexpected(std::move(valid.error()));
+  // Reject a workspace that equals or is an ancestor of the trusted real
+  // home. Ordinary projects nested under home are allowed, but making the
+  // entire home the workspace would expose personal directories to contained
+  // mutable commands and bypass the synthetic-environment boundary.
+  if (is_within(trusted_home->canonical_path, workspace_metadata->canonical_path))
+  {
+    return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied,
+                                         "command workspace must not equal or contain the trusted real home directory", "workspace",
+                                         workspace_metadata->canonical_path.string()));
+  }
   if (options.ava_authority_roots.size() > options.limits.max_path_entries)
     return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "AVA authority root list has too many entries"));
   std::vector<PathMetadata> ava_authority_roots;
@@ -731,6 +741,14 @@ ava::core::Result<SealedCommandContext> discover_command_context(CommandIntent c
       return std::unexpected(std::move(authority.error()));
     if (auto valid = validate_safe_directory(*authority, true, "AVA authority root"); !valid)
       return std::unexpected(std::move(valid.error()));
+    // Reject any workspace overlap with AVA authority roots. Containment must
+    // never make authority roots writable or readable through a broader
+    // workspace rule.
+    if (is_within(authority->canonical_path, workspace_metadata->canonical_path) || is_within(workspace_metadata->canonical_path, authority->canonical_path))
+    {
+      return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied, "command workspace must not overlap with any AVA authority root",
+                                           "workspace", workspace_metadata->canonical_path.string()));
+    }
     ava_authority_roots.push_back(std::move(*authority));
   }
 

@@ -889,6 +889,10 @@ std::string permission_request_payload_json(std::string_view resolver_request_id
     json += ',';
     json += string_field_json("backend_maximum_scope", ava::command::to_string(metadata.backend_maximum_scope));
     json += ',';
+    json += string_field_json("containment_profile_id", metadata.containment_profile_id);
+    json += ',';
+    json += bool_field_json("containment_network_allowed", metadata.containment_network_allowed);
+    json += ',';
     json += string_field_json("environment_profile_id", metadata.environment_profile_id);
     json += ',';
     json += string_field_json("environment_digest", metadata.environment_digest);

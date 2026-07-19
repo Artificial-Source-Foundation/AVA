@@ -131,6 +131,12 @@ struct ToolContext
   // Strict adapters share one descriptor-anchored root across permission
   // identity resolution and the actual built-in file operation.
   std::shared_ptr<SecureWorkspace> secure_workspace = nullptr;
+  // Actual AVA config/state/sessions/auth authority directories supplied from
+  // the runtime session. These are passed to command sealing so workspace
+  // overlap with authority roots is rejected, and to containment so authority
+  // roots are never made writable through a broader workspace rule. Direct
+  // test contexts may leave this empty.
+  std::vector<std::filesystem::path> ava_authority_roots = {};
   // ToolContext is copied into dispatchers/workers, so immutable adapters share
   // session ownership rather than storing lifetime-sensitive references.
   std::shared_ptr<ExactFileAccess const> exact_file_access = nullptr;

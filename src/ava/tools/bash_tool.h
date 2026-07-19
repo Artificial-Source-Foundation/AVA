@@ -37,6 +37,15 @@ struct BashResult
   std::size_t omitted_lines = 0;
   std::string output;
   std::filesystem::path spill_path;
+  // Containment status reported only after the parent verifies the child
+  // installed containment before exec. Pre-permission metadata never claims
+  // Active; these fields remain default (not applied) when containment is
+  // unavailable or not required.
+  bool containment_applied = false;
+  std::string containment_profile_id;
+  // "denied" when a network filter was installed; "allowed" when network was
+  // explicitly enabled; empty when no containment was applied.
+  std::string containment_network_mode;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

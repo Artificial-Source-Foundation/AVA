@@ -135,6 +135,7 @@ foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
 endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(ava_tests.containment PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.tool_scheduler PROPERTIES TIMEOUT 30)
 
 add_test(NAME ava_cli.rpc_broken_pipe_subprocess COMMAND ava_rpc_broken_pipe_subprocess_test)

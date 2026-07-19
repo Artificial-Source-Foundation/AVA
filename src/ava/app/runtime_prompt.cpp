@@ -5,6 +5,7 @@
 #include "ava/app/runtime_prompt.h"
 #include "ava/app/runtime_reasoning.h"
 #include "ava/app/runtime_retry.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/tools/file_tools.h"
@@ -857,10 +858,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
     runtime_transport = &*retry_transport;
     runtime_options.enable_transport_retries = false;
   }
-  ava::permissions::register_enforceable_permission_rule_files(
-      ava::permissions::PermissionRuleStore{.global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-                                            .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-                                            .workspace_dir = session.workspace_dir});
+  ava::permissions::register_enforceable_permission_rule_files(permission_rule_store_for_session(session));
 
   auto expanded_user_message = runtime_options.expand_prompt_file_references ? expand_prompt_file_references(session, user_message, runtime_options)
                                                                              : ava::core::Result<std::string>(user_message);
@@ -1030,6 +1028,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
         return {};
       },
       .permission_resolver = runtime_options.permission_resolver,
+      .command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(permission_rule_store_for_session(session)),
       .question_resolver = runtime_options.question_resolver,
       .cancel_requested = [&runtime_options,
                            &sink_error] { return sink_error.has_value() || (runtime_options.cancel_requested && runtime_options.cancel_requested()); },

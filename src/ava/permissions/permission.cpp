@@ -459,11 +459,53 @@ bool contains_secret_like_argument(std::string_view value)
   return std::ranges::any_of(kCredentialPatterns, [lower](std::string_view pattern) { return lower.find(pattern) != std::string::npos; });
 }
 
+bool is_payload_bearing_long_option(std::string_view lower)
+{
+  // curl/wget request-body, form, config, and query options whose argument is
+  // an arbitrary payload that may carry secrets. Stable recipe minting must
+  // refuse these conservatively (favoring false positives) rather than parsing
+  // bodies. Matches the lowercased long option name with or without =value.
+  static constexpr std::array<std::string_view, 15> kPayloadOptions{
+      // curl request-body and form options
+      "--data",          "--data-ascii",    "--data-binary",  "--data-raw",   "--data-urlencode",
+      "--json",          "--form",          "--form-string", "--url-query",  "--config",
+      // wget request-body options (--header is also credential-bearing but is
+      // listed here so wget header payloads are refused too)
+      "--post-data",     "--post-file",     "--body-data",    "--body-file",  "--header",
+  };
+  auto const eq = lower.find('=');
+  auto const name = eq != std::string_view::npos ? lower.substr(0, eq) : lower;
+  return std::ranges::find(kPayloadOptions, name) != kPayloadOptions.end();
+}
+
+bool is_payload_bearing_short_option(std::string_view arg)
+{
+  // Short-option clusters for curl payload/config flags: -d (--data),
+  // -F (--form), -K (--config). Check every character to catch separate
+  // (-d value), concatenated (-dvalue), and combined (-vd) forms.
+  if (arg.size() < 2 || arg[0] != '-' || arg[1] == '-')
+    return false;
+  for (std::size_t index = 1; index < arg.size(); ++index)
+  {
+    switch (arg[index])
+    {
+      case 'd':  // curl --data
+      case 'F':  // curl --form
+      case 'K':  // curl --config
+        return true;
+      default:
+        break;
+    }
+  }
+  return false;
+}
+
 bool contains_secret_like_arguments(std::vector<std::string> const& argv)
 {
   return std::ranges::any_of(argv, [](std::string const& argument) {
     auto const lower = lowercase(argument);
-    return is_credential_bearing_long_option(lower) || is_credential_bearing_short_option(argument) || contains_secret_like_argument(argument);
+    return is_credential_bearing_long_option(lower) || is_credential_bearing_short_option(argument) ||
+           is_payload_bearing_long_option(lower) || is_payload_bearing_short_option(argument) || contains_secret_like_argument(argument);
   });
 }
 

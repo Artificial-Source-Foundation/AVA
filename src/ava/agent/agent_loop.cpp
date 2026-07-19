@@ -863,6 +863,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
                                        .spill_dir = store.session_path().parent_path() / "spill",
                                        .mode = options_.mode,
                                        .permission_resolver = options_.permission_resolver,
+                                       .command_deny_preflight = options_.command_deny_preflight,
                                        .permission_audit_sink = append_permission_decision_locked,
                                        .progress_sink = [this](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
                                          return publish_tool_progress(

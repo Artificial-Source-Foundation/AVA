@@ -3,6 +3,7 @@
 #include "ava/app/acp/session.h"
 #include "ava/app/runtime_credentials.h"
 #include "ava/app/runtime_model.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/session/attachments.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/ids.h"
@@ -314,9 +315,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> AcpSessionHost
     }
   }
 
-  ava::permissions::PermissionRuleStore const rule_store{.global_rules_file = options_.paths.ava_config_dir / "permission-rules.json",
-                                                         .workspace_rules_file = session_.workspace_dir / ".ava" / "permission-rules.json",
-                                                         .workspace_dir = session_.workspace_dir};
+  auto const rule_store = permission_rule_store_for_session(session_);
   auto persistent = ava::permissions::match_persistent_permission_rule(rule_store, prompt);
   if (!persistent)
   {
@@ -327,13 +326,18 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> AcpSessionHost
   }
   if (*persistent)
   {
+    // match_persistent_permission_rule is the shared authoritative matcher: it
+    // already rejected non-authoritative Allow rules (unverified executors,
+    // Unavailable containment, legacy schema, repository-controlled build/test
+    // text). The MCP/session restriction below is the only ACP-local gate that
+    // remains; a redundant command_prompt_allows_persistent_allow gate here
+    // would discard a valid verified/contained exact Critical
+    // critical_acknowledged rule, so it must not be reapplied.
     bool const session_mcp_allow_requires_exact_command =
         session_.mcp_config && acp_mcp_operation(prompt.operation) && (*persistent)->action == PermissionAction::Allow;
     bool const exact_session_mcp_allow =
         !session_mcp_allow_requires_exact_command || (!(*persistent)->command.empty() && (*persistent)->command == prompt.command);
-    bool const sealed_command_allow =
-        prompt.operation != ava::permissions::Operation::RunCommand || ava::permissions::command_prompt_allows_persistent_allow(prompt);
-    if ((*persistent)->action == PermissionAction::Deny || (exact_session_mcp_allow && sealed_command_allow))
+    if ((*persistent)->action == PermissionAction::Deny || exact_session_mcp_allow)
     {
       auto const resolution = (*persistent)->action == PermissionAction::Allow ? PermissionResolution::Allow : PermissionResolution::Deny;
       PermissionResolutionDecision decision(resolution, (*persistent)->reason);

@@ -138,6 +138,11 @@ struct AgentLoopOptions
   std::function<ava::core::VoidResult(ToolProgressEntry const&)> on_tool_progress = nullptr;
   std::function<ava::core::VoidResult(ava::provider::StreamEvent const&)> on_stream_event = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
+  // Deny-only, non-interactive policy check used before a model-initiated
+  // command's backend auto-Allow. Mirrors ToolContext::command_deny_preflight
+  // so model tool calls receive the same persistent-Deny enforcement as direct
+  // app commands. It must never prompt or return reusable authority.
+  ava::permissions::PermissionResolver command_deny_preflight = nullptr;
   QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;

@@ -20,6 +20,13 @@ runtime::OpenOptions lifecycle_options(runtime::OpenOptions options, std::filesy
 
 }  // namespace
 
+ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session)
+{
+  return ava::permissions::PermissionRuleStore{.global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
+                                              .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
+                                              .workspace_dir = session.workspace_dir};
+}
+
 ava::core::Result<runtime::Session> create_runtime_session_at(runtime::OpenOptions base_options, std::filesystem::path const& workspace_root,
                                                             std::filesystem::path const& current_dir)
 {

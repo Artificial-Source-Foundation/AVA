@@ -68,11 +68,9 @@ ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session co
 
 ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session)
 {
-  return ava::permissions::PermissionRuleStore{
-      .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-      .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-      .workspace_dir = session.workspace_dir,
-  };
+  // Delegate to the single app-owned helper so the global/workspace rule-file
+  // paths are resolved in exactly one place across all callers.
+  return ava::app::permission_rule_store_for_session(session);
 }
 
 bool is_plugin_rpc_command(std::string_view type)

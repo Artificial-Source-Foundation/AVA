@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/agent/tool_result.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/search_tools.h"
@@ -207,10 +208,7 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
                                  .spill_dir = session.store.session_path().parent_path() / "spill",
                                  .mode = session.mode,
                                  .permission_resolver = std::move(permission_resolver),
-                                 .command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(
-                                     ava::permissions::PermissionRuleStore{.global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-                                                                           .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-                                                                           .workspace_dir = session.workspace_dir}),
+                                 .command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(permission_rule_store_for_session(session)),
                                  .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
                                    auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                            .parent_id = "",

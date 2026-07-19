@@ -736,15 +736,19 @@ void test_redacted_diagnostics_and_value_equality()
   auto raw_plan = command::seal_command_plan(*raw_intent, fixture.options());
   auto direct_summary = first ? first->plan().redacted_summary() : std::string{};
   auto raw_summary = raw_plan ? raw_plan->redacted_summary() : std::string{};
-  expect(first && second && *first == *second && direct_summary.find("secret-tool") == std::string::npos &&
-             direct_summary.find("argv-secret") == std::string::npos && direct_summary.find(fixture.workspace.string()) == std::string::npos && raw_plan &&
-             raw_plan->display_json().find("raw-shell-secret") != std::string::npos && raw_summary.find("raw-shell-secret") == std::string::npos &&
-             command::to_string(static_cast<command::CommandRuntimeMode>(999)) == "unknown" &&
-             command::to_string(static_cast<command::CommandLevel>(999)) == "unknown" &&
-             command::to_string(static_cast<command::CommandFamily>(999)) == "unknown" &&
-             command::to_string(static_cast<command::InteractiveScope>(999)) == "unknown",
-         "prepared environments compare by value, display JSON remains local-sensitive, diagnostics redact request payloads, and unknown enum values stay "
-         "explicit");
+  expect(first && second, "direct command preparation succeeds for both invocations");
+  expect(first && second && *first == *second, "prepared command environments compare by value across invocations");
+  expect(direct_summary.find("secret-tool") == std::string::npos, "redacted summary excludes the resolved executable name");
+  expect(direct_summary.find("argv-secret") == std::string::npos, "redacted summary excludes secret-bearing argv values");
+  expect(direct_summary.find(fixture.workspace.string()) == std::string::npos, "redacted summary excludes the local workspace path");
+  expect(raw_plan.has_value(), "raw shell plan seals successfully");
+  expect(raw_plan && raw_plan->display_json().find("raw-shell-secret") != std::string::npos,
+         "raw shell display JSON retains local-sensitive request payloads for local diagnostics");
+  expect(raw_summary.find("raw-shell-secret") == std::string::npos, "redacted summary redacts raw shell request payloads");
+  expect(command::to_string(static_cast<command::CommandRuntimeMode>(999)) == "unknown", "unknown CommandRuntimeMode stays explicit as 'unknown'");
+  expect(command::to_string(static_cast<command::CommandLevel>(999)) == "unknown", "unknown CommandLevel stays explicit as 'unknown'");
+  expect(command::to_string(static_cast<command::CommandFamily>(999)) == "unknown", "unknown CommandFamily stays explicit as 'unknown'");
+  expect(command::to_string(static_cast<command::InteractiveScope>(999)) == "unknown", "unknown InteractiveScope stays explicit as 'unknown'");
 }
 
 void test_unsafe_executables_and_ancestors_are_rejected_without_blocking()

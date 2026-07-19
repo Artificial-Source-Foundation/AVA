@@ -5,6 +5,7 @@
 #include "ava/app/display_settings.h"
 #include "ava/app/interactive_run_queue.h"
 #include "ava/app/line_shell.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/app/onboarding.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/reasoning_controls.h"
@@ -51,6 +52,9 @@
 namespace {
 
 namespace version = ava::core::version;
+
+// Delegate to the single app-owned helper so path logic is not duplicated.
+using ava::app::permission_rule_store_for_session;
 
 constexpr std::uintmax_t kExternalEditorMaxBytes = 1024 * 1024;
 
@@ -690,15 +694,6 @@ ava::core::Result<std::string> save_scoped_model_cycle(ava::app::runtime::Sessio
   if (scope_to_save->size() == 1)
     return std::string("scoped model cycle saved: 1 model enabled");
   return std::string("scoped model cycle saved: ") + std::to_string(scope_to_save->size()) + " models enabled";
-}
-
-ava::permissions::PermissionRuleStore permission_rule_store_for_session(ava::app::runtime::Session const& session)
-{
-  return ava::permissions::PermissionRuleStore{
-      .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-      .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-      .workspace_dir = session.workspace_dir,
-  };
 }
 
 ava::permissions::PermissionRuleMode permission_rule_mode_for_agent_mode(ava::agent::Mode mode)

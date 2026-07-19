@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_permissions.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/json.h"
@@ -47,15 +48,6 @@ struct PermissionAuditRow
   std::string workspace_recipe_key;
   std::string effective_allowed_scopes;
 };
-
-ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session)
-{
-  return ava::permissions::PermissionRuleStore{
-      .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-      .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-      .workspace_dir = session.workspace_dir,
-  };
-}
 
 std::string permissions_usage()
 {

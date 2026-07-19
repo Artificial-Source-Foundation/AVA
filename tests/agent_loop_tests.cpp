@@ -10,6 +10,7 @@
 #include "ava/session/session_store.h"
 #include "ava/session/validation.h"
 #include "ava/permissions/permission.h"
+#include "ava/permissions/permission_rules.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"

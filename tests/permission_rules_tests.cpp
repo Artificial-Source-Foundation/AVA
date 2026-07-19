@@ -304,6 +304,7 @@ void test_critical_command_allow_requires_explicit_acknowledgement()
   ava::permissions::CommandPermissionMetadata critical;
   critical.level = ava::command::CommandLevel::Critical;
   critical.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  critical.containment_status = ava::permissions::CommandContainmentStatus::Available;
   prompt.command_metadata = critical;
 
   auto missing_ack =
@@ -628,6 +629,62 @@ void test_legacy_command_allows_do_not_authorize_sealed_critical_or_unverified_p
   verify_legacy_allow_blocked(unverified, "unverified delegated");
 }
 
+void test_critical_acknowledged_rejects_unavailable_containment()
+{
+  auto const root = temp_root() / "permission-rules-critical-unavailable";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto const command = std::string("curl https://example.test/releases");
+  auto acknowledged =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Allow,
+                                                                                                    .operation = ava::permissions::Operation::RunCommand,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "bash",
+                                                                                                    .target_path = {},
+                                                                                                    .command = command,
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = true,
+                                                                                                    .reason = "exact critical allow for uncontained network command",
+                                                                                                    .actor = "test"});
+  expect(acknowledged.has_value(), "critical_acknowledged allow can be created for exact curl command text");
+  auto prompt = command_prompt(store, command);
+
+  // Unavailable containment: an uncontained network Sensitive command
+  // escalated to Critical must remain one-shot even with a stored
+  // critical_acknowledged rule.
+  ava::permissions::CommandPermissionMetadata unavailable;
+  unavailable.level = ava::command::CommandLevel::Critical;
+  unavailable.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  unavailable.executor_identity_verified = true;
+  unavailable.containment_status = ava::permissions::CommandContainmentStatus::Unavailable;
+  prompt.command_metadata = unavailable;
+  auto unavailable_match = ava::permissions::match_persistent_permission_rule(store, prompt);
+  expect(unavailable_match && !*unavailable_match,
+         "critical_acknowledged rules are not authoritative when command metadata containment is Unavailable, regardless of executes_mutable_project_code");
+
+  // Available containment with verified executor: the exact critical
+  // acknowledgement remains authoritative.
+  ava::permissions::CommandPermissionMetadata available = unavailable;
+  available.containment_status = ava::permissions::CommandContainmentStatus::Available;
+  prompt.command_metadata = available;
+  auto available_match = ava::permissions::match_persistent_permission_rule(store, prompt);
+  expect(available_match && *available_match && (*available_match)->rule_id == acknowledged->rule_id,
+         "critical_acknowledged rules remain authoritative when containment is Available");
+
+  // Unverified delegated executor: even with identity unverified, the
+  // containment check independently blocks authority.
+  ava::permissions::CommandPermissionMetadata unverified = unavailable;
+  unverified.executor_identity_verified = false;
+  unverified.containment_status = ava::permissions::CommandContainmentStatus::UnverifiedDelegatedExecutor;
+  prompt.command_metadata = unverified;
+  auto unverified_match = ava::permissions::match_persistent_permission_rule(store, prompt);
+  expect(unverified_match && !*unverified_match,
+         "critical_acknowledged rules are not authoritative when command metadata containment is UnverifiedDelegatedExecutor");
+}
+
 void test_permission_rule_storage_fail_closed()
 {
   auto const root = temp_root() / "permission-rules-corrupt";
@@ -817,6 +874,7 @@ void test_registered_permission_rule_paths_protect_agent_loop_context()
 void run_permission_rules_tests()
 {
   test_permission_rule_storage_add_list_remove();
+  test_critical_acknowledged_rejects_unavailable_containment();
   test_legacy_command_allows_are_removed_one_at_a_time();
   test_permission_rule_precedence_denies_win();
   test_permission_rule_precedence_prefers_specific_same_scope_rules();

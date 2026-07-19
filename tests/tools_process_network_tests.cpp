@@ -903,6 +903,55 @@ void test_websearch_tool()
 }
 }  // namespace
 
+void test_credential_command_audit_omits_secrets()
+{
+  // Local (non-ACP) audit surfaces must never persist unique secret values
+  // from credential-bearing commands. When secret detection refuses recipe
+  // minting, recipe_display is empty and the audit command field is replaced
+  // with a redacted marker.
+  struct SecretCase
+  {
+    std::string_view label;
+    std::string command;
+    std::string secret;
+  };
+  std::vector<SecretCase> const cases{
+      {"curl -u separate", "curl -u alice:s3cr3t https://example.test/releases", "s3cr3t"},
+      {"curl --user= concat", "curl --user=alice:s3cr3t https://example.test/releases", "s3cr3t"},
+      {"curl -H Authorization", "curl -H 'Authorization: Bearer tok_audit_1' https://example.test/releases", "tok_audit_1"},
+      {"curl --header= concat", "curl --header='Authorization: Bearer tok_audit_2' https://example.test/releases", "tok_audit_2"},
+      {"wget --http-password", "wget --http-user=alice --http-password=wgetpass https://example.test/releases", "wgetpass"},
+      {"url query token", "curl 'https://example.test/api?token=query_audit_secret'", "query_audit_secret"},
+  };
+
+  for (auto const& test_case : cases)
+  {
+    ava::tools::PermissionAuditEvent event;
+    event.permission_request_id = std::string("permreq_") + std::string(test_case.label);
+    event.operation = ava::permissions::Operation::RunCommand;
+    event.mode = ava::agent::Mode::Build;
+    event.tool_name = "bash";
+    event.action = ava::permissions::PermissionAction::Ask;
+    event.reason = "command requires approval";
+    event.risk = ava::permissions::PermissionRisk::High;
+    event.command = test_case.command;
+    event.resolution_source = "policy";
+    ava::permissions::CommandPermissionMetadata metadata;
+    // Simulate a contained Sensitive command whose secret detection refused
+    // recipe minting: recipe keys and display are empty.
+    metadata.level = ava::command::CommandLevel::Sensitive;
+    metadata.global_recipe_key = {};
+    metadata.workspace_recipe_key = {};
+    metadata.recipe_display = {};
+    event.command_metadata = std::move(metadata);
+    auto const json = ava::tools::permission_audit_data_json(event);
+    expect(json.find(test_case.secret) == std::string::npos,
+           std::string("local audit JSON must not contain credential secret for: ") + std::string(test_case.label));
+    expect(json.find("<redacted one-shot command>") != std::string::npos || json.find("\"command\":\"\"") != std::string::npos,
+           std::string("local audit JSON must redact credential-bearing one-shot command for: ") + std::string(test_case.label));
+  }
+}
+
 void run_tools_process_network_tests()
 {
   test_bash_tool();
@@ -911,4 +960,5 @@ void run_tools_process_network_tests()
   test_sealed_process_group_sentinel_and_grace();
   test_webfetch_tool();
   test_websearch_tool();
+  test_credential_command_audit_omits_secrets();
 }

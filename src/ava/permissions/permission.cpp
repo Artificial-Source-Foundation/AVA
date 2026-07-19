@@ -397,20 +397,74 @@ RecipeArgument recipe_argument(std::string_view value, std::filesystem::path con
   return RecipeArgument{.kind = "workspace_path", .value = relative, .display = "workspace:" + (relative.empty() ? "." : relative)};
 }
 
+bool is_credential_bearing_long_option(std::string_view lower)
+{
+  // Matches the lowercased long option name, with or without a trailing
+  // =value suffix.  Covers separate (--user value) and --option=value forms.
+  static constexpr std::array<std::string_view, 27> kCredentialOptions{
+      // curl/wget credential-bearing long options
+      "--user",          "--proxy-user",    "--header",         "--proxy-header",  "--cookie",
+      "--oauth2-bearer", "--aws-sigv4",     "--cert",           "--key",           "--pass",
+      "--cacert",        "--form-string",
+      // wget-specific credential options
+      "--http-user",     "--http-password", "--http-header",    "--proxy-password",
+      // general credential-like option names
+      "--token",         "--secret",        "--password",       "--api-key",
+      "--api_key",       "--apikey",        "--authorization",  "--auth",
+      "--credential",    "--bearer",        "--signature",
+  };
+  auto const eq = lower.find('=');
+  auto const name = eq != std::string_view::npos ? lower.substr(0, eq) : lower;
+  return std::ranges::find(kCredentialOptions, name) != kCredentialOptions.end();
+}
+
+bool is_credential_bearing_short_option(std::string_view arg)
+{
+  // Short options are case-sensitive in curl/wget.  Check every character in
+  // a short-option cluster to catch separate (-u value), concatenated
+  // (-uvalue), and combined (-vu) forms conservatively.
+  if (arg.size() < 2 || arg[0] != '-' || arg[1] == '-')
+    return false;
+  for (std::size_t index = 1; index < arg.size(); ++index)
+  {
+    switch (arg[index])
+    {
+      case 'u':  // curl --user
+      case 'H':  // curl --header
+      case 'b':  // curl --cookie
+      case 'E':  // curl --cert
+      case 'U':  // curl --proxy-user
+        return true;
+      default:
+        break;
+    }
+  }
+  return false;
+}
+
 bool contains_secret_like_argument(std::string_view value)
 {
   auto const lower = lowercase(value);
-  return lower.find("token=") != std::string::npos || lower.find("secret=") != std::string::npos || lower.find("password=") != std::string::npos ||
-         lower.find("api_key=") != std::string::npos || lower.find("apikey=") != std::string::npos || lower.find("authorization=") != std::string::npos ||
-         (lower.find("://") != std::string::npos && lower.find('@') != std::string::npos);
+  // URL userinfo (scheme://user:pass@host)
+  if (lower.find("://") != std::string::npos && lower.find('@') != std::string::npos)
+    return true;
+  // Credential-like key=value patterns: covers URL query fields (?token=...),
+  // inline assignments, and --option=value where the option name itself is
+  // credential-bearing.
+  static constexpr std::array<std::string_view, 13> kCredentialPatterns{
+      "token=",        "secret=",        "password=",   "passwd=",    "api_key=",
+      "apikey=",       "api-key=",       "access_token=", "authorization=", "auth=",
+      "credential=",   "bearer=",        "signature=",
+  };
+  return std::ranges::any_of(kCredentialPatterns, [lower](std::string_view pattern) { return lower.find(pattern) != std::string::npos; });
 }
 
 bool contains_secret_like_arguments(std::vector<std::string> const& argv)
 {
-  static constexpr std::array<std::string_view, 8> kSecretOptions{"--token",   "--secret", "--password",      "--api-key",
-                                                                  "--api_key", "--apikey", "--authorization", "--header"};
-  return std::ranges::any_of(argv, contains_secret_like_argument) ||
-         std::ranges::any_of(argv, [](std::string const& argument) { return std::ranges::find(kSecretOptions, lowercase(argument)) != kSecretOptions.end(); });
+  return std::ranges::any_of(argv, [](std::string const& argument) {
+    auto const lower = lowercase(argument);
+    return is_credential_bearing_long_option(lower) || is_credential_bearing_short_option(argument) || contains_secret_like_argument(argument);
+  });
 }
 
 struct StableRecipeIdentity

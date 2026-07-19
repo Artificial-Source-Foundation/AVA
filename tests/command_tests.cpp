@@ -773,6 +773,59 @@ void test_unsafe_executables_and_ancestors_are_rejected_without_blocking()
          "unsafe executable modes, link counts, writable ancestors, and FIFO candidates are rejected through nonblocking metadata inspection");
 }
 
+void test_credential_bearing_commands_never_mint_recipes()
+{
+  CommandFixture fixture("credential-recipe-refusal");
+  for (auto const name : {"curl", "wget", "cmake"}) fixture.executable(name);
+  ava::permissions::CommandContainmentInfo const contained{.available = true, .profile_id = "ava-development-v1", .network_allowed = false};
+  auto metadata = [&](ava::core::Result<command::CommandPlan> const& plan) {
+    return plan ? ava::permissions::command_permission_metadata(*plan, contained) : ava::permissions::CommandPermissionMetadata{};
+  };
+
+  struct SecretCase
+  {
+    std::string label;
+    std::vector<std::string> argv;
+    std::string secret_value;
+  };
+  std::vector<SecretCase> const cases{
+      {"curl -u separate", {"curl", "-u", "alice:s3cr3t", "https://example.test/releases"}, "s3cr3t"},
+      {"curl --user= concat", {"curl", "--user=alice:s3cr3t", "https://example.test/releases"}, "s3cr3t"},
+      {"curl -H Authorization", {"curl", "-H", "Authorization: Bearer tok_abc123", "https://example.test/releases"}, "tok_abc123"},
+      {"curl --header= concat", {"curl", "--header=Authorization: Bearer tok_abc123", "https://example.test/releases"}, "tok_abc123"},
+      {"curl --cookie", {"curl", "--cookie", "session=cooksecret", "https://example.test/releases"}, "cooksecret"},
+      {"curl --oauth2-bearer", {"curl", "--oauth2-bearer", "bear_tok", "https://example.test/releases"}, "bear_tok"},
+      {"curl --proxy-user", {"curl", "--proxy-user", "proxy:proxypass", "https://example.test/releases"}, "proxypass"},
+      {"curl --cert --key --pass", {"curl", "--cert", "client.pem", "--key", "client.key", "--pass", "certpass", "https://example.test/releases"}, "certpass"},
+      {"curl --aws-sigv4", {"curl", "--aws-sigv4", "aws:amz:region:service", "https://example.test/releases"}, "amz"},
+      {"wget --http-user --http-password", {"wget", "--http-user", "alice", "--http-password", "wpass", "https://example.test/releases"}, "wpass"},
+      {"wget --http-header", {"wget", "--http-header", "Authorization: Bearer tok_wget", "https://example.test/releases"}, "tok_wget"},
+      {"url query token", {"curl", "https://example.test/api?token=querysecret"}, "querysecret"},
+      {"url query api_key", {"curl", "https://example.test/api?api_key=keysecret"}, "keysecret"},
+      {"url query access_token", {"curl", "https://example.test/api?access_token=accsecret"}, "accsecret"},
+      {"url userinfo", {"curl", "https://alice:userpass@example.test/releases"}, "userpass"},
+  };
+
+  bool all_refused = true;
+  for (auto const& test_case : cases)
+  {
+    auto plan = command::seal_command_plan(*command::CommandIntent::structured(test_case.argv), fixture.options("cred-profile"));
+    auto const m = metadata(plan);
+    all_refused = all_refused && m.global_recipe_key.empty() && m.workspace_recipe_key.empty() && m.recipe_display.empty();
+    if (!m.global_recipe_key.empty() || !m.workspace_recipe_key.empty() || !m.recipe_display.empty())
+    {
+      expect(false, std::string("recipe minting must be refused for credential-bearing command: ") + std::string(test_case.label));
+    }
+  }
+
+  // A non-secret curl URL must still mint a recipe when contained.
+  auto safe_curl = command::seal_command_plan(*command::CommandIntent::structured({"curl", "https://example.test/releases"}), fixture.options("cred-profile"));
+  auto const safe_metadata = metadata(safe_curl);
+  expect(all_refused && safe_curl && !safe_metadata.global_recipe_key.empty() && !safe_metadata.recipe_display.empty(),
+         "credential-bearing curl/wget commands with separate short, concatenated long, --option=value, cookie, oauth2, proxy-user, cert/key/pass, aws-sigv4, wget "
+         "auth, and URL query/userinfo forms never mint recipe keys or display, while a plain curl URL still does");
+}
+
 }  // namespace
 
 void run_command_tests()
@@ -791,6 +844,7 @@ void run_command_tests()
   test_workspace_origin_capabilities_apply_to_every_family();
   test_ancestor_freshness_detects_mode_and_replacement();
   test_stable_recipe_identity_is_scope_aware_and_secret_free();
+  test_credential_bearing_commands_never_mint_recipes();
   test_recipe_argument_domains_and_unavailable_containment();
   test_redacted_diagnostics_and_value_equality();
   test_unsafe_executables_and_ancestors_are_rejected_without_blocking();

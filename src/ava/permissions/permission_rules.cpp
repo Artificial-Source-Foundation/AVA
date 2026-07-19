@@ -1239,10 +1239,15 @@ bool command_allow_is_authoritative(PersistentPermissionRule const& rule, Permis
     return command_prompt_allows_persistent_allow(prompt) && command_recipe_matches(rule, prompt);
   // Never recover authority for repository-controlled build/test text from an
   // old or manually forged acknowledgement, regardless of current plan
-  // classification.
+  // classification.  An exact Critical acknowledgement is authoritative only
+  // when the command is verified and contained: Unavailable or
+  // UnverifiedDelegatedExecutor containment means the command will run
+  // uncontained, so uncontained network-Sensitive commands escalated to
+  // Critical must remain one-shot regardless of executes_mutable_project_code.
   return rule.critical_acknowledged && !is_repository_controlled_build_or_test_command(rule.command) &&
          metadata.level == ava::command::CommandLevel::Critical && metadata.executor_identity_verified &&
-         !(metadata.executes_mutable_project_code && metadata.containment_status != CommandContainmentStatus::Available) && !rule.command.empty() &&
+         metadata.containment_status != CommandContainmentStatus::Unavailable &&
+         metadata.containment_status != CommandContainmentStatus::UnverifiedDelegatedExecutor && !rule.command.empty() &&
          rule.command == prompt.command;
 }
 

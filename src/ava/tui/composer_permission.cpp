@@ -139,7 +139,8 @@ std::string key_pill(std::string_view key)
 
 bool permission_choice_is_allow(PermissionPromptChoice choice)
 {
-  return choice == PermissionPromptChoice::Allow || choice == PermissionPromptChoice::AllowRemember;
+  return choice == PermissionPromptChoice::Allow || choice == PermissionPromptChoice::AllowSession ||
+         choice == PermissionPromptChoice::AllowRemember;
 }
 
 bool permission_choice_is_remember(PermissionPromptChoice choice)
@@ -152,9 +153,11 @@ bool permission_choice_can_be_remembered(PermissionPromptChoice choice, bool all
   return permission_choice_is_allow(choice) ? allow_remember_available : deny_remember_available;
 }
 
-std::vector<PermissionPromptChoice> permission_choices(bool allow_remember_available, bool deny_remember_available)
+std::vector<PermissionPromptChoice> permission_choices(bool allow_session_available, bool allow_remember_available, bool deny_remember_available)
 {
   std::vector<PermissionPromptChoice> choices{PermissionPromptChoice::Deny, PermissionPromptChoice::Allow};
+  if (allow_session_available)
+    choices.push_back(PermissionPromptChoice::AllowSession);
   if (deny_remember_available)
     choices.push_back(PermissionPromptChoice::DenyRemember);
   if (allow_remember_available)
@@ -162,9 +165,10 @@ std::vector<PermissionPromptChoice> permission_choices(bool allow_remember_avail
   return choices;
 }
 
-PermissionPromptChoice next_permission_choice(PermissionPromptChoice selected, bool allow_remember_available, bool deny_remember_available)
+PermissionPromptChoice next_permission_choice(PermissionPromptChoice selected, bool allow_session_available, bool allow_remember_available,
+                                              bool deny_remember_available)
 {
-  auto choices = permission_choices(allow_remember_available, deny_remember_available);
+  auto choices = permission_choices(allow_session_available, allow_remember_available, deny_remember_available);
   auto const found = std::ranges::find(choices, selected);
   if (found == choices.end())
     return choices.front();
@@ -172,9 +176,10 @@ PermissionPromptChoice next_permission_choice(PermissionPromptChoice selected, b
   return choices[(index + 1) % choices.size()];
 }
 
-PermissionPromptChoice previous_permission_choice(PermissionPromptChoice selected, bool allow_remember_available, bool deny_remember_available)
+PermissionPromptChoice previous_permission_choice(PermissionPromptChoice selected, bool allow_session_available, bool allow_remember_available,
+                                                  bool deny_remember_available)
 {
-  auto choices = permission_choices(allow_remember_available, deny_remember_available);
+  auto choices = permission_choices(allow_session_available, allow_remember_available, deny_remember_available);
   auto const found = std::ranges::find(choices, selected);
   if (found == choices.end())
     return choices.front();
@@ -198,6 +203,8 @@ PermissionPromptInputAction resolve_permission_choice_action(PermissionPromptCho
   {
     case PermissionPromptChoice::Allow:
       return PermissionPromptInputAction::ResolveAllow;
+    case PermissionPromptChoice::AllowSession:
+      return PermissionPromptInputAction::ResolveAllowSession;
     case PermissionPromptChoice::Deny:
       return PermissionPromptInputAction::ResolveDeny;
     case PermissionPromptChoice::AllowRemember:
@@ -208,7 +215,8 @@ PermissionPromptInputAction resolve_permission_choice_action(PermissionPromptCho
   return PermissionPromptInputAction::ResolveDeny;
 }
 
-std::string permission_dock_actions(PermissionPromptChoice selected, bool allow_remember_available, bool deny_remember_available, std::size_t width)
+std::string permission_dock_actions(PermissionPromptChoice selected, bool allow_session_available, bool allow_remember_available,
+                                    bool deny_remember_available, std::size_t width)
 {
   auto compose = [&](bool compact, bool shortest) {
     std::string text = "  ";
@@ -219,6 +227,8 @@ std::string permission_dock_actions(PermissionPromptChoice selected, bool allow_
     };
     append(shortest ? "[D]" : "[Reject]", PermissionPromptChoice::Deny);
     append(shortest ? "[A]" : "[Allow once]", PermissionPromptChoice::Allow);
+    if (allow_session_available)
+      append(shortest ? "[S]" : "[Allow session]", PermissionPromptChoice::AllowSession);
     if (deny_remember_available)
       append(shortest ? "[DR]" : "[Reject rule]", PermissionPromptChoice::DenyRemember);
     if (allow_remember_available)
@@ -235,15 +245,35 @@ std::string permission_dock_actions(PermissionPromptChoice selected, bool allow_
   return fit_line_preserving_sgr(candidates.back(), width);
 }
 
-std::string permission_dock_keys(bool allow_remember_available, bool deny_remember_available, std::size_t width)
+std::string permission_dock_keys(bool allow_session_available, bool allow_remember_available, bool deny_remember_available, std::size_t width)
 {
+  if (allow_session_available)
+  {
+    auto const remember_label =
+        allow_remember_available && deny_remember_available ? "remember selected" : (deny_remember_available ? "remember reject" : "remember allow");
+    std::array const candidates = {
+        std::string("  ") + key_pill("A") + " allow once  " + key_pill("S") + " allow session  " + key_pill("D") + " reject  " + key_pill("R") + " " +
+            remember_label + "  " + key_pill("Enter") + " confirm  " + key_pill("Esc") + " reject",
+        std::string("  ") + key_pill("A") + " allow  " + key_pill("S") + " session  " + key_pill("D") + " reject  " + key_pill("R") + " remember  " +
+            key_pill("Enter") + " ok  " + key_pill("Esc") + " no",
+        std::string("  ") + key_pill("A") + "=allow " + key_pill("S") + "=session " + key_pill("D") + "=reject " + key_pill("R") + "=remember",
+    };
+
+    for (auto const& candidate : candidates)
+    {
+      if (terminal_text_columns(candidate) <= width)
+        return candidate;
+    }
+    return fit_line_preserving_sgr(candidates.back(), width);
+  }
+
   if (allow_remember_available || deny_remember_available)
   {
     auto const remember_label =
         allow_remember_available && deny_remember_available ? "remember selected" : (deny_remember_available ? "remember reject" : "remember allow");
     std::array const candidates = {
-        std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " reject  " + key_pill("R") + " " + remember_label + "  " + key_pill("Enter") +
-            " confirm  " + key_pill("Esc") + " reject",
+        std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " reject  " + key_pill("R") + " " + remember_label + "  " +
+            key_pill("Enter") + " confirm  " + key_pill("Esc") + " reject",
         std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject  " + key_pill("R") + " remember  " + key_pill("Enter") + " ok  " +
             key_pill("Esc") + " no",
         std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=reject " + key_pill("R") + "=remember",
@@ -527,7 +557,8 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
 
   if (max_lines == 1)
   {
-    lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.allow_remember_available, prompt.deny_remember_available, width));
+    lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.allow_session_available, prompt.allow_remember_available,
+                                            prompt.deny_remember_available, width));
     return lines;
   }
 
@@ -535,7 +566,8 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
 
   if (max_lines == 2)
   {
-    lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.allow_remember_available, prompt.deny_remember_available, width));
+    lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.allow_session_available, prompt.allow_remember_available,
+                                          prompt.deny_remember_available, width));
     return lines;
   }
 
@@ -544,7 +576,8 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
 
   if (max_lines == 3)
   {
-    lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.allow_remember_available, prompt.deny_remember_available, width));
+    lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.allow_session_available, prompt.allow_remember_available,
+                                            prompt.deny_remember_available, width));
     return lines;
   }
 
@@ -570,10 +603,11 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
     lines.insert(lines.end(), diff_lines.begin(), diff_lines.end());
   }
 
-  lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.allow_remember_available, prompt.deny_remember_available, width));
+  lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.allow_session_available, prompt.allow_remember_available,
+                                          prompt.deny_remember_available, width));
   if (lines.size() < max_lines)
   {
-    lines.push_back(permission_dock_keys(prompt.allow_remember_available, prompt.deny_remember_available, width));
+    lines.push_back(permission_dock_keys(prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width));
   }
   return lines;
 }
@@ -701,8 +735,8 @@ PermissionPromptRememberAvailability permission_prompt_remember_availability(ava
       .deny_remember_available = rule_storage_available};
 }
 
-PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event, bool allow_remember_available,
-                                                           bool deny_remember_available)
+PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event, bool allow_session_available,
+                                                           bool allow_remember_available, bool deny_remember_available)
 {
   switch (event.key)
   {
@@ -710,6 +744,10 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
       if (event.character == 'a' || event.character == 'A')
       {
         return {.selected_choice = PermissionPromptChoice::Allow, .action = PermissionPromptInputAction::ResolveAllow};
+      }
+      if ((event.character == 's' || event.character == 'S') && allow_session_available)
+      {
+        return {.selected_choice = PermissionPromptChoice::AllowSession, .action = PermissionPromptInputAction::ResolveAllowSession};
       }
       if (event.character == 'd' || event.character == 'D')
       {
@@ -732,17 +770,19 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
     case Key::Enter:
       return {.selected_choice = selected_choice, .action = detail::resolve_permission_choice_action(selected_choice)};
     case Key::Tab:
-      return {.selected_choice = detail::next_permission_choice(selected_choice, allow_remember_available, deny_remember_available),
+      return {.selected_choice = detail::next_permission_choice(selected_choice, allow_session_available, allow_remember_available, deny_remember_available),
               .action = PermissionPromptInputAction::Redraw};
     case Key::ArrowLeft:
     case Key::ArrowUp:
     case Key::MouseWheelUp:
-      return {.selected_choice = detail::previous_permission_choice(selected_choice, allow_remember_available, deny_remember_available),
+      return {.selected_choice = detail::previous_permission_choice(selected_choice, allow_session_available, allow_remember_available,
+                                                                    deny_remember_available),
               .action = PermissionPromptInputAction::Redraw};
     case Key::ArrowRight:
     case Key::ArrowDown:
     case Key::MouseWheelDown:
-      return {.selected_choice = detail::next_permission_choice(selected_choice, allow_remember_available, deny_remember_available),
+      return {.selected_choice = detail::next_permission_choice(selected_choice, allow_session_available, allow_remember_available,
+                                                                  deny_remember_available),
               .action = PermissionPromptInputAction::Redraw};
     case Key::Escape:
     case Key::CtrlC:

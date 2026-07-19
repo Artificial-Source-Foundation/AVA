@@ -552,31 +552,49 @@ void test_tui_composer_rendering_and_input()
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
          "permission prompt ignores unmapped character keys without changing focus");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
-                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false);
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'S'}, false);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
+         "permission prompt ignores session shortcut when session grant is unavailable");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, false, false);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
          "permission prompt ignores remembered-rule shortcut when rule storage is unavailable");
-  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true, true);
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, false, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::DenyRemember,
          "permission prompt cycles to remembered deny when rule storage is available");
   prompt_input =
-      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::DenyRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, true, true);
+      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::DenyRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, false, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveDenyRemember, "permission prompt enter confirms remembered deny");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
-                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, true, true);
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, true, true);
   expect(
       prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowRemember,
       "permission prompt R toggles the selected allow choice into a remembered allow");
   prompt_input =
-      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, true, true);
+      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, false, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveAllowRemember, "permission prompt enter confirms remembered allow");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Deny,
-                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, true);
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, false, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::DenyRemember,
          "permission prompt keeps remembered deny available when a Critical command cannot be remembered as allow");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
-                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, true);
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, false, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
          "permission prompt does not expose remembered allow when the backend only permits one-shot approval");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'S'}, true, true, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveAllowSession && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowSession,
+         "permission prompt S resolves allow session when session grant is available");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true, true, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowSession,
+         "permission prompt tab advances from allow to allow session when available");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowSession, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true, true, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::DenyRemember,
+         "permission prompt tab advances from allow session to remembered deny when available");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowSession,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, true, true, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowRemember,
+         "permission prompt R toggles allow session into remembered allow");
   ava::permissions::CommandPermissionMetadata one_shot_metadata;
   one_shot_metadata.level = ava::command::CommandLevel::Critical;
   one_shot_metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
@@ -3796,6 +3814,39 @@ void test_tui_composer_rendering_and_input()
           std::ranges::any_of(remembered_permission_modal, [](std::string const& line) { return strip_sgr(line).find("R remember") != std::string::npos; }) &&
           std::ranges::all_of(remembered_permission_modal, [](std::string const& line) { return visible_columns(line) <= 96; }),
       "tui permission dock exposes remembered reject and always-allow choices when rule storage is available");
+
+  auto const session_permission_modal =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "",
+                                                           .status = "permission required",
+                                                           .transcript = {},
+                                                           .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "bash",
+                                                                                                               .operation = "bash",
+                                                                                                               .target = "/workspace",
+                                                                                                               .command = "cargo test",
+                                                                                                               .reason = "sealed workspace recipe",
+                                                                                                               .risk = "medium",
+                                                                                                               .allow_session_available = true,
+                                                                                                               .allow_remember_available = true,
+                                                                                                               .deny_remember_available = true},
+                                                           .width = 120,
+                                                           .height = 10});
+  expect(std::ranges::any_of(session_permission_modal,
+                             [](std::string const& line) {
+                               auto visible = strip_sgr(line);
+                               return visible.find("[Allow session]") != std::string::npos && visible.find("[Allow once]") != std::string::npos &&
+                                      visible.find("[Always in this project]") != std::string::npos && visible.find("[Reject rule]") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(session_permission_modal,
+                                 [](std::string const& line) {
+                                   auto visible = strip_sgr(line);
+                                   return visible.find("S allow session") != std::string::npos && visible.find("R remember") != std::string::npos;
+                                 }) &&
+             std::ranges::all_of(session_permission_modal, [](std::string const& line) { return visible_columns(line) <= 120; }),
+         "tui permission dock exposes allow session between allow once and always-allow when session grant is available");
 
   auto const deny_only_remember_permission_modal =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",

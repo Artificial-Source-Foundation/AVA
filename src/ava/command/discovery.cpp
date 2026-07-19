@@ -539,7 +539,12 @@ ava::core::Result<std::optional<ShebangParse>> shebang_interpreter_path(Executab
         command_error(ava::core::ErrorCategory::Io, "executable changed during shebang inspection", "path", executable.canonical_path.string()));
   }
 
-  std::string line(limits.max_shebang_bytes + 1, '\0');
+  // Linux examines a fixed 256-byte buffer for script shebangs. Do not bind
+  // bytes the kernel will truncate differently. A caller may impose a lower
+  // planning bound, but never a larger effective shebang window.
+  constexpr std::size_t kLinuxShebangBufferBytes = 256;
+  auto const read_limit = std::min(limits.max_shebang_bytes + 1, kLinuxShebangBufferBytes);
+  std::string line(read_limit, '\0');
   ssize_t const read_count = ::read(input.get(), line.data(), line.size());
   if (read_count < 0)
   {
@@ -551,25 +556,25 @@ ava::core::Result<std::optional<ShebangParse>> shebang_interpreter_path(Executab
   if (!line.starts_with("#!"))
     return std::optional<ShebangParse>{};
   auto const newline = line.find('\n');
-  if (newline == std::string::npos && line.size() > limits.max_shebang_bytes)
+  if (newline == std::string::npos && line.size() == read_limit)
   {
-    return std::unexpected(
-        command_error(ava::core::ErrorCategory::InvalidArgument, "shebang line exceeds the bounded size", "path", executable.canonical_path.string()));
+    return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument,
+                                         "shebang line exceeds the sealed Linux interpreter buffer; shorten the shebang before execution", "path",
+                                         executable.canonical_path.string()));
   }
   auto body = std::string_view(line).substr(2, newline == std::string_view::npos ? std::string_view::npos : newline - 2);
-  if (!body.empty() && body.back() == '\r')
-    body.remove_suffix(1);
+  auto const is_separator = [](char ch) { return ch == ' ' || ch == '\t'; };
   std::size_t first = 0;
-  while (first < body.size() && std::isspace(static_cast<unsigned char>(body[first])) != 0) ++first;
+  while (first < body.size() && is_separator(body[first])) ++first;
   std::size_t end = first;
-  while (end < body.size() && std::isspace(static_cast<unsigned char>(body[end])) == 0) ++end;
+  while (end < body.size() && !is_separator(body[end])) ++end;
   auto const interpreter = body.substr(first, end - first);
-  while (end < body.size() && std::isspace(static_cast<unsigned char>(body[end])) != 0) ++end;
+  while (end < body.size() && is_separator(body[end])) ++end;
   // Linux passes at most one argument from the shebang to the interpreter;
   // everything after the first whitespace-delimited interpreter token up to
   // the newline is that single argument.
   auto const argument = body.substr(end);
-  if (interpreter.empty() || has_forbidden_byte(interpreter) || has_forbidden_byte(argument) || !std::filesystem::path(interpreter).is_absolute())
+  if (interpreter.empty() || has_forbidden_byte(interpreter) || !std::filesystem::path(interpreter).is_absolute())
   {
     return std::unexpected(
         command_error(ava::core::ErrorCategory::InvalidArgument, "shebang must name an absolute interpreter path", "path", executable.canonical_path.string()));
@@ -594,6 +599,10 @@ std::optional<ExecutableMetadata> resolve_env_name(std::string_view name, std::v
     auto metadata = executable_metadata(candidate);
     if (metadata)
       return *metadata;
+    // /usr/bin/env uses the first matching PATH candidate. If that existing
+    // candidate cannot be sealed under AVA's executable policy, do not bind a
+    // later candidate that the kernel/env chain will never select.
+    return std::nullopt;
   }
   return std::nullopt;
 }
@@ -634,12 +643,13 @@ ava::core::Result<std::pair<std::vector<ShebangInterpreter>, bool>> inspect_sheb
       }
       interpreters.push_back(ShebangInterpreter{.interpreter = *env_meta, .argument = parse.argument});
       // Determine whether the env argument is a single resolvable name.
+      auto const is_separator = [](char ch) { return ch == ' ' || ch == '\t'; };
       std::size_t token_start = 0;
-      while (token_start < parse.argument.size() && std::isspace(static_cast<unsigned char>(parse.argument[token_start])) != 0) ++token_start;
+      while (token_start < parse.argument.size() && is_separator(parse.argument[token_start])) ++token_start;
       std::size_t token_end = token_start;
-      while (token_end < parse.argument.size() && std::isspace(static_cast<unsigned char>(parse.argument[token_end])) == 0) ++token_end;
+      while (token_end < parse.argument.size() && !is_separator(parse.argument[token_end])) ++token_end;
       std::size_t rest = token_end;
-      while (rest < parse.argument.size() && std::isspace(static_cast<unsigned char>(parse.argument[rest])) != 0) ++rest;
+      while (rest < parse.argument.size() && is_separator(parse.argument[rest])) ++rest;
       if (token_end == token_start || rest != parse.argument.size())
       {
         // Empty argument or trailing tokens: not a simple single-name env

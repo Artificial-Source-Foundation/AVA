@@ -125,6 +125,23 @@ void close_nonstandard_fds()
   for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) static_cast<void>(::close(fd));
 }
 
+bool reset_sentinel_signal_state()
+{
+  sigset_t empty_mask{};
+  if (::sigemptyset(&empty_mask) != 0 || ::sigprocmask(SIG_SETMASK, &empty_mask, nullptr) != 0)
+    return false;
+  struct sigaction action{};
+  action.sa_handler = SIG_DFL;
+  if (::sigemptyset(&action.sa_mask) != 0)
+    return false;
+  for (int const signal_number : {SIGTERM, SIGINT, SIGHUP, SIGQUIT})
+  {
+    if (::sigaction(signal_number, &action, nullptr) != 0)
+      return false;
+  }
+  return true;
+}
+
 bool is_canceled(ToolContext const& context)
 {
   return context.cancel_requested && context.cancel_requested();
@@ -832,6 +849,11 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     control_read.reset();
     control_write.reset();
     sentinel_read.reset();
+    // The TUI installs process-level handlers. The sentinel is an internal
+    // supervisor child and must retain default termination behavior so the
+    // verified group can leave during the finite TERM grace period.
+    if (!reset_sentinel_signal_state())
+      _exit(127);
     // Join the verified command process group. The leader established it
     // behind the gate; the parent verified it before forking here.
     if (::setpgid(0, pid) != 0)

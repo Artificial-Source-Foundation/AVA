@@ -442,6 +442,8 @@ void test_sealed_local_bash_contract()
              write_executable(second_bin / "chosen", "#!/bin/sh\nprintf 'second-choice\\n'\n") &&
              write_executable(first_bin / "stale", "#!/bin/sh\nprintf old-stale\\n") && write_executable(first_bin / "npm", "#!/bin/sh\nprintf npm-ran\\n") &&
              write_executable(first_bin / "python", "#!/bin/sh\nprintf python-ran\\n") &&
+             write_executable(first_bin / "python3", "#!/bin/sh\nprintf 'env-python-ran\\n'\n") &&
+             write_executable(first_bin / "env-python", "#!/usr/bin/env python3\nprintf 'script-body-should-not-run-directly\\n'\n") &&
              write_executable(first_bin / "bash", "#!/bin/sh\nprintf bash-ran\\n") && write_executable(first_bin / "rm", "#!/bin/sh\nprintf rm-ran\\n"),
          "sealed local bash fixture creates executable identities");
 
@@ -467,11 +469,12 @@ void test_sealed_local_bash_contract()
       "\"origin\"", "\"cwd\"",    "\"containment_available\"", "\"containment_status\"", "\"backend_maximum_scope\""};
   bool const complete_audit_metadata =
       std::ranges::all_of(audit_fields, [&audit_json](std::string_view field) { return audit_json.find(field) != std::string::npos; });
+  auto env_python = ava::tools::run_bash(context, "env-python", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   expect(exact && exact->output.find("argc=2 first=<> second=<second>") != std::string::npos && exact->output.find("sentinels=absent") != std::string::npos &&
-             exact->output.find("stdin=eof") != std::string::npos && prompts.size() == 1 && prompts.front().command_metadata && !audits.empty() &&
-             audits.front().command_metadata && prompts.front().command_metadata->fingerprint == audits.front().command_metadata->fingerprint &&
-             complete_audit_metadata && audit_json.find("must-not-reach-child") == std::string::npos &&
-             audit_json.find("AVA_BASH_SECRET_SENTINEL") == std::string::npos,
+             exact->output.find("stdin=eof") != std::string::npos && env_python && env_python->output == "env-python-ran\n" && prompts.size() == 2 &&
+             prompts.front().command_metadata && !audits.empty() && audits.front().command_metadata &&
+             prompts.front().command_metadata->fingerprint == audits.front().command_metadata->fingerprint && complete_audit_metadata &&
+             audit_json.find("must-not-reach-child") == std::string::npos && audit_json.find("AVA_BASH_SECRET_SENTINEL") == std::string::npos,
          "one sealed plan carries exact empty argv, stdin EOF, redacted environment, and the same fingerprint through prompt and audit");
 
   ava::tools::ToolContext no_relookup_context = context;

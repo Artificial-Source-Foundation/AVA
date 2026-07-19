@@ -370,6 +370,21 @@ void test_raw_shell_binds_configured_shell_and_accepts_env_shebang()
   auto arg_script = command::seal_command_plan(*command::CommandIntent::structured({"arg-script"}), fixture.options());
   auto env_missing = command::seal_command_plan(*command::CommandIntent::structured({"env-missing"}), fixture.options());
 
+  CommandFixture shadow_fixture("env-shadow");
+  auto const unsafe_bin = shadow_fixture.root / "unsafe-bin";
+  auto const safe_bin = shadow_fixture.root / "safe-bin";
+  shadow_fixture.executable_in(unsafe_bin, "python3", "#!/bin/sh\nprintf unsafe\\n\n");
+  shadow_fixture.executable_in(safe_bin, "python3", "#!/bin/sh\nprintf safe\\n\n");
+  ::chmod((unsafe_bin / "python3").c_str(), S_IRWXU | S_IRWXG);
+  shadow_fixture.executable("env-shadow", "#!/usr/bin/env python3\nprintf script\\n\n");
+  shadow_fixture.executable("env-crlf", "#!/usr/bin/env python3\r\nprintf script\\n\n");
+  shadow_fixture.executable("long-shebang", "#!/bin/sh " + std::string(300, 'x') + "\nprintf script\\n\n");
+  auto shadow_options = shadow_fixture.options();
+  shadow_options.startup_path = shadow_fixture.bin.string() + ":" + unsafe_bin.string() + ":" + safe_bin.string();
+  auto env_shadow = command::seal_command_plan(*command::CommandIntent::structured({"env-shadow"}), shadow_options);
+  auto env_crlf = command::seal_command_plan(*command::CommandIntent::structured({"env-crlf"}), shadow_options);
+  auto long_shebang = command::seal_command_plan(*command::CommandIntent::structured({"long-shebang"}), shadow_options);
+
   expect(raw_plan && raw_plan->execution_domain() == command::CommandExecutionDomain::RawShell && raw_plan->resolved_executable() &&
              raw_plan->resolved_executable()->executable.canonical_path == std::filesystem::canonical(fixture.bin / "shell") &&
              raw_plan->classification().level == command::CommandLevel::Critical && default_shell_plan && default_shell_plan->resolved_executable() &&
@@ -382,9 +397,11 @@ void test_raw_shell_binds_configured_shell_and_accepts_env_shebang()
              arg_script->resolved_executable()->shebang_interpreters.size() >= 1 &&
              arg_script->resolved_executable()->shebang_interpreters[0].argument == "-u" && arg_script->resolved_executable()->shebang_fully_resolved &&
              env_missing && !env_missing->resolved_executable()->shebang_fully_resolved &&
-             env_missing->classification().level == command::CommandLevel::Critical,
-         "raw-shell plans bind the configured shell; env shebangs resolve the interpreter chain, "
-         "interpreter-argument shebangs bind the argument, and unresolvable env shebangs produce a one-shot critical prompt");
+             env_missing->classification().level == command::CommandLevel::Critical && env_shadow &&
+             !env_shadow->resolved_executable()->shebang_fully_resolved && env_shadow->classification().level == command::CommandLevel::Critical && env_crlf &&
+             !env_crlf->resolved_executable()->shebang_fully_resolved && env_crlf->classification().level == command::CommandLevel::Critical && !long_shebang,
+         "raw-shell plans bind the configured shell; env shebangs resolve only the interpreter the kernel will select, "
+         "CRLF remains part of the kernel argument, and overlong Linux shebangs fail sealed planning");
 }
 
 void test_environment_is_synthetic_and_digest_bound()

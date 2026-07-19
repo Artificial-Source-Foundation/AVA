@@ -3992,6 +3992,33 @@ void test_acp_peer_started_non_cooperative_shutdown_escalates()
          "a started non-cooperative request causes bounded normal shutdown escalation exit 70");
 }
 
+void test_acp_redacted_command_audit_omits_recipe_arguments()
+{
+  constexpr std::string_view secret = "acp-unique-secret-like-argument-7f3e";
+  ava::tools::PermissionAuditEvent event;
+  event.permission_request_id = "permreq_acp_redacted";
+  event.operation = ava::permissions::Operation::RunCommand;
+  event.mode = ava::agent::Mode::Build;
+  event.tool_name = "bash";
+  event.action = ava::permissions::PermissionAction::Ask;
+  event.reason = "command requires approval";
+  event.risk = ava::permissions::PermissionRisk::Critical;
+  event.command = "curl --token " + std::string(secret);
+  event.resolution_source = "policy";
+  event.command_arguments_redacted = true;
+  ava::permissions::CommandPermissionMetadata metadata;
+  metadata.level = ava::command::CommandLevel::Sensitive;
+  metadata.recipe_display = "sensitive-network: --header " + std::string(secret);
+  metadata.global_recipe_key = "sha256:ava-command-recipe-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  metadata.workspace_recipe_key = "sha256:ava-command-workspace-recipe-v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  event.command_metadata = std::move(metadata);
+  auto const json = ava::tools::permission_audit_data_json(event);
+
+  expect(json.find(secret) == std::string::npos && ava::core::json::string_field(json, "command") == "[redacted]" &&
+             json.find("\"recipe_display\"") == std::string::npos,
+         "ACP-style redacted command audits retain a redacted command and never serialize argument-derived recipe display values");
+}
+
 void test_acp_peer_write_failure_wakes_reader_and_shutdown_race()
 {
   using namespace ava::app::acp;
@@ -4084,5 +4111,6 @@ void run_acp_tests()
   test_acp_prompt_admission_rollback_and_control_cancel_saturation();
   test_acp_peer_shutdown_abandons_queued_unstarted_request();
   test_acp_peer_started_non_cooperative_shutdown_escalates();
+  test_acp_redacted_command_audit_omits_recipe_arguments();
   test_acp_peer_write_failure_wakes_reader_and_shutdown_race();
 }

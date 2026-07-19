@@ -51,6 +51,8 @@ struct PermissionSessionGrant
   ava::agent::Mode mode = ava::agent::Mode::Build;
   std::string tool_name;
   std::filesystem::path target_path;
+  // For RunCommand session grants, matching is recipe-key authoritative; raw
+  // command text is retained only for display and audit.
   std::string command;
   std::string command_recipe_key;
   std::string command_recipe_display;

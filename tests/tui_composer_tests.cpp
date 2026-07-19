@@ -555,20 +555,39 @@ void test_tui_composer_rendering_and_input()
                                                           ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
          "permission prompt ignores remembered-rule shortcut when rule storage is unavailable");
-  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true);
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::DenyRemember,
          "permission prompt cycles to remembered deny when rule storage is available");
   prompt_input =
-      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::DenyRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, true);
+      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::DenyRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveDenyRemember, "permission prompt enter confirms remembered deny");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
-                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, true);
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, true, true);
   expect(
       prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowRemember,
       "permission prompt R toggles the selected allow choice into a remembered allow");
   prompt_input =
-      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, true);
+      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveAllowRemember, "permission prompt enter confirms remembered allow");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Deny,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::DenyRemember,
+         "permission prompt keeps remembered deny available when a Critical command cannot be remembered as allow");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
+         "permission prompt does not expose remembered allow when the backend only permits one-shot approval");
+  ava::permissions::CommandPermissionMetadata one_shot_metadata;
+  one_shot_metadata.level = ava::command::CommandLevel::Critical;
+  one_shot_metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  ava::permissions::PermissionPrompt one_shot_prompt;
+  one_shot_prompt.operation = ava::permissions::Operation::RunCommand;
+  one_shot_prompt.command_metadata = one_shot_metadata;
+  auto const one_shot_remember_availability = ava::tui::permission_prompt_remember_availability(one_shot_prompt, true);
+  auto const unavailable_storage_remember_availability = ava::tui::permission_prompt_remember_availability(one_shot_prompt, false);
+  expect(!one_shot_remember_availability.allow_remember_available && one_shot_remember_availability.deny_remember_available &&
+             !unavailable_storage_remember_availability.allow_remember_available && !unavailable_storage_remember_availability.deny_remember_available,
+         "tui runtime enables a persistent deny but not a persistent allow for one-shot Critical prompts when rule storage exists");
 
   auto single_question = ava::tui::QuestionPromptView{
       .header = "Choose",
@@ -3764,7 +3783,8 @@ void test_tui_composer_rendering_and_input()
                                                                                                                .command = "git push origin main",
                                                                                                                .reason = "command can change external state",
                                                                                                                .risk = "high",
-                                                                                                               .remember_available = true},
+                                                                                                               .allow_remember_available = true,
+                                                                                                               .deny_remember_available = true},
                                                            .width = 96,
                                                            .height = 10});
   expect(
@@ -3776,6 +3796,33 @@ void test_tui_composer_rendering_and_input()
           std::ranges::any_of(remembered_permission_modal, [](std::string const& line) { return strip_sgr(line).find("R remember") != std::string::npos; }) &&
           std::ranges::all_of(remembered_permission_modal, [](std::string const& line) { return visible_columns(line) <= 96; }),
       "tui permission dock exposes remembered reject and always-allow choices when rule storage is available");
+
+  auto const deny_only_remember_permission_modal =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "",
+                                                           .status = "permission required",
+                                                           .transcript = {},
+                                                           .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "bash",
+                                                                                                               .operation = "bash",
+                                                                                                               .target = "/workspace",
+                                                                                                               .command = "curl https://example.test",
+                                                                                                               .reason = "containment unavailable",
+                                                                                                               .risk = "critical",
+                                                                                                               .allow_remember_available = false,
+                                                                                                               .deny_remember_available = true},
+                                                           .width = 96,
+                                                           .height = 10});
+  expect(std::ranges::any_of(deny_only_remember_permission_modal,
+                             [](std::string const& line) {
+                               auto visible = strip_sgr(line);
+                               return visible.find("[Reject rule]") != std::string::npos && visible.find("[Always in this project]") == std::string::npos;
+                             }) &&
+             std::ranges::any_of(deny_only_remember_permission_modal,
+                                 [](std::string const& line) { return strip_sgr(line).find("R remember") != std::string::npos; }),
+         "tui permission dock renders a persistent deny without offering an unavailable persistent allow");
 
   auto const allow_focused_modal = ava::tui::render_composer(
       ava::tui::ComposerSnapshot{.mode = "build",

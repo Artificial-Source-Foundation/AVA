@@ -670,6 +670,61 @@ void test_stable_recipe_identity_is_scope_aware_and_secret_free()
          "never mint or display secrets for standard or critical commands");
 }
 
+void test_recipe_argument_domains_and_unavailable_containment()
+{
+  CommandFixture fixture("recipe-argument-domains");
+  fixture.executable("git");
+  fixture.executable("curl");
+  auto const remote_path = fixture.workspace / "origin";
+  std::filesystem::create_directories(remote_path);
+  ::chmod(remote_path.c_str(), S_IRWXU);
+
+  auto const absolute_remote =
+      command::seal_command_plan(*command::CommandIntent::structured({"git", "push", remote_path.string(), "refs/heads/main"}), fixture.options());
+  auto const literal_remote =
+      command::seal_command_plan(*command::CommandIntent::structured({"git", "push", "workspace:origin", "refs/heads/main"}), fixture.options());
+  ava::permissions::CommandContainmentInfo const contained{.available = true, .profile_id = "ava-development-v1", .network_allowed = false};
+  auto const absolute_metadata =
+      absolute_remote ? ava::permissions::command_permission_metadata(*absolute_remote, contained) : ava::permissions::CommandPermissionMetadata{};
+  auto const literal_metadata =
+      literal_remote ? ava::permissions::command_permission_metadata(*literal_remote, contained) : ava::permissions::CommandPermissionMetadata{};
+
+  auto const curl = command::seal_command_plan(*command::CommandIntent::structured({"curl", "https://example.test/releases"}), fixture.options());
+  auto const unavailable = curl ? ava::permissions::command_permission_metadata(*curl) : ava::permissions::CommandPermissionMetadata{};
+  auto const unavailable_decision = ava::permissions::decide(unavailable);
+  auto forged_unavailable = absolute_metadata;
+  forged_unavailable.level = command::CommandLevel::Sensitive;
+  forged_unavailable.backend_maximum_scope = command::InteractiveScope::Workspace;
+  forged_unavailable.containment_status = ava::permissions::CommandContainmentStatus::Unavailable;
+  forged_unavailable.effective_allowed_scopes = {command::InteractiveScope::Once, command::InteractiveScope::Session, command::InteractiveScope::Workspace};
+  auto const forged_unavailable_scopes = ava::permissions::command_permission_effective_scopes(forged_unavailable);
+
+  ava::permissions::CommandPermissionMetadata session_bounded = absolute_metadata;
+  session_bounded.backend_maximum_scope = command::InteractiveScope::Session;
+  auto const session_scopes = ava::permissions::command_permission_effective_scopes(session_bounded);
+  session_bounded.effective_allowed_scopes = session_scopes;
+  ava::permissions::PermissionPrompt session_prompt;
+  session_prompt.operation = ava::permissions::Operation::RunCommand;
+  session_prompt.command_metadata = session_bounded;
+
+  expect(absolute_remote && literal_remote && absolute_metadata.global_recipe_key != literal_metadata.global_recipe_key &&
+             absolute_metadata.workspace_recipe_key != literal_metadata.workspace_recipe_key &&
+             absolute_metadata.recipe_display.find("workspace_path=workspace:origin") != std::string::npos &&
+             literal_metadata.recipe_display.find("literal=workspace:origin") != std::string::npos && curl &&
+             unavailable.level == command::CommandLevel::Critical && unavailable.backend_maximum_scope == command::InteractiveScope::Once &&
+             unavailable.global_recipe_key.empty() && unavailable.workspace_recipe_key.empty() &&
+             unavailable.effective_allowed_scopes == std::vector<command::InteractiveScope>{command::InteractiveScope::Once} &&
+             unavailable_decision.risk == ava::permissions::PermissionRisk::Critical &&
+             !ava::permissions::command_permission_allows_reusable_grant(unavailable) &&
+             forged_unavailable_scopes == std::vector<command::InteractiveScope>{command::InteractiveScope::Once} &&
+             !ava::permissions::command_permission_allows_reusable_grant(forged_unavailable) &&
+             session_scopes == std::vector<command::InteractiveScope>{command::InteractiveScope::Once, command::InteractiveScope::Session} &&
+             ava::permissions::command_permission_allows_reusable_grant(session_bounded) &&
+             !ava::permissions::command_prompt_allows_persistent_allow(session_prompt),
+         "recipe hashes domain-separate workspace paths from git-push literals; unavailable Sensitive network commands are Critical one-shot without stable "
+         "authority; and a Session backend maximum grants Session but never Workspace or a persistent workspace allow");
+}
+
 void test_redacted_diagnostics_and_value_equality()
 {
   CommandFixture fixture("redacted-diagnostics");
@@ -736,6 +791,7 @@ void run_command_tests()
   test_workspace_origin_capabilities_apply_to_every_family();
   test_ancestor_freshness_detects_mode_and_replacement();
   test_stable_recipe_identity_is_scope_aware_and_secret_free();
+  test_recipe_argument_domains_and_unavailable_containment();
   test_redacted_diagnostics_and_value_equality();
   test_unsafe_executables_and_ancestors_are_rejected_without_blocking();
 }

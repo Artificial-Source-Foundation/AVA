@@ -47,6 +47,9 @@ struct PermissionAuditEvent
   std::string resolution_reason;
   std::string actor = "agent";
   std::string rule_id;
+  // Durable audit serialization must suppress command and recipe-display
+  // fields derived from arguments when a strict frontend supplied redacted args.
+  bool command_arguments_redacted = false;
   std::optional<ava::permissions::CommandPermissionMetadata> command_metadata = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON

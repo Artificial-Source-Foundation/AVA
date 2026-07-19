@@ -91,6 +91,65 @@ void test_permission_rule_storage_add_list_remove()
   expect(after_remove && after_remove->empty(), "permission rule removal persists an empty rules array");
 }
 
+void test_legacy_command_allows_are_removed_one_at_a_time()
+{
+  auto const root = temp_root() / "permission-rules-legacy-sequential-remove";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto legacy_allow = ava::permissions::PersistentPermissionRule{.rule_id = "permrule_legacy_first",
+                                                                 .scope = ava::permissions::PermissionRuleScope::Global,
+                                                                 .workspace_dir = {},
+                                                                 .action = ava::permissions::PermissionAction::Allow,
+                                                                 .operation = ava::permissions::Operation::RunCommand,
+                                                                 .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                 .tool_name = "bash",
+                                                                 .target_path = {},
+                                                                 .command = "legacy first",
+                                                                 .command_recipe_key = {},
+                                                                 .recipe_display = {},
+                                                                 .critical_acknowledged = false,
+                                                                 .schema_version = ava::permissions::kLegacyPermissionRulesSchemaVersion,
+                                                                 .reason = "legacy command allow",
+                                                                 .actor = "test",
+                                                                 .created_at = "2026-07-19T00:00:00Z"};
+  auto second_legacy_allow = legacy_allow;
+  second_legacy_allow.rule_id = "permrule_legacy_second";
+  second_legacy_allow.command = "legacy second";
+  write_file_with_mode(store.global_rules_file,
+                       std::string("{\"schema_version\":1,\"rules\":[") + ava::permissions::permission_rule_json(legacy_allow) + "," +
+                           ava::permissions::permission_rule_json(second_legacy_allow) + "]}",
+                       S_IRUSR | S_IWUSR);
+
+  auto first_removed = ava::permissions::remove_persistent_permission_rule(store, legacy_allow.rule_id);
+  std::ifstream after_first_file(store.global_rules_file);
+  std::string after_first((std::istreambuf_iterator<char>(after_first_file)), std::istreambuf_iterator<char>());
+  auto add_while_legacy_remains =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Global,
+                                                                                                    .action = ava::permissions::PermissionAction::Deny,
+                                                                                                    .operation = ava::permissions::Operation::ReadFile,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Any,
+                                                                                                    .tool_name = "",
+                                                                                                    .target_path = root / "outside.txt",
+                                                                                                    .command = "",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
+                                                                                                    .reason = "must not rewrite legacy command allows",
+                                                                                                    .actor = "test"});
+  auto second_removed = ava::permissions::remove_persistent_permission_rule(store, second_legacy_allow.rule_id);
+  std::ifstream after_second_file(store.global_rules_file);
+  std::string after_second((std::istreambuf_iterator<char>(after_second_file)), std::istreambuf_iterator<char>());
+  auto reloaded = ava::permissions::load_persistent_permission_rules(store);
+
+  expect(
+      first_removed && first_removed->rule_id == legacy_allow.rule_id && after_first.find("\"schema_version\":1") != std::string::npos &&
+          after_first.find(second_legacy_allow.rule_id) != std::string::npos && !add_while_legacy_remains && second_removed &&
+          second_removed->rule_id == second_legacy_allow.rule_id && after_second.find("\"schema_version\":2") != std::string::npos && reloaded &&
+          reloaded->empty(),
+      "legacy command Allows can be removed sequentially without rewriting the remaining v1 Allow, additions remain blocked, and final removal migrates to v2");
+}
+
 void test_permission_rule_precedence_denies_win()
 {
   auto const root = temp_root() / "permission-rules-precedence";
@@ -150,6 +209,7 @@ ava::permissions::CommandPermissionMetadata stable_command_metadata(std::string 
   ava::permissions::CommandPermissionMetadata metadata;
   metadata.level = ava::command::CommandLevel::Standard;
   metadata.family = ava::command::CommandFamily::CmakeBuild;
+  metadata.containment_status = ava::permissions::CommandContainmentStatus::Available;
   metadata.backend_maximum_scope = ava::command::InteractiveScope::Workspace;
   metadata.global_recipe_key = std::move(global_key);
   metadata.workspace_recipe_key = std::move(workspace_key);
@@ -280,6 +340,78 @@ void test_critical_command_allow_requires_explicit_acknowledgement()
 
   expect(!missing_ack && acknowledged && matched && *matched && (*matched)->rule_id == acknowledged->rule_id && unverified && !*unverified,
          "only an explicit advanced exact Critical acknowledgement can allow a verified Critical command; unverified delegated commands remain one-shot");
+}
+
+void test_critical_acknowledgements_cannot_authorize_repository_build_or_test_text()
+{
+  auto const root = temp_root() / "permission-rules-critical-ack-repository-build";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto const command = std::string("cmake --build build");
+  auto created =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Allow,
+                                                                                                    .operation = ava::permissions::Operation::RunCommand,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "bash",
+                                                                                                    .target_path = {},
+                                                                                                    .command = command,
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = true,
+                                                                                                    .reason = "forged raw cmake acknowledgement",
+                                                                                                    .actor = "test"});
+  auto forged = ava::permissions::PersistentPermissionRule{.rule_id = "permrule_forged_cmake_ack",
+                                                           .scope = ava::permissions::PermissionRuleScope::Global,
+                                                           .workspace_dir = {},
+                                                           .action = ava::permissions::PermissionAction::Allow,
+                                                           .operation = ava::permissions::Operation::RunCommand,
+                                                           .mode = ava::permissions::PermissionRuleMode::Build,
+                                                           .tool_name = "bash",
+                                                           .target_path = {},
+                                                           .command = command,
+                                                           .command_recipe_key = {},
+                                                           .recipe_display = {},
+                                                           .critical_acknowledged = true,
+                                                           .schema_version = ava::permissions::kCurrentPermissionRulesSchemaVersion,
+                                                           .reason = "forged persisted cmake acknowledgement",
+                                                           .actor = "test",
+                                                           .created_at = "2026-07-19T00:00:00Z"};
+  write_file_with_mode(store.global_rules_file, std::string("{\"schema_version\":2,\"rules\":[") + ava::permissions::permission_rule_json(forged) + "]}",
+                       S_IRUSR | S_IWUSR);
+  auto prompt = command_prompt(store, command);
+  ava::permissions::CommandPermissionMetadata critical;
+  critical.level = ava::command::CommandLevel::Critical;
+  critical.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  prompt.command_metadata = critical;
+  auto matched = ava::permissions::match_persistent_permission_rule(store, prompt);
+  auto ctest_created =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Allow,
+                                                                                                    .operation = ava::permissions::Operation::RunCommand,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "bash",
+                                                                                                    .target_path = {},
+                                                                                                    .command = "ctest --test-dir build",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = true,
+                                                                                                    .reason = "forged raw ctest acknowledgement",
+                                                                                                    .actor = "test"});
+  auto forged_ctest = forged;
+  forged_ctest.rule_id = "permrule_forged_ctest_ack";
+  forged_ctest.command = "ctest --test-dir build";
+  forged_ctest.reason = "forged persisted ctest acknowledgement";
+  write_file_with_mode(store.global_rules_file, std::string("{\"schema_version\":2,\"rules\":[") + ava::permissions::permission_rule_json(forged_ctest) + "]}",
+                       S_IRUSR | S_IWUSR);
+  auto ctest_prompt = command_prompt(store, forged_ctest.command);
+  ctest_prompt.command_metadata = critical;
+  auto ctest_matched = ava::permissions::match_persistent_permission_rule(store, ctest_prompt);
+
+  expect(!created && created.error().category() == ava::core::ErrorCategory::InvalidArgument && !matched && !ctest_created &&
+             ctest_created.error().category() == ava::core::ErrorCategory::InvalidArgument && !ctest_matched,
+         "raw critical acknowledgements for repository-controlled cmake build and ctest text are rejected both on creation and during persisted-rule matching");
 }
 
 void test_permission_rule_precedence_prefers_specific_same_scope_rules()
@@ -685,10 +817,12 @@ void test_registered_permission_rule_paths_protect_agent_loop_context()
 void run_permission_rules_tests()
 {
   test_permission_rule_storage_add_list_remove();
+  test_legacy_command_allows_are_removed_one_at_a_time();
   test_permission_rule_precedence_denies_win();
   test_permission_rule_precedence_prefers_specific_same_scope_rules();
   test_schema_v2_recipe_rules_bind_scope_and_deny_precedence();
   test_critical_command_allow_requires_explicit_acknowledgement();
+  test_critical_acknowledgements_cannot_authorize_repository_build_or_test_text();
   test_permission_rule_matches_command_operations_without_path_targets();
   test_repository_build_test_persistent_allows_are_rejected_but_denies_win();
   test_legacy_command_allows_do_not_authorize_sealed_critical_or_unverified_plans();

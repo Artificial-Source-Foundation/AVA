@@ -2272,12 +2272,12 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
 
   auto const jsonl = output_buffer.str();
   auto entries = session->store.load();
-  auto const audited_deny = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
-                              return entry.type == ava::session::EntryType::PermissionDecision &&
-                                     entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
-                                     entry.data_json.find("\"command\":\"sensitive-workspace_mutation (workspace_mutation)\"") != std::string::npos &&
-                                     entry.data_json.find("\"resolution\":\"deny\"") != std::string::npos;
-                            });
+  auto const audited_deny =
+      entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+        return entry.type == ava::session::EntryType::PermissionDecision && entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
+               entry.data_json.find("\"command\":\"sensitive-workspace_mutation (workspace_mutation): literal=denied.txt\"") != std::string::npos &&
+               entry.data_json.find("\"resolution\":\"deny\"") != std::string::npos;
+      });
   expect(result.has_value(), "RPC direct command denial loop completes successfully");
   expect(denied && jsonl.find("\"id\":\"cmd-deny\"") != std::string::npos && jsonl.find("\"tool\":\"bash\"") != std::string::npos,
          "RPC direct command denial returns a structured bash tool error");

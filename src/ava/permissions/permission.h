@@ -179,6 +179,7 @@ using PermissionResolver = std::function<ava::core::Result<PermissionResolutionD
                                                                     bool unverified_delegated_executor = false);
 [[nodiscard]] PermissionDecision decide(PermissionRequest const& request);
 [[nodiscard]] PermissionDecision decide(CommandPermissionMetadata const& metadata);
+[[nodiscard]] std::vector<ava::command::InteractiveScope> command_permission_effective_scopes(CommandPermissionMetadata const& metadata);
 [[nodiscard]] bool command_permission_allows_reusable_grant(CommandPermissionMetadata const& metadata) noexcept;
 [[nodiscard]] bool command_prompt_allows_persistent_allow(PermissionPrompt const& prompt) noexcept;
 [[nodiscard]] PermissionDecision classify_command(std::string_view command);

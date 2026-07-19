@@ -862,6 +862,11 @@ ava::core::VoidResult validate_rule(PersistentPermissionRule const& rule, std::f
   {
     return std::unexpected(rule_parse_error("critical_acknowledged is valid only for exact RunCommand allows", path, "critical_acknowledged", rule_index));
   }
+  if (rule.critical_acknowledged && is_repository_controlled_build_or_test_command(rule.command))
+  {
+    return std::unexpected(rule_parse_error("critical_acknowledged cannot authorize repository-controlled cmake build or ctest commands", path,
+                                            "critical_acknowledged", rule_index));
+  }
   if (!rule.actor.empty() && (!valid_identifier(rule.actor) || has_control_byte(rule.actor)))
   {
     return std::unexpected(rule_parse_error("permission rule actor is invalid", path, "actor", rule_index));
@@ -1097,16 +1102,24 @@ ava::core::Result<std::vector<PersistentPermissionRule>> load_scope_rules(Permis
   return parse_rules_file(**content, path, scope);
 }
 
+bool contains_legacy_command_allow(std::vector<PersistentPermissionRule> const& rules);
+
 std::string rules_file_json(std::vector<PersistentPermissionRule> const& rules)
 {
+  // A v1 command Allow cannot be represented in schema v2. Preserve a valid
+  // v1 document until the final such Allow is explicitly removed; the next
+  // write then deliberately migrates the remaining rules to v2.
+  auto const schema_version = contains_legacy_command_allow(rules) ? kLegacyPermissionRulesSchemaVersion : kCurrentPermissionRulesSchemaVersion;
   std::string json = "{\"schema_version\":";
-  json += std::to_string(kCurrentPermissionRulesSchemaVersion);
+  json += std::to_string(schema_version);
   json += ",\"rules\":[";
   for (std::size_t index = 0; index < rules.size(); ++index)
   {
     if (index > 0)
       json += ',';
-    json += permission_rule_json(rules[index]);
+    auto serialized_rule = rules[index];
+    serialized_rule.schema_version = schema_version;
+    json += permission_rule_json(serialized_rule);
   }
   json += "]}\n";
   return json;
@@ -1223,8 +1236,12 @@ bool command_allow_is_authoritative(PersistentPermissionRule const& rule, Permis
     return false;
   auto const& metadata = *prompt.command_metadata;
   if (!rule.command_recipe_key.empty())
-    return command_permission_allows_reusable_grant(metadata) && command_recipe_matches(rule, prompt);
-  return rule.critical_acknowledged && metadata.level == ava::command::CommandLevel::Critical && metadata.executor_identity_verified &&
+    return command_prompt_allows_persistent_allow(prompt) && command_recipe_matches(rule, prompt);
+  // Never recover authority for repository-controlled build/test text from an
+  // old or manually forged acknowledgement, regardless of current plan
+  // classification.
+  return rule.critical_acknowledged && !is_repository_controlled_build_or_test_command(rule.command) &&
+         metadata.level == ava::command::CommandLevel::Critical && metadata.executor_identity_verified &&
          !(metadata.executes_mutable_project_code && metadata.containment_status != CommandContainmentStatus::Available) && !rule.command.empty() &&
          rule.command == prompt.command;
 }
@@ -1449,10 +1466,6 @@ ava::core::Result<PersistentPermissionRule> remove_persistent_permission_rule(Pe
       continue;
     auto removed = *found;
     rules->erase(found);
-    if (contains_legacy_command_allow(*rules))
-    {
-      return std::unexpected(rule_parse_error("refusing to rewrite remaining schema-v1 command Allows; remove them explicitly first", path, "schema_version"));
-    }
     if (auto written = write_rules_file_atomic(path, rules_file_json(*rules)); !written)
     {
       return std::unexpected(std::move(written.error()));
@@ -1559,9 +1572,12 @@ std::string permission_rule_json(PersistentPermissionRule const& rule)
   json += ",\"tool_name\":\"" + ava::core::json::escape(rule.tool_name) + "\"";
   json += ",\"target_path\":\"" + ava::core::json::escape(rule.target_path.string()) + "\"";
   json += ",\"command\":\"" + ava::core::json::escape(rule.command) + "\"";
-  json += ",\"command_recipe_key\":\"" + ava::core::json::escape(rule.command_recipe_key) + "\"";
-  json += ",\"recipe_display\":\"" + ava::core::json::escape(rule.recipe_display) + "\"";
-  json += ",\"critical_acknowledged\":" + std::string(rule.critical_acknowledged ? "true" : "false");
+  if (rule.schema_version != kLegacyPermissionRulesSchemaVersion)
+  {
+    json += ",\"command_recipe_key\":\"" + ava::core::json::escape(rule.command_recipe_key) + "\"";
+    json += ",\"recipe_display\":\"" + ava::core::json::escape(rule.recipe_display) + "\"";
+    json += ",\"critical_acknowledged\":" + std::string(rule.critical_acknowledged ? "true" : "false");
+  }
   json += ",\"reason\":\"" + ava::core::json::escape(rule.reason) + "\"";
   json += ",\"actor\":\"" + ava::core::json::escape(rule.actor) + "\"";
   json += ",\"created_at\":\"" + ava::core::json::escape(rule.created_at) + "\"";

@@ -722,27 +722,32 @@ ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rul
   std::string recipe_display;
   if (prompt.operation == ava::permissions::Operation::RunCommand)
   {
-    if (!prompt.command_metadata || !ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata))
+    auto const reusable = prompt.command_metadata && ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata);
+    if (action == ava::permissions::PermissionAction::Allow && !ava::permissions::command_prompt_allows_persistent_allow(prompt))
     {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
                                               "this command cannot be remembered because no reusable sealed workspace recipe is available"));
     }
-    recipe_key = prompt.command_metadata->workspace_recipe_key;
-    recipe_display = prompt.command_metadata->recipe_display;
+    if (reusable)
+    {
+      recipe_key = prompt.command_metadata->workspace_recipe_key;
+      recipe_display = prompt.command_metadata->recipe_display;
+    }
   }
   auto added = ava::permissions::add_persistent_permission_rule(
       permission_rule_store_for_session(session),
-      ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
-                                            .action = action,
-                                            .operation = prompt.operation,
-                                            .mode = permission_rule_mode_for_agent_mode(prompt.mode),
-                                            .tool_name = prompt.tool_name,
-                                            .target_path = prompt.target_path,
-                                            .command = prompt.operation == ava::permissions::Operation::RunCommand ? std::string{} : prompt.command,
-                                            .command_recipe_key = std::move(recipe_key),
-                                            .recipe_display = std::move(recipe_display),
-                                            .reason = std::move(reason),
-                                            .actor = "tui_prompt"});
+      ava::permissions::PermissionRuleDraft{
+          .scope = ava::permissions::PermissionRuleScope::Workspace,
+          .action = action,
+          .operation = prompt.operation,
+          .mode = permission_rule_mode_for_agent_mode(prompt.mode),
+          .tool_name = prompt.tool_name,
+          .target_path = prompt.target_path,
+          .command = prompt.operation == ava::permissions::Operation::RunCommand && !recipe_key.empty() ? std::string{} : prompt.command,
+          .command_recipe_key = std::move(recipe_key),
+          .recipe_display = std::move(recipe_display),
+          .reason = std::move(reason),
+          .actor = "tui_prompt"});
   if (!added)
     return std::unexpected(std::move(added.error()));
   return ava::tui::TuiRememberedPermissionRule{.rule_id = added->rule_id};

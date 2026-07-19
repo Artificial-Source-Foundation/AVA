@@ -368,18 +368,33 @@ bool path_is_within(std::filesystem::path const& root, std::filesystem::path con
   return !relative.empty() && relative != ".." && !text.starts_with("../");
 }
 
-std::string recipe_argument(std::string_view value, std::filesystem::path const& workspace)
+struct RecipeArgument
+{
+  // `kind` and `value` are independently framed hash fields. Never encode the
+  // kind into a value prefix: a caller-controlled literal must not collide with
+  // a normalized workspace path such as "workspace:foo".
+  std::string_view kind;
+  std::string value;
+  std::string display;
+};
+
+RecipeArgument recipe_argument(std::string_view value, std::filesystem::path const& workspace)
 {
   auto const path = std::filesystem::path(value);
   if (!path.is_absolute())
-    return std::string(value);
+    return RecipeArgument{.kind = "literal", .value = std::string(value), .display = std::string(value)};
+
   auto const normalized = path.lexically_normal();
-  if (!path_is_within(workspace, normalized))
-    return normalized.generic_string();
-  auto relative = normalized.lexically_relative(workspace);
+  auto const normalized_workspace = workspace.lexically_normal();
+  if (!path_is_within(normalized_workspace, normalized))
+  {
+    auto text = normalized.generic_string();
+    return RecipeArgument{.kind = "literal", .value = text, .display = std::move(text)};
+  }
+  auto relative = normalized.lexically_relative(normalized_workspace).generic_string();
   if (relative == ".")
-    return "workspace:.";
-  return "workspace:" + relative.generic_string();
+    relative.clear();
+  return RecipeArgument{.kind = "workspace_path", .value = relative, .display = "workspace:" + (relative.empty() ? "." : relative)};
 }
 
 bool contains_secret_like_argument(std::string_view value)
@@ -437,7 +452,7 @@ std::optional<StableRecipeIdentity> stable_recipe_identity(ava::command::Command
   if (argv.empty() || contains_secret_like_arguments(argv))
     return std::nullopt;
 
-  std::vector<std::string> normalized_argv;
+  std::vector<RecipeArgument> normalized_argv;
   normalized_argv.reserve(argv.size());
   for (auto const& value : argv) normalized_argv.push_back(recipe_argument(value, plan.workspace()));
 
@@ -451,7 +466,11 @@ std::optional<StableRecipeIdentity> stable_recipe_identity(ava::command::Command
     hash.append_field(containment.profile_id.empty() ? "not-required" : containment.profile_id);
     hash.append_field(containment.network_allowed ? "network-allowed" : "network-blocked");
     hash.append_number(normalized_argv.size());
-    for (auto const& value : normalized_argv) hash.append_field(value);
+    for (auto const& value : normalized_argv)
+    {
+      hash.append_field(value.kind);
+      hash.append_field(value.value);
+    }
     if (include_workspace)
       hash.append_field(plan.workspace().lexically_normal().generic_string());
   };
@@ -462,10 +481,17 @@ std::optional<StableRecipeIdentity> stable_recipe_identity(ava::command::Command
   append_payload(workspace_hash, true);
 
   std::string display = recipe_name + " (" + std::string(ava::command::to_string(classification.family)) + ")";
-  if (classification.recipe && normalized_argv.size() > 1)
+  if (normalized_argv.size() > 1)
   {
     display += ":";
-    for (std::size_t index = 1; index < normalized_argv.size(); ++index) display += " " + normalized_argv[index];
+    for (std::size_t index = 1; index < normalized_argv.size(); ++index)
+    {
+      // Standard recipes retain their established concise display. Sensitive
+      // direct argv includes each safe normalized argument and its domain, so
+      // visually similar workspace paths and literals stay distinguishable.
+      auto const& argument = normalized_argv[index];
+      display += " " + (classification.recipe ? argument.display : std::string(argument.kind) + "=" + argument.display);
+    }
   }
   return StableRecipeIdentity{.global_key = "sha256:ava-command-recipe-v1:" + global_hash.hex(),
                               .workspace_key = "sha256:ava-command-workspace-recipe-v1:" + workspace_hash.hex(),
@@ -476,11 +502,19 @@ std::vector<ava::command::InteractiveScope> effective_scopes(CommandPermissionMe
 {
   std::vector<ava::command::InteractiveScope> scopes{ava::command::InteractiveScope::Once};
   if (!metadata.global_recipe_key.empty() && !metadata.workspace_recipe_key.empty() && metadata.executor_identity_verified &&
-      (metadata.level == ava::command::CommandLevel::Standard || metadata.level == ava::command::CommandLevel::Sensitive) &&
-      metadata.backend_maximum_scope != ava::command::InteractiveScope::Once)
+      metadata.containment_status != CommandContainmentStatus::Unavailable &&
+      metadata.containment_status != CommandContainmentStatus::UnverifiedDelegatedExecutor &&
+      (metadata.level == ava::command::CommandLevel::Standard || metadata.level == ava::command::CommandLevel::Sensitive))
   {
-    scopes.push_back(ava::command::InteractiveScope::Session);
-    scopes.push_back(ava::command::InteractiveScope::Workspace);
+    if (metadata.backend_maximum_scope == ava::command::InteractiveScope::Session ||
+        metadata.backend_maximum_scope == ava::command::InteractiveScope::Workspace)
+    {
+      scopes.push_back(ava::command::InteractiveScope::Session);
+    }
+    if (metadata.backend_maximum_scope == ava::command::InteractiveScope::Workspace)
+    {
+      scopes.push_back(ava::command::InteractiveScope::Workspace);
+    }
   }
   return scopes;
 }
@@ -514,6 +548,11 @@ PermissionRisk default_allow_risk(Operation operation)
 }
 
 }  // namespace
+
+std::vector<ava::command::InteractiveScope> command_permission_effective_scopes(CommandPermissionMetadata const& metadata)
+{
+  return effective_scopes(metadata);
+}
 
 PermissionDecision decide(PermissionRequest const& request)
 {
@@ -648,10 +687,11 @@ CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan 
       .environment_digest = plan.environment_digest(),
       .executor_identity_verified = !unverified_delegated_executor};
   bool const containment_required = classification.capabilities.requires_containment || classification.capabilities.executes_mutable_project_code;
-  if (!unverified_delegated_executor && containment_required && metadata.containment_status == CommandContainmentStatus::Unavailable)
+  if (!unverified_delegated_executor && metadata.containment_status == CommandContainmentStatus::Unavailable)
   {
-    // The original family remains visible, but an uncontained mutable plan is
-    // an explicit one-shot Critical decision.
+    // Any command that requires containment, including otherwise non-mutable
+    // Sensitive network commands, is an explicit one-shot Critical decision
+    // when the containment contract cannot be prepared.
     metadata.level = ava::command::CommandLevel::Critical;
     metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
   }
@@ -665,6 +705,7 @@ CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan 
   }
 
   if (metadata.executor_identity_verified && metadata.level != ava::command::CommandLevel::Critical &&
+      metadata.containment_status != CommandContainmentStatus::Unavailable &&
       (!containment_required || metadata.containment_status == CommandContainmentStatus::Available ||
        metadata.containment_status == CommandContainmentStatus::NotRequired))
   {
@@ -676,7 +717,7 @@ CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan 
       metadata.recipe_display = std::move(identity->display);
     }
   }
-  metadata.effective_allowed_scopes = effective_scopes(metadata);
+  metadata.effective_allowed_scopes = command_permission_effective_scopes(metadata);
   return metadata;
 }
 
@@ -685,6 +726,12 @@ PermissionDecision decide(CommandPermissionMetadata const& metadata)
   if (!metadata.executor_identity_verified || metadata.containment_status == CommandContainmentStatus::UnverifiedDelegatedExecutor)
   {
     return decision(PermissionAction::Ask, "delegated command executor identity and environment are unverified", PermissionRisk::Critical);
+  }
+  if (metadata.containment_status == CommandContainmentStatus::Unavailable)
+  {
+    return decision(PermissionAction::Ask,
+                    "sealed command requires containment, but containment is unavailable; explicit one-shot approval will run it uncontained",
+                    PermissionRisk::Critical);
   }
   if (metadata.level == ava::command::CommandLevel::Standard && !metadata.executes_mutable_project_code)
   {
@@ -718,19 +765,24 @@ PermissionDecision decide(CommandPermissionMetadata const& metadata)
 
 bool command_permission_allows_reusable_grant(CommandPermissionMetadata const& metadata) noexcept
 {
-  if (!metadata.executor_identity_verified || metadata.level == ava::command::CommandLevel::Critical ||
+  if (!metadata.executor_identity_verified || metadata.containment_status == CommandContainmentStatus::Unavailable ||
+      metadata.containment_status == CommandContainmentStatus::UnverifiedDelegatedExecutor || metadata.level == ava::command::CommandLevel::Critical ||
       metadata.backend_maximum_scope == ava::command::InteractiveScope::Once || metadata.global_recipe_key.empty() || metadata.workspace_recipe_key.empty())
     return false;
   if ((metadata.executes_mutable_project_code || metadata.containment_status == CommandContainmentStatus::Available) &&
       metadata.containment_status != CommandContainmentStatus::Available)
     return false;
-  return std::ranges::find(metadata.effective_allowed_scopes, ava::command::InteractiveScope::Session) != metadata.effective_allowed_scopes.end() &&
+  return std::ranges::find(metadata.effective_allowed_scopes, ava::command::InteractiveScope::Session) != metadata.effective_allowed_scopes.end() ||
          std::ranges::find(metadata.effective_allowed_scopes, ava::command::InteractiveScope::Workspace) != metadata.effective_allowed_scopes.end();
 }
 
 bool command_prompt_allows_persistent_allow(PermissionPrompt const& prompt) noexcept
 {
-  return !prompt.command_metadata || command_permission_allows_reusable_grant(*prompt.command_metadata);
+  if (!prompt.command_metadata)
+    return true;
+  auto const& metadata = *prompt.command_metadata;
+  return command_permission_allows_reusable_grant(metadata) &&
+         std::ranges::find(metadata.effective_allowed_scopes, ava::command::InteractiveScope::Workspace) != metadata.effective_allowed_scopes.end();
 }
 
 bool is_repository_controlled_build_or_test_command(std::string_view command)

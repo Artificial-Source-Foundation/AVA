@@ -585,6 +585,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
   ava::app::rpc::output_ts output(output_stream, [] { });
   ava::permissions::CommandPermissionMetadata metadata;
   metadata.level = ava::command::CommandLevel::Standard;
+  metadata.containment_status = ava::permissions::CommandContainmentStatus::Available;
   metadata.backend_maximum_scope = ava::command::InteractiveScope::Workspace;
   metadata.global_recipe_key = "sha256:ava-command-recipe-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   metadata.workspace_recipe_key = "sha256:ava-command-workspace-recipe-v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";

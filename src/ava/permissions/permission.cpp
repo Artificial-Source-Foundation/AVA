@@ -516,6 +516,13 @@ CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan 
       .environment_profile_id = plan.environment_profile_id(),
       .environment_digest = plan.environment_digest(),
       .executor_identity_verified = !unverified_delegated_executor};
+  if (!unverified_delegated_executor && metadata.containment_status == CommandContainmentStatus::Unavailable &&
+      (classification.capabilities.executes_mutable_project_code || classification.level == ava::command::CommandLevel::Sensitive))
+  {
+    // The original family remains visible, but the effective permission level
+    // must match the one-shot uncontained warning shown to the user.
+    metadata.level = ava::command::CommandLevel::Critical;
+  }
   // Until the separate stable recipe identity/store exists, every planned
   // command is one-shot only regardless of classification, containment, or
   // executor verification. No command may receive a reusable session or

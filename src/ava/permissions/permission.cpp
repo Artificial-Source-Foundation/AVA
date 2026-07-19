@@ -403,15 +403,35 @@ bool is_credential_bearing_long_option(std::string_view lower)
   // =value suffix.  Covers separate (--user value) and --option=value forms.
   static constexpr std::array<std::string_view, 27> kCredentialOptions{
       // curl/wget credential-bearing long options
-      "--user",          "--proxy-user",    "--header",         "--proxy-header",  "--cookie",
-      "--oauth2-bearer", "--aws-sigv4",     "--cert",           "--key",           "--pass",
-      "--cacert",        "--form-string",
+      "--user",
+      "--proxy-user",
+      "--header",
+      "--proxy-header",
+      "--cookie",
+      "--oauth2-bearer",
+      "--aws-sigv4",
+      "--cert",
+      "--key",
+      "--pass",
+      "--cacert",
+      "--form-string",
       // wget-specific credential options
-      "--http-user",     "--http-password", "--http-header",    "--proxy-password",
+      "--http-user",
+      "--http-password",
+      "--http-header",
+      "--proxy-password",
       // general credential-like option names
-      "--token",         "--secret",        "--password",       "--api-key",
-      "--api_key",       "--apikey",        "--authorization",  "--auth",
-      "--credential",    "--bearer",        "--signature",
+      "--token",
+      "--secret",
+      "--password",
+      "--api-key",
+      "--api_key",
+      "--apikey",
+      "--authorization",
+      "--auth",
+      "--credential",
+      "--bearer",
+      "--signature",
   };
   auto const eq = lower.find('=');
   auto const name = eq != std::string_view::npos ? lower.substr(0, eq) : lower;
@@ -445,16 +465,18 @@ bool is_credential_bearing_short_option(std::string_view arg)
 bool contains_secret_like_argument(std::string_view value)
 {
   auto const lower = lowercase(value);
-  // URL userinfo (scheme://user:pass@host)
-  if (lower.find("://") != std::string::npos && lower.find('@') != std::string::npos)
+  auto const scheme = lower.find("://");
+  // URL userinfo and arbitrary query strings may carry credentials under
+  // application-specific names that AVA cannot enumerate safely. Keep simple
+  // endpoint URLs reusable, but make every queried URL one-shot rather than
+  // persisting its text in a recipe display or rule.
+  if (scheme != std::string::npos && (lower.find('@', scheme + 3) != std::string::npos || lower.find('?', scheme + 3) != std::string::npos))
     return true;
-  // Credential-like key=value patterns: covers URL query fields (?token=...),
-  // inline assignments, and --option=value where the option name itself is
-  // credential-bearing.
-  static constexpr std::array<std::string_view, 13> kCredentialPatterns{
-      "token=",        "secret=",        "password=",   "passwd=",    "api_key=",
-      "apikey=",       "api-key=",       "access_token=", "authorization=", "auth=",
-      "credential=",   "bearer=",        "signature=",
+  // Credential-like key=value patterns cover inline assignments and
+  // non-URL option values. False positives only narrow reusable authority.
+  static constexpr std::array<std::string_view, 18> kCredentialPatterns{
+      "token=", "secret=",     "password=", "passwd=",    "api_key=", "apikey=", "api-key=", "access_token=", "authorization=",
+      "auth=",  "credential=", "bearer=",   "signature=", "key=",     "sig=",    "cookie=",  "session=",      "sessionid=",
   };
   return std::ranges::any_of(kCredentialPatterns, [lower](std::string_view pattern) { return lower.find(pattern) != std::string::npos; });
 }
@@ -467,11 +489,23 @@ bool is_payload_bearing_long_option(std::string_view lower)
   // bodies. Matches the lowercased long option name with or without =value.
   static constexpr std::array<std::string_view, 15> kPayloadOptions{
       // curl request-body and form options
-      "--data",          "--data-ascii",    "--data-binary",  "--data-raw",   "--data-urlencode",
-      "--json",          "--form",          "--form-string", "--url-query",  "--config",
+      "--data",
+      "--data-ascii",
+      "--data-binary",
+      "--data-raw",
+      "--data-urlencode",
+      "--json",
+      "--form",
+      "--form-string",
+      "--url-query",
+      "--config",
       // wget request-body options (--header is also credential-bearing but is
       // listed here so wget header payloads are refused too)
-      "--post-data",     "--post-file",     "--body-data",    "--body-file",  "--header",
+      "--post-data",
+      "--post-file",
+      "--body-data",
+      "--body-file",
+      "--header",
   };
   auto const eq = lower.find('=');
   auto const name = eq != std::string_view::npos ? lower.substr(0, eq) : lower;
@@ -504,8 +538,8 @@ bool contains_secret_like_arguments(std::vector<std::string> const& argv)
 {
   return std::ranges::any_of(argv, [](std::string const& argument) {
     auto const lower = lowercase(argument);
-    return is_credential_bearing_long_option(lower) || is_credential_bearing_short_option(argument) ||
-           is_payload_bearing_long_option(lower) || is_payload_bearing_short_option(argument) || contains_secret_like_argument(argument);
+    return is_credential_bearing_long_option(lower) || is_credential_bearing_short_option(argument) || is_payload_bearing_long_option(lower) ||
+           is_payload_bearing_short_option(argument) || contains_secret_like_argument(argument);
   });
 }
 

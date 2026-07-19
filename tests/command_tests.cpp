@@ -807,6 +807,8 @@ void test_credential_bearing_commands_never_mint_recipes()
       {"url query token", {"curl", "https://example.test/api?token=querysecret"}, "querysecret"},
       {"url query api_key", {"curl", "https://example.test/api?api_key=keysecret"}, "keysecret"},
       {"url query access_token", {"curl", "https://example.test/api?access_token=accsecret"}, "accsecret"},
+      {"url query key", {"curl", "https://example.test/api?key=opaquequerysecret"}, "opaquequerysecret"},
+      {"arbitrary queried URL", {"curl", "https://example.test/api?custom_name=customquerysecret"}, "customquerysecret"},
       {"url userinfo", {"curl", "https://alice:userpass@example.test/releases"}, "userpass"},
   };
 
@@ -826,8 +828,9 @@ void test_credential_bearing_commands_never_mint_recipes()
   auto safe_curl = command::seal_command_plan(*command::CommandIntent::structured({"curl", "https://example.test/releases"}), fixture.options("cred-profile"));
   auto const safe_metadata = metadata(safe_curl);
   expect(all_refused && safe_curl && !safe_metadata.global_recipe_key.empty() && !safe_metadata.recipe_display.empty(),
-         "credential-bearing curl/wget commands with separate short, concatenated long, --option=value, cookie, oauth2, proxy-user, cert/key/pass, aws-sigv4, wget "
-         "auth, and URL query/userinfo forms never mint recipe keys or display, while a plain curl URL still does");
+         "credential-bearing curl/wget commands with separate short, concatenated long, --option=value, cookie, oauth2, proxy-user, cert/key/pass, aws-sigv4, "
+         "wget "
+         "auth, arbitrary URL query, and URL userinfo forms never mint recipe keys or display, while a plain curl URL still does");
 }
 
 }  // namespace

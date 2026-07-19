@@ -6,6 +6,7 @@
 #include "ava/tools/webfetch_tool.h"
 #include "ava/tools/websearch_tool.h"
 #include "ava/permissions/permission.h"
+#include "ava/permissions/permission_rules.h"
 #include "ava/provider/provider.h"
 #include "ava/core/error.h"
 
@@ -462,6 +463,26 @@ void test_sealed_local_bash_contract()
         audits.push_back(event);
         return {};
       }};
+
+  auto const rule_store = ava::permissions::PermissionRuleStore{
+      .global_rules_file = root / "permission-rules.json", .workspace_rules_file = workspace / ".ava" / "permission-rules.json", .workspace_dir = workspace};
+  auto deny_ls =
+      ava::permissions::add_persistent_permission_rule(rule_store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Global,
+                                                                                                         .action = ava::permissions::PermissionAction::Deny,
+                                                                                                         .operation = ava::permissions::Operation::RunCommand,
+                                                                                                         .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                         .tool_name = "bash",
+                                                                                                         .target_path = {},
+                                                                                                         .command = "ls",
+                                                                                                         .reason = "test operator deny",
+                                                                                                         .actor = "test"});
+  auto denied_context = context;
+  denied_context.command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(rule_store);
+  auto denied_inspection = ava::tools::run_bash(denied_context, "ls", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+  expect(deny_ls && !denied_inspection && prompts.empty(),
+         "an explicit persistent deny remains authoritative before a standard inspection command can auto-run");
+  audits.clear();
+
   auto exact = ava::tools::run_bash(context, "inspect '' second", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   auto audit_json = audits.empty() ? std::string{} : ava::tools::permission_audit_data_json(audits.front());
   std::array<std::string_view, 10> const audit_fields{
@@ -595,6 +616,18 @@ void test_sealed_process_group_sentinel_and_grace()
         return ava::permissions::PermissionResolution::Allow;
       }};
 
+  struct sigaction previous_term_action{};
+  struct sigaction ignored_term_action{};
+  ignored_term_action.sa_handler = SIG_IGN;
+  static_cast<void>(::sigemptyset(&ignored_term_action.sa_mask));
+  bool const term_action_installed = ::sigaction(SIGTERM, &ignored_term_action, &previous_term_action) == 0;
+  sigset_t blocked_term{};
+  sigset_t previous_mask{};
+  static_cast<void>(::sigemptyset(&blocked_term));
+  static_cast<void>(::sigaddset(&blocked_term, SIGTERM));
+  bool const term_mask_installed = term_action_installed && ::sigprocmask(SIG_BLOCK, &blocked_term, &previous_mask) == 0;
+  expect(term_mask_installed, "sentinel/grace fixture installs inherited ignored and blocked SIGTERM state");
+
   // Fix 1: the sentinel is an AVA-owned sibling, so the leader (after exec)
   // has no unexpected child processes.
   auto child_check = ava::tools::run_bash(context, "child-check", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(2000)});
@@ -663,6 +696,11 @@ void test_sealed_process_group_sentinel_and_grace()
   expect(cancel_result && cancel_result->canceled && !cancel_result->timed_out && cancel_pgid && wait_for_process_group_exit(*cancel_pgid) &&
              std::filesystem::exists(cancel_marker),
          "cancellation applies the grace period to the verified process group");
+
+  if (term_mask_installed)
+    static_cast<void>(::sigprocmask(SIG_SETMASK, &previous_mask, nullptr));
+  if (term_action_installed)
+    static_cast<void>(::sigaction(SIGTERM, &previous_term_action, nullptr));
 }
 
 void test_webfetch_tool()

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/permissions/permission.h"
-
 #include "ava/core/result.h"
 
 #include <filesystem>
@@ -18,10 +17,10 @@ namespace ava::permissions {
 // stored next to AVA config under a workspace-keyed directory rather than inside
 // the model-writable workspace.  A rule matches exact operation plus all
 // non-empty target fields (path, command, tool name) and, for workspace rules,
-// the normalized workspace directory.  Persistent rules are consulted only after
-// the built-in policy has produced an Ask decision, but before session grants and
-// resolver prompts; built-in hard Deny decisions are never upgraded by durable
-// allow rules. Persistent allow rules cannot authorize repository-controlled
+// the normalized workspace directory. Persistent rules are consulted before
+// session grants and resolver prompts; matching denies also receive a dedicated
+// non-interactive preflight before backend command auto-Allow decisions. Built-in
+// hard Deny decisions are never upgraded by durable allow rules. Persistent allow rules cannot authorize repository-controlled
 // ctest or cmake --build commands; only a matching in-memory session grant or
 // one-shot resolver approval can do so. Matching deny rules always win over
 // matching allow rules, and malformed or unsupported storage fails closed by
@@ -101,6 +100,10 @@ void register_enforceable_permission_rule_files(PermissionRuleStore const& store
                                                                                                           PermissionPrompt const& prompt);
 
 [[nodiscard]] PermissionResolver build_persistent_permission_rule_resolver(PermissionRuleStore store, PermissionResolver fallback);
+// Non-interactive deny-only preflight for backend auto-Allow decisions. A
+// matching deny or malformed store is authoritative; allows are deliberately
+// ignored and absence of a deny returns Allow without prompting.
+[[nodiscard]] PermissionResolver build_persistent_permission_deny_preflight(PermissionRuleStore store);
 
 [[nodiscard]] std::string permission_rule_json(PersistentPermissionRule const& rule);
 [[nodiscard]] std::string permission_rules_result_json(PermissionRuleStore const& store, std::vector<PersistentPermissionRule> const& rules);

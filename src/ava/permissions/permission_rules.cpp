@@ -1234,6 +1234,33 @@ PermissionResolver build_persistent_permission_rule_resolver(PermissionRuleStore
   };
 }
 
+PermissionResolver build_persistent_permission_deny_preflight(PermissionRuleStore store)
+{
+  register_enforceable_permission_rule_files(store);
+  return [store = std::move(store)](PermissionPrompt const& prompt) -> ava::core::Result<PermissionResolutionDecision> {
+    auto matched = match_persistent_permission_rule(store, prompt);
+    if (!matched)
+    {
+      PermissionResolutionDecision decision{PermissionResolution::Deny, matched.error().format()};
+      decision.resolution_source = "persistent_rule_error";
+      decision.authoritative = true;
+      return decision;
+    }
+    if (*matched && (*matched)->action == PermissionAction::Deny)
+    {
+      PermissionResolutionDecision decision{PermissionResolution::Deny, (*matched)->reason};
+      decision.resolution_source = "persistent_rule";
+      decision.rule_id = (*matched)->rule_id;
+      decision.authoritative = true;
+      return decision;
+    }
+    PermissionResolutionDecision decision{PermissionResolution::Allow, "no persistent deny matched"};
+    decision.resolution_source = "persistent_deny_preflight";
+    decision.authoritative = true;
+    return decision;
+  };
+}
+
 std::string permission_rule_json(PersistentPermissionRule const& rule)
 {
   std::string json = "{";

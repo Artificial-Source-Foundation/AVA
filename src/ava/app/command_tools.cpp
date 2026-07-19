@@ -5,6 +5,7 @@
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/search_tools.h"
 #include "ava/session/session_store.h"
+#include "ava/permissions/permission_rules.h"
 #include "ava/lsp/configured_provider.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -168,7 +169,8 @@ ava::agent::ToolTimelineEntry command_result_entry(std::string const& call_id, s
   };
 }
 
-ava::core::VoidResult record_tool_event(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result, ava::agent::ToolTimelineEntry entry)
+ava::core::VoidResult record_tool_event(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result,
+                                        ava::agent::ToolTimelineEntry entry)
 {
   if (auto emitted = emit_tool_event(session, sink, entry); !emitted)
     return std::unexpected(std::move(emitted.error()));
@@ -205,6 +207,10 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
                                  .spill_dir = session.store.session_path().parent_path() / "spill",
                                  .mode = session.mode,
                                  .permission_resolver = std::move(permission_resolver),
+                                 .command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(
+                                     ava::permissions::PermissionRuleStore{.global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
+                                                                           .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
+                                                                           .workspace_dir = session.workspace_dir}),
                                  .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
                                    auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                            .parent_id = "",

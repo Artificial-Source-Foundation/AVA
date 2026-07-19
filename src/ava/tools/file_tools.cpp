@@ -305,7 +305,44 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
     decision.risk = operation == ava::permissions::Operation::EditFile ? ava::permissions::PermissionRisk::Medium : ava::permissions::PermissionRisk::Low;
   }
 
+  std::string preflight_source;
+  std::string preflight_rule_id;
+  std::string preflight_reason;
+  if (operation == ava::permissions::Operation::RunCommand && command_metadata && decision.action == ava::permissions::PermissionAction::Allow &&
+      context.command_deny_preflight)
+  {
+    auto preflight = context.command_deny_preflight(ava::permissions::PermissionPrompt{
+        .permission_request_id = permission_request_id,
+        .tool_call_id = context.current_call_id,
+        .operation = operation,
+        .mode = context.mode,
+        .workspace_dir = context.workspace_dir,
+        .target_path = permission_target,
+        .command = std::string(command),
+        .tool_name = request_tool_name,
+        .reason = decision.reason,
+        .risk = decision.risk,
+        .command_metadata = command_metadata,
+    });
+    if (!preflight || (*preflight != ava::permissions::PermissionResolution::Allow && *preflight != ava::permissions::PermissionResolution::AllowSessionGrant))
+    {
+      decision.action = ava::permissions::PermissionAction::Deny;
+      decision.risk = ava::permissions::PermissionRisk::Critical;
+      decision.reason = preflight ? (preflight->reason.empty() ? std::string("command denied by persistent policy") : preflight->reason)
+                                  : "persistent command deny preflight failed: " + preflight.error().format();
+      preflight_source = preflight && !preflight->resolution_source.empty() ? preflight->resolution_source : "persistent_rule_error";
+      preflight_rule_id = preflight ? preflight->rule_id : std::string{};
+      preflight_reason = decision.reason;
+    }
+  }
+
   auto policy_event = audit_event(context, permission_request_id, operation, request_tool_name, decision, permission_target, command, command_metadata);
+  if (!preflight_source.empty())
+  {
+    policy_event.resolution_source = std::move(preflight_source);
+    policy_event.resolution_reason = std::move(preflight_reason);
+    policy_event.rule_id = std::move(preflight_rule_id);
+  }
   if (decision.action == ava::permissions::PermissionAction::Allow || decision.action == ava::permissions::PermissionAction::Deny)
   {
     policy_event.resolution = ava::permissions::to_string(decision.action);

@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/context/context_loader.h"
 #include "ava/core/error.h"
+#include "ava/core/open_beneath.h"
 
 #include <algorithm>
 #include <array>
@@ -13,10 +14,6 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#ifdef __linux__
-#include <linux/openat2.h>
-#include <sys/syscall.h>
-#endif
 
 namespace ava::context {
 namespace {
@@ -84,71 +81,26 @@ ava::core::Error context_io_error(std::string message, std::filesystem::path con
   return error;
 }
 
-int open_components_no_symlinks(int anchor_fd, std::filesystem::path const& relative, int final_flags)
-{
-  int current = ::dup(anchor_fd);
-  if (current < 0)
-    return -1;
-  auto components = relative.begin();
-  auto const end = relative.end();
-  if (components == end)
-    return current;
-  for (; components != end; ++components)
-  {
-    auto const name = components->string();
-    if (name.empty() || name == ".")
-      continue;
-    if (name == "..")
-    {
-      ::close(current);
-      errno = EXDEV;
-      return -1;
-    }
-    auto next = components;
-    ++next;
-    int const flags = next == end ? final_flags : O_RDONLY | O_DIRECTORY | O_CLOEXEC;
-    int const opened = ::openat(current, name.c_str(), flags | O_NOFOLLOW);
-    int const saved_errno = errno;
-    ::close(current);
-    if (opened < 0)
-    {
-      errno = saved_errno;
-      return -1;
-    }
-    current = opened;
-  }
-  return current;
-}
-
-int open_beneath_no_symlinks(int anchor_fd, std::filesystem::path const& relative, int flags)
-{
-#ifdef __linux__
-  open_how how{};
-  how.flags = static_cast<std::uint64_t>(flags);
-  how.resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
-  auto const text = relative.empty() ? std::string(".") : relative.generic_string();
-  int const opened = static_cast<int>(::syscall(SYS_openat2, anchor_fd, text.c_str(), &how, sizeof(how)));
-  if (opened >= 0 || errno != ENOSYS)
-    return opened;
-#endif
-  return open_components_no_symlinks(anchor_fd, relative, flags);
-}
-
 ava::core::Result<std::optional<UniqueFd>> open_secure_root(std::filesystem::path const& root, bool missing_ok)
 {
   auto const absolute = normalized_absolute(root);
   if (!absolute.is_absolute())
     return std::unexpected(context_io_error("context root must be absolute", absolute));
+  // The context root is a trusted anchor opened at startup from configuration,
+  // so symlinked components in its path are followed rather than rejected.
+  // open_beneath (which uses openat2 RESOLVE_BENEATH) cannot be used here
+  // because it rejects absolute symlink components unconditionally; the anchor
+  // is opened directly and only the per-file reads beneath it are contained.
   UniqueFd filesystem_root(::open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
   if (filesystem_root.get() < 0)
     return std::unexpected(context_io_error("failed to open filesystem root for context validation", "/", errno));
   auto relative = absolute.lexically_relative("/");
-  int const fd = open_beneath_no_symlinks(filesystem_root.get(), relative, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  int const fd = ::openat(filesystem_root.get(), relative.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   if (fd < 0)
   {
     if (missing_ok && errno == ENOENT)
       return std::optional<UniqueFd>{};
-    return std::unexpected(context_io_error("failed to open context root without symlinks", absolute, errno));
+    return std::unexpected(context_io_error("failed to open context root", absolute, errno));
   }
   return std::optional<UniqueFd>(std::in_place, fd);
 }
@@ -156,12 +108,12 @@ ava::core::Result<std::optional<UniqueFd>> open_secure_root(std::filesystem::pat
 ava::core::Result<std::optional<std::string>> read_file_beneath(UniqueFd const& root, std::filesystem::path const& relative,
                                                                 std::filesystem::path const& display_path, std::size_t max_file_bytes)
 {
-  int const fd = open_beneath_no_symlinks(root.get(), relative, O_RDONLY | O_CLOEXEC);
+  int const fd = ava::core::open_beneath(root.get(), relative, O_RDONLY | O_CLOEXEC);
   if (fd < 0)
   {
     if (errno == ENOENT)
       return std::optional<std::string>{};
-    return std::unexpected(context_io_error("failed to open context file without symlinks", display_path, errno));
+    return std::unexpected(context_io_error("failed to open context file", display_path, errno));
   }
   UniqueFd file(fd);
   struct stat status{};

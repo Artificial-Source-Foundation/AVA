@@ -11,6 +11,7 @@
 #include "ava/tui/composer.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/core/version.h"
+#include "ava/core/AnchorSet.h"
 
 #include <cctype>
 #include <cstdlib>
@@ -689,7 +690,13 @@ int run(int argc, char** argv)
   }
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = std::filesystem::current_path();
+  auto cwd = ava::core::launch_workspace_root();
+  if (!cwd)
+  {
+    std::cerr << cwd.error().format() << '\n';
+    return 1;
+  }
+  open_options.workspace_dir = std::move(*cwd);
   open_options.current_dir = open_options.workspace_dir;
   open_options.requested_session_id = requested_session_id;
   open_options.fork_session_id = fork_session_id;

@@ -83,7 +83,6 @@ class AgentService
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
-[[nodiscard]] ava::core::Result<std::filesystem::path> canonical_launch_root();
 [[nodiscard]] ava::core::Result<AgentServiceOptions> pin_agent_service_model(AgentServiceOptions options);
 
 }  // namespace ava::app::acp

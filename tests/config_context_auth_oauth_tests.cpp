@@ -296,7 +296,7 @@ void test_context_loader()
   std::filesystem::create_directories(real_ancestor_workspace);
   {
     std::ofstream file(real_ancestor_workspace / "AGENTS.md", std::ios::binary | std::ios::trunc);
-    file << "must not load through linked ancestor\n";
+    file << "loaded through linked ancestor\n";
   }
   symlink_error.clear();
   std::filesystem::create_directory_symlink(root / "real-ancestor", linked_ancestor, symlink_error);
@@ -309,7 +309,12 @@ void test_context_loader()
         .global_agents_file = {},
         .max_file_bytes = 1024,
     });
-    expect(!ancestor && ancestor.error().category() == ava::core::ErrorCategory::Io, "context loader rejects symlinks in root ancestors before reading");
+    expect(ancestor.has_value(), "context loader follows symlinked ancestors in the workspace root path");
+    if (ancestor)
+    {
+      expect(ancestor->size() == 1 && (*ancestor)[0].content.find("loaded through linked ancestor") != std::string::npos,
+             "symlinked-ancestor workspace loads the real AGENTS.md through the link");
+    }
   }
 
   auto const intermediate_workspace = root / "intermediate-workspace";

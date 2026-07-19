@@ -5,6 +5,9 @@
 #include "ava/tools/file_tools.h"
 #include "ava/tools/mutation_queue.h"
 #include "ava/tools/secure_workspace.h"
+#include "ava/core/AnchorOpen.h"
+#include "ava/core/AnchorSet.h"
+#include "ava/core/open_beneath.h"
 #include "ava/session/export.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
@@ -25,12 +28,15 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include "debug.h"
 
 namespace {
 
@@ -1129,6 +1135,703 @@ void test_secure_workspace_file_tools()
          "retargeting a parent symlink after a grant fails closed at descriptor-anchored I/O");
 }
 
+void test_secure_workspace_symlinked_root()
+{
+  // Regression for a workspace whose configured path traverses an absolute
+  // symlink (e.g. /home/user/projects/github -> /usr/src/projects_github).
+  // The anchor descriptor is opened at startup and must follow such symlinks;
+  // only the relative paths resolved against the anchor are contained.
+  auto const root = temp_root() / "symlinked-root";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  auto const real_target = root / "real-projects-github";
+  auto const projects = root / "projects";
+  auto const real_workspace = real_target / "ai-cli" / "AVA";
+  std::filesystem::create_directories(real_workspace / "src");
+  std::filesystem::create_directories(projects);
+  {
+    std::ofstream file(real_workspace / "src" / "main.cpp", std::ios::binary | std::ios::trunc);
+    file << "int main()\n";
+  }
+  std::error_code link_error;
+  std::filesystem::create_directory_symlink(real_target, projects / "github", link_error);
+  expect(!link_error, "test creates absolute symlink in workspace path");
+  if (link_error)
+    return;
+  auto const workspace_via_link = projects / "github" / "ai-cli" / "AVA";
+
+  auto secure = ava::tools::SecureWorkspace::open(workspace_via_link);
+  expect(secure.has_value(), "secure workspace opens a root path that traverses an absolute symlink");
+  if (!secure)
+    return;
+  ava::tools::ToolContext context{.workspace_dir = workspace_via_link, .mode = ava::agent::Mode::Build, .secure_workspace = *secure};
+
+  auto read_back = ava::tools::read_file(context, workspace_via_link / "src" / "main.cpp");
+  expect(read_back.has_value() && read_back->content == "int main()\n", "contained read works through a symlinked workspace root");
+
+  auto const outside = root / "outside";
+  std::filesystem::create_directories(outside);
+  {
+    std::ofstream file(outside / "secret.txt", std::ios::binary | std::ios::trunc);
+    file << "outside secret";
+  }
+  std::filesystem::create_directory_symlink(outside, real_workspace / "linked-parent", link_error);
+  if (!link_error)
+  {
+    auto escaping_read = ava::tools::read_file(context, workspace_via_link / "linked-parent" / "secret.txt");
+    expect(!escaping_read, "contained reads still reject a symlink that escapes the anchored workspace");
+  }
+}
+
+// Verify that the descriptor-anchored workspace follows non-escaping symlinks
+// in the relative path (both intermediate directory components and the final
+// file component) and rejects symlinks that escape the anchor — for reads,
+// writes, and AllowMissing resolution alike. The anchor is the workspace root
+// fd; every symlink below is evaluated against that single anchor.
+void test_secure_workspace_symlink_containment()
+{
+  auto const root = temp_root() / "symlink-containment";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  // Anchor: ws is the workspace root opened as the SecureWorkspace descriptor.
+  auto const ws = root / "ws";
+  auto const outside = root / "outside";
+  std::filesystem::create_directories(ws / "real_dir");
+  std::filesystem::create_directories(outside);
+  {
+    std::ofstream f(ws / "real_dir" / "file.txt", std::ios::binary | std::ios::trunc);
+    f << "real content";
+  }
+  {
+    std::ofstream f(ws / "real_file.txt", std::ios::binary | std::ios::trunc);
+    f << "real file content";
+  }
+  {
+    std::ofstream f(outside / "secret.txt", std::ios::binary | std::ios::trunc);
+    f << "outside secret";
+  }
+  {
+    std::ofstream f(outside / "file.txt", std::ios::binary | std::ios::trunc);
+    f << "outside file";
+  }
+
+  auto secure = ava::tools::SecureWorkspace::open(ws);
+  expect(secure.has_value(), "secure workspace opens the anchor directory");
+  if (!secure)
+    return;
+  ava::tools::ToolContext context{.workspace_dir = ws, .mode = ava::agent::Mode::Build, .secure_workspace = *secure};
+
+  std::error_code link_error;
+
+  // linked_dir is a relative symlink to real_dir (both inside ws, no "..").
+  // Anchor: ws. Symlink location: ws/linked_dir (intermediate component).
+  // Symlink target: ws/real_dir — inside the anchor, so this must be ACCEPTED.
+  std::filesystem::create_directory_symlink("real_dir", ws / "linked_dir", link_error);
+  expect(!link_error, "create non-escaping intermediate directory symlink");
+  if (!link_error)
+  {
+    auto read = ava::tools::read_file(context, ws / "linked_dir" / "file.txt");
+    expect(read.has_value() && read->content == "real content",
+           "read through non-escaping intermediate directory symlink is accepted");
+  }
+
+  // linked_file.txt is a relative symlink to real_file.txt (both inside ws).
+  // Anchor: ws. Symlink location: ws/linked_file.txt (final component).
+  // Symlink target: ws/real_file.txt — inside the anchor, so this must be ACCEPTED.
+  std::filesystem::create_symlink("real_file.txt", ws / "linked_file.txt", link_error);
+  expect(!link_error, "create non-escaping final-component file symlink");
+  if (!link_error)
+  {
+    auto read = ava::tools::read_file(context, ws / "linked_file.txt");
+    expect(read.has_value() && read->content == "real file content",
+           "read through non-escaping final-component symlink is accepted");
+  }
+
+  // escape_dir is a relative symlink to ../outside (the ".." leaves ws).
+  // Anchor: ws. Symlink location: ws/escape_dir (intermediate component).
+  // Symlink target: root/outside — outside the anchor, so this must be REJECTED.
+  std::filesystem::create_directory_symlink("../outside", ws / "escape_dir", link_error);
+  expect(!link_error, "create escaping intermediate directory symlink");
+  if (!link_error)
+  {
+    auto read = ava::tools::read_file(context, ws / "escape_dir" / "secret.txt");
+    expect(!read, "read through escaping intermediate directory symlink is rejected");
+  }
+
+  // escape_file.txt is a relative symlink to ../outside/file.txt (leaves ws).
+  // Anchor: ws. Symlink location: ws/escape_file.txt (final component).
+  // Symlink target: root/outside/file.txt — outside the anchor, so this must be REJECTED.
+  std::filesystem::create_symlink("../outside/file.txt", ws / "escape_file.txt", link_error);
+  expect(!link_error, "create escaping final-component file symlink");
+  if (!link_error)
+  {
+    auto read = ava::tools::read_file(context, ws / "escape_file.txt");
+    expect(!read, "read through escaping final-component symlink is rejected");
+  }
+
+  // Writing a new file through a non-escaping intermediate directory symlink.
+  // Anchor: ws. Symlink: ws/linked_dir -> real_dir (intermediate, non-escaping).
+  // The parent directory resolves inside the anchor, so the write must be ACCEPTED.
+  auto written = ava::tools::write_file(context, ws / "linked_dir" / "new.txt", "new content");
+  expect(written.has_value(), "write through non-escaping intermediate directory symlink is accepted");
+
+  // Writing a new file through an escaping intermediate directory symlink.
+  // Anchor: ws. Symlink: ws/escape_dir -> ../outside (intermediate, escaping).
+  // The parent directory escapes the anchor, so the write must be REJECTED.
+  auto escape_write = ava::tools::write_file(context, ws / "escape_dir" / "new.txt", "bad");
+  expect(!escape_write, "write through escaping intermediate directory symlink is rejected");
+
+  // resolve(AllowMissing) through a non-escaping symlinked parent directory.
+  // Anchor: ws. Symlink: ws/linked_dir -> real_dir (intermediate, non-escaping).
+  // The file does not exist yet, but the parent path is contained, so this must be ACCEPTED.
+  auto resolved = (*secure)->resolve(ws / "linked_dir" / "nonexistent.txt", ava::tools::SecureWorkspaceResolveMode::AllowMissing);
+  expect(resolved.has_value() && !resolved->exists,
+         "resolve AllowMissing through non-escaping symlinked parent is accepted");
+
+  // resolve(AllowMissing) through an escaping symlinked parent directory.
+  // Anchor: ws. Symlink: ws/escape_dir -> ../outside (intermediate, escaping).
+  // The parent path escapes the anchor, so this must be REJECTED.
+  auto escape_resolved = (*secure)->resolve(ws / "escape_dir" / "nonexistent.txt", ava::tools::SecureWorkspaceResolveMode::AllowMissing);
+  expect(!escape_resolved, "resolve AllowMissing through escaping symlinked parent is rejected");
+}
+
+// Verify that AnchorSet correctly resolves candidate paths to the right anchor
+// when multiple writable directories are configured. Tests cover:
+//   - Basic multi-anchor resolution (longest prefix wins)
+//   - Paths outside all anchors are rejected
+//   - Relative paths resolve against the first (primary) anchor
+//   - Non-existent directories are silently skipped
+//   - contains() is consistent with find_anchor()
+//   - Cross-anchor symlink escape is rejected by open_beneath
+//   - Non-escaping symlinks within an anchor are followed
+void test_anchor_set_multi_anchor()
+{
+  auto const root = temp_root() / "anchor-set";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  std::filesystem::create_directories(root);
+
+  // Create two anchor directories.
+  auto const ws_a = root / "workspace-a";
+  auto const ws_b = root / "workspace-b";
+  std::filesystem::create_directories(ws_a / "subdir");
+  std::filesystem::create_directories(ws_b / "subdir");
+  {
+    std::ofstream file(ws_a / "subdir" / "file_a.txt", std::ios::binary | std::ios::trunc);
+    file << "anchor A content";
+  }
+  {
+    std::ofstream file(ws_b / "subdir" / "file_b.txt", std::ios::binary | std::ios::trunc);
+    file << "anchor B content";
+  }
+
+  // Open an AnchorSet with both directories.
+  auto opened = ava::core::AnchorSet::open({ws_a, ws_b});
+  expect(opened.has_value(), "AnchorSet::open succeeds with two existing directories");
+  if (!opened)
+    return;
+  auto const& anchors = **opened;
+
+  // find_anchor for a path beneath anchor A.
+  auto ref_a = anchors.find_anchor(ws_a / "subdir" / "file_a.txt");
+  expect(ref_a.has_value(), "find_anchor resolves path beneath anchor A");
+  expect(ref_a->anchor().root == ws_a, "find_anchor selects anchor A for A's path");
+  expect(ref_a->relative() == "subdir/file_a.txt", "find_anchor returns correct relative path for anchor A");
+
+  // find_anchor for a path beneath anchor B.
+  auto ref_b = anchors.find_anchor(ws_b / "subdir" / "file_b.txt");
+  expect(ref_b.has_value(), "find_anchor resolves path beneath anchor B");
+  expect(ref_b->anchor().root == ws_b, "find_anchor selects anchor B for B's path");
+  expect(ref_b->relative() == "subdir/file_b.txt", "find_anchor returns correct relative path for anchor B");
+
+  // find_anchor for a path outside all anchors.
+  auto ref_outside = anchors.find_anchor(root / "outside.txt");
+  expect(!ref_outside, "find_anchor rejects path outside all anchors");
+
+  // find_anchor for a relative path resolves against the first anchor.
+  auto ref_rel = anchors.find_anchor("subdir/file_a.txt");
+  expect(ref_rel.has_value(), "find_anchor resolves relative path against primary anchor");
+  expect(ref_rel->anchor().root == ws_a, "relative path resolves to anchor A (first/primary)");
+  expect(ref_rel->relative() == "subdir/file_a.txt", "relative path produces correct relative component");
+
+  // contains() is consistent with find_anchor().
+  expect(anchors.contains_lexical(ws_a / "subdir" / "file_a.txt"), "contains_lexical returns true for path in anchor A");
+  expect(anchors.contains_lexical(ws_b / "subdir" / "file_b.txt"), "contains_lexical returns true for path in anchor B");
+  expect(!anchors.contains_lexical(root / "outside.txt"), "contains_lexical returns false for path outside all anchors");
+
+  // Longest prefix wins: create a nested directory structure.
+  auto const ws_nested = ws_a / "nested";
+  std::filesystem::create_directories(ws_nested / "deep");
+  auto opened_nested = ava::core::AnchorSet::open({ws_a, ws_nested});
+  expect(opened_nested.has_value(), "AnchorSet::open succeeds with nested anchors");
+  if (!opened_nested)
+    return;
+  auto ref_nested = (*opened_nested)->find_anchor(ws_a / "nested" / "deep" / "file.txt");
+  expect(ref_nested.has_value(), "find_anchor resolves path in nested anchor");
+  expect(ref_nested->anchor().root == ws_nested, "find_anchor selects the longest prefix (nested) anchor");
+
+  // Non-existent directories are silently skipped.
+  auto opened_skip = ava::core::AnchorSet::open({ws_a, root / "does-not-exist", ws_b});
+  expect(opened_skip.has_value(), "AnchorSet::open skips non-existent directories");
+  if (!opened_skip)
+    return;
+  expect((*opened_skip)->number_of_anchors() == 2, "AnchorSet skips non-existent anchor, keeping two");
+  expect((*opened_skip)->contains_lexical(ws_a / "subdir" / "file_a.txt"), "AnchorSet with skipped dir still contains A");
+  expect((*opened_skip)->contains_lexical(ws_b / "subdir" / "file_b.txt"), "AnchorSet with skipped dir still contains B");
+
+  // Cross-anchor symlink escape is rejected by open_beneath.
+  // Create a relative symlink in anchor A that escapes to anchor B.
+  // RESOLVE_BENEATH rejects absolute symlinks unconditionally, so we use a
+  // relative target with ".." to test the actual escape detection.
+  std::error_code link_error;
+  std::filesystem::create_directory_symlink("../workspace-b", ws_a / "link-to-b", link_error);
+  expect(!link_error, "test creates cross-anchor symlink");
+  if (!link_error)
+  {
+    // The symlink is inside anchor A but points to anchor B. open_beneath
+    // with RESOLVE_BENEATH should reject it (EXDEV) because the target is
+    // outside anchor A's directory tree.
+    auto ref_cross = anchors.find_anchor(ws_a / "link-to-b" / "subdir" / "file_b.txt");
+    expect(ref_cross.has_value(), "find_anchor selects anchor A for cross-anchor symlink path");
+    if (ref_cross)
+    {
+      int probe = ava::core::open_beneath(ref_cross->anchor().fd, ref_cross->relative(), O_PATH | O_CLOEXEC);
+      expect(probe < 0, "open_beneath rejects cross-anchor symlink escape (EXDEV/ELOOP)");
+      if (probe >= 0)
+        ::close(probe);
+    }
+  }
+
+  // Non-escaping symlink within an anchor is followed.
+  // Create a relative symlink in anchor A pointing to another directory in
+  // anchor A. RESOLVE_BENEATH rejects absolute symlinks unconditionally, so
+  // the target must be relative for the symlink to be followed.
+  std::filesystem::create_directory_symlink("subdir", ws_a / "link-to-subdir", link_error);
+  expect(!link_error, "test creates non-escaping symlink");
+  if (!link_error)
+  {
+    auto ref_internal = anchors.find_anchor(ws_a / "link-to-subdir" / "file_a.txt");
+    expect(ref_internal.has_value(), "find_anchor resolves non-escaping symlink path");
+    if (ref_internal)
+    {
+      int probe = ava::core::open_beneath(ref_internal->anchor().fd, ref_internal->relative(), O_PATH | O_CLOEXEC);
+      expect(probe >= 0, "open_beneath follows non-escaping symlink within anchor");
+      if (probe >= 0)
+        ::close(probe);
+    }
+  }
+}
+
+// Verify that AnchorSet stores the lexically-normalized anchor root path,
+// not the canonical (symlink-resolved) path. The anchor fd follows symlinks
+// (opened with openat), but the stored root must remain the configured path
+// so that find_anchor matches candidate paths expressed in terms of the
+// configured path, not the resolved target.
+void test_anchor_set_symlinked_root()
+{
+  auto const root = temp_root() / "anchor-set-symlinked-root";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  std::filesystem::create_directories(root);
+
+  // Create a real directory with content, and a symlink pointing to it.
+  auto const real_target = root / "real-projects";
+  auto const symlinked_root = root / "projects";
+  std::filesystem::create_directories(real_target / "src");
+  {
+    std::ofstream file(real_target / "src" / "main.cpp", std::ios::binary | std::ios::trunc);
+    file << "int main()\n";
+  }
+  std::error_code link_error;
+  std::filesystem::create_directory_symlink(real_target, symlinked_root, link_error);
+  expect(!link_error, "test creates symlink for anchor root");
+  if (link_error)
+    return;
+
+  // Open an AnchorSet using the symlinked path.
+  auto opened = ava::core::AnchorSet::open({symlinked_root});
+  expect(opened.has_value(), "AnchorSet::open succeeds through a symlinked root");
+  if (!opened)
+    return;
+  auto const& anchors = **opened;
+
+  // The stored root must be the lexically-normalized symlinked path, not
+  // the canonical resolved path.
+  auto ref = anchors.find_anchor(symlinked_root / "src" / "main.cpp");
+  expect(ref.has_value(), "find_anchor resolves path through symlinked root");
+  expect(ref->anchor().root == symlinked_root, "stored root is the lexical (symlinked) path, not the resolved target");
+  expect(ref->relative() == "src/main.cpp", "relative path is correct through symlinked root");
+
+  // open_beneath through the symlinked anchor fd works (the fd follows the
+  // symlink at open time; subsequent open_beneath resolves relative to the
+  // real directory).
+  int probe = ava::core::open_beneath(ref->anchor().fd, ref->relative(), O_RDONLY | O_CLOEXEC);
+  expect(probe >= 0, "open_beneath reads through symlinked anchor fd");
+  if (probe >= 0)
+    ::close(probe);
+
+  // A path expressed through the resolved target must NOT match, because the
+  // stored root is the symlinked path, not the canonical one. This ensures
+  // that the anchor set only accepts paths in terms of the configured path.
+  auto ref_resolved = anchors.find_anchor(real_target / "src" / "main.cpp");
+  expect(!ref_resolved, "find_anchor rejects resolved path that does not lexically match the stored root");
+
+  // contains_lexical is consistent.
+  expect(anchors.contains_lexical(symlinked_root / "src" / "main.cpp"), "contains_lexical accepts symlinked root path");
+  expect(!anchors.contains_lexical(real_target / "src" / "main.cpp"), "contains_lexical rejects resolved target path");
+}
+
+// Read all bytes available on fd into a string. Used to verify that the
+// descriptor returned by open_writable/open_readable points at the expected
+// file content.
+std::string read_all_from_fd(int fd)
+{
+  std::string content;
+  std::array<char, 4096> buffer{};
+  while (true)
+  {
+    auto const count = ::read(fd, buffer.data(), buffer.size());
+    if (count <= 0)
+    {
+      if (count < 0 && errno == EINTR)
+        continue;
+      break;
+    }
+    content.append(buffer.data(), static_cast<std::size_t>(count));
+  }
+  return content;
+}
+
+struct Info
+{
+  std::filesystem::path path;           // That path that is opened.
+  std::filesystem::path writable_root;  // The the root of the writable anchor, or empty if not writable.
+  std::filesystem::path target_path;    // The non-symlinked target.
+  bool is_link;                         // path contains a symbol link.
+  bool crosses_boundary;                // True if this contains a symbol link that crosses a boundary.
+  std::string content;                  // The content of the file that opening this path reads.
+
+  void print_on(std::ostream& os) const;
+  friend std::ostream& operator<<(std::ostream& os, Info const& info)
+  {
+    info.print_on(os);
+    return os;
+  }
+};
+
+void Info::print_on(std::ostream& os) const
+{
+  os << std::boolalpha << "{path:" << path << ", writable_root:" << writable_root << ", target_path:" << target_path <<
+    ", is_link:" << is_link << ", crosses_boundary:" << crosses_boundary << ", content:\"" << content << "\"}";
+}
+
+// Verify the AnchorOpen entry points (open_writable / open_readable). These are
+// the single, orthogonal point through which tools open paths against the anchor
+// set; the deeper find_anchor/open_beneath mechanics are covered by the
+// existing AnchorSet and SecureWorkspace tests, so this test stays at the
+// AnchorOpen contract level and avoids re-walking the full symlink matrix.
+//   - open_writable: in-anchor open + identity; outside -> PermissionDenied;
+//     O_CREAT creates beneath the anchor; a cross-anchor escaping symlink is
+//     rejected.
+//   - open_readable: in-anchor open; external (outside-all-anchors) open, the
+//     capability that distinguishes reads from writes; O_WRONLY/O_RDWR are
+//     rejected; an escaping symlink inside an anchor is rejected.
+//   - AnchorOpen owns its descriptor: move transfers it, the source goes empty.
+// The "external symlink that enters a writable anchor" hardening is deferred
+// (see the marker in AnchorOpen.cpp) and is intentionally not asserted here.
+void test_anchor_open()
+{
+  namespace fs = std::filesystem;
+
+  auto const root = temp_root() / "anchor-open";
+
+  std::error_code cleanup;
+  fs::remove_all(root, cleanup);
+  fs::create_directories(root);
+
+  // Two writable anchors and an external (outside-all-anchors) directory.
+  auto const ws_a = root / "workspace-a";
+  auto const ws_b = root / "workspace-b";
+  auto const external = root / "external";
+
+  // Vector to store all six directories in.
+  std::vector<fs::path> directories;
+
+  // Helper to create and store a new directory.
+  auto create_directory = [&directories](fs::path const& d) {
+    directories.push_back(d);
+    fs::create_directories(d);
+  };
+
+  // Vector to store all files and links to files.
+  std::vector<Info> files;
+  // Vector to store all links to directories.
+  std::vector<Info> dirlinks;
+
+  // Helper to create symbolic link -> target.
+  auto create_link = [&files, &dirlinks](fs::path const& link, fs::path const& target, ava::core::AnchorSet::Anchor const* writable_anchor, bool crosses_boundary) {
+    std::error_code link_error;
+    //Dout(dc::notice, "Calling fs::create_symlink(" << target.lexically_relative(link.parent_path()) << ", " << link << ", link_error)");
+    fs::create_symlink(target.lexically_relative(link.parent_path()), link, link_error);
+    expect(!link_error, "anchor-open test creates a symlink");
+    if (!link_error)
+    {
+      std::error_code status_error;
+      fs::file_status status = fs::status(link, status_error);
+      expect(!status_error, "anchor-open test gets symlink status");
+      if (!status_error)
+      {
+        if (fs::is_regular_file(status))
+          // The file that this link resolves to lives in target.parent_path(), and each
+          // file.txt contains its own parent directory's path string, so that is the
+          // content that a read through the link must return.
+          files.emplace_back(link, writable_anchor ? writable_anchor->root : fs::path{}, target, true, crosses_boundary, target.parent_path().string());
+        else if (fs::is_directory(link))
+          dirlinks.emplace_back(link, writable_anchor ? writable_anchor->root : fs::path{}, target, true, crosses_boundary, std::string{});
+      }
+    }
+    else
+      Dout(dc::warning, "Failed to create symlink: " << std::strerror(link_error.value()));
+  };
+
+  // clang-format off
+  //                                               n
+  create_directory(ws_a);                       // 0
+  create_directory(ws_a / "subdir");            // 1
+  create_directory(ws_b);                       // 2
+  create_directory(ws_b / "subdir");            // 3
+  create_directory(external);                   // 4
+  create_directory(external / "subdir");        // 5
+
+  // Open AnchorSet with the two workspaces.
+  auto opened_set = ava::core::AnchorSet::open({ws_a, ws_b});
+  expect(opened_set.has_value(), "AnchorSet::open succeeds for anchor-open test");
+  if (!opened_set)
+    return;
+  auto const& anchor_set = **opened_set;
+  auto const& anchors = anchor_set.anchors();
+
+  // Helper to convert directory index to a writable anchor pointer, or nullptr if not writable.
+  auto n_to_anchor = [&anchors](int n) -> ava::core::AnchorSet::Anchor const* {
+    ava::core::AnchorSet::Anchor const* writable_anchor = nullptr;
+    if (n == 0 || n == 1)
+      writable_anchor = &anchors[0];     // ws_a
+    else if (n == 2 || n == 3)
+      writable_anchor = &anchors[1];     // ws_b
+    return writable_anchor;
+  };
+
+  // Create a test file inside each directory.
+  int n = -1;
+  for (auto const& d : directories)
+  {
+    ++n;
+    auto writable_anchor = n_to_anchor(n);
+    files.emplace_back(d / "file.txt", writable_anchor ? writable_anchor->root : fs::path{}, d / "file.txt", false, false, d.string());
+    std::ofstream file(files.back().path, std::ios::binary | std::ios::trunc);
+    file << d.string();
+  }
+
+  // Create 30 symbolic links.
+  int from_n = -1;
+  for (auto const& from : directories)
+  {
+    ++from_n;
+    int n = -1;
+    for (auto const& to : directories)
+    {
+      ++n;                                      // Enumeration of the `to` directory.
+      std::string N(1, static_cast<char>('0' + n));
+
+      if (from == to)
+        continue;
+
+      int from_root = from_n / 2;
+      int to_root = n / 2;
+      bool crosses_boundary = from_root != to_root;
+
+      auto writable_anchor = crosses_boundary ? nullptr : n_to_anchor(from_n);                          // The link appears to reside inside the anchor that belongs to from_n.
+      create_link(from / ("dirlink-" + N), to, writable_anchor, crosses_boundary);                      // from/dirlink-N -> to
+      create_link(from / ("filelink-" + N), to / "file.txt", writable_anchor, crosses_boundary);        // from/filelink-N -> to/file.txt
+    }
+  }
+  // clang-format on
+
+  // Run over all files and links to files and test trying to open them using open_writable and open_readable.
+  for (Info const& info : files)
+  {
+    bool external = false;
+    auto writable = ava::core::open_writable(anchor_set, info.path, O_RDONLY | O_CLOEXEC);
+    if (writable)
+    {
+      fs::path const absolute = writable->absolute();
+      expect(absolute == absolute.lexically_normal(), "open_writable (existing): returned absolute path is normalized");
+      expect(writable->root() == info.writable_root && absolute == info.path && writable->fd() >= 0,
+          "open_writable (existing): opens an in-anchor file using the correct anchor");
+      expect(read_all_from_fd(writable->fd()) == info.content, "open_writable returns fd to the correct file");
+      expect(writable->relative() == absolute.lexically_relative(writable->root()), "open_writable (existing): returned relative path is normalized");
+    }
+    else
+    {
+      expect(writable.error().category() == ava::core::ErrorCategory::PermissionDenied,
+         "open_writable (existing): rejects a path outside all anchors with PermissionDenied");
+      expect(info.writable_root.empty(), "open_writable (existing): refuses to open files that escape their anchor");
+      external = true;
+    }
+
+    //Dout(dc::notice, "Calling open_readable(anchor_set, " << info.path << ", O_RDONLY | O_CLOEXEC)");
+    auto readable = ava::core::open_readable(anchor_set, info.path, O_RDONLY | O_CLOEXEC);
+    expect(readable.has_value() != info.crosses_boundary, "open_readable (existing): only opens files that do not cross anchor boundaries");
+    if (readable.has_value() == info.crosses_boundary)
+    {
+      if (!readable.has_value())
+        Dout(dc::warning, "open_readable denied reading with " << readable.error() << "; expected was that we would be able to open it!");
+      else
+        Dout(dc::warning, "open_readable allowed reading; expected was that it would be denied!");
+    }
+    if (readable)
+    {
+      fs::path const absolute = readable->absolute();
+      expect(absolute == absolute.lexically_normal(), "open_readable (existing): returned absolute path is normalized");
+      expect(absolute == info.path, "open_readable (existing): returns the expected absolute path");
+      expect(readable->fd() >= 0, "open_readable (existing): returns a readable fd");
+      expect(read_all_from_fd(readable->fd()) == info.content, "open_readable (existing): returns fd to the correct file");
+      expect(!external || (readable->root().empty() && readable->relative().empty()),
+          "open_readable (existing): returns an empty root for external file");
+      expect(external || (readable->root() == writable->root() && readable->relative() == absolute.lexically_relative(readable->root())),
+          "open_readable (existing): returns writable root if in-anchor and relative path is normalized");
+    }
+
+    // AnchorOpen owns its descriptor: move transfers it, the source becomes empty.
+    if (writable)
+    {
+      int const held_fd = writable->fd();
+      auto moved = std::move(*writable);
+      expect(moved.fd() == held_fd && writable->fd() == -1, "AnchorOpen move transfers the descriptor and empties the source");
+    }
+  }
+
+  // Run over all dirlinks.
+  for (Info const& info : dirlinks)
+  {
+    std::string dp = info.path.string();
+    int dir_n = dp[dp.length() - 1] - '0';
+    for (int file_n = 0; file_n < 6; ++file_n)
+    {
+      if (file_n == dir_n)
+        continue;
+      std::string N(1, static_cast<char>('0' + file_n));
+      fs::path fp = info.path / ("filelink-" + N);
+
+      bool const crosses_boundary = info.crosses_boundary || (file_n / 2) != (dir_n / 2);
+
+      //Dout(dc::notice, "Calling open_writable(anchor_set, " << fp << ", O_RDONLY | O_CLOEXEC)");
+      auto writable = ava::core::open_writable(anchor_set, fp, O_RDONLY | O_CLOEXEC);
+      if (writable)
+      {
+        fs::path const absolute = writable->absolute();
+        expect(absolute == absolute.lexically_normal(), "returned dirlink/filelink absolute path is normalized");
+        expect(writable->root() == info.writable_root && absolute == fp && writable->fd() >= 0,
+            "open_writable opens an in-anchor dirlink/filelink using the correct anchor");
+        expect(read_all_from_fd(writable->fd()) == directories[file_n].string(), "open_writable dirlink/filelink returns fd to the correct file");
+        expect(writable->relative() == absolute.lexically_relative(writable->root()), "returned dirlink/filelink relative path is normalized");
+      }
+      else
+      {
+        expect(writable.error().category() == ava::core::ErrorCategory::PermissionDenied,
+           "open_writable rejects an escaping dirlink/filelink path with PermissionDenied");
+        if (writable.error().category() != ava::core::ErrorCategory::PermissionDenied)
+          Dout(dc::warning, "open_writable denied writing with " << writable.error() << "; expected was " <<
+              (crosses_boundary ? "that it would be denied with PermissionDenied!" : "that we would be able to open it!"));
+      }
+
+      //Dout(dc::notice, "Calling open_readable(anchor_set, " << fp << ", O_RDONLY | O_CLOEXEC)");
+      auto readable = ava::core::open_readable(anchor_set, fp, O_RDONLY | O_CLOEXEC);
+      expect(readable.has_value() != crosses_boundary, "open_readable (dirlink): only opens files that do not cross anchor boundaries");
+      if (readable.has_value() == crosses_boundary)
+      {
+        if (!readable.has_value())
+          Dout(dc::warning, "open_readable denied reading with " << readable.error() << "; expected was that we would be able to open it!");
+        else
+          Dout(dc::warning, "open_readable allowed reading; expected was that it would be denied!");
+      }
+      if (readable)
+      {
+        bool const external = dir_n > 3;
+
+        fs::path const absolute = readable->absolute();
+        expect(absolute == absolute.lexically_normal(), "open_readable (dirlink): returned absolute path is normalized");
+        expect(absolute == fp, "open_readable (dirlink): returns the expected absolute path");
+        expect(readable->fd() >= 0, "open_readable (dirlink): returns a readable fd");
+        expect(read_all_from_fd(readable->fd()) == directories[file_n].string(), "open_readable (dirlink): returns fd to the correct file");
+        expect(!external || (readable->root().empty() && readable->relative().empty()),
+            "open_readable (dirlink): returns an empty root for external file");
+        expect(external || (readable->root() == info.writable_root && readable->relative() == absolute.lexically_relative(readable->root())),
+            "open_readable (dirlink): returns writable root if in-anchor and relative path is normalized");
+      }
+    }
+  }
+
+  // Remove all files, causing all symbolic links to them to becomes dangling links.
+  for (Info const& info : files)
+  {
+    if (info.is_link)
+      continue;
+    std::error_code remove_error;
+    bool success = fs::remove(info.path, remove_error);
+    expect(success, "remove plain file");
+    if (!success)
+      Dout(dc::warning, "fs::remove(" << info.path << ") : " << std::strerror(remove_error.value()));
+  }
+
+  // Run over all symbolic link to, now non-existing, "file.txt" targets.
+  for (Info const& info : files)
+  {
+    if (!info.is_link)
+      continue;
+
+    // open_writable creates a new file beneath the anchor with O_CREAT. O_EXCL is
+    // intentionally NOT used: it checks the directory entry itself rather than
+    // following the symlink, so it would return EEXIST for every symlink path
+    // regardless of whether the (now removed) target exists — defeating the
+    // purpose of exercising creation through a dangling link. RESOLVE_BENEATH
+    // still contains the creation: a contained symlink creates its target inside
+    // the anchor; an escaping symlink is rejected with EXDEV before any file is
+    // created.
+    //Dout(dc::notice, "Calling open_writable(anchor_set, " << info.path << ", O_WRONLY | O_CREAT | O_CLOEXEC, 0600)");
+    auto created = ava::core::open_writable(anchor_set, info.path, O_WRONLY | O_CREAT | O_CLOEXEC, 0600);
+    if (created)
+    {
+      fs::path const absolute = created->absolute();
+      expect(absolute == absolute.lexically_normal(), "open_writable (create): returned absolute path is normalized");
+      expect(created->root() == info.writable_root && absolute == info.path && created->fd() >= 0,
+          "open_writable (create): opens an in-anchor file using the correct anchor");
+      expect(created->relative() == absolute.lexically_relative(created->root()), "open_writable (create): returned relative path is normalized");
+      expect(::write(created->fd(), "created", 7) == 7, "open_writable created descriptor is writable");
+      std::ifstream target(info.target_path);
+      std::string s;
+      target >> s;
+      expect(s == "created", "open_writable (create): created file contains the written data");
+      fs::remove(info.target_path, cleanup);
+    }
+    else
+    {
+      expect(created.error().category() == ava::core::ErrorCategory::PermissionDenied,
+         "open_writable (create): rejects a path outside all anchors with PermissionDenied");
+      if (created.error().category() != ava::core::ErrorCategory::PermissionDenied)
+        Dout(dc::warning, "The error is " << created.error());
+      expect(info.writable_root.empty(), "open_writable (create): refuses to open files that escape their anchor");
+    }
+  }
+
+  // open_readable rejects write access modes.
+  auto const write_mode = ava::core::open_readable(anchor_set, ws_a / "subdir" / "file.txt", O_WRONLY | O_CLOEXEC);
+  auto const rdwr_mode = ava::core::open_readable(anchor_set, ws_a / "subdir" / "file.txt", O_RDWR | O_CLOEXEC);
+  expect(!write_mode && write_mode.error().category() == ava::core::ErrorCategory::InvalidArgument &&
+      !rdwr_mode && rdwr_mode.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "open_readable rejects O_WRONLY and O_RDWR with InvalidArgument");
+}
+
 }  // namespace
 
 void run_tools_file_tests()
@@ -1139,4 +1842,9 @@ void run_tools_file_tests()
   test_secure_workspace_staged_write_contracts();
   test_injected_exact_file_access();
   test_secure_workspace_file_tools();
+  test_secure_workspace_symlinked_root();
+  test_secure_workspace_symlink_containment();
+  test_anchor_set_multi_anchor();
+  test_anchor_set_symlinked_root();
+  test_anchor_open();
 }

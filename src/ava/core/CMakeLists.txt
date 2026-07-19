@@ -1,8 +1,11 @@
 add_library(ava_core
+  "AnchorOpen.cpp"
+  "AnchorSet.cpp"
   "atomic_file.cpp"
   "error.cpp"
   "ids.cpp"
   "json.cpp"
+  "open_beneath.cpp"
   "process_args.cpp"
   "strict_json.cpp"
 )

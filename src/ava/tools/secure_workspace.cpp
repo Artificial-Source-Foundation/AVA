@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/tools/secure_workspace.h"
 #include "ava/core/ids.h"
+#include "ava/core/open_beneath.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -13,11 +14,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#ifdef __linux__
-#include <linux/openat2.h>
-#include <sys/syscall.h>
-#endif
+#include "debug.h"
 
 #ifndef O_PATH
 #define O_PATH O_RDONLY
@@ -26,12 +23,7 @@
 namespace ava::tools {
 namespace {
 
-constexpr unsigned int kResolveFlags =
-#ifdef __linux__
-    RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
-#else
-    0;
-#endif
+using ava::core::open_beneath;
 
 ava::core::Error workspace_error(ava::core::ErrorCategory category, std::string message, std::filesystem::path const& root, std::filesystem::path const& path,
                                  int error_number = 0)
@@ -82,59 +74,6 @@ ava::core::Result<SecureWorkspacePath> lexical_workspace_path(std::filesystem::p
           workspace_error(ava::core::ErrorCategory::PermissionDenied, "secure workspace path contains traversal or redundant components", root, absolute));
   }
   return SecureWorkspacePath{.absolute = std::move(absolute), .relative = std::move(relative)};
-}
-
-int fallback_open_beneath(int base_fd, std::filesystem::path const& relative, int flags)
-{
-  int current = ::dup(base_fd);
-  if (current < 0)
-    return -1;
-  if (relative.empty())
-  {
-    if ((flags & O_DIRECTORY) != 0)
-    {
-      int const directory = ::openat(current, ".", flags | O_CLOEXEC | O_NOFOLLOW);
-      int const saved = errno;
-      ::close(current);
-      errno = saved;
-      return directory;
-    }
-    return current;
-  }
-
-  std::vector<std::string> components;
-  for (auto const& component : relative) components.push_back(component.string());
-  for (std::size_t index = 0; index < components.size(); ++index)
-  {
-    bool const final = index + 1 == components.size();
-    int const open_flags = final ? flags | O_CLOEXEC | O_NOFOLLOW : O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
-    int const next = ::openat(current, components[index].c_str(), open_flags);
-    int const saved = errno;
-    ::close(current);
-    if (next < 0)
-    {
-      errno = saved;
-      return -1;
-    }
-    current = next;
-  }
-  return current;
-}
-
-int open_beneath(int base_fd, std::filesystem::path const& relative, int flags)
-{
-  auto const text = relative.empty() ? std::string(".") : relative.generic_string();
-#ifdef __linux__
-  struct open_how how{};
-  how.flags = static_cast<std::uint64_t>(flags | O_CLOEXEC);
-  how.resolve = kResolveFlags;
-  int const opened = static_cast<int>(::syscall(SYS_openat2, base_fd, text.c_str(), &how, sizeof(how)));
-  if (opened >= 0)
-    return opened;
-  if (errno != ENOSYS && errno != EINVAL && errno != E2BIG)
-    return -1;
-#endif
-  return fallback_open_beneath(base_fd, relative, flags);
 }
 
 ava::core::Error lookup_error(std::filesystem::path const& root, std::filesystem::path const& path, int error_number, std::string_view operation)
@@ -316,8 +255,8 @@ std::filesystem::path const& SecureWorkspaceHandle::path() const noexcept
   return path_;
 }
 
-SecureWorkspace::StagedWrite::StagedWrite(int parent_fd, std::filesystem::path workspace_root, std::filesystem::path path, std::string temp_name,
-                                          std::string target_name, std::size_t bytes_written)
+SecureWorkspace::StagedWrite::StagedWrite(int parent_fd, std::filesystem::path workspace_root, std::filesystem::path path, std::filesystem::path temp_name,
+                                          std::filesystem::path target_name, std::size_t bytes_written)
     : parent_fd_(parent_fd),
       workspace_root_(std::move(workspace_root)),
       path_(std::move(path)),
@@ -325,6 +264,16 @@ SecureWorkspace::StagedWrite::StagedWrite(int parent_fd, std::filesystem::path w
       target_name_(std::move(target_name)),
       bytes_written_(bytes_written)
 {
+  // target_name_ is used directly in renameat(2) and unlinkat(2) calls as the
+  // final path component relative to parent_fd_. It must be a single component
+  // (no path separators) so that no intermediate symlink can be followed and
+  // escape the anchor. lexical_workspace_path enforces this by rejecting "..",
+  // "." and empty components, and filename() returns only the last component;
+  // this assertion guards against future regressions in that chain. Using
+  // std::filesystem::path::filename() avoids raw byte searches that would be
+  // fragile under multi-byte encodings.
+  ASSERT(!target_name_.empty());
+  ASSERT(target_name_.filename() == target_name_);
 }
 
 SecureWorkspace::StagedWrite::StagedWrite(StagedWrite&& other) noexcept
@@ -443,19 +392,18 @@ ava::core::Result<std::shared_ptr<SecureWorkspace>> SecureWorkspace::open(std::f
   auto absolute = std::filesystem::absolute(root, absolute_error).lexically_normal();
   if (absolute_error || !absolute.is_absolute())
     return std::unexpected(workspace_error(ava::core::ErrorCategory::Io, "failed to resolve secure workspace root", root, root, absolute_error.value()));
-  std::error_code canonical_error;
-  auto canonical = std::filesystem::canonical(absolute, canonical_error);
-  if (canonical_error || canonical != absolute)
-  {
-    auto error = workspace_error(ava::core::ErrorCategory::PermissionDenied, "secure workspace root must be an existing canonical non-symlink directory",
-                                 absolute, absolute, canonical_error.value());
-    return std::unexpected(std::move(error));
-  }
-
+  // The anchor descriptor is opened at startup, before any untrusted input is
+  // processed, so symlinked components in the workspace root path are followed
+  // rather than rejected. The root is opened directly with a plain openat
+  // (no containment) because the configured path is trusted; open_beneath is
+  // reserved for the untrusted relative paths resolved against this anchor.
+  // openat2(RESOLVE_BENEATH) cannot be used here because it rejects absolute
+  // symlink components unconditionally, which would break a workspace whose
+  // configured path traverses an absolute symlink.
   int slash = ::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
   if (slash < 0)
     return std::unexpected(lookup_error(absolute, absolute, errno, "root anchor open"));
-  int anchored = absolute == "/" ? ::dup(slash) : open_beneath(slash, absolute.relative_path(), O_PATH | O_DIRECTORY);
+  int anchored = absolute == "/" ? ::dup(slash) : ::openat(slash, absolute.relative_path().c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC);
   int const open_error = errno;
   ::close(slash);
   if (anchored < 0)
@@ -506,34 +454,26 @@ ava::core::Result<SecureWorkspacePath> SecureWorkspace::resolve(std::filesystem:
   if (mode == SecureWorkspaceResolveMode::Existing || whole_error != ENOENT)
     return std::unexpected(lookup_error(root_, identity->absolute, whole_error, "identity resolution"));
 
-  int current = ::dup(root_fd_);
-  if (current < 0)
-    return std::unexpected(lookup_error(root_, identity->absolute, errno, "identity root duplication"));
+  // AllowMissing mode: the full path did not exist (ENOENT above). Walk each
+  // growing prefix against the workspace anchor so that non-escaping symlinks
+  // in intermediate components are followed (a symlinked parent directory is
+  // accepted) while escaping symlinks are rejected with EXDEV/ELOOP. The first
+  // prefix that fails with ENOENT marks the boundary of the existing path; the
+  // remaining components are the new file/directories that a write would create.
+  std::filesystem::path prefix;
   for (auto const& component : identity->relative)
   {
-    auto const name = component.string();
-    int next = ::openat(current, name.c_str(), O_PATH | O_CLOEXEC | O_NOFOLLOW);
-    int const open_error = errno;
+    prefix /= component;
+    int next = open_beneath(root_fd_, prefix, O_PATH | O_CLOEXEC);
     if (next < 0)
     {
-      ::close(current);
-      if (open_error == ENOENT)
+      if (errno == ENOENT)
         return identity;
+      int const open_error = errno;
       return std::unexpected(lookup_error(root_, identity->absolute, open_error, "identity component resolution"));
     }
-    struct stat status{};
-    if (::fstat(next, &status) != 0 || S_ISLNK(status.st_mode))
-    {
-      int const status_error = errno;
-      ::close(next);
-      ::close(current);
-      return std::unexpected(workspace_error(ava::core::ErrorCategory::PermissionDenied, "secure workspace identity rejects a symlinked component", root_,
-                                             identity->absolute, status_error));
-    }
-    ::close(current);
-    current = next;
+    ::close(next);
   }
-  ::close(current);
   return identity;
 }
 
@@ -624,22 +564,21 @@ ava::core::Result<SecureWorkspace::StagedWrite> SecureWorkspace::stage_write(std
     return std::unexpected(
         workspace_error(ava::core::ErrorCategory::InvalidArgument, "secure workspace write target must name a file", root_, identity->absolute));
 
-  int parent = ::openat(root_fd_, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+  int parent = open_beneath(root_fd_, {}, O_RDONLY | O_DIRECTORY);
   if (parent < 0)
     return std::unexpected(lookup_error(root_, identity->absolute, errno, "write root open"));
   for (auto const& component : identity->relative.parent_path())
   {
-    auto const name = component.string();
-    int next = open_beneath(parent, std::filesystem::path(name), O_RDONLY | O_DIRECTORY);
+    int next = open_beneath(parent, component, O_RDONLY | O_DIRECTORY);
     if (next < 0 && errno == ENOENT)
     {
-      if (::mkdirat(parent, name.c_str(), 0700) != 0 && errno != EEXIST)
+      if (::mkdirat(parent, component.c_str(), 0700) != 0 && errno != EEXIST)
       {
         int const error_number = errno;
         ::close(parent);
         return std::unexpected(lookup_error(root_, identity->absolute.parent_path(), error_number, "parent creation"));
       }
-      next = open_beneath(parent, std::filesystem::path(name), O_RDONLY | O_DIRECTORY);
+      next = open_beneath(parent, component, O_RDONLY | O_DIRECTORY);
     }
     if (next < 0)
     {
@@ -651,7 +590,7 @@ ava::core::Result<SecureWorkspace::StagedWrite> SecureWorkspace::stage_write(std
     parent = next;
   }
 
-  auto const target_name = identity->relative.filename().string();
+  auto const target_name = identity->relative.filename();
   struct stat existing{};
   bool const target_exists = ::fstatat(parent, target_name.c_str(), &existing, AT_SYMLINK_NOFOLLOW) == 0;
   if (!target_exists && errno != ENOENT)
@@ -660,21 +599,40 @@ ava::core::Result<SecureWorkspace::StagedWrite> SecureWorkspace::stage_write(std
     ::close(parent);
     return std::unexpected(lookup_error(root_, identity->absolute, error_number, "write target fstat"));
   }
-  if (target_exists && (S_ISLNK(existing.st_mode) || !S_ISREG(existing.st_mode)))
+  if (target_exists && S_ISLNK(existing.st_mode))
+  {
+    // The target is a symlink. Probe it through the workspace anchor to
+    // determine whether it escapes: open_beneath follows non-escaping
+    // symlinks (success) and rejects escaping ones (EXDEV/ELOOP). A
+    // non-escaping symlink is allowed — the staged write below replaces it
+    // with a regular file in the same parent directory, which cannot escape.
+    // A dangling symlink (ENOENT) is also allowed for the same reason.
+    int probe = open_beneath(root_fd_, identity->relative, O_PATH | O_CLOEXEC);
+    if (probe >= 0)
+    {
+      ::close(probe);
+    }
+    else if (errno == EXDEV || errno == ELOOP)
+    {
+      ::close(parent);
+      return std::unexpected(workspace_error(ava::core::ErrorCategory::PermissionDenied,
+                                            "secure workspace writes reject symlinks that escape the workspace", root_, identity->absolute));
+    }
+    // ENOENT (dangling) or other transient error: fall through to replacement.
+  }
+  else if (target_exists && !S_ISREG(existing.st_mode))
   {
     ::close(parent);
     return std::unexpected(
-        workspace_error(S_ISLNK(existing.st_mode) ? ava::core::ErrorCategory::PermissionDenied : ava::core::ErrorCategory::InvalidArgument,
-                        S_ISLNK(existing.st_mode) ? "secure workspace writes do not follow symlinks" : "secure workspace write target is not a regular file",
-                        root_, identity->absolute));
+        workspace_error(ava::core::ErrorCategory::InvalidArgument, "secure workspace write target is not a regular file", root_, identity->absolute));
   }
 
-  std::string temp_name;
+  std::filesystem::path temp_name;
   int temp = -1;
   for (int attempt = 0; attempt < 8 && temp < 0; ++attempt)
   {
-    temp_name = "." + target_name + ".ava-write-" + ava::core::make_id("tmp") + ".tmp";
-    temp = ::openat(parent, temp_name.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+    temp_name = "." + target_name.string() + ".ava-write-" + ava::core::make_id("tmp") + ".tmp";
+    temp = open_beneath(parent, temp_name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
     if (temp < 0 && errno != EEXIST)
       break;
   }

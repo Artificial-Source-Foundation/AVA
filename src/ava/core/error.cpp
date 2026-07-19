@@ -53,6 +53,8 @@ std::string to_string(ErrorCategory category)
       return "not_found";
     case ErrorCategory::PermissionDenied:
       return "permission_denied";
+    case ErrorCategory::Configuration:
+      return "configuration";
     case ErrorCategory::Provider:
       return "provider";
     case ErrorCategory::Session:

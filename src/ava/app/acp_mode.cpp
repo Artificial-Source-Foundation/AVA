@@ -64,7 +64,7 @@ int run_acp_mode(std::ostream& error_output)
     return 1;
   }
 
-  auto launch_root = acp::canonical_launch_root();
+  auto launch_root = ava::core::launch_workspace_root();
   if (!launch_root)
   {
     error_output << "ACP startup failed: launch workspace is unavailable\n";

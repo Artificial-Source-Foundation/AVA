@@ -115,15 +115,15 @@ class SecureWorkspace
    private:
     friend class SecureWorkspace;
 
-    StagedWrite(int parent_fd, std::filesystem::path workspace_root, std::filesystem::path path, std::string temp_name, std::string target_name,
-                std::size_t bytes_written);
+    StagedWrite(int parent_fd, std::filesystem::path workspace_root, std::filesystem::path path, std::filesystem::path temp_name,
+                std::filesystem::path target_name, std::size_t bytes_written);
     void cleanup() noexcept;
 
     int parent_fd_ = -1;
     std::filesystem::path workspace_root_;
     std::filesystem::path path_;
-    std::string temp_name_;
-    std::string target_name_;
+    std::filesystem::path temp_name_;
+    std::filesystem::path target_name_;
     std::size_t bytes_written_ = 0;
     bool target_changed_ = false;
     AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

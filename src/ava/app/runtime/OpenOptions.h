@@ -22,6 +22,10 @@ struct OpenOptions
 {
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
+  // Additional writable directories beyond workspace_dir (e.g., spill_dir,
+  // session storage). These are opened as anchor descriptors at startup and
+  // made available to tools via ToolContext::anchor_set.
+  std::vector<std::filesystem::path> additional_writable_dirs = {};
   std::optional<std::string> requested_session_id;
   std::optional<std::string> fork_session_id;
   std::optional<std::string> initial_session_name;

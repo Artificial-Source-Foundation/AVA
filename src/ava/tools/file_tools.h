@@ -7,6 +7,7 @@
 #include "ava/agent/tool_visibility.h"
 #include "ava/tools/tool_io.h"
 #include "ava/permissions/permission.h"
+#include "ava/core/AnchorSet.h"
 #include "ava/core/result.h"
 
 #include <atomic>
@@ -124,6 +125,12 @@ struct ToolContext
   // Strict adapters share one descriptor-anchored root across permission
   // identity resolution and the actual built-in file operation.
   std::shared_ptr<SecureWorkspace> secure_workspace = nullptr;
+  // Pre-opened anchor descriptors for all writable directories (workspace,
+  // spill, session storage, and any user-configured additional dirs). When
+  // present, this supersedes the single secure_workspace for path resolution
+  // and permission checks. Each anchor independently contains symlinks via
+  // open_beneath; a symlink in one anchor that points into another is rejected.
+  std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
   // ToolContext is copied into dispatchers/workers, so immutable adapters share
   // session ownership rather than storing lifetime-sensitive references.
   std::shared_ptr<ExactFileAccess const> exact_file_access = nullptr;

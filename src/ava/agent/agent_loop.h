@@ -17,6 +17,7 @@
 #include "ava/lsp/lsp_client.h"
 #include "ava/core/result.h"
 #include "ava/core/runtime_outcome.h"
+#include "ava/core/AnchorSet.h"
 
 #include <cstddef>
 #include <filesystem>
@@ -101,6 +102,13 @@ struct AgentLoopOptions
 {
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir = {};
+  // Additional writable directories beyond workspace_dir (e.g., spill_dir,
+  // session storage). These are opened as anchor descriptors at startup and
+  // made available to tools via ToolContext::anchor_set.
+  std::vector<std::filesystem::path> additional_writable_dirs = {};
+  // Pre-opened anchor descriptors for all writable directories. Opened once
+  // at startup and shared across all turns and subagent loops.
+  std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
   Mode mode = Mode::Build;
   std::string provider_id = "openai";
   std::string model_id = "gpt-5.5";

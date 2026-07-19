@@ -16,6 +16,7 @@
 #include "ava/session/session_metadata.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/core/json.h"
+#include "ava/core/AnchorSet.h"
 
 #include <algorithm>
 #include <map>
@@ -876,6 +877,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
                                        .subagents = subagents,
                                        .redact_permission_audit_arguments = options_.redact_permission_audit_arguments,
                                        .require_explicit_file_permissions = options_.require_explicit_file_permissions,
+                                       .anchor_set = options_.anchor_set,
                                        .exact_file_access = options_.exact_file_access,
                                        .command_executor = options_.command_executor,
                                        .lsp_diagnostics_provider = options_.lsp_diagnostics_provider,

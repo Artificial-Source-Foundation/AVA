@@ -190,7 +190,7 @@ class AcpSessionRegistry
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
-[[nodiscard]] ava::core::Result<std::filesystem::path> canonical_acp_cwd(std::filesystem::path const& launch_root, std::string_view requested);
+[[nodiscard]] ava::core::Result<std::filesystem::path> resolve_session_cwd(std::filesystem::path const& launch_root, std::string_view requested);
 [[nodiscard]] ava::core::Result<std::string_view> acp_stop_reason(ava::core::RuntimeTerminalOutcome outcome);
 
 }  // namespace ava::app::acp

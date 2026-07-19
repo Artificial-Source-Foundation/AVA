@@ -1,9 +1,13 @@
 add_library(ava_command
-  "command.cpp"
+  "intent.cpp"
+  "discovery.cpp"
+  "environment.cpp"
+  "policy.cpp"
+  "command_plan.cpp"
 )
 
-# command.cpp includes sys.h directly; propagate the cwds include interface to
-# every consumer of the public command.h debug contract as well.
+# Every implementation includes sys.h first; propagate the cwds include
+# interface to all consumers of the public command.h debug contract.
 get_target_property(CWDS_INTERFACE_INCLUDE_DIRECTORIES AICxx::cwds INTERFACE_INCLUDE_DIRECTORIES)
 target_include_directories(ava_command
   PUBLIC

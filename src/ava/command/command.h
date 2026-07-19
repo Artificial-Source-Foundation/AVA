@@ -97,9 +97,12 @@ enum class CommandRecipe
   WorkspaceScript,
 };
 
+// Global approval is deliberately not an interactive scope. It remains an
+// explicit configuration decision outside command prompts.
 enum class InteractiveScope
 {
   Once,
+  Session,
   Workspace,
 };
 
@@ -116,6 +119,8 @@ struct CommandLimits
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// These are the paths exposed to the child, not paths used for host-side tool
+// discovery. CommandBuildOptions::trusted_home supplies the latter.
 struct CommandEnvironmentOptions
 {
   std::string profile_id;
@@ -149,7 +154,13 @@ struct CommandRuntimeOptions
 struct CommandBuildOptions
 {
   std::filesystem::path workspace;
+  // The real, trusted host home used only to discover user-local toolchains.
+  // It must be distinct from the synthetic child HOME.
+  std::filesystem::path trusted_home;
   std::optional<std::string> startup_path;
+  // Raw shell plans resolve and bind this exact executable; it is never found
+  // by basename lookup. Descriptor-anchored execution remains future work.
+  std::filesystem::path shell = "/bin/sh";
   CommandEnvironmentOptions environment;
   std::vector<WorkspaceScriptRecipe> workspace_script_recipes;
   CommandLimits limits = {};
@@ -157,10 +168,39 @@ struct CommandBuildOptions
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// Captures both the requested spelling and the canonical target. The requested
+// identity records final-component symlink provenance without following a FIFO
+// or other blocking special file during metadata inspection.
+struct PathMetadata
+{
+  std::filesystem::path requested_path;
+  std::filesystem::path canonical_path;
+  std::uintmax_t device = 0;
+  std::uintmax_t inode = 0;
+  std::uintmax_t mode = 0;
+  std::uintmax_t size = 0;
+  std::uintmax_t owner = 0;
+  std::uintmax_t link_count = 0;
+  std::int64_t changed_seconds = 0;
+  std::int64_t changed_nanoseconds = 0;
+  bool requested_path_is_symlink = false;
+  std::uintmax_t requested_device = 0;
+  std::uintmax_t requested_inode = 0;
+  std::uintmax_t requested_mode = 0;
+  std::uintmax_t requested_link_count = 0;
+  std::int64_t requested_changed_seconds = 0;
+  std::int64_t requested_changed_nanoseconds = 0;
+
+  friend bool operator==(PathMetadata const&, PathMetadata const&) = default;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct CommandPathEntry
 {
   std::filesystem::path directory;
-  PathProvenance provenance;
+  PathProvenance provenance = PathProvenance::StartupPath;
+  PathMetadata metadata;
 
   friend bool operator==(CommandPathEntry const&, CommandPathEntry const&) = default;
 
@@ -169,12 +209,23 @@ struct CommandPathEntry
 
 struct ExecutableMetadata
 {
+  std::filesystem::path requested_path;
   std::filesystem::path canonical_path;
   std::uintmax_t device = 0;
   std::uintmax_t inode = 0;
   std::uintmax_t mode = 0;
   std::uintmax_t size = 0;
-  std::int64_t modified_ticks = 0;
+  std::uintmax_t owner = 0;
+  std::uintmax_t link_count = 0;
+  std::int64_t changed_seconds = 0;
+  std::int64_t changed_nanoseconds = 0;
+  bool requested_path_is_symlink = false;
+  std::uintmax_t requested_device = 0;
+  std::uintmax_t requested_inode = 0;
+  std::uintmax_t requested_mode = 0;
+  std::uintmax_t requested_link_count = 0;
+  std::int64_t requested_changed_seconds = 0;
+  std::int64_t requested_changed_nanoseconds = 0;
 
   friend bool operator==(ExecutableMetadata const&, ExecutableMetadata const&) = default;
 
@@ -212,6 +263,7 @@ struct RecipeDescriptor
 {
   CommandRecipe recipe = CommandRecipe::Pwd;
   std::vector<std::string> canonical_argv;
+  std::vector<PathMetadata> path_arguments;
 
   friend bool operator==(RecipeDescriptor const&, RecipeDescriptor const&) = default;
 
@@ -245,25 +297,28 @@ struct EnvironmentVariable
 class CommandEnvironment;
 class CommandIntent;
 class CommandPlan;
+class CommandPreparation;
 
-[[nodiscard]] ava::core::Result<CommandEnvironment> build_command_environment(CommandEnvironmentOptions const& options,
-                                                                              std::vector<CommandPathEntry> const& path_entries, CommandLimits const& limits);
-[[nodiscard]] ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const& intent, CommandBuildOptions const& options);
-[[nodiscard]] ava::core::Result<bool> plan_is_fresh(CommandPlan const& plan);
+namespace detail {
+class EnvironmentFactory;
+}
 
 class CommandEnvironment final
 {
  public:
   [[nodiscard]] std::string const& profile_id() const noexcept;
+  [[nodiscard]] std::string const& digest() const noexcept;
   [[nodiscard]] std::vector<EnvironmentVariable> const& entries() const noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
-  friend ava::core::Result<CommandEnvironment> build_command_environment(CommandEnvironmentOptions const&, std::vector<CommandPathEntry> const&,
-                                                                         CommandLimits const&);
+  friend class detail::EnvironmentFactory;
+
+  CommandEnvironment() = default;
 
   std::string profile_id_;
+  std::string digest_;
   std::vector<EnvironmentVariable> entries_;
 };
 
@@ -305,6 +360,7 @@ class CommandPlan final
   [[nodiscard]] std::optional<ResolvedExecutable> const& resolved_executable() const noexcept;
   [[nodiscard]] CommandClassification const& classification() const noexcept;
   [[nodiscard]] std::string const& environment_profile_id() const noexcept;
+  [[nodiscard]] std::string const& environment_digest() const noexcept;
   [[nodiscard]] std::string const& fingerprint() const noexcept;
   [[nodiscard]] std::string display_json() const;
 
@@ -316,30 +372,41 @@ class CommandPlan final
   friend ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const&, CommandBuildOptions const&);
   friend ava::core::Result<bool> plan_is_fresh(CommandPlan const&);
 
+  CommandPlan() = default;
+
   CommandIntentLane intent_lane_ = CommandIntentLane::Compatibility;
   CommandExecutionDomain execution_domain_ = CommandExecutionDomain::DirectArgv;
   std::filesystem::path workspace_;
   std::filesystem::path cwd_;
+  PathMetadata workspace_metadata_;
+  PathMetadata cwd_metadata_;
   std::vector<std::string> argv_;
   std::string raw_shell_text_;
   std::vector<CommandPathEntry> path_entries_;
   std::optional<ResolvedExecutable> resolved_executable_;
   CommandClassification classification_;
   std::string environment_profile_id_;
+  std::string environment_digest_;
   std::string fingerprint_;
 };
 
-struct CommandPreparation
+class CommandPreparation final
 {
-  CommandPlan plan;
-  CommandEnvironment environment;
+ public:
+  [[nodiscard]] CommandPlan const& plan() const noexcept;
+  [[nodiscard]] CommandEnvironment const& environment() const noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
+
+ private:
+  friend ava::core::Result<CommandPreparation> prepare_command(CommandIntent const&, CommandBuildOptions const&);
+
+  CommandPreparation(CommandPlan plan, CommandEnvironment environment);
+
+  CommandPlan plan_;
+  CommandEnvironment environment_;
 };
 
-[[nodiscard]] ava::core::Result<CommandEnvironment> build_command_environment(CommandEnvironmentOptions const& options,
-                                                                              std::vector<CommandPathEntry> const& path_entries,
-                                                                              CommandLimits const& limits = {});
 [[nodiscard]] ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const& intent, CommandBuildOptions const& options);
 [[nodiscard]] ava::core::Result<CommandPreparation> prepare_command(CommandIntent const& intent, CommandBuildOptions const& options);
 [[nodiscard]] ava::core::Result<bool> plan_is_fresh(CommandPlan const& plan);

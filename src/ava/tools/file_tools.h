@@ -131,6 +131,12 @@ struct ToolContext
   // Strict adapters share one descriptor-anchored root across permission
   // identity resolution and the actual built-in file operation.
   std::shared_ptr<SecureWorkspace> secure_workspace = nullptr;
+  // Actual AVA config/state/sessions/auth authority directories supplied from
+  // the runtime session. These are passed to command sealing so workspace
+  // overlap with authority roots is rejected, and to containment so authority
+  // roots are never made writable through a broader workspace rule. Direct
+  // test contexts may leave this empty.
+  std::vector<std::filesystem::path> ava_authority_roots = {};
   // ToolContext is copied into dispatchers/workers, so immutable adapters share
   // session ownership rather than storing lifetime-sensitive references.
   std::shared_ptr<ExactFileAccess const> exact_file_access = nullptr;
@@ -230,6 +236,10 @@ struct WriteOptions
 // one sealed identity rather than reparsing compatibility text.
 [[nodiscard]] ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command,
                                                               ava::command::CommandPreparation const& preparation, bool unverified_delegated_executor,
+                                                              std::string_view tool_name, std::string_view error_message);
+[[nodiscard]] ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command,
+                                                              ava::command::CommandPreparation const& preparation,
+                                                              ava::permissions::CommandContainmentInfo const& containment, bool unverified_delegated_executor,
                                                               std::string_view tool_name, std::string_view error_message);
 [[nodiscard]] std::string permission_audit_data_json(PermissionAuditEvent const& event);
 [[nodiscard]] ava::core::VoidResult replace_file_with_staged_file(std::filesystem::path const& staged_path, std::filesystem::path const& target_path);

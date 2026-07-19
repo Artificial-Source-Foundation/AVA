@@ -6,6 +6,7 @@
 #include <fstream>
 #include <ranges>
 #include <utility>
+#include <sys/stat.h>
 
 namespace ava::tests {
 
@@ -16,6 +17,12 @@ ava::config::XdgPaths app_test_paths(std::filesystem::path const& root)
   auto const data_home = root / "data";
   auto const ava_config = config_home / "ava";
   auto const ava_state = state_home / "ava";
+  auto const sessions = ava_state / "sessions";
+  for (auto const& directory : {config_home, state_home, data_home, ava_config, ava_state, sessions})
+  {
+    std::filesystem::create_directories(directory);
+    ::chmod(directory.c_str(), S_IRWXU);
+  }
   return ava::config::XdgPaths{.config_home = config_home,
                                .state_home = state_home,
                                .data_home = data_home,
@@ -26,7 +33,7 @@ ava::config::XdgPaths app_test_paths(std::filesystem::path const& root)
                                .global_agents_file = ava_config / "AGENTS.md",
                                .models_file = ava_config / "models.json",
                                .prompts_dir = ava_config / "prompts",
-                               .sessions_dir = ava_state / "sessions"};
+                               .sessions_dir = sessions};
 }
 
 std::string app_test_plugin_manifest_json(std::string_view id, std::string_view name)

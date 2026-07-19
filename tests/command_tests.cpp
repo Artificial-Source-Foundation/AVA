@@ -468,15 +468,22 @@ void test_synthetic_environment_roots_are_sealed_and_fresh()
   authority_overlap_options.ava_authority_roots = {authority_root};
   authority_overlap_options.environment.tmpdir = authority_root;
   auto authority_overlap = command::seal_command_plan(*intent, authority_overlap_options);
+  auto missing_authority_overlap_options = fixture.options();
+  missing_authority_overlap_options.ava_authority_roots = {fixture.workspace / "future-ava-authority"};
+  auto missing_authority_overlap = command::seal_command_plan(*intent, missing_authority_overlap_options);
+  auto missing_disjoint_authority_options = fixture.options();
+  missing_disjoint_authority_options.ava_authority_roots = {fixture.root / "future-ava-authority"};
+  auto missing_disjoint_authority = command::seal_command_plan(*intent, missing_disjoint_authority_options);
 
   std::filesystem::remove(sealed_tmpdir);
   std::filesystem::create_directory_symlink(outside, sealed_tmpdir);
   auto replaced =
       plan ? command::plan_is_fresh(*plan) : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no plan"))};
 
-  expect(plan && before && *before && !missing && !loose_mode && !authority_overlap && replaced && !*replaced,
-         "synthetic HOME/XDG/TMP roots must already be owner-owned restrictive directories, remain disjoint from AVA authority roots, and go stale on "
-         "replacement");
+  expect(plan && before && *before && !missing && !loose_mode && !authority_overlap && !missing_authority_overlap && missing_disjoint_authority && replaced &&
+             !*replaced,
+         "synthetic HOME/XDG/TMP roots must already be owner-owned restrictive directories, existing and reserved future AVA authority roots remain disjoint, "
+         "and roots go stale on replacement");
 }
 
 void test_capabilities_scopes_and_standard_recipes()

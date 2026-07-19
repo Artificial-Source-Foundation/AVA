@@ -112,6 +112,13 @@ struct CommandExecutionPlanMetadata
   std::filesystem::path resolved_executable;
   std::filesystem::path cwd;
   bool executor_identity_verified = false;
+  bool containment_available = false;
+  std::string containment_profile_id;
+  bool containment_network_allowed = false;
+  // Set to true only after the parent verifies the child installed
+  // containment before exec. Pre-permission metadata never claims applied.
+  bool containment_applied = false;
+  std::string containment_network_mode;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -135,6 +142,11 @@ struct CommandExecutionResult
   bool canceled = false;
   bool truncated = false;
   std::string output;
+  // Containment status reported by a delegated executor only after it
+  // verifies the child installed containment before exec.
+  bool containment_applied = false;
+  std::string containment_profile_id;
+  std::string containment_network_mode;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 

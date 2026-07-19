@@ -440,6 +440,15 @@ ava::core::VoidResult ensure_command_permission(ToolContext const& context, std:
                            std::move(metadata));
 }
 
+ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command, ava::command::CommandPreparation const& preparation,
+                                                ava::permissions::CommandContainmentInfo const& containment, bool unverified_delegated_executor,
+                                                std::string_view tool_name, std::string_view error_message)
+{
+  auto metadata = ava::permissions::command_permission_metadata(preparation.plan(), containment, unverified_delegated_executor);
+  return ensure_permission(context, ava::permissions::Operation::RunCommand, preparation.plan().cwd(), command, tool_name, error_message, {}, false,
+                           std::move(metadata));
+}
+
 std::string permission_audit_data_json(PermissionAuditEvent const& event)
 {
   std::string data = "{";
@@ -492,7 +501,9 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event)
             ava::core::json::escape(ava::command::to_string(metadata.executable_origin)) + "\",\"cwd\":\"" + ava::core::json::escape(metadata.cwd.string()) +
             "\",\"containment_available\":" + (metadata.containment_available ? "true" : "false") + ",\"containment_status\":\"" +
             ava::core::json::escape(ava::permissions::to_string(metadata.containment_status)) + "\",\"backend_maximum_scope\":\"" +
-            ava::core::json::escape(ava::command::to_string(metadata.backend_maximum_scope)) + "\",\"environment_profile_id\":\"" +
+            ava::core::json::escape(ava::command::to_string(metadata.backend_maximum_scope)) + "\",\"containment_profile_id\":\"" +
+            ava::core::json::escape(metadata.containment_profile_id) +
+            "\",\"containment_network_allowed\":" + (metadata.containment_network_allowed ? "true" : "false") + ",\"environment_profile_id\":\"" +
             ava::core::json::escape(metadata.environment_profile_id) + "\",\"environment_digest\":\"" + ava::core::json::escape(metadata.environment_digest) +
             "\",\"executor_identity_verified\":" + (metadata.executor_identity_verified ? "true" : "false") + '}';
   }

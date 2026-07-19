@@ -720,13 +720,46 @@ ava::core::Result<SealedCommandContext> discover_command_context(CommandIntent c
     return std::unexpected(std::move(trusted_home.error()));
   if (auto valid = validate_safe_directory(*trusted_home, true, "trusted command discovery home"); !valid)
     return std::unexpected(std::move(valid.error()));
+  // Reject a workspace that equals or is an ancestor of the trusted real
+  // home. Ordinary projects nested under home are allowed, but making the
+  // entire home the workspace would expose personal directories to contained
+  // mutable commands and bypass the synthetic-environment boundary.
+  if (is_within(trusted_home->canonical_path, workspace_metadata->canonical_path))
+  {
+    return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied,
+                                         "command workspace must not equal or contain the trusted real home directory", "workspace",
+                                         workspace_metadata->canonical_path.string()));
+  }
   if (options.ava_authority_roots.size() > options.limits.max_path_entries)
     return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "AVA authority root list has too many entries"));
+  std::vector<std::filesystem::path> ava_authority_paths;
   std::vector<PathMetadata> ava_authority_roots;
+  ava_authority_paths.reserve(options.ava_authority_roots.size());
   ava_authority_roots.reserve(options.ava_authority_roots.size());
   for (auto const& root : options.ava_authority_roots)
   {
-    auto authority = inspect_path_metadata(root, ExpectedNode::Directory, true, "AVA authority root");
+    auto normalized = normalized_absolute(root, "AVA authority root");
+    if (!normalized)
+      return std::unexpected(std::move(normalized.error()));
+    // Even an authority directory that does not exist yet reserves its
+    // intended location. A mutable workspace must not be able to create AVA's
+    // future configuration or state boundary for itself.
+    if (is_within(*normalized, workspace_metadata->canonical_path) || is_within(workspace_metadata->canonical_path, *normalized))
+    {
+      return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied, "command workspace must not overlap with any AVA authority root",
+                                           "workspace", workspace_metadata->canonical_path.string()));
+    }
+    ava_authority_paths.push_back(*normalized);
+
+    std::error_code status_error;
+    auto const status = std::filesystem::symlink_status(*normalized, status_error);
+    if (status.type() == std::filesystem::file_type::not_found)
+      continue;
+    if (status_error)
+    {
+      return std::unexpected(command_error(ava::core::ErrorCategory::Io, "failed to inspect AVA authority root", "path", normalized->string()));
+    }
+    auto authority = inspect_path_metadata(*normalized, ExpectedNode::Directory, true, "AVA authority root");
     if (!authority)
       return std::unexpected(std::move(authority.error()));
     if (auto valid = validate_safe_directory(*authority, true, "AVA authority root"); !valid)
@@ -734,11 +767,11 @@ ava::core::Result<SealedCommandContext> discover_command_context(CommandIntent c
     ava_authority_roots.push_back(std::move(*authority));
   }
 
-  auto const overlaps_protected_root = [&workspace_metadata, &trusted_home, &ava_authority_roots](std::filesystem::path const& candidate) {
-    auto const overlaps = [&candidate](PathMetadata const& protected_root) {
-      return is_within(candidate, protected_root.canonical_path) || is_within(protected_root.canonical_path, candidate);
+  auto const overlaps_protected_root = [&workspace_metadata, &trusted_home, &ava_authority_paths](std::filesystem::path const& candidate) {
+    auto const overlaps = [&candidate](std::filesystem::path const& protected_root) {
+      return is_within(candidate, protected_root) || is_within(protected_root, candidate);
     };
-    return overlaps(*workspace_metadata) || overlaps(*trusted_home) || std::ranges::any_of(ava_authority_roots, overlaps);
+    return overlaps(workspace_metadata->canonical_path) || overlaps(trusted_home->canonical_path) || std::ranges::any_of(ava_authority_paths, overlaps);
   };
   auto const capture_synthetic_root = [&options, &overlaps_protected_root](std::filesystem::path const& path,
                                                                            std::string_view name) -> ava::core::Result<PathMetadata> {

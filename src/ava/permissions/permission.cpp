@@ -486,7 +486,19 @@ PermissionDecision decide(PermissionRequest const& request)
 
 CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan const& plan, bool unverified_delegated_executor)
 {
+  return command_permission_metadata(plan, CommandContainmentInfo{}, unverified_delegated_executor);
+}
+
+CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan const& plan, CommandContainmentInfo const& containment,
+                                                      bool unverified_delegated_executor)
+{
   auto const& classification = plan.classification();
+  CommandContainmentStatus containment_status = CommandContainmentStatus::NotRequired;
+  if (classification.capabilities.requires_containment || classification.capabilities.executes_mutable_project_code ||
+      classification.level == ava::command::CommandLevel::Sensitive)
+  {
+    containment_status = containment.available ? CommandContainmentStatus::Available : CommandContainmentStatus::Unavailable;
+  }
   CommandPermissionMetadata metadata{
       .level = classification.level,
       .family = classification.family,
@@ -496,12 +508,21 @@ CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan 
       .executable_origin = plan.resolved_executable() ? plan.resolved_executable()->origin : ava::command::ExecutableOrigin::System,
       .cwd = plan.cwd(),
       .executes_mutable_project_code = classification.capabilities.executes_mutable_project_code,
-      .containment_available = false,
-      .containment_status = classification.capabilities.requires_containment ? CommandContainmentStatus::Unavailable : CommandContainmentStatus::NotRequired,
+      .containment_available = containment.available,
+      .containment_status = containment_status,
+      .containment_profile_id = containment.profile_id,
+      .containment_network_allowed = containment.network_allowed,
       .backend_maximum_scope = classification.max_interactive_scope,
       .environment_profile_id = plan.environment_profile_id(),
       .environment_digest = plan.environment_digest(),
       .executor_identity_verified = !unverified_delegated_executor};
+  if (!unverified_delegated_executor && metadata.containment_status == CommandContainmentStatus::Unavailable &&
+      (classification.capabilities.executes_mutable_project_code || classification.level == ava::command::CommandLevel::Sensitive))
+  {
+    // The original family remains visible, but the effective permission level
+    // must match the one-shot uncontained warning shown to the user.
+    metadata.level = ava::command::CommandLevel::Critical;
+  }
   // Until the separate stable recipe identity/store exists, every planned
   // command is one-shot only regardless of classification, containment, or
   // executor verification. No command may receive a reusable session or
@@ -528,8 +549,23 @@ PermissionDecision decide(CommandPermissionMetadata const& metadata)
   {
     return decision(PermissionAction::Allow, "sealed command is a standard inspection recipe", PermissionRisk::Low);
   }
+  // A mutable command whose required containment plan is unavailable is
+  // downgraded to Critical risk. It may run uncontained only after an explicit
+  // one-shot approval, with metadata/audit stating unavailable/uncontained.
+  // This preserves user authority: unavailable containment must not look like
+  // ordinary Sensitive/Standard containment.
+  bool const needs_containment = metadata.executes_mutable_project_code || metadata.containment_status == CommandContainmentStatus::Unavailable;
+  if (needs_containment && !metadata.containment_available && metadata.containment_status != CommandContainmentStatus::NotRequired)
+  {
+    return decision(
+        PermissionAction::Ask,
+        "sealed command executes mutable project code; containment is unavailable and the command will run uncontained after explicit one-shot approval",
+        PermissionRisk::Critical);
+  }
   if (metadata.level == ava::command::CommandLevel::Standard)
   {
+    if (metadata.containment_available)
+      return decision(PermissionAction::Allow, "sealed command executes mutable project code under verified development containment", PermissionRisk::Medium);
     return decision(PermissionAction::Ask, "sealed command executes mutable project code; containment is unavailable", PermissionRisk::High);
   }
   if (metadata.level == ava::command::CommandLevel::Sensitive)
@@ -689,6 +725,10 @@ std::string to_string(CommandContainmentStatus status)
       return "not_required";
     case CommandContainmentStatus::Unavailable:
       return "unavailable";
+    case CommandContainmentStatus::Available:
+      return "available";
+    case CommandContainmentStatus::Active:
+      return "active";
     case CommandContainmentStatus::UnverifiedDelegatedExecutor:
       return "unverified_delegated_executor";
   }

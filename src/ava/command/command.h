@@ -384,6 +384,7 @@ class CommandEnvironment final
   [[nodiscard]] std::string const& profile_id() const noexcept;
   [[nodiscard]] std::string const& digest() const noexcept;
   [[nodiscard]] std::vector<EnvironmentVariable> const& entries() const noexcept;
+  [[nodiscard]] SyntheticEnvironmentRoots const& synthetic_roots() const noexcept;
 
   friend bool operator==(CommandEnvironment const&, CommandEnvironment const&) = default;
 

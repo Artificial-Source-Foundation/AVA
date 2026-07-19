@@ -773,9 +773,9 @@ def run_harness_signal_cleanup_regression(
     harness = start(
         [
             sys.executable,
-            str(pathlib.Path(__file__).resolve()),
+            str(pathlib.Path(__file__).absolute()),
             "--script",
-            str(pathlib.Path(__file__).resolve()),
+            str(pathlib.Path(__file__).absolute()),
             "--ava",
             str(fixture),
             "--fake-provider",
@@ -1773,7 +1773,7 @@ def run_package_tests(
     repo: pathlib.Path,
 ) -> int:
     root = workspace.root
-    script = args.script.resolve()
+    script = args.script.absolute()
     publisher = script.parent / "publish-linux-artifacts.py"
     version = project_version(repo)
     package_name = f"ava-{version}-linux-{package_architecture()}"
@@ -1790,7 +1790,7 @@ def run_package_tests(
     output = root / "accepted-output"
     output.mkdir(mode=0o700)
     success = run(
-        package_command(script, args.ava.resolve(), output, args.fake_provider.resolve()),
+        package_command(script, args.ava.absolute(), output, args.fake_provider.absolute()),
         env=env,
     )
     artifact = parse_path(success.stdout, "artifact")
@@ -2350,7 +2350,7 @@ def run_main_package_tests(args: argparse.Namespace) -> int:
     workspace: PackageTestWorkspace | None = None
     with PackageTestTerminationHandlers():
         try:
-            repo = args.repo.resolve()
+            repo = args.repo.absolute()
             # Every safety regression creates and then immediately cleans a private
             # workspace. Defer terminal delivery across the complete sequence so a
             # signal cannot land between creation and that local cleanup.

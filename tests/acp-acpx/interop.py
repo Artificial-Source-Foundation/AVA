@@ -158,7 +158,7 @@ def run_preflight(argv, env, cwd):
 
 def clean_environment(root, node, provider_port=None):
     guard_bin = root / "guard-bin"
-    node_bin = Path(node).resolve().parent
+    node_bin = Path(node).absolute().parent
     env = {
         "HOME": str(root / "home"),
         "XDG_CONFIG_HOME": str(root / "xdg-config"),
@@ -232,7 +232,7 @@ if [ "$#" -ne 0 ]; then
 fi
 printf 'exec ava --acp\\n' > "$AVA_ACP_WRAPPER_PROOF"
 exec %s --acp 2>"$AVA_ACP_STDERR"
-""" % shlex.quote(str(Path(ava).resolve()))
+""" % shlex.quote(str(Path(ava).absolute()))
     wrapper.write_text(script, encoding="utf-8")
     wrapper.chmod(0o700)
     return wrapper
@@ -281,7 +281,7 @@ def main():
     os.environ.clear()
     if os.name != "posix":
         raise AssertionError("owned process-group acpx harness currently requires POSIX")
-    parent = Path(args.root).resolve() if args.root else Path(tempfile.gettempdir())
+    parent = Path(args.root).absolute() if args.root else Path(tempfile.gettempdir())
     parent.mkdir(parents=True, exist_ok=True)
     root = Path(tempfile.mkdtemp(prefix="ava-acpx-", dir=parent))
     ACTIVE_ROOTS.add(root)
@@ -294,9 +294,9 @@ def main():
         wrapper = make_ava_wrapper(root, args.ava)
         base_env = clean_environment(root, args.node)
 
-        node_version = run_preflight([str(Path(args.node).resolve()), "--version"], base_env, root)
+        node_version = run_preflight([str(Path(args.node).absolute()), "--version"], base_env, root)
         assert node_version == EXPECTED_NODE_VERSION, (node_version, EXPECTED_NODE_VERSION)
-        acpx_version = run_preflight([str(Path(args.acpx).resolve()), "--version"], base_env, root)
+        acpx_version = run_preflight([str(Path(args.acpx).absolute()), "--version"], base_env, root)
         assert acpx_version == EXPECTED_ACPX_VERSION, (acpx_version, EXPECTED_ACPX_VERSION)
 
         provider_root = root / "provider"
@@ -304,14 +304,14 @@ def main():
         request_log = provider_root / "requests.log"
         effect = root / "workspace" / "acpx-effect.txt"
         provider = ManagedProcess(
-            [str(Path(args.fake_provider).resolve()), str(port_file), str(request_log), "0", "write-tool", str(effect)],
+            [str(Path(args.fake_provider).absolute()), str(port_file), str(request_log), "0", "write-tool", str(effect)],
             env=base_env,
             cwd=root / "workspace",
         )
         port = wait_for_port(port_file, provider)
         env = clean_environment(root, args.node, port)
         command = [
-            str(Path(args.acpx).resolve()),
+            str(Path(args.acpx).absolute()),
             "--agent", str(wrapper),
             "--cwd", str(root / "workspace"),
             "--format", "json",

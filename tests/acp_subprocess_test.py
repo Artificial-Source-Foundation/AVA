@@ -18,7 +18,7 @@ def environment(root):
     root.mkdir(parents=True, exist_ok=True)
     temporary = root / "tmp"
     temporary.mkdir(parents=True, exist_ok=True)
-    libcwd_rcfile = (root / "libcwdrc").resolve()
+    libcwd_rcfile = (root / "libcwdrc").absolute()
     libcwd_rcfile.write_text(
         "silent = on\nchannels_default = off\n", encoding="utf-8")
     return {
@@ -344,15 +344,15 @@ def main():
     send(lifecycle, json.dumps({
         "jsonrpc": "2.0", "id": "mcp-duplicate", "method": "session/new",
         "params": {"cwd": str(workspace), "mcpServers": [
-            {"name": "duplicate", "command": str(Path(args.fake_mcp).resolve()), "args": [], "env": []},
-            {"name": "duplicate", "command": str(Path(args.fake_mcp).resolve()), "args": [], "env": []},
+            {"name": "duplicate", "command": str(Path(args.fake_mcp).absolute()), "args": [], "env": []},
+            {"name": "duplicate", "command": str(Path(args.fake_mcp).absolute()), "args": [], "env": []},
         ]},
     }).encode())
     assert read_line(lifecycle)["error"]["code"] == -32602
     send(lifecycle, json.dumps({
         "jsonrpc": "2.0", "id": "mcp-stdio", "method": "session/new",
         "params": {"cwd": str(workspace), "mcpServers": [{
-            "name": "stdio-demo", "command": str(Path(args.fake_mcp).resolve()), "args": [],
+            "name": "stdio-demo", "command": str(Path(args.fake_mcp).absolute()), "args": [],
             "env": [{"name": "AVA_MCP_EXPLICIT", "value": "session-local"}],
         }]},
     }).encode())

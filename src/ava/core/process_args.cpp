@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/core/process_args.h"
+#include "ava/core/path.h"
 
 #include <filesystem>
 #include <string>
@@ -10,18 +11,6 @@ namespace {
 std::filesystem::path fallback_root()
 {
   return std::filesystem::path{"/"};
-}
-
-std::filesystem::path normalized_absolute(std::filesystem::path const& path)
-{
-  std::error_code error;
-  auto resolved = std::filesystem::weakly_canonical(path, error);
-  if (!error)
-    return resolved.lexically_normal();
-  resolved = std::filesystem::absolute(path, error);
-  if (!error)
-    return resolved.lexically_normal();
-  return path.lexically_normal();
 }
 
 bool is_within_path(std::filesystem::path const& parent, std::filesystem::path const& candidate)
@@ -64,10 +53,10 @@ std::filesystem::path safe_global_process_cwd(std::filesystem::path const& confi
   if (cwd.empty() || cwd == ".")
     cwd = fallback_root();
 
-  auto const cwd_absolute = normalized_absolute(cwd);
+  auto const cwd_absolute = normalized_absolute_path(cwd);
   if (!workspace_dir.empty())
   {
-    auto const workspace_absolute = normalized_absolute(workspace_dir);
+    auto const workspace_absolute = normalized_absolute_path(workspace_dir);
     if (is_within_path(workspace_absolute, cwd_absolute))
       return fallback_root();
   }

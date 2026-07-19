@@ -251,7 +251,7 @@ def main() -> int:
         print("skipping tmux TUI smoke; tmux is not installed")
         return SKIP
 
-    ava_exe = pathlib.Path(args.ava).resolve()
+    ava_exe = pathlib.Path(args.ava).absolute()
     if not ava_exe.exists():
         raise RuntimeError(f"AVA executable does not exist: {ava_exe}")
     fake_provider_exe = ava_exe.parent / "tests" / "ava_fake_provider_server"
@@ -260,7 +260,7 @@ def main() -> int:
     if not fake_provider_exe.exists():
         raise RuntimeError(f"fake provider executable does not exist next to AVA build: {fake_provider_exe}")
 
-    root = pathlib.Path(args.root).resolve()
+    root = pathlib.Path(args.root).absolute()
     if root.exists():
         if root.name != "tui-tmux-smoke":
             raise RuntimeError(f"refusing to clear unexpected smoke root: {root}")
@@ -383,7 +383,7 @@ def main() -> int:
         json.dumps(
             {
                 "workspaces": {
-                    str(workspace.resolve()): {
+                    str(workspace.absolute()): {
                         "project": {"com.example.footer": {"enabled": True}}
                     }
                 }

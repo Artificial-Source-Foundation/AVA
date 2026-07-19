@@ -39,7 +39,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True, type=pathlib.Path)
     args = parser.parse_args()
-    source = args.source.resolve()
+    source = args.source.absolute()
     failures: list[str] = []
 
     direct_read_pattern = (

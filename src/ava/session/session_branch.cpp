@@ -5,6 +5,7 @@
 #include "ava/session/validation.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <cctype>
@@ -21,12 +22,7 @@ ava::core::Error branch_error(ava::core::ErrorCategory category, std::string mes
   return ava::core::Error(category, std::move(message));
 }
 
-std::filesystem::path normalized_absolute_path(std::filesystem::path const& path)
-{
-  std::error_code error;
-  auto absolute = std::filesystem::absolute(path, error);
-  return (error ? path : absolute).lexically_normal();
-}
+using ava::core::normalized_absolute_path;
 
 void append_json_string_field(std::string& json, std::string_view key, std::string_view value)
 {

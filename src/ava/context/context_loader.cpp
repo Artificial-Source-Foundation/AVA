@@ -2,6 +2,7 @@
 #include "ava/context/context_loader.h"
 #include "ava/core/error.h"
 #include "ava/core/open_beneath.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <array>
@@ -55,12 +56,7 @@ bool is_context_file_name(std::filesystem::path const& path)
   return std::ranges::any_of(kContextFileNames, [&](std::string_view candidate) { return filename == candidate; });
 }
 
-std::filesystem::path normalized_absolute(std::filesystem::path const& path)
-{
-  std::error_code error;
-  auto absolute = std::filesystem::absolute(path, error);
-  return (error ? path : absolute).lexically_normal();
-}
+using ava::core::normalized_absolute_path;
 
 bool is_same_or_child(std::filesystem::path const& child, std::filesystem::path const& parent)
 {
@@ -83,7 +79,7 @@ ava::core::Error context_io_error(std::string message, std::filesystem::path con
 
 ava::core::Result<std::optional<UniqueFd>> open_secure_root(std::filesystem::path const& root, bool missing_ok)
 {
-  auto const absolute = normalized_absolute(root);
+  auto const absolute = normalized_absolute_path(root);
   if (!absolute.is_absolute())
     return std::unexpected(context_io_error("context root must be absolute", absolute));
   // The context root is a trusted anchor opened at startup from configuration,
@@ -157,7 +153,7 @@ ava::core::VoidResult append_if_present(std::vector<LoadedContextFile>& files, s
                                         std::filesystem::path const& root_path, std::filesystem::path const& path, ContextSourceType source_type,
                                         std::size_t max_file_bytes)
 {
-  auto const normalized = normalized_absolute(path);
+  auto const normalized = normalized_absolute_path(path);
   auto const relative = normalized.lexically_relative(root_path);
   if (relative.empty() || relative.is_absolute() || relative.native().starts_with(".."))
     return std::unexpected(context_io_error("context file escapes its anchored root", normalized));
@@ -189,8 +185,8 @@ ava::core::VoidResult append_first_context_file_from_dir(std::vector<LoadedConte
 std::vector<std::filesystem::path> context_dirs_root_to_current(std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir)
 {
   std::vector<std::filesystem::path> dirs;
-  auto const root = normalized_absolute(workspace_root);
-  auto const current = normalized_absolute(current_dir.empty() ? workspace_root : current_dir);
+  auto const root = normalized_absolute_path(workspace_root);
+  auto const current = normalized_absolute_path(current_dir.empty() ? workspace_root : current_dir);
   if (!is_same_or_child(current, root))
   {
     dirs.push_back(root);
@@ -229,7 +225,7 @@ ava::core::Result<std::vector<LoadedContextFile>> load_context_files(ContextLoad
 {
   std::vector<LoadedContextFile> files;
   std::set<std::string> seen_paths;
-  auto const workspace_root = normalized_absolute(options.workspace_root);
+  auto const workspace_root = normalized_absolute_path(options.workspace_root);
   auto workspace = open_secure_root(workspace_root, false);
   if (!workspace)
     return std::unexpected(std::move(workspace.error()));
@@ -243,7 +239,7 @@ ava::core::Result<std::vector<LoadedContextFile>> load_context_files(ContextLoad
 
   if (!options.global_agents_file.empty())
   {
-    auto const global_root = normalized_absolute(options.global_agents_file.parent_path());
+    auto const global_root = normalized_absolute_path(options.global_agents_file.parent_path());
     auto global = open_secure_root(global_root, true);
     if (!global)
       return std::unexpected(std::move(global.error()));

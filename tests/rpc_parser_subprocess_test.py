@@ -16,7 +16,7 @@ def main():
 
     root = Path(args.root)
     root.mkdir(parents=True, exist_ok=True)
-    libcwd_rcfile = (root / "libcwdrc").resolve()
+    libcwd_rcfile = (root / "libcwdrc").absolute()
     libcwd_rcfile.write_text(
         "silent = on\nchannels_default = off\n", encoding="utf-8")
     env = os.environ.copy()

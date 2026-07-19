@@ -9,6 +9,7 @@
 #include "ava/plugin/tool_broker.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <array>
@@ -150,13 +151,9 @@ bool path_is_within(std::filesystem::path const& base, std::filesystem::path con
 ava::core::Result<std::filesystem::path> plugin_resource_path(ava::plugin::PluginManifest const& manifest,
                                                               ava::plugin::PluginResourceContribution const& resource)
 {
-  std::error_code base_error;
-  auto const canonical_base = std::filesystem::weakly_canonical(manifest.directory, base_error);
-  auto const base_path = base_error ? std::filesystem::absolute(manifest.directory).lexically_normal() : canonical_base;
+  auto const base_path = ava::core::normalized_absolute_path(manifest.directory);
   auto const raw_target = manifest.directory / resource.path;
-  std::error_code target_error;
-  auto const canonical_target = std::filesystem::weakly_canonical(raw_target, target_error);
-  auto const target_path = target_error ? std::filesystem::absolute(raw_target).lexically_normal() : canonical_target;
+  auto const target_path = ava::core::normalized_absolute_path(raw_target);
   if (!path_is_within(base_path, target_path))
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin resource path escapes plugin directory");
@@ -581,9 +578,7 @@ std::string plugin_validate_argument(std::string_view plugins_argument)
 
 std::filesystem::path normalized_absolute(std::filesystem::path const& path)
 {
-  std::error_code canonical_error;
-  auto const canonical = std::filesystem::weakly_canonical(path, canonical_error);
-  return canonical_error ? std::filesystem::absolute(path).lexically_normal() : canonical;
+  return ava::core::normalized_absolute_path(path);
 }
 
 ava::core::Error filesystem_errno_error(ava::core::ErrorCategory category, std::string message, std::filesystem::path const& path, int error_number)

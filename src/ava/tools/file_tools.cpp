@@ -8,6 +8,7 @@
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <memory>
@@ -117,18 +118,7 @@ std::shared_ptr<MutationQueue> effective_mutation_queue(ToolContext const& conte
   return default_mutation_queue();
 }
 
-std::filesystem::path normalized_absolute_path(std::filesystem::path const& path)
-{
-  std::error_code canonical_error;
-  auto const canonical = std::filesystem::weakly_canonical(path, canonical_error);
-  if (!canonical_error)
-    return canonical;
-  std::error_code absolute_error;
-  auto absolute = std::filesystem::absolute(path, absolute_error);
-  if (absolute_error)
-    absolute = path;
-  return absolute.lexically_normal();
-}
+using ava::core::normalized_absolute_path;
 
 void append_permission_rule_store_for_config_dir(std::vector<ava::permissions::PermissionRuleStore>& stores, ToolContext const& context,
                                                  std::filesystem::path const& config_dir)
@@ -457,6 +447,18 @@ ava::core::Result<FileMutationResult> write_file(ToolContext const& context, std
   if (auto canceled = check_canceled(context, "write_file", path); !canceled)
   {
     return std::unexpected(std::move(canceled.error()));
+  }
+  // Reject symlinks before any permission check or file read. This prevents
+  // writing through a symlink to a protected target (e.g., a source file in
+  // plan mode) without needing canonicalization to detect the target.
+  // The check uses symlink_status (no path resolution), consistent with
+  // read_file's symlink rejection.
+  if (std::error_code link_error; std::filesystem::is_symlink(std::filesystem::symlink_status(path, link_error)))
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "file writes do not follow symlinks");
+    error.with_context("operation", "write_file");
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
   }
   if (auto protected_file = reject_permission_rules_file_mutation(context, path); !protected_file)
   {

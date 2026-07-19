@@ -2,7 +2,11 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-readonly SOURCE_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+# Use logical paths (pwd, not pwd -P) throughout AVA: symlink resolution is
+# only allowed when checking whether two logical paths are the same directory.
+# The build-tree lock lives inside $build_dir, so mkdir already provides
+# inode-based mutual exclusion regardless of which logical path is used.
+readonly SOURCE_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=parallel-runner-common.sh
 source "$SOURCE_ROOT/scripts/parallel-runner-common.sh"
 
@@ -71,7 +75,7 @@ done
 
 [[ -n $build_dir ]] || ava_parallel_die "--build-dir must not be empty"
 [[ -d $build_dir ]] || ava_parallel_die "build directory does not exist: $build_dir"
-build_dir=$(cd -- "$build_dir" && pwd -P)
+build_dir=$(cd -- "$build_dir" && pwd)
 [[ -f $build_dir/CMakeCache.txt ]] || ava_parallel_die "build directory is not configured by CMake: $build_dir"
 
 if [[ -z $jobs ]]; then

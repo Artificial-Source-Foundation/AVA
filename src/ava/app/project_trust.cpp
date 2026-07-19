@@ -3,6 +3,7 @@
 #include "ava/core/atomic_file.h"
 #include "ava/core/error.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <cctype>
@@ -13,6 +14,8 @@
 
 namespace ava::app {
 namespace {
+
+using ava::core::normalized_absolute_path;
 
 constexpr std::size_t kMaxTrustFileBytes = 256 * 1024;
 
@@ -28,16 +31,6 @@ struct ParsedTrustRecords
   std::string diagnostic;
 };
 
-std::filesystem::path normalized_absolute(std::filesystem::path const& path)
-{
-  std::error_code error;
-  auto normalized = std::filesystem::weakly_canonical(path, error);
-  if (!error)
-    return normalized.lexically_normal();
-  auto absolute = std::filesystem::absolute(path, error);
-  return error ? path.lexically_normal() : absolute.lexically_normal();
-}
-
 bool path_exists(std::filesystem::path const& path)
 {
   std::error_code error;
@@ -48,7 +41,7 @@ void add_resource_if_present(std::vector<ProjectTrustResource>& resources, std::
 {
   if (!path_exists(path))
     return;
-  resources.push_back(ProjectTrustResource{.kind = std::move(kind), .path = normalized_absolute(path)});
+  resources.push_back(ProjectTrustResource{.kind = std::move(kind), .path = ava::core::normalized_absolute_path(path)});
 }
 
 std::vector<ProjectTrustResource> discover_protected_resources(std::filesystem::path const& workspace_dir)
@@ -56,7 +49,7 @@ std::vector<ProjectTrustResource> discover_protected_resources(std::filesystem::
   std::vector<ProjectTrustResource> resources;
   if (workspace_dir.empty())
     return resources;
-  auto const workspace = normalized_absolute(workspace_dir);
+  auto const workspace = normalized_absolute_path(workspace_dir);
   add_resource_if_present(resources, "prompt_commands", workspace / ".ava" / "commands");
   add_resource_if_present(resources, "prompt_commands", workspace / ".ava" / "command");
   add_resource_if_present(resources, "skills", workspace / ".ava" / "skills");
@@ -169,7 +162,7 @@ ParsedTrustRecords parse_trust_records(std::string_view content, bool content_ex
       ++skipped_records;
       continue;
     }
-    parsed.records.push_back(TrustRecord{.path = normalized_absolute(*path), .trusted = *trusted});
+    parsed.records.push_back(TrustRecord{.path = normalized_absolute_path(*path), .trusted = *trusted});
   }
   if (skipped_records > 0)
   {
@@ -211,7 +204,7 @@ bool path_is_ancestor_or_same(std::filesystem::path const& ancestor, std::filesy
 std::optional<TrustRecord> closest_matching_record(std::vector<TrustRecord> const& records, std::filesystem::path const& workspace_dir)
 {
   std::optional<TrustRecord> best;
-  auto const workspace = normalized_absolute(workspace_dir);
+  auto const workspace = normalized_absolute_path(workspace_dir);
   for (auto const& record : records)
   {
     if (!path_is_ancestor_or_same(record.path, workspace))
@@ -265,7 +258,7 @@ std::filesystem::path project_trust_file(ava::config::XdgPaths const& paths)
 ProjectTrustState load_project_trust_state(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir)
 {
   ProjectTrustState state;
-  state.workspace_dir = normalized_absolute(workspace_dir);
+  state.workspace_dir = normalized_absolute_path(workspace_dir);
   state.trust_file = project_trust_file(paths);
   state.protected_resources = discover_protected_resources(state.workspace_dir);
 
@@ -293,7 +286,7 @@ ava::core::VoidResult set_project_trust_decision(ava::config::XdgPaths const& pa
   auto records = load_records_for_write(trust_path);
   if (!records)
     return std::unexpected(std::move(records.error()));
-  auto const workspace = normalized_absolute(workspace_dir);
+  auto const workspace = normalized_absolute_path(workspace_dir);
   auto existing = std::ranges::find_if(*records, [&](TrustRecord const& record) { return record.path == workspace; });
   if (existing == records->end())
     records->push_back(TrustRecord{.path = workspace, .trusted = trusted});
@@ -309,7 +302,7 @@ ava::core::VoidResult clear_project_trust_decision(ava::config::XdgPaths const& 
   auto records = load_records_for_write(trust_path);
   if (!records)
     return std::unexpected(std::move(records.error()));
-  auto const workspace = normalized_absolute(workspace_dir);
+  auto const workspace = normalized_absolute_path(workspace_dir);
   auto const old_size = records->size();
   records->erase(std::remove_if(records->begin(), records->end(), [&](TrustRecord const& record) { return record.path == workspace; }), records->end());
   if (records->size() == old_size)

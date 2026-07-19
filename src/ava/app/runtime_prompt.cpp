@@ -19,6 +19,7 @@
 #include "ava/core/error.h"
 #include "ava/core/fingerprint.h"
 #include "ava/core/ids.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <array>
@@ -80,15 +81,6 @@ struct PluginRuntimeResources
   std::vector<PluginResourceLoadFailure> failures;
 };
 
-std::filesystem::path normalized_absolute(std::filesystem::path const& path)
-{
-  std::error_code error;
-  auto normalized = std::filesystem::weakly_canonical(path, error);
-  if (!error)
-    return normalized.lexically_normal();
-  return std::filesystem::absolute(path, error).lexically_normal();
-}
-
 ava::core::Result<std::string> read_freshness_file(std::filesystem::path const& path, std::size_t max_bytes)
 {
   std::error_code status_error;
@@ -148,7 +140,7 @@ void add_freshness_file(std::vector<FreshnessSourceMetadata>& sources, Freshness
                                             .scope = std::move(scope),
                                             .source_id = std::move(source_id),
                                             .name = std::move(name),
-                                            .path = normalized_absolute(path),
+                                            .path = ava::core::normalized_absolute_path(path),
                                             .byte_count = content->size(),
                                             .content_fingerprint = ava::core::content_fingerprint(*content)});
 }
@@ -162,7 +154,7 @@ void add_prompt_command_freshness_sources(std::vector<FreshnessSourceMetadata>& 
                                               .scope = command.scope,
                                               .source_id = command.command_name,
                                               .name = command.command_name,
-                                              .path = normalized_absolute(command.path),
+                                              .path = ava::core::normalized_absolute_path(command.path),
                                               .byte_count = command.byte_count,
                                               .content_fingerprint = command.content_fingerprint});
   }
@@ -192,7 +184,7 @@ ava::core::Result<std::optional<RuntimePromptResource>> load_prompt_resource(ava
   if (!text)
     return std::unexpected(std::move(text.error()));
   return RuntimePromptResource{
-      .kind = kind, .scope = std::move(scope), .name = std::move(name), .path = normalized_absolute(selected_path), .text = std::move(*text)};
+      .kind = kind, .scope = std::move(scope), .name = std::move(name), .path = ava::core::normalized_absolute_path(selected_path), .text = std::move(*text)};
 }
 
 void add_prompt_resource_freshness_source(std::vector<FreshnessSourceMetadata>& sources, RuntimePromptResource const& resource)

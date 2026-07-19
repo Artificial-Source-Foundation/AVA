@@ -8,6 +8,7 @@
 #include "ava/permissions/permission.h"
 #include "ava/core/error.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <cctype>
@@ -202,23 +203,12 @@ bool path_is_within(std::filesystem::path const& base, std::filesystem::path con
 ava::core::Result<std::filesystem::path> resolve_proxy_path(ava::tools::ToolContext const& context, std::string_view requested_path, std::string_view operation)
 {
   auto raw_path = proxy_workspace_path(context, requested_path).lexically_normal();
-  std::error_code canonical_error;
-  auto const canonical_path = std::filesystem::weakly_canonical(raw_path, canonical_error);
-  if (canonical_error)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to resolve proxy path");
-    error.with_context("operation", std::string(operation));
-    error.with_context("path", raw_path.string());
-    error.with_context("cause", canonical_error.message());
-    return std::unexpected(std::move(error));
-  }
+  auto const canonical_path = ava::core::normalized_absolute_path(raw_path);
 
   std::filesystem::path const parsed(requested_path);
   if (!parsed.is_absolute())
   {
-    std::error_code workspace_error;
-    auto const workspace = std::filesystem::weakly_canonical(context.workspace_dir, workspace_error);
-    auto const workspace_path = workspace_error ? std::filesystem::absolute(context.workspace_dir).lexically_normal() : workspace;
+    auto const workspace_path = ava::core::normalized_absolute_path(context.workspace_dir);
     if (!path_is_within(workspace_path, canonical_path))
     {
       auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "relative proxy paths must stay inside the workspace");

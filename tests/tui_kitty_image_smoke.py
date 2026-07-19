@@ -111,11 +111,11 @@ def main() -> int:
         print("skipping Kitty image PTY smoke; set AVA_TUI_KITTY_IMAGE_SMOKE=1 to run")
         return SKIP
 
-    ava_exe = pathlib.Path(args.ava).resolve()
+    ava_exe = pathlib.Path(args.ava).absolute()
     if not ava_exe.exists():
         raise RuntimeError(f"AVA executable does not exist: {ava_exe}")
 
-    root = pathlib.Path(args.root).resolve()
+    root = pathlib.Path(args.root).absolute()
     if root.exists():
         if root.name != "tui-kitty-image-smoke":
             raise RuntimeError(f"refusing to clear unexpected smoke root: {root}")

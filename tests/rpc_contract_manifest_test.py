@@ -21,7 +21,7 @@ def main() -> int:
     parser.add_argument("--source", required=True, type=pathlib.Path)
     parser.add_argument("--ava", required=True, type=pathlib.Path)
     args = parser.parse_args()
-    root = args.source.resolve()
+    root = args.source.absolute()
     golden = root / "tests/golden/rpc-v1"
     manifest = json.loads((golden / "manifest.json").read_text(encoding="utf-8"))
 

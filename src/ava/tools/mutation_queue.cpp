@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/tools/mutation_queue.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <array>
@@ -110,14 +111,7 @@ std::size_t MutationQueue::tracked_path_count() const
 
 std::filesystem::path MutationQueue::normalized_key(std::filesystem::path const& path)
 {
-  std::error_code error;
-  auto canonical = std::filesystem::weakly_canonical(path, error);
-  if (!error)
-    return canonical.lexically_normal();
-  auto absolute = std::filesystem::absolute(path, error);
-  if (!error)
-    return absolute.lexically_normal();
-  return path.lexically_normal();
+  return ava::core::normalized_absolute_path(path);
 }
 
 void MutationQueue::prune_expired_entries(State& state)

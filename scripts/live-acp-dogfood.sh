@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/$(basename -- "${BASH_SOURCE[0]}")"
-readonly SOURCE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+readonly SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
+readonly SOURCE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly FAKE_KEY="AVA_ZED_DOGFOOD_FAKE_KEY_NOT_A_SECRET"
 readonly MAX_PREFLIGHT_BYTES=16384
 readonly MAX_REPORT_BYTES=65536
@@ -64,14 +64,14 @@ require_absolute_dir() {
   local value=$1 label=$2
   [[ $value == /* ]] || die "$label must be an absolute path: $value"
   [[ -d $value ]] || die "$label is not a directory: $value"
-  realpath -e -- "$value"
+  cd -- "$value" && pwd
 }
 
 require_absolute_executable() {
   local value=$1 label=$2 directory normalized
   [[ $value == /* ]] || die "$label must be an explicit absolute path: $value"
   [[ -f $value && -x $value ]] || die "$label is not an executable file: $value"
-  directory=$(cd -- "$(dirname -- "$value")" && pwd -P)
+  directory=$(cd -- "$(dirname -- "$value")" && pwd)
   normalized="$directory/$(basename -- "$value")"
   [[ -f $normalized && -x $normalized ]] || die "$label did not resolve to an executable file: $value"
   # Preserve the explicitly supplied final symlink. Some launchers, including
@@ -918,7 +918,7 @@ zed_run() {
   local ava="" fake_provider="" zed="" display="" display_kind="" display_label="" confinement="" description="" preflight="" root_parent="${TMPDIR:-/tmp}"
   local display_auth_source="" display_auth_staged="" disposable_ack=false display_ack=false operator_timeout=$DEFAULT_OPERATOR_TIMEOUT
   local command_name
-  for command_name in python3 setsid timeout ps realpath stat sha256sum awk install mktemp cat; do
+  for command_name in python3 setsid timeout ps stat sha256sum awk install mktemp cat; do
     command -v "$command_name" >/dev/null 2>&1 || die "zed run requires local command: $command_name"
   done
   shift
@@ -998,7 +998,7 @@ zed_run() {
   fi
   [[ $root_parent == /* ]] || die "--root-parent/TMPDIR must be absolute"
   mkdir -p -- "$root_parent"
-  root_parent=$(realpath -e -- "$root_parent")
+  root_parent=$(cd -- "$root_parent" && pwd)
   local root
   root=$(mktemp -d -- "$root_parent/ava-zed-dogfood.XXXXXXXX")
   chmod 700 "$root"

@@ -2,6 +2,7 @@
 #include "ava/config/xdg_paths.h"
 #include "ava/context/skill_loader.h"
 #include "ava/core/error.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <array>
@@ -19,15 +20,6 @@ namespace {
 constexpr std::size_t kMaxSkillNameBytes = 64;
 constexpr std::size_t kMaxSkillDescriptionBytes = 1024;
 constexpr std::size_t kMaxDeclaredSkillNameBytes = 96;
-
-std::filesystem::path normalized_absolute(std::filesystem::path const& path)
-{
-  std::error_code error;
-  auto normalized = std::filesystem::weakly_canonical(path, error);
-  if (!error)
-    return normalized.lexically_normal();
-  return std::filesystem::absolute(path, error).lexically_normal();
-}
 
 std::optional<std::filesystem::path> home_dir()
 {
@@ -285,7 +277,7 @@ void load_skill_file(std::vector<LoadedSkill>& skills, std::vector<SkillDiagnost
   }
 
   auto parsed = parse_skill_markdown(*content);
-  auto const directory = normalized_absolute(skill_file.parent_path());
+  auto const directory = ava::core::normalized_absolute_path(skill_file.parent_path());
   auto name = field(parsed.frontmatter, "name").value_or(directory.filename().string());
   auto description = field(parsed.frontmatter, "description").value_or("");
   name = trim(name);
@@ -304,7 +296,7 @@ void load_skill_file(std::vector<LoadedSkill>& skills, std::vector<SkillDiagnost
 
   add_or_replace_skill(skills, LoadedSkill{.name = std::move(name),
                                            .description = std::move(description),
-                                           .path = normalized_absolute(skill_file),
+                                           .path = ava::core::normalized_absolute_path(skill_file),
                                            .directory = directory,
                                            .source_type = source_type,
                                            .byte_count = content->size(),
@@ -413,10 +405,10 @@ ava::core::Result<LoadedSkill> load_declared_skill_file(DeclaredSkillFileOptions
     return std::unexpected(std::move(error));
   }
 
-  auto const directory = normalized_absolute(options.path.parent_path());
+  auto const directory = ava::core::normalized_absolute_path(options.path.parent_path());
   return LoadedSkill{.name = std::move(name),
                      .description = std::move(description),
-                     .path = normalized_absolute(options.path),
+                      .path = ava::core::normalized_absolute_path(options.path),
                      .directory = directory,
                      .source_type = options.source_type,
                      .byte_count = content->size(),
@@ -501,7 +493,7 @@ std::vector<std::filesystem::path> sample_skill_files(std::filesystem::path cons
       continue;
     if (it->path().filename() == "SKILL.md")
       continue;
-    files.push_back(normalized_absolute(it->path()));
+    files.push_back(ava::core::normalized_absolute_path(it->path()));
   }
   std::ranges::sort(files);
   return files;

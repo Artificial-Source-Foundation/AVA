@@ -7,7 +7,7 @@ if [[ $(uname -s) != Linux ]]; then
   exit 2
 fi
 
-repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 binary=""
 fake_provider=""
 output_dir=""

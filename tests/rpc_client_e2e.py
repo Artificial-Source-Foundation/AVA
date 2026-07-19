@@ -35,7 +35,7 @@ def main() -> int:
     sys.path.insert(0, str(args.source / "examples/rpc-client"))
     from ava_rpc_client import AvaRpcClient, RpcError  # pylint: disable=import-error,import-outside-toplevel
 
-    root = args.root.resolve()
+    root = args.root.absolute()
     shutil.rmtree(root, ignore_errors=True)
     root.mkdir(parents=True)
     clients: list[AvaRpcClient] = []

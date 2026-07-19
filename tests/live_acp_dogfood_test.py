@@ -219,12 +219,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True)
     args = parser.parse_args()
-    source = Path(args.source).resolve()
+    source = Path(args.source).absolute()
     script = source / "scripts/live-acp-dogfood.sh"
     assert script.is_file() and os.access(script, os.X_OK)
 
     with tempfile.TemporaryDirectory(prefix="ava-live-acp-dogfood-test-") as temporary:
-        root = Path(temporary).resolve()
+        root = Path(temporary).absolute()
         display_root = root / "display"
         display_root.mkdir()
         assert_display_validation(script, display_root)

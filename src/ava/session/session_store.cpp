@@ -5,6 +5,7 @@
 #include "ava/session/session_store.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 #include "ava/core/strict_json.h"
 
 #include <algorithm>
@@ -379,12 +380,7 @@ bool same_file_identity(struct stat const& left, struct stat const& right)
   return S_ISREG(left.st_mode) && S_ISREG(right.st_mode) && left.st_dev == right.st_dev && left.st_ino == right.st_ino;
 }
 
-std::filesystem::path normalized_absolute_path(std::filesystem::path const& path)
-{
-  std::error_code error;
-  auto absolute = std::filesystem::absolute(path, error);
-  return (error ? path : absolute).lexically_normal();
-}
+using ava::core::normalized_absolute_path;
 
 ava::core::Error append_authority_error(std::string message, std::filesystem::path const& path)
 {

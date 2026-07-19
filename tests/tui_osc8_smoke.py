@@ -122,14 +122,14 @@ def main() -> int:
         print("skipping OSC 8 PTY smoke; set AVA_TUI_OSC8_SMOKE=1 to run")
         return SKIP
 
-    ava_exe = pathlib.Path(args.ava).resolve()
-    fake_provider_exe = pathlib.Path(args.fake_provider).resolve()
+    ava_exe = pathlib.Path(args.ava).absolute()
+    fake_provider_exe = pathlib.Path(args.fake_provider).absolute()
     if not ava_exe.exists():
         raise RuntimeError(f"AVA executable does not exist: {ava_exe}")
     if not fake_provider_exe.exists():
         raise RuntimeError(f"fake provider executable does not exist: {fake_provider_exe}")
 
-    root = pathlib.Path(args.root).resolve()
+    root = pathlib.Path(args.root).absolute()
     if root.exists():
         if root.name != "tui-osc8-smoke":
             raise RuntimeError(f"refusing to clear unexpected smoke root: {root}")

@@ -3,6 +3,7 @@
 
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <array>
@@ -122,11 +123,37 @@ ava::core::Error rule_parse_error(std::string message, std::filesystem::path con
 
 std::filesystem::path normalized_path(std::filesystem::path const& path)
 {
-  std::error_code error;
-  auto const canonical = std::filesystem::weakly_canonical(path, error);
-  if (!error)
-    return canonical;
-  return std::filesystem::absolute(path).lexically_normal();
+  return ava::core::normalized_absolute_path(path);
+}
+
+// Check whether two paths refer to the same file. Uses inode comparison
+// (std::filesystem::equivalent) when both paths exist — this detects symlink
+// aliases (e.g., a directory symlink making config-link/permission-rules.json
+// refer to the same file as config/permission-rules.json) without canonicalizing
+// the path. When either path does not exist (e.g., the enforceable permission
+// rules file has not been created yet), falls back to weakly_canonical for the
+// narrow path-equality check — the canonical form is used transiently for
+// comparison only and never stored or forwarded.
+bool paths_refer_to_same_file(std::filesystem::path const& a, std::filesystem::path const& b)
+{
+  if (a.empty() || b.empty())
+    return false;
+  std::error_code a_error;
+  std::error_code b_error;
+  bool const a_exists = std::filesystem::exists(a, a_error) && !a_error;
+  bool const b_exists = std::filesystem::exists(b, b_error) && !b_error;
+  if (a_exists && b_exists)
+  {
+    std::error_code equiv_error;
+    return std::filesystem::equivalent(a, b, equiv_error) && !equiv_error;
+  }
+  std::error_code canon_a_error;
+  std::error_code canon_b_error;
+  auto const canon_a = std::filesystem::weakly_canonical(a, canon_a_error);
+  auto const canon_b = std::filesystem::weakly_canonical(b, canon_b_error);
+  if (!canon_a_error && !canon_b_error)
+    return canon_a == canon_b;
+  return normalized_path(a) == normalized_path(b);
 }
 
 bool contains_parent_reference(std::filesystem::path const& path)
@@ -1067,10 +1094,11 @@ bool is_enforceable_permission_rules_file(PermissionRuleStore const& store, std:
 {
   if (path.empty())
     return false;
-  auto const normalized = normalized_path(path);
-  if (!store.global_rules_file.empty() && normalized == normalized_path(enforceable_permission_rules_file(store, PermissionRuleScope::Global)))
+  if (!store.global_rules_file.empty() &&
+      paths_refer_to_same_file(path, enforceable_permission_rules_file(store, PermissionRuleScope::Global)))
     return true;
-  return !store.workspace_dir.empty() && normalized == normalized_path(enforceable_permission_rules_file(store, PermissionRuleScope::Workspace));
+  return !store.workspace_dir.empty() &&
+         paths_refer_to_same_file(path, enforceable_permission_rules_file(store, PermissionRuleScope::Workspace));
 }
 
 void register_enforceable_permission_rule_files(PermissionRuleStore const& store)
@@ -1091,10 +1119,9 @@ bool is_registered_enforceable_permission_rules_file(std::filesystem::path const
 {
   if (path.empty())
     return false;
-  auto const normalized = normalized_path(path);
   std::lock_guard lock(protected_rule_paths_mutex());
   auto const& paths = protected_rule_paths();
-  return std::ranges::find(paths, normalized) != paths.end();
+  return std::ranges::any_of(paths, [&](std::filesystem::path const& registered) { return paths_refer_to_same_file(path, registered); });
 }
 
 ava::core::Result<std::vector<PersistentPermissionRule>> load_persistent_permission_rules(PermissionRuleStore const& store)

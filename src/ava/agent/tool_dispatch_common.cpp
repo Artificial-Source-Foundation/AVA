@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/agent/tool_dispatch_common.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <cctype>
 #include <utility>
@@ -159,11 +160,7 @@ std::filesystem::path workspace_path(ava::tools::ToolContext const& context, std
 
 std::filesystem::path permission_dedupe_path(std::filesystem::path const& path)
 {
-  std::error_code error;
-  auto const canonical = std::filesystem::weakly_canonical(path, error);
-  if (!error)
-    return canonical;
-  return std::filesystem::absolute(path).lexically_normal();
+  return ava::core::normalized_absolute_path(path);
 }
 
 std::size_t optional_size_arg(std::string_view arguments, std::string_view field, std::size_t fallback, std::size_t maximum)

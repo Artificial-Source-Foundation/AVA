@@ -1,20 +1,12 @@
 #include "sys.h"
 #include "ava/plugin/static_resources.h"
 #include "ava/core/error.h"
+#include "ava/core/path.h"
 
 #include <system_error>
 
 namespace ava::plugin {
 namespace {
-
-std::filesystem::path normalized_absolute(std::filesystem::path const& path)
-{
-  std::error_code error;
-  auto normalized = std::filesystem::weakly_canonical(path, error);
-  if (!error)
-    return normalized.lexically_normal();
-  return std::filesystem::absolute(path, error).lexically_normal();
-}
 
 bool path_is_within(std::filesystem::path const& base, std::filesystem::path const& target)
 {
@@ -41,9 +33,9 @@ std::filesystem::path plugin_static_resource_display_path(PluginManifest const& 
 
 ava::core::Result<std::filesystem::path> plugin_static_resource_path(PluginManifest const& manifest, PluginResourceContribution const& resource)
 {
-  auto const base_path = normalized_absolute(manifest.directory);
+  auto const base_path = ava::core::normalized_absolute_path(manifest.directory);
   auto const raw_target = plugin_static_resource_display_path(manifest, resource);
-  auto const target_path = normalized_absolute(raw_target);
+  auto const target_path = ava::core::normalized_absolute_path(raw_target);
   if (!path_is_within(base_path, target_path))
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin resource path escapes plugin directory");

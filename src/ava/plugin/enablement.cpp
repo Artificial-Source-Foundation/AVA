@@ -2,6 +2,7 @@
 #include "ava/plugin/enablement.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <cctype>
@@ -266,14 +267,7 @@ std::filesystem::path default_plugin_enablement_file()
 
 std::filesystem::path canonical_workspace_key(std::filesystem::path const& workspace_root)
 {
-  std::error_code canonical_error;
-  auto canonical = std::filesystem::weakly_canonical(workspace_root, canonical_error);
-  if (!canonical_error && canonical.is_absolute())
-    return canonical.lexically_normal();
-  auto absolute = std::filesystem::absolute(workspace_root, canonical_error);
-  if (!canonical_error)
-    return absolute.lexically_normal();
-  return workspace_root.lexically_normal();
+  return ava::core::normalized_absolute_path(workspace_root);
 }
 
 ava::core::Result<std::vector<PluginEnablementRecord>> load_plugin_enablement(std::filesystem::path const& state_file)

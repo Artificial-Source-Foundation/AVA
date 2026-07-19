@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/permissions/permission.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <cctype>
@@ -216,12 +217,8 @@ bool is_within_workspace(std::filesystem::path const& workspace_dir, std::filesy
     return true;
   }
 
-  std::error_code workspace_error;
-  std::error_code target_error;
-  auto const workspace_path = std::filesystem::weakly_canonical(workspace_dir, workspace_error);
-  auto const target_path_normalized = std::filesystem::weakly_canonical(target_path, target_error);
-  auto const workspace = workspace_error ? std::filesystem::absolute(workspace_dir).lexically_normal() : workspace_path;
-  auto const target = target_error ? std::filesystem::absolute(target_path).lexically_normal() : target_path_normalized;
+  auto const workspace = ava::core::normalized_absolute_path(workspace_dir);
+  auto const target = ava::core::normalized_absolute_path(target_path);
   if (target == workspace)
   {
     return true;
@@ -239,13 +236,7 @@ bool is_within_workspace(std::filesystem::path const& workspace_dir, std::filesy
 
 std::filesystem::path policy_path(std::filesystem::path const& path)
 {
-  std::error_code error;
-  auto const normalized = std::filesystem::weakly_canonical(path, error);
-  if (!error)
-  {
-    return normalized;
-  }
-  return std::filesystem::absolute(path).lexically_normal();
+  return ava::core::normalized_absolute_path(path);
 }
 
 bool is_secret_path(std::filesystem::path const& path)

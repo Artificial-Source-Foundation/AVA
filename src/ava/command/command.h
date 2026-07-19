@@ -20,6 +20,11 @@ enum class CommandIntentLane
   RawShell,
 };
 
+// Runtime integration is intentionally separate from planning. Legacy leaves
+// existing command handling in place, PromptOnly permits callers to inspect a
+// sealed plan without treating it as execution authority, and Enabled requires
+// callers to gate execution on a fresh sealed plan plus their policy decision.
+// No mode turns this planning library into an executor by itself.
 enum class CommandRuntimeMode
 {
   Legacy,
@@ -98,7 +103,9 @@ enum class CommandRecipe
 };
 
 // Global approval is deliberately not an interactive scope. It remains an
-// explicit configuration decision outside command prompts.
+// explicit configuration decision outside command prompts. Once applies to
+// one sealed-plan attempt; Session and Workspace may persist only an exact
+// canonical recipe under the active policy and environment versions.
 enum class InteractiveScope
 {
   Once,
@@ -120,7 +127,9 @@ struct CommandLimits
 };
 
 // These are the paths exposed to the child, not paths used for host-side tool
-// discovery. CommandBuildOptions::trusted_home supplies the latter.
+// discovery. CommandBuildOptions::trusted_home supplies the latter. Every root
+// must already exist as a non-symlink directory owned by the current user with
+// no group or other permissions; planning never creates these authority roots.
 struct CommandEnvironmentOptions
 {
   std::string profile_id;
@@ -161,6 +170,9 @@ struct CommandBuildOptions
   // Raw shell plans resolve and bind this exact executable; it is never found
   // by basename lookup. Descriptor-anchored execution remains future work.
   std::filesystem::path shell = "/bin/sh";
+  // Persistent AVA config, credential, and session roots which must stay
+  // disjoint from every synthetic child environment root.
+  std::vector<std::filesystem::path> ava_authority_roots;
   CommandEnvironmentOptions environment;
   std::vector<WorkspaceScriptRecipe> workspace_script_recipes;
   CommandLimits limits = {};
@@ -168,9 +180,34 @@ struct CommandBuildOptions
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-// Captures both the requested spelling and the canonical target. The requested
-// identity records final-component symlink provenance without following a FIFO
-// or other blocking special file during metadata inspection.
+// Captures one non-final lexical path component. Symlink records preserve the
+// lstat identity of the link itself; directory records preserve the identity of
+// the directory reached through any preceding links.
+struct PathAncestorMetadata
+{
+  std::filesystem::path path;
+  std::uintmax_t device = 0;
+  std::uintmax_t inode = 0;
+  std::uintmax_t mode = 0;
+  std::uintmax_t owner = 0;
+  std::uintmax_t link_count = 0;
+  std::int64_t changed_seconds = 0;
+  std::int64_t changed_nanoseconds = 0;
+  bool is_symlink = false;
+  // Shared sticky namespace boundaries (such as /tmp) are revalidated for
+  // safety but not identity-bound because unrelated entries legitimately
+  // change their timestamps and link counts.
+  bool identity_bound = true;
+
+  friend bool operator==(PathAncestorMetadata const&, PathAncestorMetadata const&) = default;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+// Captures both the requested spelling and the canonical target, plus every
+// safe lexical/canonical ancestor used to reach it. The requested identity
+// records final-component symlink provenance without following a FIFO or other
+// blocking special file during metadata inspection.
 struct PathMetadata
 {
   std::filesystem::path requested_path;
@@ -187,11 +224,30 @@ struct PathMetadata
   std::uintmax_t requested_device = 0;
   std::uintmax_t requested_inode = 0;
   std::uintmax_t requested_mode = 0;
+  std::uintmax_t requested_owner = 0;
   std::uintmax_t requested_link_count = 0;
   std::int64_t requested_changed_seconds = 0;
   std::int64_t requested_changed_nanoseconds = 0;
+  std::vector<PathAncestorMetadata> ancestor_metadata;
 
   friend bool operator==(PathMetadata const&, PathMetadata const&) = default;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+// These canonicalized, sealed roots are the only HOME/XDG/TMP locations
+// exposed to a child. They are retained by plans and prepared environments
+// rather than reconstructed from mutable input options.
+struct SyntheticEnvironmentRoots
+{
+  PathMetadata home;
+  PathMetadata xdg_config_home;
+  PathMetadata xdg_cache_home;
+  PathMetadata xdg_data_home;
+  PathMetadata xdg_state_home;
+  PathMetadata tmpdir;
+
+  friend bool operator==(SyntheticEnvironmentRoots const&, SyntheticEnvironmentRoots const&) = default;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -223,9 +279,11 @@ struct ExecutableMetadata
   std::uintmax_t requested_device = 0;
   std::uintmax_t requested_inode = 0;
   std::uintmax_t requested_mode = 0;
+  std::uintmax_t requested_owner = 0;
   std::uintmax_t requested_link_count = 0;
   std::int64_t requested_changed_seconds = 0;
   std::int64_t requested_changed_nanoseconds = 0;
+  std::vector<PathAncestorMetadata> ancestor_metadata;
 
   friend bool operator==(ExecutableMetadata const&, ExecutableMetadata const&) = default;
 
@@ -301,7 +359,8 @@ class CommandPreparation;
 
 namespace detail {
 class EnvironmentFactory;
-}
+ava::core::VoidResult validate_environment_matches_plan(CommandEnvironment const& environment, CommandPlan const& plan);
+}  // namespace detail
 
 class CommandEnvironment final
 {
@@ -310,16 +369,34 @@ class CommandEnvironment final
   [[nodiscard]] std::string const& digest() const noexcept;
   [[nodiscard]] std::vector<EnvironmentVariable> const& entries() const noexcept;
 
+  friend bool operator==(CommandEnvironment const&, CommandEnvironment const&) = default;
+
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
-  friend class detail::EnvironmentFactory;
+  // Including an internal header is not an authority boundary because src/ is
+  // an include root. Only sealing functions can mint this passkey, so an
+  // external caller cannot construct an environment through EnvironmentFactory.
+  class FactoryPasskey final
+  {
+    friend class CommandEnvironment;
 
-  CommandEnvironment() = default;
+    FactoryPasskey() = default;
+  };
+
+  [[nodiscard]] static FactoryPasskey make_factory_passkey() noexcept { return {}; }
+
+  friend ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const&, CommandBuildOptions const&);
+  friend ava::core::Result<CommandPreparation> prepare_command(CommandIntent const&, CommandBuildOptions const&);
+  friend class detail::EnvironmentFactory;
+  friend ava::core::VoidResult detail::validate_environment_matches_plan(CommandEnvironment const&, CommandPlan const&);
+
+  explicit CommandEnvironment(FactoryPasskey, SyntheticEnvironmentRoots roots);
 
   std::string profile_id_;
   std::string digest_;
   std::vector<EnvironmentVariable> entries_;
+  SyntheticEnvironmentRoots roots_;
 };
 
 class CommandIntent final
@@ -361,8 +438,16 @@ class CommandPlan final
   [[nodiscard]] CommandClassification const& classification() const noexcept;
   [[nodiscard]] std::string const& environment_profile_id() const noexcept;
   [[nodiscard]] std::string const& environment_digest() const noexcept;
+  // An instantaneous integrity binding for this sealed plan, never a durable
+  // recipe or grant identity. Durable grants must exact-match canonical recipe
+  // fields plus their policy and environment versions, not this fingerprint.
   [[nodiscard]] std::string const& fingerprint() const noexcept;
+  // Local user-facing sensitive text. It may contain workspace paths, argv,
+  // and raw shell text and must never enter logs, telemetry, or RPC diagnostics.
   [[nodiscard]] std::string display_json() const;
+  // Diagnostics-safe structural summary: deliberately excludes argv, shell
+  // text, paths, environment values, and any other request payload.
+  [[nodiscard]] std::string redacted_summary() const;
 
   friend bool operator==(CommandPlan const&, CommandPlan const&) = default;
 
@@ -370,7 +455,9 @@ class CommandPlan final
 
  private:
   friend ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const&, CommandBuildOptions const&);
+  friend ava::core::Result<CommandPreparation> prepare_command(CommandIntent const&, CommandBuildOptions const&);
   friend ava::core::Result<bool> plan_is_fresh(CommandPlan const&);
+  friend ava::core::VoidResult detail::validate_environment_matches_plan(CommandEnvironment const&, CommandPlan const&);
 
   CommandPlan() = default;
 
@@ -380,6 +467,9 @@ class CommandPlan final
   std::filesystem::path cwd_;
   PathMetadata workspace_metadata_;
   PathMetadata cwd_metadata_;
+  PathMetadata trusted_home_metadata_;
+  std::vector<PathMetadata> ava_authority_root_metadata_;
+  SyntheticEnvironmentRoots synthetic_environment_roots_;
   std::vector<std::string> argv_;
   std::string raw_shell_text_;
   std::vector<CommandPathEntry> path_entries_;
@@ -395,6 +485,8 @@ class CommandPreparation final
  public:
   [[nodiscard]] CommandPlan const& plan() const noexcept;
   [[nodiscard]] CommandEnvironment const& environment() const noexcept;
+
+  friend bool operator==(CommandPreparation const&, CommandPreparation const&) = default;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 

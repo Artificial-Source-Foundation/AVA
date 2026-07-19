@@ -21,6 +21,8 @@ namespace command = ava::command;
 static_assert(!std::default_initializable<command::CommandEnvironment>);
 static_assert(!std::default_initializable<command::CommandPlan>);
 static_assert(!std::default_initializable<command::CommandPreparation>);
+static_assert(std::equality_comparable<command::CommandEnvironment>);
+static_assert(std::equality_comparable<command::CommandPreparation>);
 
 struct CommandFixture
 {
@@ -28,6 +30,11 @@ struct CommandFixture
   std::filesystem::path workspace;
   std::filesystem::path trusted_home;
   std::filesystem::path synthetic_home;
+  std::filesystem::path synthetic_xdg_config_home;
+  std::filesystem::path synthetic_xdg_cache_home;
+  std::filesystem::path synthetic_xdg_data_home;
+  std::filesystem::path synthetic_xdg_state_home;
+  std::filesystem::path synthetic_tmpdir;
   std::filesystem::path bin;
 
   explicit CommandFixture(std::string_view name)
@@ -35,6 +42,11 @@ struct CommandFixture
         workspace(root / "workspace"),
         trusted_home(root / "trusted-home"),
         synthetic_home(root / "synthetic-child-home"),
+        synthetic_xdg_config_home(root / "synthetic-xdg-config"),
+        synthetic_xdg_cache_home(root / "synthetic-xdg-cache"),
+        synthetic_xdg_data_home(root / "synthetic-xdg-data"),
+        synthetic_xdg_state_home(root / "synthetic-xdg-state"),
+        synthetic_tmpdir(root / "synthetic-tmp"),
         bin(root / "bin")
   {
     std::error_code remove_error;
@@ -44,7 +56,8 @@ struct CommandFixture
     // enclosing namespace before sealing any path under it.
     std::filesystem::create_directories(root.parent_path());
     ::chmod(root.parent_path().c_str(), S_IRWXU);
-    for (auto const& directory : {workspace, trusted_home, synthetic_home, bin, workspace / "build", workspace / "tests", workspace / "nested"})
+    for (auto const& directory : {workspace, trusted_home, synthetic_home, synthetic_xdg_config_home, synthetic_xdg_cache_home, synthetic_xdg_data_home,
+                                  synthetic_xdg_state_home, synthetic_tmpdir, bin, workspace / "build", workspace / "tests", workspace / "nested"})
     {
       std::filesystem::create_directories(directory);
       ::chmod(directory.c_str(), S_IRWXU);
@@ -72,15 +85,16 @@ struct CommandFixture
                                         .trusted_home = trusted_home,
                                         .startup_path = bin.string(),
                                         .shell = bin / "shell",
+                                        .ava_authority_roots = {},
                                         .environment = command::CommandEnvironmentOptions{.profile_id = std::move(profile_id),
                                                                                           .user = "ava-test-user",
                                                                                           .logname = "ava-test-login",
                                                                                           .home = synthetic_home,
-                                                                                          .xdg_config_home = root / "synthetic-xdg-config",
-                                                                                          .xdg_cache_home = root / "synthetic-xdg-cache",
-                                                                                          .xdg_data_home = root / "synthetic-xdg-data",
-                                                                                          .xdg_state_home = root / "synthetic-xdg-state",
-                                                                                          .tmpdir = root / "synthetic-tmp"},
+                                                                                          .xdg_config_home = synthetic_xdg_config_home,
+                                                                                          .xdg_cache_home = synthetic_xdg_cache_home,
+                                                                                          .xdg_data_home = synthetic_xdg_data_home,
+                                                                                          .xdg_state_home = synthetic_xdg_state_home,
+                                                                                          .tmpdir = synthetic_tmpdir},
                                         .workspace_script_recipes = {},
                                         .limits = {}};
   }
@@ -101,24 +115,44 @@ bool is_standard_recipe(ava::core::Result<command::CommandPlan> const& plan)
 
 void test_compatibility_parser_is_lossless_or_raw_shell()
 {
-  auto quoted_backslash = command::CommandIntent::compatibility("echo 'a\\b'");
-  auto ordinary_double_quote = command::CommandIntent::compatibility("echo \"a\\q\"");
-  auto expanded_double_quote = command::CommandIntent::compatibility("echo \"$HOME\"");
-  auto backtick = command::CommandIntent::compatibility("echo `id`");
-  auto assignment = command::CommandIntent::compatibility("NAME=value echo safe");
-  auto substitution = command::CommandIntent::compatibility("echo $(id)");
-  auto unmatched_quote = command::CommandIntent::compatibility("echo 'unterminated");
-  auto unmatched_escape = command::CommandIntent::compatibility("echo trailing\\");
+  auto quoted_backslash = command::CommandIntent::compatibility("external-tool 'a\\b'");
+  auto ordinary_double_quote = command::CommandIntent::compatibility("external-tool \"a\\q\"");
+  auto expanded_double_quote = command::CommandIntent::compatibility("external-tool \"$HOME\"");
+  auto backtick = command::CommandIntent::compatibility("external-tool `id`");
+  auto assignment = command::CommandIntent::compatibility("NAME=value external-tool safe");
+  auto substitution = command::CommandIntent::compatibility("external-tool $(id)");
+  auto unmatched_quote = command::CommandIntent::compatibility("external-tool 'unterminated");
+  auto unmatched_escape = command::CommandIntent::compatibility("external-tool trailing\\");
 
   expect(quoted_backslash && quoted_backslash->lane() == command::CommandIntentLane::Compatibility &&
-             quoted_backslash->argv() == std::vector<std::string>({"echo", "a\\b"}) && ordinary_double_quote &&
+             quoted_backslash->argv() == std::vector<std::string>({"external-tool", "a\\b"}) && ordinary_double_quote &&
              ordinary_double_quote->lane() == command::CommandIntentLane::Compatibility &&
-             ordinary_double_quote->argv() == std::vector<std::string>({"echo", "a\\q"}),
+             ordinary_double_quote->argv() == std::vector<std::string>({"external-tool", "a\\q"}),
          "compatibility parsing preserves literal single-quote backslashes and supported double-quote escapes exactly");
   expect(expanded_double_quote && expanded_double_quote->lane() == command::CommandIntentLane::RawShell && backtick &&
              backtick->lane() == command::CommandIntentLane::RawShell && assignment && assignment->lane() == command::CommandIntentLane::RawShell &&
              substitution && substitution->lane() == command::CommandIntentLane::RawShell && !unmatched_quote && !unmatched_escape,
          "compatibility parsing routes expansion, leading assignment, unsupported shell constructs, and non-lossless syntax to critical raw-shell handling");
+}
+
+void test_compatibility_shell_words_are_critical_raw_shell()
+{
+  CommandFixture fixture("compatibility-shell-words");
+  std::vector<std::string> const shell_words{"cd workspace", "command ls",    "exec tool", "time tool", "export NAME=value", "unset NAME", "set -e",
+                                             "read value",   "source script", ". script",  "eval tool", "if condition",      "for item"};
+  bool all_raw_critical = true;
+  for (auto const& text : shell_words)
+  {
+    auto intent = command::CommandIntent::compatibility(text);
+    auto plan = intent
+                    ? command::seal_command_plan(*intent, fixture.options())
+                    : ava::core::Result<command::CommandPlan>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no compatibility intent"))};
+    all_raw_critical = all_raw_critical && intent && intent->lane() == command::CommandIntentLane::RawShell && plan &&
+                       plan->execution_domain() == command::CommandExecutionDomain::RawShell &&
+                       plan->classification().level == command::CommandLevel::Critical && plan->classification().family == command::CommandFamily::RawShell;
+  }
+  expect(all_raw_critical,
+         "compatibility shell builtins, special builtins, and reserved command-position words always use critical raw-shell plans instead of argv lookup");
 }
 
 void test_intent_bounds_and_path_bounds_do_not_underflow()
@@ -131,18 +165,14 @@ void test_intent_bounds_and_path_bounds_do_not_underflow()
   auto exact = command::CommandIntent::structured({"aa", "bb"}, std::nullopt, exact_limit);
 
   CommandFixture fixture("bounds");
-  fixture.executable("pwd");
+  auto const path_root = fixture.root / ("path-limit-" + std::string(128, 'p'));
+  fixture.executable_in(path_root, "pwd");
   auto intent = command::CommandIntent::structured({"pwd"});
   auto fits = fixture.options();
-  fits.environment.home = "/a";
-  fits.environment.xdg_config_home = "/b";
-  fits.environment.xdg_cache_home = "/c";
-  fits.environment.xdg_data_home = "/d";
-  fits.environment.xdg_state_home = "/e";
-  fits.environment.tmpdir = "/f";
-  fits.limits.max_path_bytes = fixture.bin.string().size();
+  fits.startup_path = path_root.string();
+  fits.limits.max_path_bytes = path_root.string().size();
   auto does_not_fit = fits;
-  does_not_fit.limits.max_path_bytes = fixture.bin.string().size() - 1;
+  does_not_fit.limits.max_path_bytes = path_root.string().size() - 1;
   auto fitting_plan = command::seal_command_plan(*intent, fits);
   auto oversized_path_plan = command::seal_command_plan(*intent, does_not_fit);
 
@@ -172,6 +202,8 @@ void test_workspace_spoofs_are_not_inspection_recipes()
              bare_ls->resolved_executable()->origin == command::ExecutableOrigin::Workspace &&
              absolute_ls->resolved_executable()->origin == command::ExecutableOrigin::Workspace &&
              bare_ls->classification().level == command::CommandLevel::Critical && absolute_ls->classification().level == command::CommandLevel::Critical &&
+             bare_ls->classification().capabilities.executes_mutable_project_code && bare_ls->classification().capabilities.requires_containment &&
+             absolute_ls->classification().capabilities.executes_mutable_project_code && absolute_ls->classification().capabilities.requires_containment &&
              workspace_cmake && workspace_cmake->classification().level == command::CommandLevel::Standard &&
              workspace_cmake->classification().capabilities.executes_mutable_project_code &&
              workspace_cmake->classification().capabilities.requires_containment && trusted_ls &&
@@ -338,6 +370,8 @@ void test_environment_is_synthetic_and_digest_bound()
   auto prepared = command::prepare_command(*command::CommandIntent::structured({"user-tool"}), fixture.options("environment-profile"));
   auto changed_environment_options = fixture.options("environment-profile");
   changed_environment_options.environment.tmpdir = fixture.root / "different-synthetic-tmp";
+  std::filesystem::create_directories(changed_environment_options.environment.tmpdir);
+  ::chmod(changed_environment_options.environment.tmpdir.c_str(), S_IRWXU);
   auto changed_environment = command::seal_command_plan(*command::CommandIntent::structured({"user-tool"}), changed_environment_options);
   auto overlapping_root_options = fixture.options("environment-profile");
   overlapping_root_options.environment.home = fixture.trusted_home;
@@ -355,6 +389,53 @@ void test_environment_is_synthetic_and_digest_bound()
          "to plans");
 }
 
+void test_synthetic_environment_roots_are_sealed_and_fresh()
+{
+  CommandFixture fixture("synthetic-environment-roots");
+  fixture.executable("pwd");
+  auto intent = command::CommandIntent::structured({"pwd"});
+  auto authority_root = fixture.root / "ava-authority";
+  std::filesystem::create_directories(authority_root);
+  ::chmod(authority_root.c_str(), S_IRWXU);
+  auto const unique_suffix = std::to_string(static_cast<unsigned long long>(::getpid()));
+  auto sealed_tmpdir = std::filesystem::temp_directory_path() / ("ava-command-sealed-synthetic-" + unique_suffix);
+  auto outside = std::filesystem::temp_directory_path() / ("ava-command-sealed-outside-" + unique_suffix);
+  std::error_code cleanup_error;
+  std::filesystem::remove_all(sealed_tmpdir, cleanup_error);
+  std::filesystem::remove_all(outside, cleanup_error);
+  std::filesystem::create_directories(sealed_tmpdir);
+  std::filesystem::create_directories(outside);
+  ::chmod(sealed_tmpdir.c_str(), S_IRWXU);
+  ::chmod(outside.c_str(), S_IRWXU);
+
+  auto loose_mode_options = fixture.options();
+  ::chmod(loose_mode_options.environment.xdg_cache_home.c_str(), S_IRWXU | S_IRGRP);
+  auto loose_mode = command::seal_command_plan(*intent, loose_mode_options);
+  ::chmod(loose_mode_options.environment.xdg_cache_home.c_str(), S_IRWXU);
+
+  auto sealed_options = fixture.options();
+  sealed_options.environment.tmpdir = sealed_tmpdir;
+  auto plan = command::seal_command_plan(*intent, sealed_options);
+  auto before = plan ? command::plan_is_fresh(*plan) : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no plan"))};
+
+  auto missing_options = fixture.options();
+  missing_options.environment.tmpdir = fixture.root / "missing-synthetic-tmp";
+  auto missing = command::seal_command_plan(*intent, missing_options);
+  auto authority_overlap_options = fixture.options();
+  authority_overlap_options.ava_authority_roots = {authority_root};
+  authority_overlap_options.environment.tmpdir = authority_root;
+  auto authority_overlap = command::seal_command_plan(*intent, authority_overlap_options);
+
+  std::filesystem::remove(sealed_tmpdir);
+  std::filesystem::create_directory_symlink(outside, sealed_tmpdir);
+  auto replaced =
+      plan ? command::plan_is_fresh(*plan) : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no plan"))};
+
+  expect(plan && before && *before && !missing && !loose_mode && !authority_overlap && replaced && !*replaced,
+         "synthetic HOME/XDG/TMP roots must already be owner-owned restrictive directories, remain disjoint from AVA authority roots, and go stale on "
+         "replacement");
+}
+
 void test_capabilities_scopes_and_standard_recipes()
 {
   CommandFixture fixture("policy");
@@ -364,6 +445,12 @@ void test_capabilities_scopes_and_standard_recipes()
   auto fetch = command::seal_command_plan(*command::CommandIntent::structured({"git", "fetch"}), options);
   auto clone = command::seal_command_plan(*command::CommandIntent::structured({"git", "clone", "origin"}), options);
   auto submodule = command::seal_command_plan(*command::CommandIntent::structured({"git", "submodule", "update"}), options);
+  auto remote_add = command::seal_command_plan(*command::CommandIntent::structured({"git", "remote", "add", "origin", "url"}), options);
+  auto remote_set_url = command::seal_command_plan(*command::CommandIntent::structured({"git", "remote", "set-url", "origin", "url"}), options);
+  auto remote_remove = command::seal_command_plan(*command::CommandIntent::structured({"git", "remote", "remove", "origin"}), options);
+  auto remote_rename = command::seal_command_plan(*command::CommandIntent::structured({"git", "remote", "rename", "origin", "upstream"}), options);
+  auto remote_update = command::seal_command_plan(*command::CommandIntent::structured({"git", "remote", "update"}), options);
+  auto remote_prune = command::seal_command_plan(*command::CommandIntent::structured({"git", "remote", "prune", "origin"}), options);
   auto force_push = command::seal_command_plan(*command::CommandIntent::structured({"git", "push", "--force-with-lease"}), options);
   auto cmake = command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build"}), options);
   auto ctest = command::seal_command_plan(*command::CommandIntent::structured({"ctest", "--test-dir", "build"}), options);
@@ -375,7 +462,13 @@ void test_capabilities_scopes_and_standard_recipes()
     return plan && plan->classification().level == command::CommandLevel::Sensitive && plan->classification().capabilities.network_enabled &&
            plan->classification().capabilities.mutates_workspace && plan->classification().max_interactive_scope == command::InteractiveScope::Workspace;
   };
-  expect(remote_mutating(pull) && remote_mutating(fetch) && remote_mutating(clone) && remote_mutating(submodule) && force_push &&
+  auto const local_remote_mutation = [](ava::core::Result<command::CommandPlan> const& plan) {
+    return plan && plan->classification().level == command::CommandLevel::Sensitive && plan->classification().capabilities.mutates_workspace &&
+           !plan->classification().capabilities.network_enabled;
+  };
+  expect(remote_mutating(pull) && remote_mutating(fetch) && remote_mutating(clone) && remote_mutating(submodule) && remote_mutating(remote_update) &&
+             local_remote_mutation(remote_add) && local_remote_mutation(remote_set_url) && local_remote_mutation(remote_remove) &&
+             local_remote_mutation(remote_rename) && local_remote_mutation(remote_prune) && force_push &&
              force_push->classification().level == command::CommandLevel::Critical && force_push->classification().capabilities.network_enabled &&
              force_push->classification().capabilities.destructive_or_privileged &&
              force_push->classification().max_interactive_scope == command::InteractiveScope::Once && is_standard_recipe(cmake) && is_standard_recipe(ctest) &&
@@ -384,8 +477,89 @@ void test_capabilities_scopes_and_standard_recipes()
              install->classification().max_interactive_scope == command::InteractiveScope::Workspace && inline_python &&
              inline_python->classification().max_interactive_scope == command::InteractiveScope::Once &&
              command::to_string(command::InteractiveScope::Session) == "session",
-         "git network/mutation capabilities are exact, force-push is critical, Standard/Sensitive cap at workspace, Critical caps at once, and Session is "
-         "available without global prompting");
+         "git remote add/set-url/remove/rename/update/prune and fetch expose exact local mutation and network capabilities; force-push is critical, "
+         "Standard/Sensitive cap at workspace, Critical caps at once, and Session is available without global prompting");
+}
+
+void test_workspace_origin_capabilities_apply_to_every_family()
+{
+  CommandFixture fixture("workspace-origin-invariants");
+  auto workspace_bin = fixture.workspace / ".venv" / "bin";
+  fixture.executable_in(workspace_bin, "git");
+  fixture.executable_in(workspace_bin, "python");
+  fixture.executable_in(workspace_bin, "shell");
+  ::chmod((fixture.workspace / ".venv").c_str(), S_IRWXU);
+  auto options = fixture.options();
+  options.startup_path = workspace_bin.string() + ":" + fixture.bin.string();
+  auto sensitive = command::seal_command_plan(*command::CommandIntent::structured({"git", "push"}), options);
+  auto critical = command::seal_command_plan(*command::CommandIntent::structured({"python", "-c", "print(1)"}), options);
+  auto raw_options = options;
+  raw_options.shell = workspace_bin / "shell";
+  auto raw = command::seal_command_plan(*command::CommandIntent::raw_shell("external-tool --secret"), raw_options);
+  auto const contained_project_code = [](ava::core::Result<command::CommandPlan> const& plan) {
+    return plan && plan->resolved_executable() && plan->resolved_executable()->origin == command::ExecutableOrigin::Workspace &&
+           plan->classification().capabilities.executes_mutable_project_code && plan->classification().capabilities.requires_containment;
+  };
+  expect(contained_project_code(sensitive) && contained_project_code(critical) && contained_project_code(raw),
+         "workspace-origin executables require mutable-project-code containment after Sensitive, Critical, and RawShell classification");
+}
+
+void test_ancestor_freshness_detects_mode_and_replacement()
+{
+  CommandFixture mode_fixture("ancestor-mode-freshness");
+  mode_fixture.executable("pwd");
+  auto mode_plan = command::seal_command_plan(*command::CommandIntent::structured({"pwd"}), mode_fixture.options());
+  ::chmod(mode_fixture.root.c_str(), S_IRWXU | S_IWGRP);
+  auto mode_changed =
+      mode_plan ? command::plan_is_fresh(*mode_plan) : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no plan"))};
+
+  CommandFixture replacement_fixture("ancestor-replacement-freshness");
+  replacement_fixture.executable("pwd");
+  auto replacement_plan = command::seal_command_plan(*command::CommandIntent::structured({"pwd"}), replacement_fixture.options());
+  auto moved_root = replacement_fixture.root;
+  moved_root += ".moved";
+  std::filesystem::rename(replacement_fixture.root, moved_root);
+  std::filesystem::create_directory_symlink(moved_root, replacement_fixture.root);
+  auto replaced = replacement_plan ? command::plan_is_fresh(*replacement_plan)
+                                   : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no plan"))};
+
+  CommandFixture recipe_fixture("recipe-ancestor-freshness");
+  recipe_fixture.executable("ls");
+  auto parent = recipe_fixture.workspace / "recipe-parent";
+  auto target = parent / "target";
+  std::filesystem::create_directories(target);
+  ::chmod(parent.c_str(), S_IRWXU);
+  ::chmod(target.c_str(), S_IRWXU);
+  auto recipe_plan = command::seal_command_plan(*command::CommandIntent::structured({"ls", "recipe-parent/target"}), recipe_fixture.options());
+  ::chmod(parent.c_str(), S_IRWXU | S_IWGRP);
+  auto recipe_changed = recipe_plan ? command::plan_is_fresh(*recipe_plan)
+                                    : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no plan"))};
+
+  auto const stale_or_error = [](ava::core::Result<bool> const& result) { return !result || !*result; };
+  expect(stale_or_error(mode_changed) && stale_or_error(replaced) && stale_or_error(recipe_changed),
+         "sealed workspace, executable, and recipe ancestor identities go stale or error after unsafe chmod or lexical-ancestor replacement");
+}
+
+void test_redacted_diagnostics_and_value_equality()
+{
+  CommandFixture fixture("redacted-diagnostics");
+  fixture.executable("secret-tool");
+  auto direct_intent = command::CommandIntent::structured({"secret-tool", "--token=argv-secret"});
+  auto first = command::prepare_command(*direct_intent, fixture.options());
+  auto second = command::prepare_command(*direct_intent, fixture.options());
+  auto raw_intent = command::CommandIntent::raw_shell("external-tool --token=raw-shell-secret");
+  auto raw_plan = command::seal_command_plan(*raw_intent, fixture.options());
+  auto direct_summary = first ? first->plan().redacted_summary() : std::string{};
+  auto raw_summary = raw_plan ? raw_plan->redacted_summary() : std::string{};
+  expect(first && second && *first == *second && direct_summary.find("secret-tool") == std::string::npos &&
+             direct_summary.find("argv-secret") == std::string::npos && direct_summary.find(fixture.workspace.string()) == std::string::npos && raw_plan &&
+             raw_plan->display_json().find("raw-shell-secret") != std::string::npos && raw_summary.find("raw-shell-secret") == std::string::npos &&
+             command::to_string(static_cast<command::CommandRuntimeMode>(999)) == "unknown" &&
+             command::to_string(static_cast<command::CommandLevel>(999)) == "unknown" &&
+             command::to_string(static_cast<command::CommandFamily>(999)) == "unknown" &&
+             command::to_string(static_cast<command::InteractiveScope>(999)) == "unknown",
+         "prepared environments compare by value, display JSON remains local-sensitive, diagnostics redact request payloads, and unknown enum values stay "
+         "explicit");
 }
 
 void test_unsafe_executables_and_ancestors_are_rejected_without_blocking()
@@ -419,6 +593,7 @@ void test_unsafe_executables_and_ancestors_are_rejected_without_blocking()
 void run_command_tests()
 {
   test_compatibility_parser_is_lossless_or_raw_shell();
+  test_compatibility_shell_words_are_critical_raw_shell();
   test_intent_bounds_and_path_bounds_do_not_underflow();
   test_workspace_spoofs_are_not_inspection_recipes();
   test_recipe_paths_are_canonical_sealed_and_fresh();
@@ -426,6 +601,10 @@ void run_command_tests()
   test_workspace_cwd_path_and_interpreter_freshness();
   test_raw_shell_binds_configured_shell_and_rejects_env_shebang();
   test_environment_is_synthetic_and_digest_bound();
+  test_synthetic_environment_roots_are_sealed_and_fresh();
   test_capabilities_scopes_and_standard_recipes();
+  test_workspace_origin_capabilities_apply_to_every_family();
+  test_ancestor_freshness_detects_mode_and_replacement();
+  test_redacted_diagnostics_and_value_equality();
   test_unsafe_executables_and_ancestors_are_rejected_without_blocking();
 }

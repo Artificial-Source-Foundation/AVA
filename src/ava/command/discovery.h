@@ -10,6 +10,9 @@ struct SealedCommandContext
   std::filesystem::path cwd;
   PathMetadata workspace_metadata;
   PathMetadata cwd_metadata;
+  PathMetadata trusted_home_metadata;
+  std::vector<PathMetadata> ava_authority_root_metadata;
+  SyntheticEnvironmentRoots synthetic_environment_roots;
   std::vector<CommandPathEntry> path_entries;
 
   AVA_DEBUG_PRINT_MEMBERS_ON

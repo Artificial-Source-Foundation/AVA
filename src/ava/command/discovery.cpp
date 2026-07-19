@@ -130,8 +130,52 @@ ava::core::Result<struct stat> metadata_stat(std::filesystem::path const& path, 
   return status;
 }
 
+PathAncestorMetadata ancestor_metadata_from(std::filesystem::path path, struct stat const& status)
+{
+  return PathAncestorMetadata{.path = std::move(path),
+                              .device = static_cast<std::uintmax_t>(status.st_dev),
+                              .inode = static_cast<std::uintmax_t>(status.st_ino),
+                              .mode = static_cast<std::uintmax_t>(status.st_mode),
+                              .owner = static_cast<std::uintmax_t>(status.st_uid),
+                              .link_count = static_cast<std::uintmax_t>(status.st_nlink),
+                              .changed_seconds = static_cast<std::int64_t>(status.st_ctim.tv_sec),
+                              .changed_nanoseconds = static_cast<std::int64_t>(status.st_ctim.tv_nsec),
+                              .is_symlink = S_ISLNK(status.st_mode),
+                              // Root-owned sticky namespaces such as /tmp are
+                              // shared by unrelated processes, so bind their
+                              // safety properties but not volatile identity
+                              // metadata. Other sticky directories stay bound.
+                              .identity_bound = !(is_sticky_directory(status) && status.st_uid == 0)};
+}
+
+ava::core::Result<std::vector<PathAncestorMetadata>> capture_ancestor_metadata(std::filesystem::path const& requested, std::filesystem::path const& canonical,
+                                                                               std::string_view label)
+{
+  std::vector<PathAncestorMetadata> result;
+  std::set<std::filesystem::path> seen;
+  auto const capture_parents = [&result, &seen, label](std::filesystem::path const& path) -> ava::core::VoidResult {
+    std::filesystem::path current("/");
+    for (auto const& component : path.parent_path().relative_path())
+    {
+      current /= component;
+      if (!seen.insert(current).second)
+        continue;
+      auto status = metadata_stat(current, label);
+      if (!status)
+        return std::unexpected(std::move(status.error()));
+      result.push_back(ancestor_metadata_from(current, *status));
+    }
+    return {};
+  };
+  if (auto captured = capture_parents(requested); !captured)
+    return std::unexpected(std::move(captured.error()));
+  if (auto captured = capture_parents(canonical); !captured)
+    return std::unexpected(std::move(captured.error()));
+  return result;
+}
+
 PathMetadata metadata_from(std::filesystem::path requested, std::filesystem::path canonical, struct stat const& requested_status,
-                           struct stat const& canonical_status)
+                           struct stat const& canonical_status, std::vector<PathAncestorMetadata> ancestors)
 {
   return PathMetadata{.requested_path = std::move(requested),
                       .canonical_path = std::move(canonical),
@@ -147,9 +191,11 @@ PathMetadata metadata_from(std::filesystem::path requested, std::filesystem::pat
                       .requested_device = static_cast<std::uintmax_t>(requested_status.st_dev),
                       .requested_inode = static_cast<std::uintmax_t>(requested_status.st_ino),
                       .requested_mode = static_cast<std::uintmax_t>(requested_status.st_mode),
+                      .requested_owner = static_cast<std::uintmax_t>(requested_status.st_uid),
                       .requested_link_count = static_cast<std::uintmax_t>(requested_status.st_nlink),
                       .requested_changed_seconds = static_cast<std::int64_t>(requested_status.st_ctim.tv_sec),
-                      .requested_changed_nanoseconds = static_cast<std::int64_t>(requested_status.st_ctim.tv_nsec)};
+                      .requested_changed_nanoseconds = static_cast<std::int64_t>(requested_status.st_ctim.tv_nsec),
+                      .ancestor_metadata = std::move(ancestors)};
 }
 
 ava::core::Result<PathMetadata> inspect_path_metadata(std::filesystem::path const& input, ExpectedNode expected, bool reject_final_symlink,
@@ -184,33 +230,65 @@ ava::core::Result<PathMetadata> inspect_path_metadata(std::filesystem::path cons
     return std::unexpected(
         command_error(ava::core::ErrorCategory::InvalidArgument, std::string(label) + " has an unexpected file type", "path", canonical.string()));
   }
-  return metadata_from(std::move(*requested), std::move(canonical), *requested_status, *canonical_status);
+  auto ancestors = capture_ancestor_metadata(*requested, canonical, "path ancestor");
+  if (!ancestors)
+    return std::unexpected(std::move(ancestors.error()));
+  return metadata_from(std::move(*requested), std::move(canonical), *requested_status, *canonical_status, std::move(*ancestors));
 }
 
-ava::core::VoidResult validate_safe_ancestors(std::filesystem::path const& canonical_path, bool include_final_directory, std::string_view label)
+ava::core::VoidResult validate_safe_ancestors(std::vector<PathAncestorMetadata> const& ancestors)
 {
-  auto stop = include_final_directory ? canonical_path : canonical_path.parent_path();
-  if (stop.empty() || !stop.is_absolute())
-    return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, std::string(label) + " must be an absolute canonical path"));
-
-  std::filesystem::path current("/");
-  for (auto const& component : stop.relative_path())
+  for (auto const& ancestor : ancestors)
   {
-    current /= component;
-    auto status = metadata_stat(current, "path ancestor");
-    if (!status)
-      return std::unexpected(std::move(status.error()));
-    if (!S_ISDIR(status->st_mode))
-      return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied, "command path ancestor is not a directory", "path", current.string()));
-    if (!owner_is_safe(*status, false))
-      return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied, "command path ancestor has an unsafe owner", "path", current.string()));
+    struct stat status{};
+    status.st_mode = static_cast<mode_t>(ancestor.mode);
+    status.st_uid = static_cast<uid_t>(ancestor.owner);
+    status.st_nlink = static_cast<nlink_t>(ancestor.link_count);
+    if (ancestor.is_symlink)
+    {
+      if (!S_ISLNK(status.st_mode) || !owner_is_safe(status, false) || status.st_nlink != 1)
+      {
+        return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied, "command path symlink ancestor has an unsafe owner or link count",
+                                             "path", ancestor.path.string()));
+      }
+      continue;
+    }
+    if (!S_ISDIR(status.st_mode))
+      return std::unexpected(
+          command_error(ava::core::ErrorCategory::PermissionDenied, "command path ancestor is not a directory", "path", ancestor.path.string()));
+    if (!owner_is_safe(status, false))
+      return std::unexpected(
+          command_error(ava::core::ErrorCategory::PermissionDenied, "command path ancestor has an unsafe owner", "path", ancestor.path.string()));
     // A sticky shared directory (for example /tmp) is an accepted namespace
     // boundary. Every descendant used as an execution root remains checked.
-    if (!mode_is_safe(*status) && !is_sticky_directory(*status))
+    if (!mode_is_safe(status) && !is_sticky_directory(status))
       return std::unexpected(
-          command_error(ava::core::ErrorCategory::PermissionDenied, "command path ancestor is group/world writable", "path", current.string()));
+          command_error(ava::core::ErrorCategory::PermissionDenied, "command path ancestor is group/world writable", "path", ancestor.path.string()));
   }
   return {};
+}
+
+ava::core::VoidResult validate_safe_final_symlink_identity(std::filesystem::path const& path, bool is_symlink, std::uintmax_t mode, std::uintmax_t owner,
+                                                           std::uintmax_t link_count, std::string_view label)
+{
+  if (!is_symlink)
+    return {};
+  struct stat status{};
+  status.st_mode = static_cast<mode_t>(mode);
+  status.st_uid = static_cast<uid_t>(owner);
+  status.st_nlink = static_cast<nlink_t>(link_count);
+  if (!S_ISLNK(status.st_mode) || !owner_is_safe(status, false) || status.st_nlink != 1)
+  {
+    return std::unexpected(
+        command_error(ava::core::ErrorCategory::PermissionDenied, std::string(label) + " symlink has an unsafe owner or link count", "path", path.string()));
+  }
+  return {};
+}
+
+ava::core::VoidResult validate_safe_final_symlink(PathMetadata const& metadata, std::string_view label)
+{
+  return validate_safe_final_symlink_identity(metadata.requested_path, metadata.requested_path_is_symlink, metadata.requested_mode, metadata.requested_owner,
+                                              metadata.requested_link_count, label);
 }
 
 ava::core::VoidResult validate_safe_directory(PathMetadata const& metadata, bool require_current_user, std::string_view label)
@@ -224,7 +302,38 @@ ava::core::VoidResult validate_safe_directory(PathMetadata const& metadata, bool
                                          std::string(label) + " has unsafe ownership or group/world-writable permissions", "path",
                                          metadata.canonical_path.string()));
   }
-  return validate_safe_ancestors(metadata.canonical_path, true, label);
+  if (auto valid = validate_safe_final_symlink(metadata, label); !valid)
+    return std::unexpected(std::move(valid.error()));
+  return validate_safe_ancestors(metadata.ancestor_metadata);
+}
+
+ava::core::VoidResult validate_synthetic_environment_directory(PathMetadata const& metadata, std::string_view label)
+{
+  struct stat status{};
+  status.st_mode = static_cast<mode_t>(metadata.mode);
+  status.st_uid = static_cast<uid_t>(metadata.owner);
+  if (!S_ISDIR(status.st_mode) || !owner_is_safe(status, true) || (status.st_mode & (S_IRWXG | S_IRWXO)) != 0)
+  {
+    return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied, std::string(label) + " must be an owner-owned 0700-style directory",
+                                         "path", metadata.canonical_path.string()));
+  }
+  return validate_safe_ancestors(metadata.ancestor_metadata);
+}
+
+ava::core::VoidResult validate_safe_recipe_path(PathMetadata const& metadata)
+{
+  struct stat status{};
+  status.st_mode = static_cast<mode_t>(metadata.mode);
+  status.st_uid = static_cast<uid_t>(metadata.owner);
+  status.st_nlink = static_cast<nlink_t>(metadata.link_count);
+  if (metadata.requested_path_is_symlink || (!S_ISDIR(status.st_mode) && !S_ISREG(status.st_mode)) || !mode_is_safe(status) || !owner_is_safe(status, false) ||
+      (S_ISREG(status.st_mode) && status.st_nlink != 1))
+  {
+    return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied,
+                                         "recipe path argument has unsafe ownership, mode, link count, or symlink provenance", "path",
+                                         metadata.canonical_path.string()));
+  }
+  return validate_safe_ancestors(metadata.ancestor_metadata);
 }
 
 ava::core::VoidResult validate_safe_executable(ExecutableMetadata const& metadata)
@@ -242,7 +351,13 @@ ava::core::VoidResult validate_safe_executable(ExecutableMetadata const& metadat
     return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied, "resolved command has unsafe owner, writable mode, or link count", "path",
                                          metadata.canonical_path.string()));
   }
-  return validate_safe_ancestors(metadata.canonical_path, false, "executable");
+  if (auto valid = validate_safe_final_symlink_identity(metadata.requested_path, metadata.requested_path_is_symlink, metadata.requested_mode,
+                                                        metadata.requested_owner, metadata.requested_link_count, "executable");
+      !valid)
+  {
+    return std::unexpected(std::move(valid.error()));
+  }
+  return validate_safe_ancestors(metadata.ancestor_metadata);
 }
 
 ExecutableMetadata executable_from(PathMetadata const& metadata)
@@ -261,9 +376,11 @@ ExecutableMetadata executable_from(PathMetadata const& metadata)
                             .requested_device = metadata.requested_device,
                             .requested_inode = metadata.requested_inode,
                             .requested_mode = metadata.requested_mode,
+                            .requested_owner = metadata.requested_owner,
                             .requested_link_count = metadata.requested_link_count,
                             .requested_changed_seconds = metadata.requested_changed_seconds,
-                            .requested_changed_nanoseconds = metadata.requested_changed_nanoseconds};
+                            .requested_changed_nanoseconds = metadata.requested_changed_nanoseconds,
+                            .ancestor_metadata = metadata.ancestor_metadata};
 }
 
 ava::core::Result<ExecutableMetadata> executable_metadata(std::filesystem::path const& requested)
@@ -512,52 +629,73 @@ ava::core::Result<SealedCommandContext> discover_command_context(CommandIntent c
     return std::unexpected(std::move(trusted_home.error()));
   if (auto valid = validate_safe_directory(*trusted_home, true, "trusted command discovery home"); !valid)
     return std::unexpected(std::move(valid.error()));
-  auto const overlaps_trusted_home = [&trusted_home](std::filesystem::path const& candidate) {
-    return is_within(candidate, trusted_home->canonical_path) || is_within(trusted_home->canonical_path, candidate);
-  };
-  for (auto const& [name, path] :
-       std::array<std::pair<std::string_view, std::filesystem::path const*>, 6>{{{"HOME", &options.environment.home},
-                                                                                 {"XDG_CONFIG_HOME", &options.environment.xdg_config_home},
-                                                                                 {"XDG_CACHE_HOME", &options.environment.xdg_cache_home},
-                                                                                 {"XDG_DATA_HOME", &options.environment.xdg_data_home},
-                                                                                 {"XDG_STATE_HOME", &options.environment.xdg_state_home},
-                                                                                 {"TMPDIR", &options.environment.tmpdir}}})
+  if (options.ava_authority_roots.size() > options.limits.max_path_entries)
+    return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "AVA authority root list has too many entries"));
+  std::vector<PathMetadata> ava_authority_roots;
+  ava_authority_roots.reserve(options.ava_authority_roots.size());
+  for (auto const& root : options.ava_authority_roots)
   {
-    auto synthetic = normalized_absolute(*path, "synthetic child environment root");
+    auto authority = inspect_path_metadata(root, ExpectedNode::Directory, true, "AVA authority root");
+    if (!authority)
+      return std::unexpected(std::move(authority.error()));
+    if (auto valid = validate_safe_directory(*authority, true, "AVA authority root"); !valid)
+      return std::unexpected(std::move(valid.error()));
+    ava_authority_roots.push_back(std::move(*authority));
+  }
+
+  auto const overlaps_protected_root = [&workspace_metadata, &trusted_home, &ava_authority_roots](std::filesystem::path const& candidate) {
+    auto const overlaps = [&candidate](PathMetadata const& protected_root) {
+      return is_within(candidate, protected_root.canonical_path) || is_within(protected_root.canonical_path, candidate);
+    };
+    return overlaps(*workspace_metadata) || overlaps(*trusted_home) || std::ranges::any_of(ava_authority_roots, overlaps);
+  };
+  auto const capture_synthetic_root = [&options, &overlaps_protected_root](std::filesystem::path const& path,
+                                                                           std::string_view name) -> ava::core::Result<PathMetadata> {
+    auto synthetic = normalized_absolute(path, name);
     if (!synthetic)
       return std::unexpected(std::move(synthetic.error()));
-    if (overlaps_trusted_home(*synthetic))
+    if (synthetic->string().size() > options.limits.max_path_bytes)
     {
       return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument,
-                                           "synthetic child environment root must be distinct from trusted command discovery home", "path",
-                                           synthetic->string()));
+                                           std::string(name) + " exceeds the bounded synthetic environment path size", "path", synthetic->string()));
     }
-    std::error_code exists_error;
-    bool const exists = std::filesystem::exists(*synthetic, exists_error);
-    if (exists_error)
+    auto metadata = inspect_path_metadata(*synthetic, ExpectedNode::Directory, true, name);
+    if (!metadata)
+      return std::unexpected(std::move(metadata.error()));
+    if (auto valid = validate_synthetic_environment_directory(*metadata, name); !valid)
+      return std::unexpected(std::move(valid.error()));
+    if (overlaps_protected_root(metadata->canonical_path))
     {
-      auto error = command_error(ava::core::ErrorCategory::Io, "failed to inspect synthetic child environment root", "path", synthetic->string());
-      error.with_context("cause", exists_error.message());
-      return std::unexpected(std::move(error));
+      return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument,
+                                           std::string(name) + " must be disjoint from workspace and trusted AVA host roots", "path",
+                                           metadata->canonical_path.string()));
     }
-    if (exists)
-    {
-      std::error_code canonical_error;
-      auto const canonical = std::filesystem::canonical(*synthetic, canonical_error);
-      if (canonical_error)
-      {
-        auto error = command_error(ava::core::ErrorCategory::Io, "failed to canonicalize synthetic child environment root", "path", synthetic->string());
-        error.with_context("cause", canonical_error.message());
-        return std::unexpected(std::move(error));
-      }
-      if (overlaps_trusted_home(canonical))
-      {
-        return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument,
-                                             "synthetic child environment root resolves into trusted command discovery home", "path", canonical.string()));
-      }
-    }
-    static_cast<void>(name);
-  }
+    return metadata;
+  };
+  auto home = capture_synthetic_root(options.environment.home, "HOME");
+  if (!home)
+    return std::unexpected(std::move(home.error()));
+  auto xdg_config_home = capture_synthetic_root(options.environment.xdg_config_home, "XDG_CONFIG_HOME");
+  if (!xdg_config_home)
+    return std::unexpected(std::move(xdg_config_home.error()));
+  auto xdg_cache_home = capture_synthetic_root(options.environment.xdg_cache_home, "XDG_CACHE_HOME");
+  if (!xdg_cache_home)
+    return std::unexpected(std::move(xdg_cache_home.error()));
+  auto xdg_data_home = capture_synthetic_root(options.environment.xdg_data_home, "XDG_DATA_HOME");
+  if (!xdg_data_home)
+    return std::unexpected(std::move(xdg_data_home.error()));
+  auto xdg_state_home = capture_synthetic_root(options.environment.xdg_state_home, "XDG_STATE_HOME");
+  if (!xdg_state_home)
+    return std::unexpected(std::move(xdg_state_home.error()));
+  auto tmpdir = capture_synthetic_root(options.environment.tmpdir, "TMPDIR");
+  if (!tmpdir)
+    return std::unexpected(std::move(tmpdir.error()));
+  SyntheticEnvironmentRoots synthetic_environment_roots{.home = std::move(*home),
+                                                        .xdg_config_home = std::move(*xdg_config_home),
+                                                        .xdg_cache_home = std::move(*xdg_cache_home),
+                                                        .xdg_data_home = std::move(*xdg_data_home),
+                                                        .xdg_state_home = std::move(*xdg_state_home),
+                                                        .tmpdir = std::move(*tmpdir)};
 
   auto entries = discover_path(options, workspace_metadata->canonical_path, trusted_home->canonical_path);
   if (!entries)
@@ -566,6 +704,9 @@ ava::core::Result<SealedCommandContext> discover_command_context(CommandIntent c
                               .cwd = cwd_metadata.canonical_path,
                               .workspace_metadata = std::move(*workspace_metadata),
                               .cwd_metadata = std::move(cwd_metadata),
+                              .trusted_home_metadata = std::move(*trusted_home),
+                              .ava_authority_root_metadata = std::move(ava_authority_roots),
+                              .synthetic_environment_roots = std::move(synthetic_environment_roots),
                               .path_entries = std::move(*entries)};
 }
 
@@ -627,9 +768,34 @@ std::optional<PathMetadata> seal_recipe_path_argument(std::string_view value, st
   // also covers intermediate symlinks; replacement is caught by freshness.
   if (metadata->canonical_path != *normalized || metadata->requested_path_is_symlink)
     return std::nullopt;
-  if (auto valid = validate_safe_ancestors(metadata->canonical_path, S_ISDIR(static_cast<mode_t>(metadata->mode)), "recipe path argument"); !valid)
+  if (auto valid = validate_safe_recipe_path(*metadata); !valid)
     return std::nullopt;
   return std::move(*metadata);
+}
+
+bool ancestors_are_fresh(std::vector<PathAncestorMetadata> const& recorded, std::vector<PathAncestorMetadata> const& current)
+{
+  if (recorded.size() != current.size())
+    return false;
+  for (std::size_t index = 0; index < recorded.size(); ++index)
+  {
+    auto const& expected = recorded[index];
+    auto const& observed = current[index];
+    if (expected.path != observed.path || expected.is_symlink != observed.is_symlink || expected.identity_bound != observed.identity_bound)
+      return false;
+    if (expected.identity_bound)
+    {
+      if (expected != observed)
+        return false;
+      continue;
+    }
+    struct stat status{};
+    status.st_mode = static_cast<mode_t>(observed.mode);
+    status.st_uid = static_cast<uid_t>(observed.owner);
+    if (!S_ISDIR(status.st_mode) || !owner_is_safe(status, false) || !is_sticky_directory(status))
+      return false;
+  }
+  return true;
 }
 
 ava::core::Result<bool> path_metadata_is_fresh(PathMetadata const& recorded)
@@ -637,6 +803,9 @@ ava::core::Result<bool> path_metadata_is_fresh(PathMetadata const& recorded)
   auto current = inspect_path_metadata(recorded.requested_path, ExpectedNode::Any, false, "sealed path");
   if (!current)
     return std::unexpected(std::move(current.error()));
+  if (!ancestors_are_fresh(recorded.ancestor_metadata, current->ancestor_metadata))
+    return false;
+  current->ancestor_metadata = recorded.ancestor_metadata;
   return *current == recorded;
 }
 
@@ -645,6 +814,9 @@ ava::core::Result<bool> executable_metadata_is_fresh(ExecutableMetadata const& r
   auto current = executable_metadata(recorded.requested_path);
   if (!current)
     return std::unexpected(std::move(current.error()));
+  if (!ancestors_are_fresh(recorded.ancestor_metadata, current->ancestor_metadata))
+    return false;
+  current->ancestor_metadata = recorded.ancestor_metadata;
   return *current == recorded;
 }
 

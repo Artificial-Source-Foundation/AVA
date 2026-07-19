@@ -98,12 +98,21 @@ std::array<std::uint8_t, 32> sha256(std::vector<std::uint8_t> const& bytes)
   return result;
 }
 
-ava::core::VoidResult validate_environment_path(std::filesystem::path const& path, std::string_view name, CommandLimits const& limits)
+ava::core::VoidResult validate_sealed_environment_root(PathMetadata const& root, std::string_view name, CommandLimits const& limits)
 {
-  if (path.empty() || !path.is_absolute() || has_forbidden_path_byte(path) || path.string().size() > limits.max_path_bytes)
+  if (root.canonical_path.empty() || !root.canonical_path.is_absolute() || has_forbidden_path_byte(root.canonical_path) ||
+      root.canonical_path.string().size() > limits.max_path_bytes)
   {
     return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument,
-                                         std::string(name) + " must be a bounded absolute synthetic environment path", "path", path.string()));
+                                         std::string(name) + " is not a bounded canonical synthetic environment path", "path", root.canonical_path.string()));
+  }
+  auto fresh = path_metadata_is_fresh(root);
+  if (!fresh)
+    return std::unexpected(std::move(fresh.error()));
+  if (!*fresh)
+  {
+    return std::unexpected(
+        command_error(ava::core::ErrorCategory::Io, std::string(name) + " changed during environment construction", "path", root.requested_path.string()));
   }
   return {};
 }
@@ -190,7 +199,8 @@ std::string Sha256Builder::hex() const
 }
 
 ava::core::Result<CommandEnvironment> EnvironmentFactory::make(CommandEnvironmentOptions const& options, std::vector<CommandPathEntry> const& path_entries,
-                                                               CommandLimits const& limits)
+                                                               SyntheticEnvironmentRoots roots, CommandLimits const& limits,
+                                                               CommandEnvironment::FactoryPasskey passkey)
 {
   if (auto valid = validate_limits(limits); !valid)
     return std::unexpected(std::move(valid.error()));
@@ -204,21 +214,21 @@ ava::core::Result<CommandEnvironment> EnvironmentFactory::make(CommandEnvironmen
     if (value->empty() || value->size() > limits.max_argument_bytes || has_forbidden_byte(*value))
       return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "USER and LOGNAME must be bounded safe values"));
   }
-  for (auto const& [name, path] : std::array<std::pair<std::string_view, std::filesystem::path const*>, 6>{{{"HOME", &options.home},
-                                                                                                            {"XDG_CONFIG_HOME", &options.xdg_config_home},
-                                                                                                            {"XDG_CACHE_HOME", &options.xdg_cache_home},
-                                                                                                            {"XDG_DATA_HOME", &options.xdg_data_home},
-                                                                                                            {"XDG_STATE_HOME", &options.xdg_state_home},
-                                                                                                            {"TMPDIR", &options.tmpdir}}})
+  for (auto const& [name, root] : std::array<std::pair<std::string_view, PathMetadata const*>, 6>{{{"HOME", &roots.home},
+                                                                                                   {"XDG_CONFIG_HOME", &roots.xdg_config_home},
+                                                                                                   {"XDG_CACHE_HOME", &roots.xdg_cache_home},
+                                                                                                   {"XDG_DATA_HOME", &roots.xdg_data_home},
+                                                                                                   {"XDG_STATE_HOME", &roots.xdg_state_home},
+                                                                                                   {"TMPDIR", &roots.tmpdir}}})
   {
-    if (auto valid = validate_environment_path(*path, name, limits); !valid)
+    if (auto valid = validate_sealed_environment_root(*root, name, limits); !valid)
       return std::unexpected(std::move(valid.error()));
   }
 
   auto path = join_path(path_entries, limits);
   if (!path)
     return std::unexpected(std::move(path.error()));
-  CommandEnvironment environment;
+  CommandEnvironment environment(std::move(passkey), std::move(roots));
   environment.profile_id_ = options.profile_id;
   environment.entries_ = {{"LANG", "C.UTF-8"},
                           {"LC_ALL", "C.UTF-8"},
@@ -227,19 +237,20 @@ ava::core::Result<CommandEnvironment> EnvironmentFactory::make(CommandEnvironmen
                           {"USER", options.user},
                           {"LOGNAME", options.logname},
                           {"PATH", std::move(*path)},
-                          {"HOME", options.home.string()},
-                          {"XDG_CONFIG_HOME", options.xdg_config_home.string()},
-                          {"XDG_CACHE_HOME", options.xdg_cache_home.string()},
-                          {"XDG_DATA_HOME", options.xdg_data_home.string()},
-                          {"XDG_STATE_HOME", options.xdg_state_home.string()},
-                          {"TMPDIR", options.tmpdir.string()}};
+                          {"HOME", environment.roots_.home.canonical_path.string()},
+                          {"XDG_CONFIG_HOME", environment.roots_.xdg_config_home.canonical_path.string()},
+                          {"XDG_CACHE_HOME", environment.roots_.xdg_cache_home.canonical_path.string()},
+                          {"XDG_DATA_HOME", environment.roots_.xdg_data_home.canonical_path.string()},
+                          {"XDG_STATE_HOME", environment.roots_.xdg_state_home.canonical_path.string()},
+                          {"TMPDIR", environment.roots_.tmpdir.canonical_path.string()}};
   environment.digest_ = environment_digest(environment.profile_id_, environment.entries_);
   return environment;
 }
 
 ava::core::VoidResult validate_environment_matches_plan(CommandEnvironment const& environment, CommandPlan const& plan)
 {
-  if (environment.profile_id() != plan.environment_profile_id() || environment.digest() != plan.environment_digest())
+  if (environment.profile_id() != plan.environment_profile_id() || environment.digest() != plan.environment_digest() ||
+      environment.roots_ != plan.synthetic_environment_roots_)
   {
     return std::unexpected(
         command_error(ava::core::ErrorCategory::PermissionDenied, "prepared command environment does not match the sealed plan environment digest"));
@@ -250,6 +261,10 @@ ava::core::VoidResult validate_environment_matches_plan(CommandEnvironment const
 }  // namespace ava::command::detail
 
 namespace ava::command {
+
+CommandEnvironment::CommandEnvironment(FactoryPasskey, SyntheticEnvironmentRoots roots) : roots_(std::move(roots))
+{
+}
 
 std::string const& CommandEnvironment::profile_id() const noexcept
 {

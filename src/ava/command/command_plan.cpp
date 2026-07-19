@@ -27,9 +27,24 @@ void append_path_metadata(detail::Sha256Builder& hash, PathMetadata const& metad
   hash.append_number(metadata.requested_device);
   hash.append_number(metadata.requested_inode);
   hash.append_number(metadata.requested_mode);
+  hash.append_number(metadata.requested_owner);
   hash.append_number(metadata.requested_link_count);
   hash.append_field(std::to_string(metadata.requested_changed_seconds));
   hash.append_field(std::to_string(metadata.requested_changed_nanoseconds));
+  hash.append_number(metadata.ancestor_metadata.size());
+  for (auto const& ancestor : metadata.ancestor_metadata)
+  {
+    hash.append_field(ancestor.path.string());
+    hash.append_number(ancestor.device);
+    hash.append_number(ancestor.inode);
+    hash.append_number(ancestor.mode);
+    hash.append_number(ancestor.owner);
+    hash.append_number(ancestor.link_count);
+    hash.append_field(std::to_string(ancestor.changed_seconds));
+    hash.append_field(std::to_string(ancestor.changed_nanoseconds));
+    hash.append_field(ancestor.is_symlink ? "1" : "0");
+    hash.append_field(ancestor.identity_bound ? "1" : "0");
+  }
 }
 
 void append_executable_metadata(detail::Sha256Builder& hash, ExecutableMetadata const& metadata)
@@ -48,21 +63,35 @@ void append_executable_metadata(detail::Sha256Builder& hash, ExecutableMetadata 
                                           .requested_device = metadata.requested_device,
                                           .requested_inode = metadata.requested_inode,
                                           .requested_mode = metadata.requested_mode,
+                                          .requested_owner = metadata.requested_owner,
                                           .requested_link_count = metadata.requested_link_count,
                                           .requested_changed_seconds = metadata.requested_changed_seconds,
-                                          .requested_changed_nanoseconds = metadata.requested_changed_nanoseconds});
+                                          .requested_changed_nanoseconds = metadata.requested_changed_nanoseconds,
+                                          .ancestor_metadata = metadata.ancestor_metadata});
 }
 
-std::string compute_fingerprint(CommandPlan const& plan, PathMetadata const& workspace_metadata, PathMetadata const& cwd_metadata)
+void append_synthetic_environment_roots(detail::Sha256Builder& hash, SyntheticEnvironmentRoots const& roots)
+{
+  for (auto const* root : {&roots.home, &roots.xdg_config_home, &roots.xdg_cache_home, &roots.xdg_data_home, &roots.xdg_state_home, &roots.tmpdir})
+    append_path_metadata(hash, *root);
+}
+
+std::string compute_fingerprint(CommandPlan const& plan, PathMetadata const& workspace_metadata, PathMetadata const& cwd_metadata,
+                                PathMetadata const& trusted_home_metadata, std::vector<PathMetadata> const& ava_authority_root_metadata,
+                                SyntheticEnvironmentRoots const& synthetic_environment_roots)
 {
   detail::Sha256Builder hash;
-  hash.append_field("ava-command-plan-v2");
+  hash.append_field("ava-command-plan-v3");
   hash.append_field(to_string(plan.intent_lane()));
   hash.append_field(to_string(plan.execution_domain()));
   hash.append_field(plan.workspace().string());
   append_path_metadata(hash, workspace_metadata);
   hash.append_field(plan.cwd().string());
   append_path_metadata(hash, cwd_metadata);
+  append_path_metadata(hash, trusted_home_metadata);
+  hash.append_number(ava_authority_root_metadata.size());
+  for (auto const& root : ava_authority_root_metadata) append_path_metadata(hash, root);
+  append_synthetic_environment_roots(hash, synthetic_environment_roots);
   hash.append_number(plan.argv().size());
   for (auto const& argument : plan.argv()) hash.append_field(argument);
   hash.append_field(plan.raw_shell_text());
@@ -104,7 +133,7 @@ std::string compute_fingerprint(CommandPlan const& plan, PathMetadata const& wor
   }
   hash.append_field(plan.environment_profile_id());
   hash.append_field(plan.environment_digest());
-  return "sha256:ava-command-plan-v2:" + hash.hex();
+  return "sha256:ava-command-plan-v3:" + hash.hex();
 }
 
 std::string json_escape(std::string_view value)
@@ -169,6 +198,17 @@ ava::core::Result<bool> fresh(ExecutableMetadata const& metadata)
   return *result;
 }
 
+bool paths_overlap(std::filesystem::path const& first, std::filesystem::path const& second)
+{
+  std::error_code error;
+  auto first_relative = std::filesystem::relative(first, second, error);
+  if (!error && (first_relative.empty() || first_relative == "." || first_relative.begin() == first_relative.end() || *first_relative.begin() != ".."))
+    return true;
+  error.clear();
+  auto second_relative = std::filesystem::relative(second, first, error);
+  return !error && (second_relative.empty() || second_relative == "." || second_relative.begin() == second_relative.end() || *second_relative.begin() != "..");
+}
+
 }  // namespace
 
 ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const& intent, CommandBuildOptions const& options)
@@ -188,7 +228,8 @@ ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const& intent, Co
   auto context = detail::discover_command_context(intent, options);
   if (!context)
     return std::unexpected(std::move(context.error()));
-  auto environment = detail::EnvironmentFactory::make(options.environment, context->path_entries, options.limits);
+  auto environment = detail::EnvironmentFactory::make(options.environment, context->path_entries, context->synthetic_environment_roots, options.limits,
+                                                      CommandEnvironment::make_factory_passkey());
   if (!environment)
     return std::unexpected(std::move(environment.error()));
 
@@ -198,6 +239,9 @@ ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const& intent, Co
   plan.cwd_ = context->cwd;
   plan.workspace_metadata_ = std::move(context->workspace_metadata);
   plan.cwd_metadata_ = std::move(context->cwd_metadata);
+  plan.trusted_home_metadata_ = std::move(context->trusted_home_metadata);
+  plan.ava_authority_root_metadata_ = std::move(context->ava_authority_root_metadata);
+  plan.synthetic_environment_roots_ = std::move(context->synthetic_environment_roots);
   plan.path_entries_ = std::move(context->path_entries);
   plan.environment_profile_id_ = environment->profile_id();
   plan.environment_digest_ = environment->digest();
@@ -214,7 +258,7 @@ ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const& intent, Co
     if (!shell)
       return std::unexpected(std::move(shell.error()));
     plan.resolved_executable_ = std::move(*shell);
-    plan.classification_ = detail::classify_raw_shell();
+    plan.classification_ = detail::classify_raw_shell(*plan.resolved_executable_);
   }
   else
   {
@@ -226,7 +270,8 @@ ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const& intent, Co
     plan.classification_ = detail::classify_command(plan.argv_, *resolved, plan.cwd_, plan.workspace_, options.workspace_script_recipes);
     plan.resolved_executable_ = std::move(*resolved);
   }
-  plan.fingerprint_ = compute_fingerprint(plan, plan.workspace_metadata_, plan.cwd_metadata_);
+  plan.fingerprint_ = compute_fingerprint(plan, plan.workspace_metadata_, plan.cwd_metadata_, plan.trusted_home_metadata_, plan.ava_authority_root_metadata_,
+                                          plan.synthetic_environment_roots_);
   return plan;
 }
 
@@ -235,7 +280,8 @@ ava::core::Result<CommandPreparation> prepare_command(CommandIntent const& inten
   auto plan = seal_command_plan(intent, options);
   if (!plan)
     return std::unexpected(std::move(plan.error()));
-  auto environment = detail::EnvironmentFactory::make(options.environment, plan->path_entries(), options.limits);
+  auto environment = detail::EnvironmentFactory::make(options.environment, plan->path_entries(), plan->synthetic_environment_roots_, options.limits,
+                                                      CommandEnvironment::make_factory_passkey());
   if (!environment)
     return std::unexpected(std::move(environment.error()));
   if (auto valid = detail::validate_environment_matches_plan(*environment, *plan); !valid)
@@ -264,13 +310,39 @@ ava::core::Result<bool> plan_is_fresh(CommandPlan const& plan)
         return false;
     }
   }
-  for (auto const* metadata : {&plan.workspace_metadata_, &plan.cwd_metadata_})
+  for (auto const* metadata : {&plan.workspace_metadata_, &plan.cwd_metadata_, &plan.trusted_home_metadata_})
   {
     auto result = fresh(*metadata);
     if (!result)
       return std::unexpected(std::move(result.error()));
     if (!*result)
       return false;
+  }
+  for (auto const& root : plan.ava_authority_root_metadata_)
+  {
+    auto result = fresh(root);
+    if (!result)
+      return std::unexpected(std::move(result.error()));
+    if (!*result)
+      return false;
+  }
+  for (auto const* root :
+       {&plan.synthetic_environment_roots_.home, &plan.synthetic_environment_roots_.xdg_config_home, &plan.synthetic_environment_roots_.xdg_cache_home,
+        &plan.synthetic_environment_roots_.xdg_data_home, &plan.synthetic_environment_roots_.xdg_state_home, &plan.synthetic_environment_roots_.tmpdir})
+  {
+    auto result = fresh(*root);
+    if (!result)
+      return std::unexpected(std::move(result.error()));
+    if (!*result)
+      return false;
+    if (paths_overlap(root->canonical_path, plan.workspace_metadata_.canonical_path) ||
+        paths_overlap(root->canonical_path, plan.trusted_home_metadata_.canonical_path))
+      return false;
+    for (auto const& authority_root : plan.ava_authority_root_metadata_)
+    {
+      if (paths_overlap(root->canonical_path, authority_root.canonical_path))
+        return false;
+    }
   }
   for (auto const& entry : plan.path_entries_)
   {
@@ -374,6 +446,15 @@ std::string CommandPlan::display_json() const
   return std::move(output).str();
 }
 
+std::string CommandPlan::redacted_summary() const
+{
+  std::ostringstream output;
+  output << "{\"fingerprint\":\"" << json_escape(fingerprint_) << "\",\"intent_lane\":\"" << to_string(intent_lane_) << "\",\"execution_domain\":\""
+         << to_string(execution_domain_) << "\",\"level\":\"" << to_string(classification_.level) << "\",\"family\":\"" << to_string(classification_.family)
+         << "\",\"resolved_executable\":" << (resolved_executable_ ? "true" : "false") << '}';
+  return std::move(output).str();
+}
+
 CommandPreparation::CommandPreparation(CommandPlan plan, CommandEnvironment environment) : plan_(std::move(plan)), environment_(std::move(environment))
 {
 }
@@ -423,7 +504,7 @@ std::string_view to_string(CommandRuntimeMode value) noexcept
     case CommandRuntimeMode::Enabled:
       return "enabled";
   }
-  return "legacy";
+  return "unknown";
 }
 
 std::string_view to_string(CommandExecutionDomain value) noexcept
@@ -481,7 +562,7 @@ std::string_view to_string(CommandLevel value) noexcept
     case CommandLevel::Critical:
       return "critical";
   }
-  return "critical";
+  return "unknown";
 }
 
 std::string_view to_string(CommandFamily value) noexcept
@@ -525,7 +606,7 @@ std::string_view to_string(CommandFamily value) noexcept
     case CommandFamily::RawShell:
       return "raw_shell";
   }
-  return "unknown_wrapper";
+  return "unknown";
 }
 
 std::string_view to_string(CommandRecipe value) noexcept
@@ -577,7 +658,7 @@ std::string_view to_string(InteractiveScope value) noexcept
     case InteractiveScope::Workspace:
       return "workspace";
   }
-  return "once";
+  return "unknown";
 }
 
 }  // namespace ava::command

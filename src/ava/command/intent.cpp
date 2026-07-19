@@ -61,6 +61,21 @@ bool is_assignment_word(std::string_view value)
   return std::ranges::all_of(value.substr(1, equal - 1), [](unsigned char ch) { return std::isalnum(ch) != 0 || ch == '_'; });
 }
 
+bool is_shell_command_position_word(std::string_view value)
+{
+  // Compatibility input is shell text, so command-position shell words must
+  // never be reinterpreted as a direct executable lookup. This includes POSIX
+  // special builtins, common shell builtins, and grammar/control keywords.
+  static constexpr std::array<std::string_view, 75> kShellWords{
+      ".",        ":",        "alias",   "bg",     "bind",   "break",   "builtin", "caller",   "case",    "cd",    "command", "compgen", "complete",
+      "compopt",  "continue", "declare", "dirs",   "disown", "do",      "done",    "echo",     "elif",    "else",  "esac",    "eval",    "exec",
+      "exit",     "export",   "false",   "fc",     "fg",     "fi",      "for",     "function", "getopts", "hash",  "help",    "history", "if",
+      "in",       "jobs",     "kill",    "let",    "local",  "logout",  "mapfile", "popd",     "printf",  "pushd", "pwd",     "read",    "readarray",
+      "readonly", "return",   "select",  "set",    "shift",  "shopt",   "source",  "suspend",  "test",    "then",  "time",    "times",   "trap",
+      "true",     "type",     "typeset", "ulimit", "umask",  "unalias", "unset",   "until",    "wait",    "while"};
+  return std::ranges::find(kShellWords, value) != kShellWords.end();
+}
+
 }  // namespace
 
 ava::core::Error command_error(ava::core::ErrorCategory category, std::string message, std::string_view field, std::string_view value)
@@ -230,7 +245,7 @@ ava::core::Result<CompatibilityParse> parse_compatibility_command(std::string_vi
     return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "command request must encode a non-empty executable argument"));
   if (parsed.argv.front().empty())
     return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "command request has an ambiguous empty executable argument"));
-  if (is_assignment_word(parsed.argv.front()))
+  if (is_assignment_word(parsed.argv.front()) || is_shell_command_position_word(parsed.argv.front()))
     parsed.requires_raw_shell = true;
   return parsed;
 }

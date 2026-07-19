@@ -73,6 +73,19 @@ CommandClassification standard_classification(CommandFamily family, CommandRecip
       .ask_candidate = true};
 }
 
+CommandClassification apply_executable_origin_invariants(CommandClassification classification, ResolvedExecutable const& executable)
+{
+  // Classification is about command family; executable provenance is an
+  // independent execution invariant. A project-owned executable can replace a
+  // familiar inspection, sensitive, or critical binary with arbitrary code.
+  if (executable.origin == ExecutableOrigin::Workspace)
+  {
+    classification.capabilities.executes_mutable_project_code = true;
+    classification.capabilities.requires_containment = true;
+  }
+  return classification;
+}
+
 bool is_inline_interpreter(std::string_view executable_name, std::vector<std::string> const& argv)
 {
   static constexpr std::array<std::string_view, 12> kInterpreters{"bash", "sh",   "zsh",  "fish", "python", "python3",
@@ -129,7 +142,24 @@ std::optional<CommandClassification> classify_sensitive(std::string_view executa
       return sensitive_classification(CommandFamily::RemoteGitMutation, CommandCapabilities{.network_enabled = network, .mutates_workspace = mutates});
     }
     if (second == "remote")
-      return sensitive_classification(CommandFamily::RemoteGitMutation, CommandCapabilities{});
+    {
+      auto const action = argv.size() >= 3 ? lowercase(argv[2]) : std::string{};
+      CommandCapabilities capabilities;
+      if (action == "add" || action == "set-url" || action == "remove" || action == "rm" || action == "rename")
+        capabilities.mutates_workspace = true;
+      else if (action == "update")
+      {
+        capabilities.network_enabled = true;
+        capabilities.mutates_workspace = true;
+      }
+      else if (action == "prune")
+      {
+        // `git remote prune` removes stale local remote-tracking refs but does
+        // not itself fetch from the network.
+        capabilities.mutates_workspace = true;
+      }
+      return sensitive_classification(CommandFamily::RemoteGitMutation, capabilities);
+    }
     if (second == "apply" || second == "checkout" || second == "restore" || second == "commit" || second == "merge" || second == "rebase" ||
         second == "cherry-pick")
     {
@@ -259,29 +289,33 @@ std::optional<CommandClassification> classify_standard(std::string_view executab
 
 }  // namespace
 
-CommandClassification classify_raw_shell()
+CommandClassification classify_raw_shell(ResolvedExecutable const& executable)
 {
-  return CommandClassification{.level = CommandLevel::Critical,
-                               .family = CommandFamily::RawShell,
-                               .recipe = std::nullopt,
-                               .capabilities = CommandCapabilities{.raw_shell = true},
-                               .max_interactive_scope = InteractiveScope::Once,
-                               .ask_candidate = true};
+  return apply_executable_origin_invariants(CommandClassification{.level = CommandLevel::Critical,
+                                                                  .family = CommandFamily::RawShell,
+                                                                  .recipe = std::nullopt,
+                                                                  .capabilities = CommandCapabilities{.raw_shell = true},
+                                                                  .max_interactive_scope = InteractiveScope::Once,
+                                                                  .ask_candidate = true},
+                                            executable);
 }
 
 CommandClassification classify_command(std::vector<std::string> const& argv, ResolvedExecutable const& executable, std::filesystem::path const& cwd,
                                        std::filesystem::path const& workspace, std::vector<WorkspaceScriptRecipe> const& workspace_recipes)
 {
   auto const executable_name = lowercase(executable.executable.canonical_path.filename().string());
+  CommandClassification classification;
   if (auto destructive = classify_destructive_or_privileged(executable_name, argv))
-    return *destructive;
-  if (is_inline_interpreter(executable_name, argv))
-    return critical_classification(CommandFamily::InterpreterInline, CommandCapabilities{.interpreter_inline = true});
-  if (auto sensitive = classify_sensitive(executable_name, argv))
-    return *sensitive;
-  if (auto standard = classify_standard(executable_name, argv, executable, cwd, workspace, workspace_recipes))
-    return *standard;
-  return critical_classification(CommandFamily::UnknownWrapper, CommandCapabilities{.unknown_wrapper = true});
+    classification = std::move(*destructive);
+  else if (is_inline_interpreter(executable_name, argv))
+    classification = critical_classification(CommandFamily::InterpreterInline, CommandCapabilities{.interpreter_inline = true});
+  else if (auto sensitive = classify_sensitive(executable_name, argv))
+    classification = std::move(*sensitive);
+  else if (auto standard = classify_standard(executable_name, argv, executable, cwd, workspace, workspace_recipes))
+    classification = std::move(*standard);
+  else
+    classification = critical_classification(CommandFamily::UnknownWrapper, CommandCapabilities{.unknown_wrapper = true});
+  return apply_executable_origin_invariants(std::move(classification), executable);
 }
 
 }  // namespace ava::command::detail

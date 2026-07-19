@@ -9,8 +9,11 @@ namespace ava::command::detail {
 class EnvironmentFactory final
 {
  public:
+  // The private passkey makes this internal construction API uncallable by
+  // consumers even if they can physically include this detail header.
   [[nodiscard]] static ava::core::Result<CommandEnvironment> make(CommandEnvironmentOptions const& options, std::vector<CommandPathEntry> const& path_entries,
-                                                                  CommandLimits const& limits);
+                                                                  SyntheticEnvironmentRoots roots, CommandLimits const& limits,
+                                                                  CommandEnvironment::FactoryPasskey passkey);
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 

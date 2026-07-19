@@ -261,6 +261,7 @@ enum class PermissionPromptChoice
 {
   Deny,
   Allow,
+  AllowSession,
   DenyRemember,
   AllowRemember,
 };
@@ -271,6 +272,7 @@ enum class PermissionPromptInputAction
   Redraw,
   ResolveAllow,
   ResolveDeny,
+  ResolveAllowSession,
   ResolveAllowRemember,
   ResolveDenyRemember,
 };
@@ -301,6 +303,7 @@ struct PermissionPromptView
   std::string risk = {};
   std::string diff_preview = {};
   bool diff_truncated = false;
+  bool allow_session_available = false;
   bool allow_remember_available = false;
   bool deny_remember_available = false;
   std::string recipe_display = {};
@@ -538,7 +541,8 @@ struct PathCompletionSelectionText
 [[nodiscard]] PermissionPromptRememberAvailability permission_prompt_remember_availability(ava::permissions::PermissionPrompt const& prompt,
                                                                                            bool rule_storage_available) noexcept;
 [[nodiscard]] PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event,
-                                                                         bool allow_remember_available = false, bool deny_remember_available = false);
+                                                                         bool allow_session_available = false, bool allow_remember_available = false,
+                                                                         bool deny_remember_available = false);
 [[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt, InputEvent event);
 [[nodiscard]] std::vector<std::size_t> filter_select_list_items(SelectListView const& view);
 [[nodiscard]] std::size_t clamp_select_list_selection(SelectListView const& view, std::size_t selected_index);

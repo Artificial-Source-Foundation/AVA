@@ -154,20 +154,20 @@ ava::core::Result<AnchorSet::AnchorRef> AnchorSet::find_anchor(std::filesystem::
   if (candidate.empty())
     return std::unexpected(anchor_error("candidate path is empty", candidate));
 
-  // Lexically normalize the candidate — no filesystem canonicalization.
   // If the candidate is relative, resolve it against the first anchor root
   // (the primary workspace). This matches the existing SecureWorkspace
   // behavior where relative paths are resolved against the workspace root.
-  std::filesystem::path absolute;
-  if (candidate.is_absolute())
-    absolute = candidate.lexically_normal();
-  else if (!anchors_.empty())
-    absolute = (anchors_.front().root / candidate).lexically_normal();
-  else
-    return std::unexpected(anchor_error("no anchors available to resolve relative path", candidate));
+  if (!candidate.is_absolute())
+    try {
+      // The first entry is always the launch workspace.
+      ASSERT(!anchors_.empty());
+      return AnchorRef{anchors_.front(), candidate};
+    } catch (std::runtime_error const& error) {
+      return std::unexpected(anchor_error(error.what(), candidate));
+    }
 
-  if (!absolute.is_absolute())
-    return std::unexpected(anchor_error("failed to resolve candidate to an absolute path", candidate));
+  // Lexically normalize the candidate — no filesystem canonicalization.
+  std::filesystem::path absolute = candidate.lexically_normal();
 
   // Find the anchor whose root is the longest lexical prefix of the candidate.
   // Longest match wins so that nested anchors (e.g., workspace/a/b when
@@ -187,7 +187,8 @@ ava::core::Result<AnchorSet::AnchorRef> AnchorSet::find_anchor(std::filesystem::
   auto relative = absolute.lexically_relative(best->root);
   if (relative == ".")
     relative.clear();
-  return AnchorRef{.fd = best->fd, .root = best->root, .relative = std::move(relative)};
+
+  return AnchorRef{*best, relative};
 }
 
 bool AnchorSet::contains_lexical(std::filesystem::path const& candidate) const
@@ -197,6 +198,7 @@ bool AnchorSet::contains_lexical(std::filesystem::path const& candidate) const
 
 std::filesystem::path const& AnchorSet::launch_workspace_root() const
 {
+  // The first entry is always the launch workspace.
   ASSERT(!anchors_.empty());
   return anchors_.front().root;
 }

@@ -90,11 +90,12 @@ Result<AnchorOpen> open_writable(AnchorSet const& anchors, std::filesystem::path
   auto ref = anchors.find_anchor(candidate);
   if (!ref)
     return std::unexpected(std::move(ref.error()));
-  auto const absolute = ref->root / ref->relative;
-  int const fd = open_beneath(ref->fd, ref->relative, flags, mode);
+  auto const& anchor = ref->anchor();
+  auto const absolute = ref->absolute();
+  int const fd = open_beneath(anchor.fd, ref->relative(), flags, mode);
   if (fd < 0)
-    return std::unexpected(open_path_error("open_writable failed to open path beneath its anchor", errno, absolute, ref->root));
-  return AnchorOpen(fd, std::move(ref->root), std::move(absolute), std::move(ref->relative));
+    return std::unexpected(open_path_error("open_writable failed to open path beneath its anchor", errno, absolute, anchor.root));
+  return AnchorOpen(fd, anchor.root, std::move(absolute), ref->relative());
 }
 
 Result<AnchorOpen> open_readable(AnchorSet const& anchors, std::filesystem::path const& candidate, int flags, mode_t mode)
@@ -105,11 +106,11 @@ Result<AnchorOpen> open_readable(AnchorSet const& anchors, std::filesystem::path
   auto ref = anchors.find_anchor(candidate);
   if (ref)
   {
-    auto const absolute = ref->root / ref->relative;
-    int const fd = open_beneath(ref->fd, ref->relative, flags, mode);
+    auto const& anchor = ref->anchor();
+    int const fd = open_beneath(anchor.fd, ref->relative(), flags, mode);
     if (fd < 0)
-      return std::unexpected(open_path_error("open_readable failed to open path beneath its anchor", errno, absolute, ref->root));
-    return AnchorOpen(fd, std::move(ref->root), std::move(absolute), std::move(ref->relative));
+      return std::unexpected(open_path_error("open_readable failed to open path beneath its anchor", errno, ref->absolute(), anchor.root));
+    return AnchorOpen(fd, anchor.root, ref->absolute(), ref->relative());
   }
 
   // find_anchor returns PermissionDenied specifically when the candidate is

@@ -61,8 +61,7 @@ class AnchorSet
   // opened at all.
   [[nodiscard]] static Result<std::shared_ptr<AnchorSet>> open(std::vector<std::filesystem::path> const& roots);
 
-  // The result of resolving a candidate path against the anchor set.
-  struct AnchorRef
+  struct Anchor
   {
     // The anchor's open directory descriptor. Callers pass this to open_beneath
     // along with relative. The descriptor is owned by the AnchorSet and remains
@@ -70,9 +69,42 @@ class AnchorSet
     int fd = -1;
     // The absolute, lexically-normalized root path of the selected anchor.
     std::filesystem::path root;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
+  };
+
+  // The result of resolving a candidate path against the anchor set.
+  struct AnchorRef
+  {
+   private:
+    // The best anchor for the given path.
+    Anchor const& anchor_;
+
     // The candidate path relative to the anchor root. This is the path to pass
     // to open_beneath. May be empty if the candidate is the anchor root itself.
-    std::filesystem::path relative;
+    std::filesystem::path relative_;    // Lexically normalized; this does not contain ".." and or "." components anywhere ("." is replaced with an empty path).
+
+    // Calculate a lexically-normalized relative part of root / relative.
+    std::filesystem::path normalize_relative(std::filesystem::path const& relative) const
+    {
+      // Collapse every "." and ".." first; only the normalized form is trustworthy.
+      auto const normalized_absolute = (anchor_.root / relative).lexically_normal();
+      auto normalized = normalized_absolute.lexically_relative(anchor_.root);
+      if (normalized == ".")
+        normalized.clear();
+      // After lexically_normal, "." is gone and ".." can remain only as a leading
+      // run — present iff the normalized path escaped the anchor root.
+      if (!normalized.empty() && *normalized.begin() == "..")
+        throw std::runtime_error("AnchorRef relative escapes its anchor root");
+      return normalized;
+    }
+
+   public:
+    AnchorRef(Anchor const& best, std::filesystem::path const& relative) : anchor_(best), relative_(normalize_relative(relative)) { }
+
+    Anchor const& anchor() const { return anchor_; }
+    std::filesystem::path const& relative() const { return relative_; }
+    std::filesystem::path absolute() const { return anchor_.root / relative_; }
 
     AVA_DEBUG_PRINT_MEMBERS_ON
   };
@@ -105,18 +137,12 @@ class AnchorSet
  private:
   AnchorSet() = default;
 
-  struct Anchor
-  {
-    int fd = -1;
-    std::filesystem::path root;
-
-    AVA_DEBUG_PRINT_MEMBERS_ON
-  };
   std::vector<Anchor> anchors_;
 
  public:
   // For test purposes.
   size_t number_of_anchors() const { return anchors_.size(); }
+  std::vector<Anchor> const& anchors() const { return anchors_; }
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

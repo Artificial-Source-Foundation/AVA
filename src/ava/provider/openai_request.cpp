@@ -6,6 +6,7 @@
 #include "ava/provider/provider_utils.h"
 #include "ava/core/json.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
@@ -238,6 +239,64 @@ NativeToolPartMask paired_native_tool_part_mask(std::vector<ChatMessage> const& 
   return mask;
 }
 
+bool valid_openai_assistant_text_item_part(ContentPart const& part)
+{
+  // A valid provider item ID is sufficient to preserve an output message as a
+  // native Responses item. Unknown phase is an absence of phase metadata, not
+  // a reason to discard the opaque provider identity or alter item order.
+  return part.type == ContentPartType::Text && !part.provider_item_id.empty() && is_valid_openai_opaque_id(part.provider_item_id);
+}
+
+std::string bounded_openai_message_item_id(std::string_view provider_item_id)
+{
+  // Responses rejects message item IDs above 64 bytes. Preserve normal IDs
+  // exactly; the fallback is deterministic and derived only from the opaque
+  // ID, never replayed text or any other user/model content.
+  if (provider_item_id.size() <= 64 && is_valid_openai_opaque_id(provider_item_id))
+    return std::string(provider_item_id);
+  std::uint64_t hash = 1469598103934665603ULL;
+  for (unsigned char const byte : provider_item_id)
+  {
+    hash ^= byte;
+    hash *= 1099511628211ULL;
+  }
+  constexpr char hex[] = "0123456789abcdef";
+  std::string fallback = "msg_ava_";
+  for (int shift = 60; shift >= 0; shift -= 4) fallback += hex[(hash >> shift) & 0xFU];
+  return fallback;
+}
+
+std::string assistant_message_output_item_json(ContentPart const& part)
+{
+  std::string item = "{\"type\":\"message\",\"id\":\"" + ava::core::json::escape(bounded_openai_message_item_id(part.provider_item_id)) +
+                     "\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"" + ava::core::json::escape(part.text) +
+                     "\",\"annotations\":[]}],\"status\":\"completed\"";
+  if (part.assistant_phase == AssistantPhase::Commentary)
+    item += ",\"phase\":\"commentary\"";
+  else if (part.assistant_phase == AssistantPhase::FinalAnswer)
+    item += ",\"phase\":\"final_answer\"";
+  item += '}';
+  return item;
+}
+
+NativeToolPartMask native_replay_part_mask(std::vector<ChatMessage> const& messages)
+{
+  auto mask = paired_native_tool_part_mask(messages);
+  for (std::size_t message_index = 0; message_index < messages.size(); ++message_index)
+  {
+    auto const& message = messages[message_index];
+    if (message.role != "assistant" || has_unreplayable_openai_reasoning(message.content_parts))
+      continue;
+    for (std::size_t part_index = 0; part_index < message.content_parts.size(); ++part_index)
+    {
+      auto const& part = message.content_parts[part_index];
+      if (valid_openai_reasoning_item_part(part) || valid_openai_assistant_text_item_part(part))
+        mask[message_index][part_index] = true;
+    }
+  }
+  return mask;
+}
+
 std::string reasoning_input_item_json(ContentPart const& part)
 {
   return part.reasoning_native_item_json;
@@ -245,10 +304,12 @@ std::string reasoning_input_item_json(ContentPart const& part)
 
 std::string function_call_input_item_json(ContentPart const& part)
 {
-  // ContentPart deliberately has no OpenAI output-item ID. Replaying the logical
-  // call_id is sufficient to bind the function result without inventing an ID.
-  return "{\"type\":\"function_call\",\"call_id\":\"" + ava::core::json::escape(part.tool_call_id) + "\",\"name\":\"" +
-         ava::core::json::escape(part.tool_name) + "\",\"arguments\":\"" + ava::core::json::escape(part.input_json) + "\"}";
+  std::string json = "{\"type\":\"function_call\"";
+  if (!part.provider_item_id.empty() && is_valid_openai_opaque_id(part.provider_item_id))
+    json += ",\"id\":\"" + ava::core::json::escape(part.provider_item_id) + "\"";
+  json += ",\"call_id\":\"" + ava::core::json::escape(part.tool_call_id) + "\",\"name\":\"" + ava::core::json::escape(part.tool_name) + "\",\"arguments\":\"" +
+          ava::core::json::escape(part.input_json) + "\"}";
+  return json;
 }
 
 std::string function_call_output_input_item_json(ContentPart const& part)
@@ -345,7 +406,7 @@ std::string request_body_json(ProviderRequest const& request, bool include_max_o
 {
   std::string body = "{\"model\":\"" + ava::core::json::escape(request.model_id) + "\",\"instructions\":\"" + ava::core::json::escape(request.system_prompt) +
                      "\",\"stream\":" + (request.stream ? "true" : "false") + ",\"input\":[";
-  auto const native_tool_parts = paired_native_tool_part_mask(request.messages);
+  auto const native_replay_parts = native_replay_part_mask(request.messages);
   bool first_input_item = true;
   auto append_input_item = [&body, &first_input_item](std::string item) {
     if (!first_input_item)
@@ -356,9 +417,9 @@ std::string request_body_json(ProviderRequest const& request, bool include_max_o
   for (std::size_t message_index = 0; message_index < request.messages.size(); ++message_index)
   {
     auto const& message = request.messages[message_index];
-    bool has_native_tool_part = false;
-    for (bool const native : native_tool_parts[message_index]) has_native_tool_part = has_native_tool_part || native;
-    if (!has_native_tool_part)
+    bool has_native_replay_part = false;
+    for (bool const native : native_replay_parts[message_index]) has_native_replay_part = has_native_replay_part || native;
+    if (!has_native_replay_part)
     {
       append_input_item(input_item_json(message));
       continue;
@@ -376,13 +437,19 @@ std::string request_body_json(ProviderRequest const& request, bool include_max_o
     for (std::size_t part_index = 0; part_index < message.content_parts.size(); ++part_index)
     {
       auto const& part = message.content_parts[part_index];
-      if (part.type == ContentPartType::Reasoning && valid_openai_reasoning_item_part(part))
+      if (part.type == ContentPartType::Reasoning && valid_openai_reasoning_item_part(part) && native_replay_parts[message_index][part_index])
       {
         append_ordinary_parts();
         append_input_item(reasoning_input_item_json(part));
         continue;
       }
-      if (!native_tool_parts[message_index][part_index])
+      if (part.type == ContentPartType::Text && valid_openai_assistant_text_item_part(part) && native_replay_parts[message_index][part_index])
+      {
+        append_ordinary_parts();
+        append_input_item(assistant_message_output_item_json(part));
+        continue;
+      }
+      if (!native_replay_parts[message_index][part_index])
       {
         ordinary_parts.push_back(&part);
         continue;

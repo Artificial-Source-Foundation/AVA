@@ -1,7 +1,9 @@
 #include "sys.h"
+#include "ava/command/discovery.h"
 #include "ava/containment/containment.h"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
@@ -28,6 +30,7 @@ namespace detail {
 std::uint64_t device_file_mask() noexcept;
 [[nodiscard]] ava::core::VoidResult validate_synthetic_directory_root(std::filesystem::path const& path);
 [[nodiscard]] ava::core::VoidResult validate_writable_directory_root(std::filesystem::path const& path);
+[[nodiscard]] ava::core::VoidResult validate_read_only_toolchain_directory_root(std::filesystem::path const& path);
 [[nodiscard]] ava::core::VoidResult validate_device_root(std::filesystem::path const& path);
 [[nodiscard]] bool path_is_within(std::filesystem::path const& child, std::filesystem::path const& parent);
 void add_filesystem_rule(std::vector<ContainmentFilesystemRule>& rules, std::filesystem::path const& path, std::uint64_t mask);
@@ -158,10 +161,36 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
   }
   scope.synthetic_environment_writable = true;
 
-  // 3. System roots: read/execute (executables, libraries, headers, config).
+  // 3. Optional sealed rustup state: read/execute only. This root is
+  // identity-bound at planning time and revalidated here before it becomes a
+  // Landlock allow rule; no CARGO_HOME or broader trusted-home rule exists.
+  if (auto const& rustup_home = command_plan.rustup_home_metadata())
+  {
+    auto fresh = ava::command::detail::path_metadata_is_fresh(*rustup_home);
+    if (!fresh || !*fresh || canonical_path(rustup_home->canonical_path) != rustup_home->canonical_path ||
+        detail::path_is_within(rustup_home->canonical_path, command_plan.workspace()) ||
+        detail::path_is_within(command_plan.workspace(), rustup_home->canonical_path))
+    {
+      plan.availability = ContainmentAvailability::Unavailable;
+      plan.profile_id = "ava-landlock-seccomp-v1";
+      plan.unavailable_reason = "sealed rustup home changed or overlaps the workspace before containment preparation";
+      return plan;
+    }
+    if (auto valid = detail::validate_read_only_toolchain_directory_root(rustup_home->canonical_path); !valid)
+    {
+      plan.availability = ContainmentAvailability::Unavailable;
+      plan.profile_id = "ava-landlock-seccomp-v1";
+      plan.unavailable_reason = "sealed rustup home failed containment validation";
+      return plan;
+    }
+    detail::add_filesystem_rule(rules, rustup_home->canonical_path, detail::read_execute_root_mask());
+    ++scope.read_only_root_count;
+  }
+
+  // 4. System roots: read/execute (executables, libraries, headers, config).
   add_system_roots(rules);
 
-  // 4. Sealed PATH entries: read/execute (toolchain directories).
+  // 5. Sealed PATH entries: read/execute (toolchain directories).
   for (auto const& entry : command_plan.path_entries())
   {
     auto const canonical = canonical_path(entry.directory);
@@ -171,7 +200,7 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
     ++scope.read_only_root_count;
   }
 
-  // 5. Resolved executable directory: read/execute (finding the binary).
+  // 6. Resolved executable directory: read/execute (finding the binary).
   if (command_plan.resolved_executable())
   {
     auto const& exec_path = command_plan.resolved_executable()->executable.canonical_path;
@@ -186,7 +215,7 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
     }
   }
 
-  // 6. Shebang interpreter directories: read/execute.
+  // 7. Shebang interpreter directories: read/execute.
   if (command_plan.resolved_executable())
   {
     for (auto const& interpreter : command_plan.resolved_executable()->shebang_interpreters)
@@ -203,7 +232,7 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
     }
   }
 
-  // 7. Recipe path arguments: directories get writable access; regular files
+  // 8. Recipe path arguments: directories get writable access; regular files
   //    get file-valid read/execute only (never READ_DIR). Redundant rules
   //    already covered by the writable workspace are omitted to avoid
   //    stale or conflicting masks.
@@ -230,7 +259,7 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
     }
   }
 
-  // 8. Device files: read-only (/dev/null, /dev/zero, etc.).
+  // 9. Device files: read-only (/dev/null, /dev/zero, etc.).
   add_device_files(rules, scope);
 
   // Assemble the plan.
@@ -273,32 +302,32 @@ ava::core::VoidResult apply_containment_in_child(DevelopmentContainmentPlan cons
   return {};
 }
 
-void close_inherited_fds_except(int keep_fd_a, int keep_fd_b) noexcept
+void close_inherited_fds_except(int keep_fd_a, int keep_fd_b, int keep_fd_c) noexcept
 {
   // Use close_range(2) where available for O(1) bulk closure, then fall back
-  // to a bounded loop. The handshake fds (keep_fd_a, keep_fd_b) are never
-  // closed; everything else above stderr is.
+  // to a bounded loop. The handshake fds and the approved executable
+  // descriptor are never closed before descriptor exec.
   int const lo = STDERR_FILENO + 1;
-  auto const close_range_available = [](int low, int high) {
-    return ::syscall(SYS_close_range, static_cast<unsigned int>(low), static_cast<unsigned int>(high), 0u) == 0;
-  };
+  auto const close_range_available = [](unsigned int low, unsigned int high) { return ::syscall(SYS_close_range, low, high, 0u) == 0; };
 
-  // Order the keep fds so we can close around them.
-  int first_keep = keep_fd_a;
-  int second_keep = keep_fd_b;
-  if (first_keep > second_keep)
-    std::swap(first_keep, second_keep);
-
-  // Attempt close_range in three segments around the keep fds. These are
-  // best-effort: if close_range is unavailable (ENOSYS), the bounded loop
-  // below catches any remaining non-keep fds.
-  if (first_keep > lo)
-    close_range_available(lo, first_keep - 1);
-  if (second_keep > first_keep + 1)
-    close_range_available(first_keep + 1, second_keep - 1);
-  // Close everything above the second keep fd (covers very high-numbered
-  // descriptors beyond the sysconf bound).
-  static_cast<void>(::syscall(SYS_close_range, static_cast<unsigned int>(second_keep + 1), ~0u, 0u));
+  std::array<int, 3> keep_fds{keep_fd_a, keep_fd_b, keep_fd_c};
+  std::ranges::sort(keep_fds);
+  auto const unique_end = std::unique(keep_fds.begin(), keep_fds.end());
+  unsigned int next = static_cast<unsigned int>(lo);
+  for (auto keep_iterator = keep_fds.begin(); keep_iterator != unique_end; ++keep_iterator)
+  {
+    auto const keep_fd = *keep_iterator;
+    if (keep_fd < lo)
+      continue;
+    auto const keep = static_cast<unsigned int>(keep_fd);
+    if (next < keep)
+      static_cast<void>(close_range_available(next, keep - 1));
+    next = keep + 1;
+  }
+  // Close everything above the final kept descriptor (including very high
+  // descriptors beyond the sysconf bound). keep_fd is an int, so next cannot
+  // wrap here.
+  static_cast<void>(close_range_available(next, ~0u));
 
   // Bounded fallback: iterate and close any remaining non-keep fds. This
   // catches cases where close_range is unavailable (ENOSYS) or a segment
@@ -307,7 +336,7 @@ void close_inherited_fds_except(int keep_fd_a, int keep_fd_b) noexcept
   int const max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
   for (int fd = lo; fd < max_fd; ++fd)
   {
-    if (fd == keep_fd_a || fd == keep_fd_b)
+    if (fd == keep_fd_a || fd == keep_fd_b || fd == keep_fd_c)
       continue;
     static_cast<void>(::close(fd));
   }

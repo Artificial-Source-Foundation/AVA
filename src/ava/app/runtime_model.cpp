@@ -3,6 +3,7 @@
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_prompt.h"
 #include "ava/config/provider_profiles.h"
+#include "ava/session/assistant_output.h"
 #include "ava/session/validation.h"
 #include "ava/provider/registry.h"
 #include "ava/core/json.h"
@@ -96,11 +97,27 @@ ava::core::Error incompatible_model_switch_error(ava::config::ModelInfo const& m
 
 ava::core::VoidResult validate_model_history_entries(std::vector<ava::session::SessionEntry> const& entries, ava::config::ModelInfo const& target)
 {
+  auto const assistant_output = ava::session::classify_assistant_output(entries);
+  for (auto const& diagnostic : assistant_output.diagnostics)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, diagnostic.severity == ava::session::AssistantOutputDiagnosticSeverity::Warning
+                                                                         ? "model switch cannot inspect incomplete assistant-output history"
+                                                                         : "model switch cannot inspect malformed assistant-output history");
+    error.with_context("diagnostic_kind", std::string(ava::session::to_string(diagnostic.kind)))
+        .with_context("diagnostic_entry_id", diagnostic.entry_id)
+        .with_context("diagnostic", diagnostic.message);
+    return std::unexpected(std::move(error));
+  }
+
   auto replay_start = entries.begin();
+  std::size_t replay_start_index = 0;
   for (auto it = entries.begin(); it != entries.end(); ++it)
   {
     if (it->type == ava::session::EntryType::Compaction)
+    {
       replay_start = std::next(it);
+      replay_start_index = static_cast<std::size_t>(std::distance(entries.begin(), replay_start));
+    }
   }
 
   std::size_t image_count = 0;
@@ -165,15 +182,54 @@ ava::core::VoidResult validate_model_history_entries(std::vector<ava::session::S
     return std::unexpected(std::move(error));
   }
 
+  for (auto const& turn : assistant_output.turns)
+  {
+    if (turn.commit_index < replay_start_index)
+      continue;
+    for (auto const& output_item : turn.items)
+    {
+      if (output_item.entry_index >= entries.size())
+      {
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "model switch encountered an ambiguous committed assistant-output item"));
+      }
+      auto const& source_entry = entries[output_item.entry_index];
+      if (auto const* function = std::get_if<ava::session::AssistantOutputFunctionCall>(&output_item.item.payload))
+      {
+        (void)function;
+        if (!target.supports_tools.value_or(false))
+        {
+          return std::unexpected(incompatible_model_switch_error(
+              target, "target model does not declare tool support required by committed assistant function history", source_entry));
+        }
+        continue;
+      }
+
+      auto const* reasoning = std::get_if<ava::session::AssistantOutputReasoning>(&output_item.item.payload);
+      if (!reasoning)
+        continue;
+      if (turn.commit.provider != target.provider_id)
+      {
+        auto error = incompatible_model_switch_error(target, "target model cannot replay provider-native reasoning from another provider", source_entry);
+        error.with_context("reasoning_provider", turn.commit.provider).with_context("reasoning_format", reasoning->format);
+        return std::unexpected(std::move(error));
+      }
+      if (model_accepts_reasoning_format(target, reasoning->format))
+        continue;
+
+      auto error = incompatible_model_switch_error(target, "target model cannot replay provider-native reasoning format", source_entry);
+      error.with_context("reasoning_format", reasoning->format);
+      return std::unexpected(std::move(error));
+    }
+  }
+
   return {};
 }
 
 }  // namespace
 
-ava::core::VoidResult validate_runtime_model_history(ava::session::SessionReadAuthority read_authority, ava::config::ModelInfo const& target,
-                                                     ava::session::SessionReadLimits read_limits)
+ava::core::VoidResult validate_runtime_model_history(ava::session::SessionReadAuthority read_authority, ava::config::ModelInfo const& target)
 {
-  auto entries = read_authority.load_bounded(read_limits);
+  auto entries = read_authority.load();
   if (!entries)
     return std::unexpected(std::move(entries.error()));
   return validate_model_history_entries(*entries, target);
@@ -277,7 +333,7 @@ ava::core::Result<bool> switch_runtime_model(runtime::Session& session, ava::con
   auto read_authority = session.read_authority();
   if (!read_authority)
     return std::unexpected(std::move(read_authority.error()));
-  auto compatible = runtime::validate_runtime_model_history(std::move(*read_authority), model, ava::session::SessionReadLimits{});
+  auto compatible = runtime::validate_runtime_model_history(std::move(*read_authority), model);
   if (!compatible)
     return std::unexpected(std::move(compatible.error()));
 

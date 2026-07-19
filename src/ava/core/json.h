@@ -1,12 +1,17 @@
 #pragma once
 
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace ava::core::json {
+
+// Strict AVA JSON surfaces accept at most 64 simultaneously open object/array
+// containers, counting the root container as depth one.
+inline constexpr std::size_t kMaxNestingDepth = 64;
 
 [[nodiscard]] bool is_valid_utf8(std::string_view value) noexcept;
 [[nodiscard]] std::string replace_invalid_utf8(std::string_view value);
@@ -18,8 +23,10 @@ namespace ava::core::json {
 [[nodiscard]] std::vector<std::string> objects_in_array_field(std::string_view object, std::string_view key);
 // Returns nullopt unless the named value is a syntactically valid array whose
 // every element is a JSON object. Unlike objects_in_array_field(), this never
-// skips scalar or malformed elements.
-[[nodiscard]] std::optional<std::vector<std::string>> strict_objects_in_array_field(std::string_view object, std::string_view key);
+// skips scalar or malformed elements. max_items bounds vector materialization;
+// a matching array with more elements is rejected.
+[[nodiscard]] std::optional<std::vector<std::string>> strict_objects_in_array_field(std::string_view object, std::string_view key,
+                                                                                    std::size_t max_items = std::numeric_limits<std::size_t>::max());
 [[nodiscard]] std::vector<std::string> strings_in_array_field(std::string_view object, std::string_view key);
 [[nodiscard]] bool is_valid_object(std::string_view value);
 

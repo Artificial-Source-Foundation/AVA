@@ -16,13 +16,13 @@ releasing the child process to exec. Containment uses two kernel mechanisms:
 | Command Level | Containment | Permission |
 |---------------|-------------|------------|
 | Standard (inspection) | Not required | Allow |
-| Standard (mutable) + available | Applied before exec | Allow |
+| Standard (mutable) + available | Applied before exec | Allow; eligible typed recipe scopes |
 | Standard (mutable) + unavailable | Not applied | Critical, one-shot Ask (uncontained warning) |
-| Sensitive + available | Applied after approval | Ask |
+| Sensitive + available | Applied after approval | Ask; eligible typed recipe scopes |
 | Sensitive + unavailable | Not applied | Critical, one-shot Ask (uncontained warning) |
 | Critical / Raw / Unverified | Not applied | Ask once |
 
-All commands remain max Once for now. Policy v2 (reusable grants) comes later.
+Schema-v2 reusable command grants are available only for sealed direct-argv Standard or Sensitive recipes with verified local executor identity and Available/NotRequired containment. Critical, raw-shell, unavailable-containment, and unverified delegated commands remain one-shot through ordinary frontends.
 
 When containment is unavailable, the command is downgraded to Critical risk and
 requires explicit one-shot approval. After approval it may run uncontained, but
@@ -38,8 +38,22 @@ Root validation is split between synthetic and writable roots:
   (owner-only, no group/world permissions). These are private, per-run
   directories created by AVA.
 - **Writable workspace**: may be current-user-owned 0755 or 0750 (group
-  read/execute permitted). Must reject any group/world write bit, symlink,
-  special file type, or identity mismatch.
+  read/execute permitted). It may also be current-user-owned 0770 or 0775 only
+  when its gid is the current account's **verified private primary group**.
+  Verification is deliberately local-files-only: AVA opens root-owned,
+  non-writable, non-symlink `/etc/passwd` and `/etc/group` descriptors, performs
+  bounded independent enumeration, requires exactly one passwd record with that
+  primary gid (the current account), and requires exactly one same-named group
+  whose explicit member list is empty or contains only that account. NSS-only
+  identities, lookup/parse failure, duplicate or oversized records, a shared
+  group, root ownership, a different gid, or any world-write bit fail closed.
+  Symlinks, special file types, and identity mismatches are also rejected.
+- **Optional rustup state**: sealing may discover exactly
+  `<trusted_home>/.rustup`, never inherited `RUSTUP_HOME`. If present it must be
+  a bounded canonical, non-symlink current-user-owned directory with safe
+  ancestors and the same narrowly verified private-primary-group write
+  exception. Unsafe present roots fail closed; an absent root is simply omitted.
+  Its complete metadata is sealed into the command plan and environment.
 
 ## Authority and Trusted-Home Boundaries
 
@@ -51,6 +65,8 @@ At command sealing:
   sessions, auth directories).
 - Synthetic environment roots must be disjoint from workspace, trusted home, and
   all AVA authority roots.
+- A sealed rustup root must be disjoint from workspace, AVA authority roots, and
+  all synthetic roots. No other real-home toolchain state is eligible.
 
 Containment never makes AVA authority roots writable or readable through a
 broader workspace rule. Authority roots are explicitly excluded from the
@@ -75,8 +91,10 @@ Landlock rights are ABI-version-aware:
   roots receive read/write/create/execute permissions (including IOCTL_DEV when
   ABI >= 5).
 - **Read/execute roots**: system roots (`/usr`, `/lib`, `/lib64`, `/bin`,
-  `/sbin`, `/etc`), sealed PATH/toolchain entries, and the resolved executable
-  directory receive read/execute permissions (READ_FILE, READ_DIR, EXECUTE).
+  `/sbin`, `/etc`), sealed PATH/toolchain entries, the resolved executable
+  directory, and an optional identity-revalidated sealed rustup root receive
+  read/execute permissions (READ_FILE, READ_DIR, EXECUTE). The rustup root has
+  no write/create/remove rights and increases the redacted read-only-root count.
 - **Regular-file rules**: file rules use only file-valid rights (READ_FILE and
   EXECUTE as appropriate), never READ_DIR, which Landlock rejects on
   non-directory paths. Redundant recipe-file rules already beneath the writable
@@ -84,9 +102,13 @@ Landlock rights are ABI-version-aware:
 - **Device files**: `/dev/null`, `/dev/zero`, `/dev/urandom`, `/dev/random`
   receive read/write permissions. Device files are deliberate: they do not
   receive IOCTL_DEV automatically.
-- **Explicitly denied**: the real home directory, AVA config/state/session/auth
-  roots, arbitrary `/proc`, external checkout siblings, SSH/cloud/provider
-  secrets, and broad `/tmp` are not in the allow list.
+- **Explicitly denied**: the real home directory (except the exact optional
+  sealed read-only rustup root), the `<trusted_home>/.cargo` root and its
+  `credentials*` files, AVA config/state/session/auth roots, arbitrary `/proc`,
+  external checkout siblings, SSH/cloud/provider secrets, and broad `/tmp` are
+  not in the allow list. A separately sealed `.cargo/bin` PATH entry may still
+  be read/executed to invoke Cargo; it does not grant access to its parent or
+  credential files.
 
 ### Network (seccomp)
 
@@ -107,7 +129,11 @@ header — no silent header-dependent omission.
 
 Inherited non-stdio file descriptors are closed before the filter is installed
 using `close_range(2)` with a bounded fallback, so no pre-existing sockets can
-bypass the restriction. Handshake pipe descriptors are never closed.
+bypass the restriction. Handshake pipe descriptors and the already
+metadata-verified executable descriptor are retained until descriptor exec;
+regular binaries close that executable descriptor on exec, while a shebang
+script retains only its own sealed source descriptor long enough for the kernel
+interpreter handoff. Execution never falls back to an executable pathname.
 
 Seccomp action support is probed in the parent via a non-mutating
 `SECCOMP_GET_ACTION_AVAIL` query. If the kernel does not support the required
@@ -153,12 +179,14 @@ privilege escalation through setuid binaries.
   as Unavailable and standard mutable commands downgrade to Critical Ask.
 - If seccomp is not supported or the required action is unavailable,
   containment is reported as Unavailable.
-- If the child fails to install Landlock or seccomp rules before exec, the
-  parent terminates the verified group and returns an actionable error.
-  User code does not start. Commands are never auto-run if child install fails.
-- If any allow root fails validation (not owner-only for synthetic, group/world
-  writable for workspace, symlink, or identity mismatch), containment is
-  reported as Unavailable.
+- If the child fails to install Landlock or seccomp rules before descriptor
+  exec, the parent terminates the verified group and returns an actionable
+  error. User code does not start. Commands are never auto-run if child
+  installation or descriptor execution fails.
+- If any allow root fails validation (not owner-only for synthetic, unsafe
+  group/world write outside the private-primary-group exception for workspace or
+  rustup state, symlink, or identity mismatch), containment is reported as
+  Unavailable.
 
 ## Truthful Status
 

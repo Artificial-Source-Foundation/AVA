@@ -4,6 +4,7 @@
 #include "ava/permissions/permission.h"
 
 #include <algorithm>
+#include <array>
 #include <concepts>
 #include <filesystem>
 #include <fstream>
@@ -12,6 +13,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <grp.h>
+#include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -114,6 +117,71 @@ bool is_standard_recipe(ava::core::Result<command::CommandPlan> const& plan)
   return plan && plan->classification().level == command::CommandLevel::Standard && plan->classification().recipe.has_value();
 }
 
+std::optional<std::pair<std::string, gid_t>> current_account_for_test()
+{
+  std::array<char, 16 * 1024> storage{};
+  passwd record{};
+  passwd* resolved = nullptr;
+  if (::getpwuid_r(::geteuid(), &record, storage.data(), storage.size(), &resolved) != 0 || !resolved || !resolved->pw_name || resolved->pw_name[0] == '\0')
+    return std::nullopt;
+  return std::pair{std::string(resolved->pw_name), resolved->pw_gid};
+}
+
+std::optional<gid_t> private_primary_group_for_test()
+{
+  auto const account = current_account_for_test();
+  if (!account)
+    return std::nullopt;
+  std::array<char, 16 * 1024> storage{};
+  group record{};
+  group* resolved = nullptr;
+  if (::getgrgid_r(account->second, &record, storage.data(), storage.size(), &resolved) != 0 || !resolved || !resolved->gr_name ||
+      std::string_view(resolved->gr_name) != account->first)
+  {
+    return std::nullopt;
+  }
+  for (auto const* const* member = resolved->gr_mem; member && *member; ++member)
+  {
+    if (std::string_view(*member) != account->first)
+      return std::nullopt;
+  }
+  return resolved->gr_gid;
+}
+
+std::optional<gid_t> shared_supplementary_group_for_test()
+{
+  auto const account = current_account_for_test();
+  if (!account)
+    return std::nullopt;
+  int const count = ::getgroups(0, nullptr);
+  if (count <= 0)
+    return std::nullopt;
+  std::vector<gid_t> groups(static_cast<std::size_t>(count));
+  if (::getgroups(count, groups.data()) != count)
+    return std::nullopt;
+  for (gid_t const candidate : groups)
+  {
+    if (candidate == account->second)
+      continue;
+    std::array<char, 16 * 1024> storage{};
+    group record{};
+    group* resolved = nullptr;
+    if (::getgrgid_r(candidate, &record, storage.data(), storage.size(), &resolved) != 0 || !resolved)
+      continue;
+    for (auto const* const* member = resolved->gr_mem; member && *member; ++member)
+    {
+      if (std::string_view(*member) != account->first)
+        return candidate;
+    }
+  }
+  return std::nullopt;
+}
+
+bool set_group_and_mode(std::filesystem::path const& path, gid_t group_id, mode_t mode)
+{
+  return ::chown(path.c_str(), ::geteuid(), group_id) == 0 && ::chmod(path.c_str(), mode) == 0;
+}
+
 void test_compatibility_parser_is_lossless_or_raw_shell()
 {
   auto quoted_backslash = command::CommandIntent::compatibility("external-tool 'a\\b'");
@@ -180,6 +248,118 @@ void test_intent_bounds_and_path_bounds_do_not_underflow()
 
   expect(!too_large && exact && fitting_plan && !oversized_path_plan,
          "bounded argv and PATH accumulation reject overflows without unsigned-underflow bypasses while accepting exact boundaries");
+}
+
+void test_private_primary_group_directories_are_accepted()
+{
+  auto const private_group = private_primary_group_for_test();
+  if (!private_group)
+    return;
+
+  CommandFixture fixture("private-primary-group");
+  fixture.executable("pwd");
+  bool const configured = set_group_and_mode(fixture.root, *private_group, S_IRWXU | S_IRGRP | S_IWGRP | S_IXGRP) &&
+                          set_group_and_mode(fixture.workspace, *private_group, S_IRWXU | S_IRWXG) &&
+                          set_group_and_mode(fixture.workspace / "nested", *private_group, S_IRWXU | S_IRGRP | S_IWGRP | S_IXGRP) &&
+                          set_group_and_mode(fixture.bin, *private_group, S_IRWXU | S_IRGRP | S_IWGRP | S_IXGRP);
+  expect(configured, "private-primary-group fixture changes directory group and modes");
+  if (!configured)
+    return;
+
+  auto const workspace_0770 = command::seal_command_plan(*command::CommandIntent::structured({"pwd"}), fixture.options());
+  auto const cwd_0775 = command::seal_command_plan(*command::CommandIntent::structured({"pwd"}, "nested"), fixture.options());
+  ::chmod(fixture.workspace.c_str(), S_IRWXU | S_IRGRP | S_IWGRP | S_IXGRP);
+  auto const prepared_0775 = command::prepare_command(*command::CommandIntent::structured({"pwd"}), fixture.options());
+  auto const fresh = prepared_0775 ? command::plan_is_fresh(prepared_0775->plan())
+                                   : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no private-group plan"))};
+
+  expect(workspace_0770 && cwd_0775 && prepared_0775 && fresh && *fresh,
+         "owner/private-primary-group 0770 and 0775 workspace, cwd, PATH, and ancestor directories seal a normal pwd plan");
+}
+
+void test_world_writable_directories_are_rejected()
+{
+  CommandFixture final_fixture("world-writable-final");
+  final_fixture.executable("pwd");
+  ::chmod(final_fixture.workspace.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+  auto const unsafe_final = command::seal_command_plan(*command::CommandIntent::structured({"pwd"}), final_fixture.options());
+
+  CommandFixture ancestor_fixture("world-writable-ancestor");
+  ancestor_fixture.executable("pwd");
+  ::chmod(ancestor_fixture.root.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+  auto const unsafe_ancestor = command::seal_command_plan(*command::CommandIntent::structured({"pwd"}), ancestor_fixture.options());
+
+  expect(!unsafe_final && !unsafe_ancestor, "world-writable final workspace and captured ancestors are rejected");
+}
+
+void test_shared_supplementary_group_directories_are_rejected()
+{
+  auto const shared_group = shared_supplementary_group_for_test();
+  if (!shared_group)
+    return;
+
+  CommandFixture fixture("shared-supplementary-group");
+  fixture.executable("pwd");
+  bool const configured =
+      set_group_and_mode(fixture.workspace, *shared_group, S_IRWXU | S_IRWXG) && set_group_and_mode(fixture.root, *shared_group, S_IRWXU | S_IRWXG);
+  expect(configured, "shared supplementary-group fixture changes directory group and modes");
+  if (!configured)
+    return;
+
+  auto const plan = command::seal_command_plan(*command::CommandIntent::structured({"pwd"}), fixture.options());
+  expect(!plan, "writable shared supplementary-group workspace and captured ancestor are rejected");
+}
+
+void test_group_changes_invalidate_sealed_plans()
+{
+  auto const shared_group = shared_supplementary_group_for_test();
+  if (!shared_group)
+    return;
+
+  CommandFixture fixture("group-freshness");
+  fixture.executable("pwd");
+  ::chmod(fixture.workspace.c_str(), S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+  auto const before = command::seal_command_plan(*command::CommandIntent::structured({"pwd"}), fixture.options());
+  bool const changed = ::chown(fixture.workspace.c_str(), ::geteuid(), *shared_group) == 0;
+  expect(changed, "group-freshness fixture changes workspace group");
+  if (!changed)
+    return;
+  auto const stale = before ? command::plan_is_fresh(*before)
+                            : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no group-freshness plan"))};
+  auto const after = command::seal_command_plan(*command::CommandIntent::structured({"pwd"}), fixture.options());
+
+  expect(before && stale && !*stale && after && before->fingerprint() != after->fingerprint(),
+         "workspace group metadata changes invalidate freshness and fingerprint identity");
+}
+
+void test_known_toolchain_symlink_aliases_keep_invoked_family()
+{
+  CommandFixture fixture("toolchain-symlink-aliases");
+  fixture.executable("rustup");
+  fixture.executable("npm-cli.js");
+  std::filesystem::create_symlink("rustup", fixture.bin / "cargo");
+  std::filesystem::create_symlink("npm-cli.js", fixture.bin / "npm");
+
+  auto const bare_cargo = command::seal_command_plan(*command::CommandIntent::structured({"cargo", "check"}), fixture.options());
+  auto const absolute_cargo = command::seal_command_plan(*command::CommandIntent::structured({(fixture.bin / "cargo").string(), "check"}), fixture.options());
+  auto const npm = command::seal_command_plan(*command::CommandIntent::structured({"npm", "run", "test"}), fixture.options());
+
+  auto const is_recipe = [](ava::core::Result<command::CommandPlan> const& plan, command::CommandRecipe expected) {
+    return plan && plan->classification().level == command::CommandLevel::Standard && plan->classification().recipe &&
+           plan->classification().recipe->recipe == expected;
+  };
+  ava::permissions::CommandContainmentInfo const contained{.available = true, .profile_id = "ava-development-v1", .network_allowed = false};
+  auto const cargo_permission = bare_cargo ? ava::permissions::decide(ava::permissions::command_permission_metadata(*bare_cargo, contained))
+                                           : ava::permissions::PermissionDecision{.action = ava::permissions::PermissionAction::Ask, .reason = {}};
+  expect(is_recipe(bare_cargo, command::CommandRecipe::CargoCheck) && is_recipe(absolute_cargo, command::CommandRecipe::CargoCheck) &&
+             is_recipe(npm, command::CommandRecipe::PackageManagerRunScript) && bare_cargo->resolved_executable() &&
+             bare_cargo->resolved_executable()->executable.canonical_path.filename() == "rustup" && npm->resolved_executable() &&
+             npm->resolved_executable()->executable.canonical_path.filename() == "npm-cli.js" &&
+             bare_cargo->classification().recipe->canonical_argv == absolute_cargo->classification().recipe->canonical_argv &&
+             cargo_permission.action == ava::permissions::PermissionAction::Allow,
+         "known symlinked cargo/npm toolchain aliases classify by the invoked family while identity and recipe argv bind their canonical target and contained "
+         "cargo "
+         "check requires no prompt");
 }
 
 void test_workspace_spoofs_are_not_inspection_recipes()
@@ -425,12 +605,77 @@ void test_environment_is_synthetic_and_digest_bound()
   auto path = prepared ? environment_value(prepared->environment(), "PATH") : std::nullopt;
   expect(prepared && prepared->plan().resolved_executable() && prepared->plan().resolved_executable()->origin == command::ExecutableOrigin::User && home &&
              *home == fixture.synthetic_home.string() && *home != fixture.trusted_home.string() && path && path->find(user_bin.string()) != std::string::npos &&
-             prepared->plan().environment_digest().starts_with("sha256:ava-command-environment-v1:") &&
+             prepared->plan().environment_digest().starts_with("sha256:ava-command-environment-v2:") &&
              prepared->plan().display_json().find(fixture.synthetic_home.string()) == std::string::npos && changed_environment &&
              changed_environment->environment_digest() != prepared->plan().environment_digest() &&
              changed_environment->fingerprint() != prepared->plan().fingerprint() && !overlapping_root,
          "trusted host toolchain discovery is separate from synthetic child roots and a versioned SHA-256 environment digest binds exact environment content "
          "to plans");
+}
+
+void test_rustup_home_is_optional_sealed_and_bound()
+{
+  CommandFixture fixture("rustup-home");
+  fixture.executable("pwd");
+  ScopedEnvVar const inherited_rustup("RUSTUP_HOME", (fixture.root / "inherited-rustup").string());
+  auto const intent = command::CommandIntent::structured({"pwd"});
+  auto const absent = command::prepare_command(*intent, fixture.options("rustup-profile"));
+
+  auto const rustup_home = fixture.trusted_home / ".rustup";
+  std::filesystem::create_directories(rustup_home);
+  ::chmod(rustup_home.c_str(), S_IRWXU);
+  auto const sealed = command::prepare_command(*intent, fixture.options("rustup-profile"));
+  auto const rustup = sealed ? environment_value(sealed->environment(), "RUSTUP_HOME") : std::nullopt;
+  auto const cargo = sealed ? environment_value(sealed->environment(), "CARGO_HOME") : std::nullopt;
+  auto const before_fresh = sealed ? command::plan_is_fresh(sealed->plan())
+                                   : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no rustup plan"))};
+
+  ::chmod(rustup_home.c_str(), S_IRWXU | S_IRGRP | S_IXGRP);
+  auto const stale = sealed ? command::plan_is_fresh(sealed->plan())
+                            : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no rustup plan"))};
+  auto const resealed = command::prepare_command(*intent, fixture.options("rustup-profile"));
+
+  CommandFixture unsafe_fixture("rustup-unsafe");
+  unsafe_fixture.executable("pwd");
+  std::filesystem::create_directories(unsafe_fixture.trusted_home / ".rustup");
+  ::chmod((unsafe_fixture.trusted_home / ".rustup").c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+  auto const unsafe = command::seal_command_plan(*intent, unsafe_fixture.options());
+
+  CommandFixture symlink_fixture("rustup-symlink");
+  symlink_fixture.executable("pwd");
+  auto const symlink_target = symlink_fixture.root / "rustup-target";
+  std::filesystem::create_directories(symlink_target);
+  ::chmod(symlink_target.c_str(), S_IRWXU);
+  std::filesystem::create_directory_symlink(symlink_target, symlink_fixture.trusted_home / ".rustup");
+  auto const symlinked = command::seal_command_plan(*intent, symlink_fixture.options());
+
+  auto overlapping_options = fixture.options();
+  overlapping_options.workspace = rustup_home;
+  auto const workspace_overlap = command::seal_command_plan(*intent, overlapping_options);
+  auto authority_overlap_options = fixture.options();
+  authority_overlap_options.ava_authority_roots = {rustup_home};
+  auto const authority_overlap = command::seal_command_plan(*intent, authority_overlap_options);
+
+  bool private_primary_group_accepted = true;
+  if (auto const private_group = private_primary_group_for_test())
+  {
+    CommandFixture private_group_fixture("rustup-private-primary-group");
+    private_group_fixture.executable("pwd");
+    auto const private_rustup = private_group_fixture.trusted_home / ".rustup";
+    std::filesystem::create_directories(private_rustup);
+    private_primary_group_accepted =
+        set_group_and_mode(private_rustup, *private_group, S_IRWXU | S_IRWXG) && command::prepare_command(*intent, private_group_fixture.options()).has_value();
+  }
+
+  expect(absent && !environment_value(absent->environment(), "RUSTUP_HOME") && sealed && sealed->plan().rustup_home_metadata() &&
+             sealed->environment().rustup_home_metadata() == sealed->plan().rustup_home_metadata() && rustup && *rustup == rustup_home.string() && !cargo &&
+             sealed->plan().display_json().find(rustup_home.string()) == std::string::npos &&
+             sealed->plan().redacted_summary().find(rustup_home.string()) == std::string::npos && before_fresh && *before_fresh && stale && !*stale &&
+             resealed && sealed->environment().digest() != resealed->environment().digest() && sealed->plan().fingerprint() != resealed->plan().fingerprint() &&
+             *sealed != *resealed && !unsafe && !symlinked && !workspace_overlap && !authority_overlap && private_primary_group_accepted,
+         "only a safe sealed trusted-home .rustup root adds RUSTUP_HOME (never inherited RUSTUP_HOME or CARGO_HOME), keeps its value out of diagnostics, binds "
+         "environment/plan metadata and freshness, accepts the verified private-primary-group exception, and fails closed for unsafe, symlinked, or "
+         "overlapping roots");
 }
 
 void test_synthetic_environment_roots_are_sealed_and_fresh()
@@ -764,7 +1009,7 @@ void test_unsafe_executables_and_ancestors_are_rejected_without_blocking()
 
   auto const unsafe_dir = fixture.root / "unsafe-ancestor";
   fixture.executable_in(unsafe_dir, "ancestor-tool");
-  ::chmod(unsafe_dir.c_str(), S_IRWXU | S_IWGRP);
+  ::chmod(unsafe_dir.c_str(), S_IRWXU | S_IRWXO);
   auto ancestor_options = fixture.options();
   ancestor_options.startup_path = unsafe_dir.string();
   auto unsafe_ancestor = command::seal_command_plan(*command::CommandIntent::structured({"ancestor-tool"}), ancestor_options);
@@ -840,12 +1085,18 @@ void run_command_tests()
   test_compatibility_parser_is_lossless_or_raw_shell();
   test_compatibility_shell_words_are_critical_raw_shell();
   test_intent_bounds_and_path_bounds_do_not_underflow();
+  test_private_primary_group_directories_are_accepted();
+  test_world_writable_directories_are_rejected();
+  test_shared_supplementary_group_directories_are_rejected();
+  test_group_changes_invalidate_sealed_plans();
+  test_known_toolchain_symlink_aliases_keep_invoked_family();
   test_workspace_spoofs_are_not_inspection_recipes();
   test_recipe_paths_are_canonical_sealed_and_fresh();
   test_sealed_freshness_and_symlink_provenance();
   test_workspace_cwd_path_and_interpreter_freshness();
   test_raw_shell_binds_configured_shell_and_accepts_env_shebang();
   test_environment_is_synthetic_and_digest_bound();
+  test_rustup_home_is_optional_sealed_and_bound();
   test_synthetic_environment_roots_are_sealed_and_fresh();
   test_capabilities_scopes_and_standard_recipes();
   test_workspace_origin_capabilities_apply_to_every_family();

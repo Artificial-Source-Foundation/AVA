@@ -12,8 +12,8 @@ class EnvironmentFactory final
   // The private passkey makes this internal construction API uncallable by
   // consumers even if they can physically include this detail header.
   [[nodiscard]] static ava::core::Result<CommandEnvironment> make(CommandEnvironmentOptions const& options, std::vector<CommandPathEntry> const& path_entries,
-                                                                  SyntheticEnvironmentRoots roots, CommandLimits const& limits,
-                                                                  CommandEnvironment::FactoryPasskey passkey);
+                                                                  SyntheticEnvironmentRoots roots, std::optional<PathMetadata> rustup_home_metadata,
+                                                                  CommandLimits const& limits, CommandEnvironment::FactoryPasskey passkey);
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <initializer_list>
 #include <optional>
 #include <string_view>
 #include <thread>
@@ -72,6 +73,67 @@ ava::core::Error errno_error(std::string message)
   return error;
 }
 
+ssize_t read_retry(int fd, void* data, std::size_t size);
+
+bool matches_sealed_executable(struct stat const& status, ava::command::ExecutableMetadata const& sealed) noexcept
+{
+  return S_ISREG(status.st_mode) && static_cast<std::uintmax_t>(status.st_dev) == sealed.device && static_cast<std::uintmax_t>(status.st_ino) == sealed.inode &&
+         static_cast<std::uintmax_t>(status.st_mode) == sealed.mode && static_cast<std::uintmax_t>(status.st_size) == sealed.size &&
+         static_cast<std::uintmax_t>(status.st_uid) == sealed.owner && static_cast<std::uintmax_t>(status.st_gid) == sealed.group &&
+         static_cast<std::uintmax_t>(status.st_nlink) == sealed.link_count && static_cast<std::int64_t>(status.st_ctim.tv_sec) == sealed.changed_seconds &&
+         static_cast<std::int64_t>(status.st_ctim.tv_nsec) == sealed.changed_nanoseconds;
+}
+
+ava::core::Result<UniqueFd> open_approved_executable(ava::command::ExecutableMetadata const& sealed)
+{
+  // Open the canonical final component only after approval. O_NONBLOCK makes
+  // this fail promptly if a pathname was replaced by a special file; O_NOFOLLOW
+  // rejects a replacement symlink. The resulting descriptor, not this path,
+  // is the authority passed to exec.
+  UniqueFd executable_fd(::open(sealed.canonical_path.c_str(), O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC));
+  if (executable_fd.get() < 0)
+  {
+    auto error =
+        ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "approved executable could not be opened safely; prepare and approve a new command");
+    error.with_context("cause", std::strerror(errno));
+    return std::unexpected(std::move(error));
+  }
+  struct stat status{};
+  if (::fstat(executable_fd.get(), &status) != 0)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "approved executable descriptor could not be inspected; prepare and approve a new command");
+    error.with_context("cause", std::strerror(errno));
+    return std::unexpected(std::move(error));
+  }
+  if (!matches_sealed_executable(status, sealed))
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "approved executable changed after permission; prepare and approve a new command"));
+  }
+  return executable_fd;
+}
+
+ava::core::Result<std::optional<int>> child_descriptor_exec_failure(int status_fd)
+{
+  int child_errno = 0;
+  auto const bytes = read_retry(status_fd, &child_errno, sizeof(child_errno));
+  if (bytes == 0)
+    return std::optional<int>{};
+  if (bytes != static_cast<ssize_t>(sizeof(child_errno)) || child_errno == 0)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "sealed command child reported an invalid descriptor-exec status"));
+  }
+  return std::optional<int>{child_errno};
+}
+
+ava::core::Error descriptor_exec_error(int error_number)
+{
+  auto error =
+      ava::core::Error(ava::core::ErrorCategory::Io, "approved executable could not start from its bound descriptor; prepare and approve a new command");
+  error.with_context("cause", std::strerror(error_number));
+  return error;
+}
+
 ssize_t read_retry(int fd, void* data, std::size_t size)
 {
   while (true)
@@ -119,11 +181,16 @@ ava::core::Result<std::array<int, 2>> make_pipe_cloexec()
   return pipe_fds;
 }
 
-void close_nonstandard_fds()
+void close_nonstandard_fds_except(std::initializer_list<int> keep_fds)
 {
   long const open_max = ::sysconf(_SC_OPEN_MAX);
   int const max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
-  for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) static_cast<void>(::close(fd));
+  for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd)
+  {
+    if (std::ranges::find(keep_fds, fd) != keep_fds.end())
+      continue;
+    static_cast<void>(::close(fd));
+  }
 }
 
 bool reset_child_signal_state()
@@ -583,10 +650,10 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
 {
   if (command.empty())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "command must not be empty"));
-  if (!ava::command::command_mode_is_prompt_only(context.command_runtime))
+  if (!ava::command::command_mode_is_enabled(context.command_runtime))
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                            "local sealed bash execution is available only in explicit PromptOnly runtime mode during this milestone"));
+                                            "local sealed bash execution requires the Enabled command runtime mode; Legacy and PromptOnly do not execute"));
   }
 
   auto synthetic = SyntheticEnvironmentRoot::create();
@@ -595,7 +662,9 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   auto build_options = local_command_build_options(context, *synthetic);
   if (!build_options)
     return std::unexpected(std::move(build_options.error()));
-  auto intent = ava::command::CommandIntent::compatibility(std::string(command), build_options->limits);
+  auto intent = options.invocation_source == BashOptions::InvocationSource::UserRawShell
+                    ? ava::command::CommandIntent::raw_shell(std::string(command), build_options->limits)
+                    : ava::command::CommandIntent::compatibility(std::string(command), build_options->limits);
   if (!intent)
     return std::unexpected(std::move(intent.error()));
   // Prepare exactly once, before permission. The scoped synthetic root remains
@@ -681,11 +750,10 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     process_outcome = "canceled";
     return result;
   }
-  if (auto started = announce_tool_execution_start(context); !started)
-    return std::unexpected(std::move(started.error()));
-
   if (context.command_executor)
   {
+    if (auto started = announce_tool_execution_start(context); !started)
+      return std::unexpected(std::move(started.error()));
     auto permission_metadata = ava::permissions::command_permission_metadata(preparation->plan(), true);
     auto executed = context.command_executor->execute(CommandExecutionRequest{
         .argv = std::move(*argv_strings),
@@ -754,6 +822,17 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
         ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "sealed command plan is stale; prepare a new command under a fresh permission decision"));
   }
 
+  auto executable_fd = open_approved_executable(preparation->plan().resolved_executable()->executable);
+  if (!executable_fd)
+    return std::unexpected(std::move(executable_fd.error()));
+  bool const executable_is_script = !preparation->plan().resolved_executable()->shebang_interpreters.empty();
+
+  // This notification is the strict adapter's existing execution boundary.
+  // The approved descriptor is already held, so a namespace replacement after
+  // this point cannot redirect execution to a different executable.
+  if (auto started = announce_tool_execution_start(context); !started)
+    return std::unexpected(std::move(started.error()));
+
   std::vector<char*> argv;
   argv.reserve(argv_strings->size() + 1);
   for (auto& argument : *argv_strings) argv.push_back(argument.data());
@@ -765,7 +844,6 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   environment.reserve(environment_strings.size() + 1);
   for (auto& entry : environment_strings) environment.push_back(entry.data());
   environment.push_back(nullptr);
-  auto const executable = preparation->plan().resolved_executable()->executable.canonical_path.string();
   auto const cwd = preparation->plan().cwd().string();
 
   auto output_pipe = make_pipe_cloexec();
@@ -828,6 +906,8 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     if (null_input.get() < 0 || ::dup2(null_input.get(), STDIN_FILENO) < 0 || ::dup2(write_fd.get(), STDOUT_FILENO) < 0 ||
         ::dup2(write_fd.get(), STDERR_FILENO) < 0 || ::chdir(cwd.c_str()) != 0)
     {
+      int const before_exec_error = errno == 0 ? EIO : errno;
+      static_cast<void>(write_retry(status_write.get(), &before_exec_error, sizeof(before_exec_error)));
       _exit(127);
     }
     write_fd.reset();
@@ -835,9 +915,10 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
       null_input.reset();
     if (containment_available)
     {
-      // Close inherited non-stdio FDs except the containment handshake
-      // pipes so no inherited socket can bypass the seccomp filter.
-      ava::containment::close_inherited_fds_except(status_write.get(), control_read.get());
+      // Close inherited non-stdio FDs except the containment handshake and
+      // approved executable descriptors so no inherited socket can bypass the
+      // seccomp filter before descriptor exec.
+      ava::containment::close_inherited_fds_except(status_write.get(), control_read.get(), executable_fd->get());
       int containment_status = 0;
       if (auto containment_result = ava::containment::apply_containment_in_child(*containment_plan); !containment_result)
         containment_status = errno == 0 ? EIO : errno;
@@ -847,17 +928,32 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
       char final_release = '\0';
       if (read_retry(control_read.get(), &final_release, 1) != 1 || final_release != 'X')
         _exit(127);
-      status_write.reset();
       control_read.reset();
-      close_nonstandard_fds();
+      close_nonstandard_fds_except({status_write.get(), executable_fd->get()});
     }
     else
     {
       control_read.reset();
-      status_write.reset();
-      close_nonstandard_fds();
+      close_nonstandard_fds_except({status_write.get(), executable_fd->get()});
     }
-    ::execve(executable.c_str(), argv.data(), environment.data());
+    // fexecve closes the approved descriptor for regular binaries because it
+    // remains CLOEXEC. Linux cannot run a shebang script if its source
+    // descriptor is CLOEXEC, so clear that bit only in this child immediately
+    // before descriptor exec; the sealed source descriptor remains its sole
+    // authority and no pathname fallback is permitted.
+    if (executable_is_script)
+    {
+      int const descriptor_flags = ::fcntl(executable_fd->get(), F_GETFD);
+      if (descriptor_flags < 0 || ::fcntl(executable_fd->get(), F_SETFD, descriptor_flags & ~FD_CLOEXEC) != 0)
+      {
+        int const descriptor_error = errno == 0 ? EIO : errno;
+        static_cast<void>(write_retry(status_write.get(), &descriptor_error, sizeof(descriptor_error)));
+        _exit(127);
+      }
+    }
+    ::fexecve(executable_fd->get(), argv.data(), environment.data());
+    int const descriptor_error = errno == 0 ? EIO : errno;
+    static_cast<void>(write_retry(status_write.get(), &descriptor_error, sizeof(descriptor_error)));
     _exit(127);
   }
 
@@ -888,8 +984,6 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     return std::unexpected(poll_result == 0 ? ava::core::Error(ava::core::ErrorCategory::Io, "sealed command process-group setup timed out")
                                             : errno_error("sealed command process-group setup failed"));
   }
-  if (!containment_available)
-    status_read.reset();
   pid_t const observed_pgid = ::getpgid(pid);
   bool const group_verified = gate_status == 0 && observed_pgid == pid && (parent_setpgid || observed_pgid == pid) && ::kill(-pid, 0) == 0;
   if (!group_verified)
@@ -919,6 +1013,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     control_read.reset();
     control_write.reset();
     sentinel_read.reset();
+    executable_fd->reset();
     // The TUI installs process-level handlers. The sentinel is an internal
     // supervisor child and must retain default termination behavior so the
     // verified group can leave during the finite TERM grace period.
@@ -931,7 +1026,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     char const ack = 'S';
     static_cast<void>(write_retry(sentinel_write.get(), &ack, 1));
     sentinel_write.reset();
-    close_nonstandard_fds();
+    close_nonstandard_fds_except({});
     // The sentinel keeps the verified group identity from being recycled
     // between leader completion and descendant cleanup. It never execs user
     // code and has no stdio or control descriptors.
@@ -975,7 +1070,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   {
     // Containment handshake: the child applies Landlock + seccomp after
     // stdio/cwd setup and reports success/failure before exec. The parent
-    // must acknowledge success before the child proceeds to execve.
+    // must acknowledge success before the child proceeds to descriptor exec.
     pollfd containment_poll{.fd = status_read.get(), .events = POLLIN, .revents = 0};
     int containment_poll_result = 0;
     do
@@ -1011,9 +1106,8 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
       static_cast<void>(terminate_verified_group(pid, pid, sentinel_pid, cleanup_status, cleanup_leader_reaped, cleanup_sentinel_reaped));
       return std::unexpected(errno_error("failed to release sealed command process after containment"));
     }
-    status_read.reset();
     control_write.reset();
-    // Containment was successfully applied in the child before exec. Report
+    // Containment was successfully applied in the child before descriptor exec. Report
     // this only after parent verification, never in pre-permission metadata.
     result.containment_applied = true;
     result.containment_profile_id = containment_plan->profile_id;
@@ -1129,6 +1223,12 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
       return std::unexpected(std::move(progress.error()));
   }
   read_fd.reset();
+  auto descriptor_failure = child_descriptor_exec_failure(status_read.get());
+  status_read.reset();
+  if (!descriptor_failure)
+    return std::unexpected(std::move(descriptor_failure.error()));
+  if (*descriptor_failure)
+    return std::unexpected(descriptor_exec_error(**descriptor_failure));
 
   if (result.timed_out || result.canceled)
     result.exit_code = -1;

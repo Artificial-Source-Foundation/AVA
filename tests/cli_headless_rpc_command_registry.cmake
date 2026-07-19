@@ -36,6 +36,7 @@ string(REPLACE "\"" "\\\"" FAKE_MCP_SERVER_JSON "${FAKE_MCP_SERVER_JSON}")
 file(REMOVE_RECURSE "${TEST_ROOT}")
 file(MAKE_DIRECTORY "${WORKSPACE}/.ava/commands" "${WORKSPACE}/.ava/skills/release" "${HOME_DIR}"
                     "${CONFIG_DIR}/ava" "${STATE_DIR}/ava" "${DATA_DIR}")
+file(CHMOD "${CONFIG_DIR}/ava" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 file(REAL_PATH "${WORKSPACE}" REAL_WORKSPACE)
 file(WRITE "${STATE_DIR}/ava/project-trust.json"
      "{\"schema_version\":1,\"decisions\":[{\"path\":\"${REAL_WORKSPACE}\",\"trusted\":true}]}\n")

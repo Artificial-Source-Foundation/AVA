@@ -48,6 +48,7 @@ struct RunOptions
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
   ava::agent::SessionAppendSink active_append_route = nullptr;
+  ava::agent::SessionAppendBatchSink active_append_batch_route = nullptr;
   std::mutex* session_mutex = nullptr;
   std::vector<ava::session::ImageAttachmentRef> image_attachments;
   // Disabled by default; observation data never enters events, sessions, or RPC output.

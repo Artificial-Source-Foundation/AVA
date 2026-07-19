@@ -1,11 +1,15 @@
 #include "sys.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/session_run_controller.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
+#include "ava/session/assistant_output.h"
 #include "ava/session/session_store.h"
+#include "ava/session/validation.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider.h"
+#include "ava/core/json.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -78,6 +82,7 @@ void test_agent_loop_cancellation_boundaries()
         .access_token = "token",
         .cancel_requested = [] { return true; },
         .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("cancel now", store, provider, transport);
@@ -121,6 +126,7 @@ void test_agent_loop_cancellation_boundaries()
               return cancel_checks >= 2;
             },
         .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("cancel before provider", store, provider, transport);
@@ -162,24 +168,29 @@ void test_agent_loop_cancellation_boundaries()
         .access_token = "token",
         .cancel_requested = [&cancel] { return cancel; },
         .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("read then cancel", store, provider, transport);
     auto entries = store.load();
     bool saw_tool_entry = false;
+    bool saw_v4_output = false;
     bool saw_cancel = false;
     if (entries)
     {
       for (auto const& entry : *entries)
       {
         saw_tool_entry = saw_tool_entry || entry.type == ava::session::EntryType::ToolCall || entry.type == ava::session::EntryType::ToolResult;
+        saw_v4_output =
+            saw_v4_output || entry.type == ava::session::EntryType::AssistantOutputItem || entry.type == ava::session::EntryType::AssistantTurnCommit;
         saw_cancel = saw_cancel || (entry.type == ava::session::EntryType::Cancel && (entry.data_json.find("before_tool_dispatch") != std::string::npos ||
                                                                                       entry.data_json.find("during_provider_request") != std::string::npos ||
                                                                                       entry.data_json.find("after_provider_call") != std::string::npos));
       }
     }
-    expect(!result && result.error().message() == "agent loop canceled" && transport.requests().size() == 1 && entries && saw_cancel && !saw_tool_entry,
-           "agent loop cancellation before tool dispatch avoids tool call/result entries");
+    expect(!result && result.error().message() == "agent loop canceled" && transport.requests().size() == 1 && entries && saw_cancel && !saw_tool_entry &&
+               !saw_v4_output,
+           "cancellation before the assistant batch writes no v4 staging or commit records");
   }
 
   {
@@ -225,6 +236,7 @@ void test_agent_loop_cancellation_boundaries()
               return bash_cancel_checks >= 3;
             },
         .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("sleep then cancel", store, provider, transport);
@@ -241,6 +253,58 @@ void test_agent_loop_cancellation_boundaries()
     expect(
         !result && result.error().message() == "agent loop canceled" && transport.requests().size() == 1 && saw_canceled_tool_result && saw_after_tool_cancel,
         "agent loop propagates cancellation into bash tools and persists a canceled tool result");
+  }
+
+  {
+    auto const root = temp_root() / "agent-cancel-after-committed-before-first-tool";
+    std::error_code remove_error;
+    std::filesystem::remove_all(root, remove_error);
+    auto const workspace = root / "workspace";
+    std::filesystem::create_directories(workspace);
+    ava::session::SessionStore store(
+        ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "cancel-after-commit"});
+    ava::tests::FakeTransport transport({sse_response(
+        "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_unstarted\",\"name\":\"read_file\"}\n\n"
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_unstarted\",\"delta\":\"{\\\"path\\\":\\\"never-read.txt\\\"}\"}\n\n"
+        "data: [DONE]\n\n")});
+    bool cancel = false;
+    std::size_t tool_events = 0;
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .provider_id = "openai",
+        .model_id = "gpt-5.5",
+        .system_prompt = "system prompt",
+        .access_token = "token",
+        .on_tool_event = [&tool_events](ava::agent::ToolTimelineEntry const&) { ++tool_events; },
+        .cancel_requested = [&cancel] { return cancel; },
+        .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
+        .on_phase = [&cancel](ava::agent::RunPhase phase) -> ava::core::VoidResult {
+          if (phase == ava::agent::RunPhase::PreparingTools)
+            cancel = true;
+          return {};
+        },
+    });
+    auto result = loop.run_turn("cancel after assistant commit", store, provider, transport);
+    auto entries = store.load();
+    std::size_t functions = 0;
+    std::size_t bound_canceled_results = 0;
+    if (entries)
+    {
+      auto projection = ava::session::classify_assistant_output(*entries);
+      for (auto const& turn : projection.turns)
+        for (auto const& item : turn.items) functions += std::holds_alternative<ava::session::AssistantOutputFunctionCall>(item.item.payload);
+      for (auto const& entry : *entries)
+        bound_canceled_results += entry.type == ava::session::EntryType::ToolResult && entry.data_json.find("call_unstarted") != std::string::npos &&
+                                  entry.data_json.find("\"status\":\"canceled\"") != std::string::npos &&
+                                  entry.data_json.find("execution_outcome_unknown") != std::string::npos;
+    }
+    auto validation = entries ? ava::session::validate_session_replay(*entries) : ava::session::SessionReplayValidation{};
+    expect(!result && result.error().message() == "agent loop canceled" && entries && functions == 1 && bound_canceled_results == 1 && tool_events == 0 &&
+               validation.ok(),
+           "cancellation after a v4 commit but before first dispatch closes its exact binding without executing the tool");
   }
 }
 
@@ -265,6 +329,7 @@ void test_agent_loop_error_paths_and_bounds()
         .system_prompt = "system prompt",
         .access_token = "token",
         .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
@@ -288,6 +353,7 @@ void test_agent_loop_error_paths_and_bounds()
         .system_prompt = "system prompt",
         .access_token = "token",
         .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
@@ -311,6 +377,7 @@ void test_agent_loop_error_paths_and_bounds()
         .system_prompt = "system prompt",
         .access_token = "token",
         .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
@@ -336,6 +403,7 @@ void test_agent_loop_error_paths_and_bounds()
         .access_token = "token",
         .max_provider_events = 1,
         .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
@@ -361,6 +429,7 @@ void test_agent_loop_error_paths_and_bounds()
         .access_token = "token",
         .max_assistant_text_bytes = 3,
         .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
@@ -389,6 +458,7 @@ void test_agent_loop_error_paths_and_bounds()
         .access_token = "token",
         .max_tool_argument_bytes = 5,
         .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
@@ -414,6 +484,7 @@ void test_agent_loop_error_paths_and_bounds()
         .system_prompt = "system prompt",
         .access_token = "token",
         .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("bad id", store, provider, transport);
@@ -427,6 +498,72 @@ void test_agent_loop_error_paths_and_bounds()
     }
     expect(!result && result.error().message().find("control byte") != std::string::npos && entries && !saw_tool_entry,
            "agent loop rejects provider tool call ids with control bytes before session or timeline use");
+  }
+
+  {
+    auto const root = temp_root() / "agent-result-append-failure";
+    std::error_code remove_error;
+    std::filesystem::remove_all(root, remove_error);
+    auto const workspace = root / "workspace";
+    std::filesystem::create_directories(workspace);
+    auto store = ava::session::SessionStore::create(workspace, root / "sessions");
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    auto authority = lease ? ava::session::SessionReadAuthority::create_persistent(*store, *lease)
+                           : ava::core::Result<ava::session::SessionReadAuthority>(std::unexpected(lease.error()));
+    if (store && lease && authority)
+    {
+      std::size_t writes = 0;
+      store->set_append_write_for_test([&writes](int fd, std::string_view bytes) -> ssize_t {
+        if (writes++ < 3)
+          return ::write(fd, bytes.data(), bytes.size());
+        errno = EIO;
+        return -1;
+      });
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      if (!target)
+      {
+        expect(false, "result-append-failure fixture creates a persistent append target after installing its write seam");
+      }
+      else
+      {
+        ava::app::SessionRunController controller(std::move(*target));
+        ava::tests::FakeTransport transport({sse_response(
+            "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_result_failure\",\"name\":\"read_file\"}\n\n"
+            "data: "
+            "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_result_failure\",\"delta\":\"{\\\"path\\\":\\\"missing.txt\\\"}\"}\n\n"
+            "data: [DONE]\n\n")});
+        ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                                .mode = ava::agent::Mode::Build,
+                                                                .provider_id = "openai",
+                                                                .model_id = "gpt-5.5",
+                                                                .system_prompt = "system prompt",
+                                                                .access_token = "token",
+                                                                .append_entry = controller.owner_append_route(),
+                                                                .append_batch = controller.owner_append_batch_route(),
+                                                                .session_read_authority = *authority});
+        auto result = loop.run_turn("force result append failure", *store, provider, transport);
+        auto blocked = controller.append(ava::session::SessionEntry{.id = "blocked-after-tool-result-failure",
+                                                                    .parent_id = "",
+                                                                    .type = ava::session::EntryType::UserMessage,
+                                                                    .timestamp = ava::session::now_timestamp(),
+                                                                    .data_json = "{\"text\":\"blocked\"}"});
+        auto entries = store->load(*lease);
+        std::size_t committed_functions = 0;
+        std::size_t bound_results = 0;
+        if (entries)
+        {
+          auto projection = ava::session::classify_assistant_output(*entries);
+          for (auto const& turn : projection.turns)
+            for (auto const& item : turn.items) committed_functions += std::holds_alternative<ava::session::AssistantOutputFunctionCall>(item.item.payload);
+          for (auto const& entry : *entries)
+            bound_results += entry.type == ava::session::EntryType::ToolResult &&
+                             ava::core::json::field_value_start(entry.data_json, "assistant_output_entry_id").has_value();
+        }
+        expect(!result && !blocked && entries && committed_functions == 1 && bound_results == 0 && writes == 4,
+               "a tool-result append failure leaves the controller latch authoritative while terminal cleanup never re-executes the committed tool");
+      }
+    }
   }
 
   {
@@ -449,6 +586,7 @@ void test_agent_loop_error_paths_and_bounds()
         .system_prompt = "system prompt",
         .access_token = "token",
         .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("long id", store, provider, transport);
@@ -486,6 +624,7 @@ void test_agent_loop_max_iteration_guard()
       .access_token = "token",
       .max_tool_iterations = 2,
       .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("loop", store, provider, transport);

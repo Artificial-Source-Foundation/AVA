@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/command/private_group.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -35,6 +36,7 @@ constexpr std::size_t kMaxPermissionRecipeDisplayBytes = 1024;
 class ScopedFd
 {
  public:
+  ScopedFd() = default;
   explicit ScopedFd(int fd) : fd_(fd) { }
   ScopedFd(ScopedFd const&) = delete;
   ScopedFd& operator=(ScopedFd const&) = delete;
@@ -65,16 +67,19 @@ class ScopedFd
 class TempPathCleanup
 {
  public:
-  explicit TempPathCleanup(std::filesystem::path path) : path_(std::move(path)) { }
+  TempPathCleanup(int parent_fd, std::string name) : parent_fd_(parent_fd), name_(std::move(name)) { }
   TempPathCleanup(TempPathCleanup const&) = delete;
   TempPathCleanup& operator=(TempPathCleanup const&) = delete;
-  TempPathCleanup(TempPathCleanup&& other) noexcept : path_(std::move(other.path_)), active_(std::exchange(other.active_, false)) { }
+  TempPathCleanup(TempPathCleanup&& other) noexcept : parent_fd_(other.parent_fd_), name_(std::move(other.name_)), active_(std::exchange(other.active_, false))
+  {
+  }
   TempPathCleanup& operator=(TempPathCleanup&& other) noexcept
   {
     if (this != &other)
     {
       cleanup();
-      path_ = std::move(other.path_);
+      parent_fd_ = other.parent_fd_;
+      name_ = std::move(other.name_);
       active_ = std::exchange(other.active_, false);
     }
     return *this;
@@ -86,15 +91,27 @@ class TempPathCleanup
  private:
   void cleanup() noexcept
   {
-    if (!active_)
-      return;
-    std::error_code remove_error;
-    std::filesystem::remove(path_, remove_error);
+    if (active_ && parent_fd_ >= 0 && !name_.empty())
+      static_cast<void>(::unlinkat(parent_fd_, name_.c_str(), 0));
     active_ = false;
   }
 
-  std::filesystem::path path_;
+  int parent_fd_ = -1;
+  std::string name_;
   bool active_ = true;
+};
+
+struct RuleDirectory
+{
+  ScopedFd fd;
+  std::filesystem::path path;
+  std::string file_name;
+};
+
+struct RuleLock
+{
+  RuleDirectory directory;
+  ScopedFd fd;
 };
 
 std::string errno_message()
@@ -266,77 +283,201 @@ std::filesystem::path rules_file_path(PermissionRuleStore const& store, Permissi
   return enforceable_permission_rules_file(store, scope);
 }
 
-ava::core::VoidResult ensure_rule_directory(std::filesystem::path const& file_path)
+ava::core::VoidResult validate_rule_file_path(std::filesystem::path const& path)
 {
-  auto const parent = file_path.parent_path();
-  std::error_code mkdir_error;
-  std::filesystem::create_directories(parent, mkdir_error);
-  if (mkdir_error)
+  if (path.empty() || !path.is_absolute() || path.filename().empty() || path.filename() == "." || path.filename() == "..")
   {
-    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to create permission rules directory", parent);
-    error.with_context("cause", mkdir_error.message());
-    return std::unexpected(std::move(error));
+    return std::unexpected(
+        rule_file_error(ava::core::ErrorCategory::InvalidArgument, "permission rules file path must be an absolute path with a regular filename", path));
   }
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(parent, status_error);
-  if (status_error)
+  for (auto const& component : path)
   {
-    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to inspect permission rules directory", parent);
-    error.with_context("cause", status_error.message());
-    return std::unexpected(std::move(error));
+    if (component == "." || component == "..")
+    {
+      return std::unexpected(
+          rule_file_error(ava::core::ErrorCategory::InvalidArgument, "permission rules file path must not contain traversal components", path));
+    }
   }
-  if (std::filesystem::is_symlink(status) || !std::filesystem::is_directory(status))
+  return {};
+}
+
+ava::core::VoidResult validate_rule_ancestor(int fd, std::filesystem::path const& path)
+{
+  struct stat st{};
+  if (::fstat(fd, &st) != 0)
   {
-    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules directory is not a regular directory", parent));
-  }
-  if (::chmod(parent.c_str(), S_IRWXU) != 0)
-  {
-    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to set permission rules directory permissions", parent);
+    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to inspect permission rules path component", path);
     error.with_context("cause", errno_message());
     return std::unexpected(std::move(error));
   }
+  if (!S_ISDIR(st.st_mode))
+    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules path component is not a directory", path));
+  if (st.st_uid != 0 && st.st_uid != ::geteuid())
+    return std::unexpected(
+        rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules path component is not owned by root or the current user", path));
+  bool const shared_sticky_root_namespace = st.st_uid == 0 && (st.st_mode & S_ISVTX) != 0;
+  bool const private_primary_group_directory = ava::command::detail::is_current_user_private_primary_group_directory(st);
+  if ((st.st_mode & (S_IWGRP | S_IWOTH)) != 0 && !shared_sticky_root_namespace && !private_primary_group_directory)
+  {
+    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules path component is group- or world-writable", path));
+  }
   return {};
 }
 
-ava::core::VoidResult reject_unsafe_replace_target(std::filesystem::path const& path)
+ava::core::VoidResult validate_final_rule_directory(int fd, std::filesystem::path const& path)
 {
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (status_error)
+  if (auto safe = validate_rule_ancestor(fd, path); !safe)
+    return safe;
+  struct stat st{};
+  if (::fstat(fd, &st) != 0)
   {
-    if (status_error.default_error_condition() == std::errc::no_such_file_or_directory)
-      return {};
-    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to inspect permission rules file", path);
-    error.with_context("cause", status_error.message());
+    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to inspect permission rules directory", path);
+    error.with_context("cause", errno_message());
     return std::unexpected(std::move(error));
   }
-  if (!std::filesystem::exists(status))
-    return {};
-  if (std::filesystem::is_symlink(status))
+  if (st.st_uid != ::geteuid() || (st.st_mode & 07777) != S_IRWXU)
   {
-    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules file is a symbolic link", path));
-  }
-  if (!std::filesystem::is_regular_file(status))
-  {
-    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules file is not regular", path));
+    auto error =
+        rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules directory must be owned by the current user with exact mode 0700", path);
+    error.with_context("expected_permissions", "0700");
+    return std::unexpected(std::move(error));
   }
   return {};
 }
 
-ava::core::Result<ScopedFd> acquire_rule_lock(std::filesystem::path const& file_path)
+ava::core::Error rule_directory_open_error(std::filesystem::path const& path, int error_number)
 {
-  if (auto ensured = ensure_rule_directory(file_path); !ensured)
-    return std::unexpected(std::move(ensured.error()));
+  auto const category = error_number == ELOOP || error_number == ENOTDIR ? ava::core::ErrorCategory::PermissionDenied : ava::core::ErrorCategory::Io;
+  auto error = rule_file_error(category, "failed to securely open permission rules path component", path);
+  error.with_context("cause", std::strerror(error_number));
+  return error;
+}
 
-  auto const lock_path = file_path.parent_path() / (file_path.filename().string() + ".lock");
-  int flags = O_RDWR | O_CREAT | O_CLOEXEC;
-#ifdef O_NOFOLLOW
-  flags |= O_NOFOLLOW;
-#endif
-  ScopedFd fd(::open(lock_path.c_str(), flags, S_IRUSR | S_IWUSR));
+ava::core::Result<std::optional<RuleDirectory>> open_rule_directory_for_read(std::filesystem::path const& file_path)
+{
+  if (auto valid = validate_rule_file_path(file_path); !valid)
+    return std::unexpected(std::move(valid.error()));
+
+  ScopedFd current(::open("/", O_RDONLY | O_DIRECTORY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC));
+  if (current.get() < 0)
+  {
+    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to open permission rules filesystem anchor", file_path);
+    error.with_context("cause", errno_message());
+    return std::unexpected(std::move(error));
+  }
+  if (auto safe = validate_rule_ancestor(current.get(), "/"); !safe)
+    return std::unexpected(std::move(safe.error()));
+
+  auto const parent = file_path.parent_path();
+  std::filesystem::path component_path("/");
+  for (auto const& component : parent.relative_path())
+  {
+    auto const name = component.string();
+    component_path /= name;
+    int const next = ::openat(current.get(), name.c_str(), O_RDONLY | O_DIRECTORY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+    if (next < 0)
+    {
+      auto const error_number = errno;
+      if (error_number == ENOENT)
+        return std::optional<RuleDirectory>{};
+      return std::unexpected(rule_directory_open_error(component_path, error_number));
+    }
+    ScopedFd opened(next);
+    if (auto safe = validate_rule_ancestor(opened.get(), component_path); !safe)
+      return std::unexpected(std::move(safe.error()));
+    current = std::move(opened);
+  }
+  if (auto safe = validate_final_rule_directory(current.get(), parent); !safe)
+    return std::unexpected(std::move(safe.error()));
+  return std::optional<RuleDirectory>{RuleDirectory{.fd = std::move(current), .path = parent, .file_name = file_path.filename().string()}};
+}
+
+ava::core::Result<RuleDirectory> open_rule_directory_for_write(std::filesystem::path const& file_path)
+{
+  if (auto valid = validate_rule_file_path(file_path); !valid)
+    return std::unexpected(std::move(valid.error()));
+
+  ScopedFd current(::open("/", O_RDONLY | O_DIRECTORY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC));
+  if (current.get() < 0)
+  {
+    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to open permission rules filesystem anchor", file_path);
+    error.with_context("cause", errno_message());
+    return std::unexpected(std::move(error));
+  }
+  if (auto safe = validate_rule_ancestor(current.get(), "/"); !safe)
+    return std::unexpected(std::move(safe.error()));
+
+  auto const parent = file_path.parent_path();
+  std::filesystem::path component_path("/");
+  for (auto const& component : parent.relative_path())
+  {
+    auto const name = component.string();
+    component_path /= name;
+    bool created = false;
+    int next = ::openat(current.get(), name.c_str(), O_RDONLY | O_DIRECTORY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+    if (next < 0 && errno == ENOENT)
+    {
+      if (::mkdirat(current.get(), name.c_str(), S_IRWXU) == 0)
+      {
+        created = true;
+      }
+      else if (errno != EEXIST)
+      {
+        auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to create permission rules path component", component_path);
+        error.with_context("cause", errno_message());
+        return std::unexpected(std::move(error));
+      }
+      next = ::openat(current.get(), name.c_str(), O_RDONLY | O_DIRECTORY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+    }
+    if (next < 0)
+      return std::unexpected(rule_directory_open_error(component_path, errno));
+    ScopedFd opened(next);
+    if (auto safe = validate_rule_ancestor(opened.get(), component_path); !safe)
+      return std::unexpected(std::move(safe.error()));
+    if (created && ::fchmod(opened.get(), S_IRWXU) != 0)
+    {
+      auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to secure newly created permission rules directory", component_path);
+      error.with_context("cause", errno_message());
+      return std::unexpected(std::move(error));
+    }
+    current = std::move(opened);
+  }
+  if (auto safe = validate_final_rule_directory(current.get(), parent); !safe)
+    return std::unexpected(std::move(safe.error()));
+  return RuleDirectory{.fd = std::move(current), .path = parent, .file_name = file_path.filename().string()};
+}
+
+ava::core::VoidResult validate_unsafe_replace_target(RuleDirectory const& directory)
+{
+  struct stat st{};
+  if (::fstatat(directory.fd.get(), directory.file_name.c_str(), &st, AT_SYMLINK_NOFOLLOW) != 0)
+  {
+    if (errno == ENOENT)
+      return {};
+    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to inspect permission rules file", directory.path / directory.file_name);
+    error.with_context("cause", errno_message());
+    return std::unexpected(std::move(error));
+  }
+  if (S_ISLNK(st.st_mode) || !S_ISREG(st.st_mode) || st.st_uid != ::geteuid() || (st.st_mode & 07777) != (S_IRUSR | S_IWUSR))
+  {
+    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied,
+                                           "permission rules file must be a current-user-owned regular file with exact mode 0600",
+                                           directory.path / directory.file_name));
+  }
+  return {};
+}
+
+ava::core::Result<RuleLock> acquire_rule_lock(std::filesystem::path const& file_path)
+{
+  auto directory = open_rule_directory_for_write(file_path);
+  if (!directory)
+    return std::unexpected(std::move(directory.error()));
+
+  auto const lock_name = directory->file_name + ".lock";
+  ScopedFd fd(::openat(directory->fd.get(), lock_name.c_str(), O_RDWR | O_CREAT | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW, S_IRUSR | S_IWUSR));
   if (fd.get() < 0)
   {
-    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to open permission rules lock file", lock_path);
+    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to open permission rules lock file", directory->path / lock_name);
     error.with_context("cause", errno_message());
     return std::unexpected(std::move(error));
   }
@@ -344,17 +485,18 @@ ava::core::Result<ScopedFd> acquire_rule_lock(std::filesystem::path const& file_
   struct stat opened_st{};
   if (::fstat(fd.get(), &opened_st) != 0)
   {
-    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to inspect permission rules lock file", lock_path);
+    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to inspect permission rules lock file", directory->path / lock_name);
     error.with_context("cause", errno_message());
     return std::unexpected(std::move(error));
   }
-  if (!S_ISREG(opened_st.st_mode))
+  if (!S_ISREG(opened_st.st_mode) || opened_st.st_uid != ::geteuid() || (opened_st.st_mode & (S_IRWXG | S_IRWXO)) != 0)
   {
-    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules lock file is not regular", lock_path));
+    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules lock file is not a private current-user regular file",
+                                           directory->path / lock_name));
   }
   if (::fchmod(fd.get(), S_IRUSR | S_IWUSR) != 0)
   {
-    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to set permission rules lock permissions", lock_path);
+    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to set permission rules lock permissions", directory->path / lock_name);
     error.with_context("cause", errno_message());
     return std::unexpected(std::move(error));
   }
@@ -362,11 +504,11 @@ ava::core::Result<ScopedFd> acquire_rule_lock(std::filesystem::path const& file_
   {
     if (errno == EINTR)
       continue;
-    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to lock permission rules file", lock_path);
+    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to lock permission rules file", directory->path / lock_name);
     error.with_context("cause", errno_message());
     return std::unexpected(std::move(error));
   }
-  return fd;
+  return RuleLock{.directory = std::move(*directory), .fd = std::move(fd)};
 }
 
 ava::core::VoidResult write_all_to_fd(int fd, std::string_view body, std::filesystem::path const& path)
@@ -399,98 +541,69 @@ ava::core::VoidResult fsync_fd(int fd, std::filesystem::path const& path, std::s
   return std::unexpected(std::move(error));
 }
 
-void fsync_parent_best_effort(std::filesystem::path const& path)
+ava::core::VoidResult write_rules_file_atomic(RuleDirectory const& directory, std::string_view body)
 {
-  ScopedFd const dir_fd(::open(path.parent_path().c_str(), O_RDONLY | O_CLOEXEC));
-  if (dir_fd.get() < 0)
-    return;
-  static_cast<void>(::fsync(dir_fd.get()));
-}
-
-ava::core::VoidResult write_rules_file_atomic(std::filesystem::path const& path, std::string_view body)
-{
-  if (auto checked = reject_unsafe_replace_target(path); !checked)
+  if (auto checked = validate_unsafe_replace_target(directory); !checked)
     return checked;
 
-  auto const parent = path.parent_path();
-  auto const basename = path.filename().string();
+  auto const path = directory.path / directory.file_name;
   for (int attempt = 0; attempt < 100; ++attempt)
   {
-    auto const temp_path = parent / (basename + ".tmp." + std::to_string(::getpid()) + "." + std::to_string(attempt));
-    ScopedFd const fd(::open(temp_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, S_IRUSR | S_IWUSR));
+    auto const temp_name = directory.file_name + ".tmp." + std::to_string(::getpid()) + "." + std::to_string(attempt);
+    ScopedFd const fd(::openat(directory.fd.get(), temp_name.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW, S_IRUSR | S_IWUSR));
     if (fd.get() < 0)
     {
       if (errno == EEXIST)
         continue;
-      auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to create temporary permission rules file", temp_path);
+      auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to create temporary permission rules file", directory.path / temp_name);
       error.with_context("cause", errno_message());
       return std::unexpected(std::move(error));
     }
-    TempPathCleanup cleanup(temp_path);
+    TempPathCleanup cleanup(directory.fd.get(), temp_name);
     struct stat opened_st{};
     if (::fstat(fd.get(), &opened_st) != 0)
     {
-      auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to inspect temporary permission rules file", temp_path);
+      auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to inspect temporary permission rules file", directory.path / temp_name);
       error.with_context("cause", errno_message());
       return std::unexpected(std::move(error));
     }
-    if (!S_ISREG(opened_st.st_mode))
+    if (!S_ISREG(opened_st.st_mode) || opened_st.st_uid != ::geteuid() || opened_st.st_nlink != 1)
     {
-      return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "temporary permission rules file is not regular", temp_path));
+      return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied,
+                                             "temporary permission rules file is not a private current-user regular file", directory.path / temp_name));
     }
     if (::fchmod(fd.get(), S_IRUSR | S_IWUSR) != 0)
     {
-      auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to set temporary permission rules permissions", temp_path);
+      auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to set temporary permission rules permissions", directory.path / temp_name);
       error.with_context("cause", errno_message());
       return std::unexpected(std::move(error));
     }
-    if (auto written = write_all_to_fd(fd.get(), body, temp_path); !written)
+    if (auto written = write_all_to_fd(fd.get(), body, directory.path / temp_name); !written)
       return written;
-    if (auto synced = fsync_fd(fd.get(), temp_path, "failed to sync permission rules file"); !synced)
+    if (auto synced = fsync_fd(fd.get(), directory.path / temp_name, "failed to sync temporary permission rules file"); !synced)
       return synced;
-    if (::rename(temp_path.c_str(), path.c_str()) != 0)
+    if (auto checked = validate_unsafe_replace_target(directory); !checked)
+      return checked;
+    if (::renameat(directory.fd.get(), temp_name.c_str(), directory.fd.get(), directory.file_name.c_str()) != 0)
     {
       auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to replace permission rules file", path);
       error.with_context("cause", errno_message());
       return std::unexpected(std::move(error));
     }
     cleanup.dismiss();
-    fsync_parent_best_effort(path);
-    return {};
+    return fsync_fd(directory.fd.get(), directory.path, "failed to sync permission rules directory");
   }
   return std::unexpected(rule_file_error(ava::core::ErrorCategory::Io, "failed to create unique temporary permission rules file", path));
 }
 
-ava::core::Result<std::optional<std::string>> read_rules_text_if_exists(std::filesystem::path const& path)
+ava::core::Result<std::optional<std::string>> read_rules_text_if_exists(RuleDirectory const& directory)
 {
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (status_error)
-  {
-    if (status_error.default_error_condition() == std::errc::no_such_file_or_directory)
-      return std::nullopt;
-    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to inspect permission rules file", path);
-    error.with_context("cause", status_error.message());
-    return std::unexpected(std::move(error));
-  }
-  if (!std::filesystem::exists(status))
-    return std::nullopt;
-  if (std::filesystem::is_symlink(status))
-  {
-    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules file is a symbolic link", path));
-  }
-  if (!std::filesystem::is_regular_file(status))
-  {
-    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules file is not regular", path));
-  }
-
-  int flags = O_RDONLY | O_CLOEXEC;
-#ifdef O_NOFOLLOW
-  flags |= O_NOFOLLOW;
-#endif
-  ScopedFd const fd(::open(path.c_str(), flags));
+  auto const path = directory.path / directory.file_name;
+  ScopedFd const fd(::openat(directory.fd.get(), directory.file_name.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW));
   if (fd.get() < 0)
   {
+    if (errno == ENOENT)
+      return std::nullopt;
     auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to open permission rules file", path);
     error.with_context("cause", errno_message());
     return std::unexpected(std::move(error));
@@ -503,18 +616,10 @@ ava::core::Result<std::optional<std::string>> read_rules_text_if_exists(std::fil
     error.with_context("cause", errno_message());
     return std::unexpected(std::move(error));
   }
-  if (!S_ISREG(st.st_mode))
+  if (!S_ISREG(st.st_mode) || st.st_uid != ::geteuid() || (st.st_mode & 07777) != (S_IRUSR | S_IWUSR))
   {
-    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "opened permission rules file is not regular", path));
-  }
-  if (st.st_uid != ::geteuid())
-  {
-    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules file is not owned by the current user", path));
-  }
-  if ((st.st_mode & (S_IRWXG | S_IRWXO)) != 0)
-  {
-    auto error =
-        rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules file permissions are too broad; run `chmod 600` on the file", path);
+    auto error = rule_file_error(ava::core::ErrorCategory::PermissionDenied,
+                                 "permission rules file must be a current-user-owned regular file with exact mode 0600", path);
     error.with_context("expected_permissions", "0600");
     return std::unexpected(std::move(error));
   }
@@ -524,20 +629,6 @@ ava::core::Result<std::optional<std::string>> read_rules_text_if_exists(std::fil
     error.with_context("max_bytes", std::to_string(kMaxPermissionRulesFileBytes));
     return std::unexpected(std::move(error));
   }
-
-#ifndef O_NOFOLLOW
-  struct stat path_st{};
-  if (::lstat(path.c_str(), &path_st) != 0)
-  {
-    auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to inspect permission rules file", path);
-    error.with_context("cause", errno_message());
-    return std::unexpected(std::move(error));
-  }
-  if (S_ISLNK(path_st.st_mode) || path_st.st_dev != st.st_dev || path_st.st_ino != st.st_ino)
-  {
-    return std::unexpected(rule_file_error(ava::core::ErrorCategory::PermissionDenied, "permission rules file changed during open", path));
-  }
-#endif
 
   std::string content;
   std::array<char, 4096> buffer{};
@@ -1091,10 +1182,26 @@ ava::core::Result<std::vector<PersistentPermissionRule>> parse_rules_file(std::s
   return rules;
 }
 
-ava::core::Result<std::vector<PersistentPermissionRule>> load_scope_rules(PermissionRuleStore const& store, PermissionRuleScope scope)
+ava::core::Result<std::vector<PersistentPermissionRule>> load_scope_rules(PermissionRuleStore const& store, PermissionRuleScope scope,
+                                                                          RuleDirectory const* locked_directory = nullptr)
 {
   auto const path = rules_file_path(store, scope);
-  auto content = read_rules_text_if_exists(path);
+  if (locked_directory)
+  {
+    auto content = read_rules_text_if_exists(*locked_directory);
+    if (!content)
+      return std::unexpected(std::move(content.error()));
+    if (!*content)
+      return std::vector<PersistentPermissionRule>{};
+    return parse_rules_file(**content, path, scope);
+  }
+
+  auto directory = open_rule_directory_for_read(path);
+  if (!directory)
+    return std::unexpected(std::move(directory.error()));
+  if (!*directory)
+    return std::vector<PersistentPermissionRule>{};
+  auto content = read_rules_text_if_exists(**directory);
   if (!content)
     return std::unexpected(std::move(content.error()));
   if (!*content)
@@ -1247,8 +1354,7 @@ bool command_allow_is_authoritative(PersistentPermissionRule const& rule, Permis
   return rule.critical_acknowledged && !is_repository_controlled_build_or_test_command(rule.command) &&
          metadata.level == ava::command::CommandLevel::Critical && metadata.executor_identity_verified &&
          metadata.containment_status != CommandContainmentStatus::Unavailable &&
-         metadata.containment_status != CommandContainmentStatus::UnverifiedDelegatedExecutor && !rule.command.empty() &&
-         rule.command == prompt.command;
+         metadata.containment_status != CommandContainmentStatus::UnverifiedDelegatedExecutor && !rule.command.empty() && rule.command == prompt.command;
 }
 
 bool is_repository_build_or_test_allow(PersistentPermissionRule const& rule)
@@ -1423,7 +1529,7 @@ ava::core::Result<PersistentPermissionRule> add_persistent_permission_rule(Permi
   auto lock = acquire_rule_lock(path);
   if (!lock)
     return std::unexpected(std::move(lock.error()));
-  auto rules = load_scope_rules(store, scope);
+  auto rules = load_scope_rules(store, scope, &lock->directory);
   if (!rules)
     return std::unexpected(std::move(rules.error()));
   if (contains_legacy_command_allow(*rules))
@@ -1432,7 +1538,7 @@ ava::core::Result<PersistentPermissionRule> add_persistent_permission_rule(Permi
         rule_parse_error("refusing to rewrite schema-v1 command Allows; remove them explicitly before adding schema-v2 rules", path, "schema_version"));
   }
   rules->push_back(*rule);
-  if (auto written = write_rules_file_atomic(path, rules_file_json(*rules)); !written)
+  if (auto written = write_rules_file_atomic(lock->directory, rules_file_json(*rules)); !written)
   {
     return std::unexpected(std::move(written.error()));
   }
@@ -1455,7 +1561,7 @@ ava::core::Result<PersistentPermissionRule> remove_persistent_permission_rule(Pe
     auto lock = acquire_rule_lock(path);
     if (!lock)
       return std::unexpected(std::move(lock.error()));
-    auto rules = load_scope_rules(store, scope);
+    auto rules = load_scope_rules(store, scope, &lock->directory);
     if (!rules)
       return std::unexpected(std::move(rules.error()));
     auto found = rules->end();
@@ -1471,7 +1577,7 @@ ava::core::Result<PersistentPermissionRule> remove_persistent_permission_rule(Pe
       continue;
     auto removed = *found;
     rules->erase(found);
-    if (auto written = write_rules_file_atomic(path, rules_file_json(*rules)); !written)
+    if (auto written = write_rules_file_atomic(lock->directory, rules_file_json(*rules)); !written)
     {
       return std::unexpected(std::move(written.error()));
     }

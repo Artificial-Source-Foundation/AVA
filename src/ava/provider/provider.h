@@ -17,6 +17,12 @@
 
 namespace ava::provider {
 
+// Provider parsers enforce this boundary before constructing StreamEvent
+// vectors. AgentLoop applies its configurable limit afterwards.
+inline constexpr std::size_t kMaxProviderParserEvents = 4096;
+inline constexpr std::size_t kMaxProviderParserArrayItems = 1024;
+inline constexpr std::size_t kMaxProviderSseBufferedBytes = 256U * 1024U;
+
 enum class ContentPartType
 {
   Text,
@@ -24,6 +30,16 @@ enum class ContentPartType
   Reasoning,
   ToolUse,
   ToolResult,
+};
+
+// The native Responses API distinguishes interim commentary from the final
+// answer. Unknown is deliberately retained for legacy provider event families
+// that do not expose an equivalent phase.
+enum class AssistantPhase
+{
+  Unknown,
+  Commentary,
+  FinalAnswer,
 };
 
 struct ContentPart
@@ -46,6 +62,12 @@ struct ContentPart
   // cross public stream/event boundaries or be included in exports.
   std::string reasoning_native_item_json = {};
   bool redacted = false;
+  // Internal provider-output identity retained for exact continuation. Other
+  // provider families may ignore it. It is never exposed through public
+  // stream/event surfaces.
+  std::string provider_item_id = {};
+  std::optional<std::size_t> provider_output_index = std::nullopt;
+  AssistantPhase assistant_phase = AssistantPhase::Unknown;
   // Image attachment metadata. Session/RPC records store references and
   // provider serializers may load bytes transiently after validation.
   std::string attachment_id = {};
@@ -150,7 +172,9 @@ struct HttpResponse
 
 enum class StreamEventType
 {
+  TextStart,
   TextDelta,
+  TextEnd,
   ReasoningStart,
   ReasoningDelta,
   ReasoningEnd,
@@ -182,6 +206,12 @@ struct StreamEvent
   std::string tool_name;
   std::string error_message;
   std::optional<TokenUsage> usage;
+  // Native output-item identity is intentionally distinct from the logical
+  // function call ID used for tool dispatch. It remains internal to provider
+  // parsing and assistant-turn reconstruction.
+  std::string provider_item_id = {};
+  std::optional<std::size_t> provider_output_index = std::nullopt;
+  AssistantPhase assistant_phase = AssistantPhase::Unknown;
   // Present only on a provider terminal event. The value is closed at the
   // provider boundary; unknown native values normalize to Error.
   std::optional<ProviderFinishReason> finish_reason = std::nullopt;
@@ -311,6 +341,9 @@ void observe_transport_result(TransportObservation const& observation, HttpReque
 void observe_transport_retry(TransportObservation const& observation, std::size_t next_attempt, std::size_t max_attempts, std::size_t delay_ms,
                              std::string_view reason, int status_code, bool streaming) noexcept;
 
+[[nodiscard]] std::string to_string(AssistantPhase phase);
+[[nodiscard]] std::optional<AssistantPhase> assistant_phase_from_string(std::string_view value);
+[[nodiscard]] bool is_known_assistant_phase(AssistantPhase phase) noexcept;
 [[nodiscard]] std::string to_string(StreamEventType type);
 [[nodiscard]] std::string to_string(ProviderErrorKind kind);
 [[nodiscard]] ProviderErrorKind classify_provider_error(HttpResponse const& response);

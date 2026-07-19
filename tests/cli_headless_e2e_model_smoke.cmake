@@ -243,13 +243,18 @@ foreach(NEEDLE
         "\"ok\":true"
         "\"id\":\"messages-after\""
         "\"type\":\"user_message\""
-        "\"type\":\"assistant_message\""
-        "\"type\":\"tool_call\""
+        "\"name\":\"assistant_message\""
+        "\"name\":\"tool_start\""
         "\"type\":\"tool_result\""
         "\"id\":\"sessions-after\""
         "\"sessions\":[")
   assert_contains(AVA_OUTPUT "${NEEDLE}")
 endforeach()
+
+assert_after(AVA_OUTPUT "\"id\":\"messages-after\"" "\"type\":\"assistant_message\"")
+assert_after(AVA_OUTPUT "\"id\":\"messages-after\"" "E2E task complete: TODO fixed and verification command passed.")
+assert_after(AVA_OUTPUT "\"id\":\"messages-after\"" "\"type\":\"tool_call\"")
+assert_after(AVA_OUTPUT "\"id\":\"messages-after\"" "\"call_id\":\"call_bash_e2e\"")
 
 file(GLOB_RECURSE SESSION_FILES "${STATE_DIR}/ava/sessions/*.jsonl")
 list(LENGTH SESSION_FILES SESSION_FILE_COUNT)
@@ -260,8 +265,8 @@ list(GET SESSION_FILES 0 SESSION_FILE)
 file(READ "${SESSION_FILE}" SESSION_JSONL)
 foreach(NEEDLE
         "\"type\":\"user_message\""
-        "\"type\":\"assistant_message\""
-        "\"type\":\"tool_call\""
+        "\"type\":\"assistant_output_item\""
+        "\"type\":\"assistant_turn_commit\""
         "\"type\":\"tool_result\""
         "\"type\":\"permission_decision\""
         "\"tool_name\":\"apply_patch\""
@@ -314,13 +319,15 @@ foreach(NEEDLE
         "\"ok\":true"
         "\"id\":\"replay-messages\""
         "Fix the TODO and verify the build."
-        "E2E task complete: TODO fixed and verification command passed."
         "\"type\":\"user_message\""
-        "\"type\":\"assistant_message\""
-        "\"type\":\"tool_call\""
         "\"type\":\"tool_result\""
         "status: DONE"
         "\"id\":\"replay-sessions\""
         "\"sessions\":[")
   assert_contains(REPLAY_OUTPUT "${NEEDLE}")
 endforeach()
+
+assert_after(REPLAY_OUTPUT "\"id\":\"replay-messages\"" "\"type\":\"assistant_message\"")
+assert_after(REPLAY_OUTPUT "\"id\":\"replay-messages\"" "E2E task complete: TODO fixed and verification command passed.")
+assert_after(REPLAY_OUTPUT "\"id\":\"replay-messages\"" "\"type\":\"tool_call\"")
+assert_after(REPLAY_OUTPUT "\"id\":\"replay-messages\"" "\"call_id\":\"call_bash_e2e\"")

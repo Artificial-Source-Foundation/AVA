@@ -169,7 +169,8 @@ struct CommandBuildOptions
   std::filesystem::path trusted_home;
   std::optional<std::string> startup_path;
   // Raw shell plans resolve and bind this exact executable; it is never found
-  // by basename lookup. Descriptor-anchored execution remains future work.
+  // by basename lookup. The local executor opens the sealed canonical path and
+  // executes that descriptor rather than reusing this pathname.
   std::filesystem::path shell = "/bin/sh";
   // Persistent AVA config, credential, and session roots which must stay
   // disjoint from every synthetic child environment root.
@@ -191,6 +192,7 @@ struct PathAncestorMetadata
   std::uintmax_t inode = 0;
   std::uintmax_t mode = 0;
   std::uintmax_t owner = 0;
+  std::uintmax_t group = 0;
   std::uintmax_t link_count = 0;
   std::int64_t changed_seconds = 0;
   std::int64_t changed_nanoseconds = 0;
@@ -218,6 +220,7 @@ struct PathMetadata
   std::uintmax_t mode = 0;
   std::uintmax_t size = 0;
   std::uintmax_t owner = 0;
+  std::uintmax_t group = 0;
   std::uintmax_t link_count = 0;
   std::int64_t changed_seconds = 0;
   std::int64_t changed_nanoseconds = 0;
@@ -226,6 +229,7 @@ struct PathMetadata
   std::uintmax_t requested_inode = 0;
   std::uintmax_t requested_mode = 0;
   std::uintmax_t requested_owner = 0;
+  std::uintmax_t requested_group = 0;
   std::uintmax_t requested_link_count = 0;
   std::int64_t requested_changed_seconds = 0;
   std::int64_t requested_changed_nanoseconds = 0;
@@ -273,6 +277,7 @@ struct ExecutableMetadata
   std::uintmax_t mode = 0;
   std::uintmax_t size = 0;
   std::uintmax_t owner = 0;
+  std::uintmax_t group = 0;
   std::uintmax_t link_count = 0;
   std::int64_t changed_seconds = 0;
   std::int64_t changed_nanoseconds = 0;
@@ -281,6 +286,7 @@ struct ExecutableMetadata
   std::uintmax_t requested_inode = 0;
   std::uintmax_t requested_mode = 0;
   std::uintmax_t requested_owner = 0;
+  std::uintmax_t requested_group = 0;
   std::uintmax_t requested_link_count = 0;
   std::int64_t requested_changed_seconds = 0;
   std::int64_t requested_changed_nanoseconds = 0;
@@ -385,6 +391,10 @@ class CommandEnvironment final
   [[nodiscard]] std::string const& digest() const noexcept;
   [[nodiscard]] std::vector<EnvironmentVariable> const& entries() const noexcept;
   [[nodiscard]] SyntheticEnvironmentRoots const& synthetic_roots() const noexcept;
+  // The only trusted real-home toolchain root exposed to a child today. Its
+  // complete metadata is sealed with this environment; absent roots are not
+  // represented and never become an environment variable.
+  [[nodiscard]] std::optional<PathMetadata> const& rustup_home_metadata() const noexcept;
 
   friend bool operator==(CommandEnvironment const&, CommandEnvironment const&) = default;
 
@@ -414,6 +424,7 @@ class CommandEnvironment final
   std::string digest_;
   std::vector<EnvironmentVariable> entries_;
   SyntheticEnvironmentRoots roots_;
+  std::optional<PathMetadata> rustup_home_metadata_;
 };
 
 class CommandIntent final
@@ -453,6 +464,9 @@ class CommandPlan final
   [[nodiscard]] std::vector<CommandPathEntry> const& path_entries() const noexcept;
   [[nodiscard]] std::optional<ResolvedExecutable> const& resolved_executable() const noexcept;
   [[nodiscard]] CommandClassification const& classification() const noexcept;
+  // Optional sealed ${trusted_home}/.rustup authority. This is intentionally
+  // not a general trusted-home escape hatch and never represents CARGO_HOME.
+  [[nodiscard]] std::optional<PathMetadata> const& rustup_home_metadata() const noexcept;
   [[nodiscard]] std::string const& environment_profile_id() const noexcept;
   [[nodiscard]] std::string const& environment_digest() const noexcept;
   // An instantaneous integrity binding for this sealed plan, never a durable
@@ -487,6 +501,7 @@ class CommandPlan final
   PathMetadata trusted_home_metadata_;
   std::vector<PathMetadata> ava_authority_root_metadata_;
   SyntheticEnvironmentRoots synthetic_environment_roots_;
+  std::optional<PathMetadata> rustup_home_metadata_;
   std::vector<std::string> argv_;
   std::string raw_shell_text_;
   std::vector<CommandPathEntry> path_entries_;

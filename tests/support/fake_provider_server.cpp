@@ -335,7 +335,7 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
     return ProviderResponse{.status_code = 500,
                             .reason = "Internal Server Error",
                             .body =
-                                "{\"error\":{\"message\":\"provider unavailable\","
+                                "{\"error\":{\"type\":\"FAKE_UNKNOWN_DISCRIMINATOR_CANARY\",\"message\":\"provider unavailable\","
                                 "\"reasoning_content\":\"secret reasoning\","
                                 "\"thinking\":\"secret thinking\",\"api_key\":\"secret-key\"}}"};
   }

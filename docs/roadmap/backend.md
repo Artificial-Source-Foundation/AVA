@@ -3,7 +3,7 @@
 This roadmap defines the backend work needed for AVA 1.0 to feel capable enough for serious daily coding work while keeping AVA's product constraints: native C++23, one binary, terminal first, explicit safety boundaries, and inspectable local files.
 
 Frontend/TUI planning is Carlo-owned and intentionally not tracked here. Backend items should expose terminal-agnostic contracts for interactive and headless clients without planning UI layout, renderer, or modal work.
-The measurable backend maturity acceptance criteria and staged hardening gates live in `docs/roadmap/backend-maturity-baseline.md`.
+The measurable backend maturity acceptance criteria and staged hardening gates live in `docs/roadmap/backend-maturity-baseline.md`. The separately discussed command-permission, background-job, diagnostics, compaction, and session-title usability decisions are staged in `docs/roadmap/backend-usability.md`; that ledger does not authorize implementation until its final combined plan is approved.
 
 External systems are behavior references for backend power, not architectures to copy directly. AVA should borrow the capability shape, then implement it with narrow C++ modules and clear permission boundaries.
 

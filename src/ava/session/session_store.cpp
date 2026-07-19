@@ -3,6 +3,7 @@
 #include "ava/session/EphemeralState.h"
 #include "ava/session/record.h"
 #include "ava/session/session_store.h"
+#include "ava/session/validation.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 #include "ava/core/strict_json.h"
@@ -24,6 +25,7 @@
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 #include <fcntl.h>
@@ -187,8 +189,6 @@ ava::core::VoidResult validate_read_limits(SessionReadLimits const& limits)
   return {};
 }
 
-inline constexpr std::size_t kMaxSessionJsonNestingDepth = 64;
-
 ava::core::Error strict_session_record_error(ava::core::StrictJsonStatus status, std::filesystem::path const& path, bool final_unterminated)
 {
   std::string message;
@@ -210,13 +210,13 @@ ava::core::Error strict_session_record_error(ava::core::StrictJsonStatus status,
   auto error = ava::core::Error(ava::core::ErrorCategory::Session, std::move(message));
   error.with_context("path", path.string());
   error.with_context("record_framing", final_unterminated ? "final_unterminated" : "newline_terminated");
-  error.with_context("max_nesting_depth", std::to_string(kMaxSessionJsonNestingDepth));
+  error.with_context("max_nesting_depth", std::to_string(ava::core::json::kMaxNestingDepth));
   return error;
 }
 
 ava::core::Result<SessionEntry> parse_strict_session_record(std::string_view line, std::filesystem::path const& path, bool final_unterminated)
 {
-  auto const strict_status = ava::core::validate_strict_json(line, kMaxSessionJsonNestingDepth);
+  auto const strict_status = ava::core::validate_strict_json(line, ava::core::json::kMaxNestingDepth);
   if (strict_status != ava::core::StrictJsonStatus::Valid)
     return std::unexpected(strict_session_record_error(strict_status, path, final_unterminated));
   if (line.ends_with('\r'))
@@ -240,7 +240,7 @@ ava::core::VoidResult visit_session_snapshot_fd(int fd, off_t snapshot_size, std
   line.reserve(std::min<std::size_t>(limits.max_line_bytes, buffer.size()));
   std::size_t entry_count = 0;
   auto consume_line = [&](bool final_unterminated) -> ava::core::Result<bool> {
-    auto const strict_status = ava::core::validate_strict_json(line, kMaxSessionJsonNestingDepth);
+    auto const strict_status = ava::core::validate_strict_json(line, ava::core::json::kMaxNestingDepth);
     if (tolerate_invalid_final_suffix && final_unterminated && strict_status == ava::core::StrictJsonStatus::Invalid)
     {
       line.clear();
@@ -419,15 +419,55 @@ bool has_append_commit_state(ava::core::Error const& error)
   return std::ranges::any_of(error.context(), [](ava::core::ErrorContext const& item) { return item.key == "append_commit_state"; });
 }
 
+bool append_committed_to_leased_inode(ava::core::Error const& error)
+{
+  return std::ranges::any_of(error.context(), [](ava::core::ErrorContext const& item) {
+    return item.key == "append_commit_state" && item.value == append_commit_state_text(AppendCommitState::CommittedToLeasedInode);
+  });
+}
+
+bool append_partial_or_unknown(ava::core::Error const& error)
+{
+  return std::ranges::any_of(error.context(), [](ava::core::ErrorContext const& item) {
+    return item.key == "append_commit_state" && item.value == append_commit_state_text(AppendCommitState::PartialOrUnknown);
+  });
+}
+
+ava::core::Error append_target_recovery_required_error(std::filesystem::path const& path)
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session append target requires explicit recovery after a partially persisted batch");
+  error.with_context("recovery", "call SessionAppendTarget::recover before any later append or append_batch").with_context("path", path.string());
+  return error;
+}
+
 ava::core::Error with_append_commit_state(ava::core::Error error, AppendCommitState state, std::filesystem::path const& path)
 {
   error.with_context("append_commit_state", std::string(append_commit_state_text(state)));
   if (state == AppendCommitState::PartialOrUnknown)
   {
-    error.with_context("recovery", "retain the same active SessionLease and call SessionStore::recover_torn_tail before any further append");
+    error.with_context("recovery",
+                       "retain the same active SessionLease, call SessionStore::recover_torn_tail, then call "
+                       "SessionStore::recover_incomplete_assistant_output_suffix before any further append");
   }
   error.with_context("path", path.string());
   return error;
+}
+
+ava::core::Error batch_partial_failure(ava::core::Error const& failure, std::filesystem::path const& path, std::size_t persisted_entries)
+{
+  ava::core::Error normalized(failure.category(), failure.message());
+  for (auto const& context : failure.context())
+  {
+    if (context.key != "append_commit_state" && context.key != "recovery")
+      normalized.with_context(context.key, context.value);
+  }
+  normalized = with_append_commit_state(std::move(normalized), AppendCommitState::PartialOrUnknown, path);
+  normalized.with_context("batch_persisted_entries", std::to_string(persisted_entries));
+  normalized.with_context(
+      "staged_prefix_recovery",
+      "a batch prefix may be durable; retain the append authority and call SessionAppendTarget::recover to repair torn bytes plus any valid incomplete "
+      "assistant-output suffix before accepting another mutation");
+  return normalized;
 }
 
 ava::core::Result<std::string> rollback_quarantine_name(std::string_view session_name)
@@ -537,92 +577,198 @@ ava::core::VoidResult require_unchanged_repair_namespace(int repair_fd, int pare
   return {};
 }
 
-ava::core::Result<std::filesystem::path> quarantine_session_tail(int parent_fd, std::filesystem::path const& parent_path, std::string const& session_name,
-                                                                 std::string_view suffix, SessionCancelCallback const& cancel_requested)
+ava::core::Result<std::filesystem::path> quarantine_session_suffix(int parent_fd, std::filesystem::path const& parent_path, std::string const& session_name,
+                                                                   std::string_view recovery_kind, std::string_view suffix,
+                                                                   SessionCancelCallback const& cancel_requested,
+                                                                   std::function<void(std::filesystem::path const&)> const* before_publication_for_test)
 {
   for (int attempt = 0; attempt < 16; ++attempt)
   {
     auto const unique = ava::core::make_id("quarantine");
-    auto const final_name = session_name + ".torn-tail." + unique + ".bin";
-    auto const temporary_name = "." + session_name + ".torn-tail.tmp." + unique;
+    auto const final_name = session_name + "." + std::string(recovery_kind) + "." + unique + ".bin";
+    auto const temporary_name = "." + session_name + "." + std::string(recovery_kind) + ".tmp." + unique;
     auto const final_path = anchored_child_diagnostic_path(parent_fd, final_name, parent_path);
     auto const temporary_path = anchored_child_diagnostic_path(parent_fd, temporary_name, parent_path);
 
-    int quarantine_fd = ::openat(parent_fd, temporary_name.c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW, 0600);
-    if (quarantine_fd < 0)
+    ScopedFd quarantine_fd(::openat(parent_fd, temporary_name.c_str(), O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600));
+    if (quarantine_fd.get() < 0)
     {
       if (errno == EEXIST)
         continue;
-      return std::unexpected(path_io_error("failed to create temporary torn session tail quarantine", temporary_path, errno));
+      return std::unexpected(path_io_error("failed to create temporary session recovery quarantine", temporary_path, errno));
     }
 
-    auto cleanup_temporary = [&] { static_cast<void>(::unlinkat(parent_fd, temporary_name.c_str(), 0)); };
-    auto prepublication_error = [&](std::string message, int error_number) {
-      auto error = path_io_error(std::move(message), temporary_path, error_number);
+    struct stat initial_status{};
+    if (fstat(quarantine_fd.get(), &initial_status) != 0)
+    {
+      int const error_number = errno;
+      int const close_error = quarantine_fd.close_checked();
+      auto error = path_io_error("failed to inspect newly created session recovery quarantine", temporary_path, error_number);
       error.with_context("quarantine_target", final_path.string());
-      return error;
-    };
-
-    if (fchmod(quarantine_fd, 0600) != 0)
-    {
-      int const error_number = errno;
-      static_cast<void>(::close(quarantine_fd));
-      cleanup_temporary();
-      return std::unexpected(prepublication_error("failed to set torn session tail quarantine permissions", error_number));
-    }
-    int write_error = 0;
-    if (!write_all(quarantine_fd, suffix, write_error))
-    {
-      static_cast<void>(::close(quarantine_fd));
-      cleanup_temporary();
-      return std::unexpected(prepublication_error("failed to write torn session tail quarantine", write_error));
-    }
-    if (fdatasync(quarantine_fd) != 0)
-    {
-      int const error_number = errno;
-      static_cast<void>(::close(quarantine_fd));
-      cleanup_temporary();
-      return std::unexpected(prepublication_error("failed to sync torn session tail quarantine", error_number));
-    }
-    if (::close(quarantine_fd) != 0)
-    {
-      int const error_number = errno;
-      cleanup_temporary();
-      return std::unexpected(prepublication_error("failed to close torn session tail quarantine", error_number));
-    }
-    quarantine_fd = -1;
-
-    if (auto canceled = check_recovery_cancellation(cancel_requested); !canceled)
-    {
-      cleanup_temporary();
-      return std::unexpected(std::move(canceled.error()));
-    }
-
-    if (::linkat(parent_fd, temporary_name.c_str(), parent_fd, final_name.c_str(), 0) != 0)
-    {
-      int const error_number = errno;
-      cleanup_temporary();
-      if (error_number == EEXIST)
-        continue;
-      return std::unexpected(prepublication_error("failed to publish torn session tail quarantine", error_number));
-    }
-
-    if (::unlinkat(parent_fd, temporary_name.c_str(), 0) != 0)
-    {
-      auto error = path_io_error("torn session tail quarantine was published but its temporary name could not be removed", final_path, errno);
-      error.with_context("quarantine_path", final_path.string()).with_context("temporary_path", temporary_path.string());
+      if (close_error != 0)
+        error.with_context("quarantine_close_cause", std::strerror(close_error));
       return std::unexpected(std::move(error));
     }
-    if (fsync(parent_fd) != 0)
+    auto same_quarantine_metadata = [](struct stat const& left, struct stat const& right) {
+      return same_file_identity(left, right) && left.st_uid == right.st_uid && left.st_gid == right.st_gid && left.st_mode == right.st_mode &&
+             left.st_size == right.st_size;
+    };
+    auto cleanup_temporary_if_owned = [&]() -> int {
+      struct stat named_status{};
+      if (fstatat(parent_fd, temporary_name.c_str(), &named_status, AT_SYMLINK_NOFOLLOW) != 0)
+        return errno == ENOENT ? 0 : errno;
+      if (!same_file_identity(initial_status, named_status))
+        return ESTALE;
+      return ::unlinkat(parent_fd, temporary_name.c_str(), 0) == 0 ? 0 : errno;
+    };
+    auto abandon_prepublication = [&](ava::core::Error error) -> ava::core::Result<std::filesystem::path> {
+      int const cleanup_error = cleanup_temporary_if_owned();
+      int const close_error = quarantine_fd.close_checked();
+      error.with_context("quarantine_target", final_path.string());
+      if (cleanup_error != 0)
+        error.with_context("temporary_cleanup", cleanup_error == ESTALE ? "temporary name changed; replacement preserved" : std::strerror(cleanup_error));
+      if (close_error != 0)
+        error.with_context("quarantine_close_cause", std::strerror(close_error));
+      return std::unexpected(std::move(error));
+    };
+    auto prepublication_io_failure = [&](std::string message, int error_number) {
+      return abandon_prepublication(path_io_error(std::move(message), temporary_path, error_number));
+    };
+    auto published_failure = [&](std::string message, int error_number = 0) -> ava::core::Result<std::filesystem::path> {
+      auto error = error_number == 0 ? ava::core::Error(ava::core::ErrorCategory::PermissionDenied, std::move(message))
+                                     : path_io_error(std::move(message), final_path, error_number);
+      error.with_context("quarantine_path", final_path.string()).with_context("temporary_path", temporary_path.string());
+      int const close_error = quarantine_fd.close_checked();
+      if (close_error != 0)
+        error.with_context("quarantine_close_cause", std::strerror(close_error));
+      return std::unexpected(std::move(error));
+    };
+    auto descriptor_content_matches = [&]() -> bool {
+      if (initial_status.st_size < 0 || static_cast<std::uintmax_t>(initial_status.st_size) != suffix.size())
+        return false;
+      std::array<char, 8192> buffer{};
+      std::size_t offset = 0;
+      while (offset < suffix.size())
+      {
+        auto const wanted = std::min(buffer.size(), suffix.size() - offset);
+        ssize_t count = 0;
+        do
+        {
+          count = ::pread(quarantine_fd.get(), buffer.data(), wanted, static_cast<off_t>(offset));
+        } while (count < 0 && errno == EINTR);
+        if (count <= 0 || std::string_view(buffer.data(), static_cast<std::size_t>(count)) != suffix.substr(offset, static_cast<std::size_t>(count)))
+          return false;
+        offset += static_cast<std::size_t>(count);
+      }
+      return true;
+    };
+
+    if (fchmod(quarantine_fd.get(), 0600) != 0)
+      return prepublication_io_failure("failed to set session recovery quarantine permissions", errno);
+    if (fstat(quarantine_fd.get(), &initial_status) != 0)
+      return prepublication_io_failure("failed to inspect temporary session recovery quarantine", errno);
+    if (!S_ISREG(initial_status.st_mode) || (initial_status.st_mode & 07777) != 0600 || initial_status.st_uid != geteuid() || initial_status.st_nlink != 1)
     {
-      auto error = path_io_error("torn session tail quarantine was published but the session directory sync failed", final_path, errno);
+      auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "temporary session recovery quarantine has unsafe metadata");
+      error.with_context("mode", std::to_string(initial_status.st_mode & 07777))
+          .with_context("owner", std::to_string(initial_status.st_uid))
+          .with_context("link_count", std::to_string(initial_status.st_nlink));
+      return abandon_prepublication(std::move(error));
+    }
+    int write_error = 0;
+    if (!write_all(quarantine_fd.get(), suffix, write_error))
+      return prepublication_io_failure("failed to write session recovery quarantine", write_error);
+    if (fdatasync(quarantine_fd.get()) != 0)
+      return prepublication_io_failure("failed to sync session recovery quarantine", errno);
+    if (fstat(quarantine_fd.get(), &initial_status) != 0)
+      return prepublication_io_failure("failed to re-inspect temporary session recovery quarantine", errno);
+
+    if (before_publication_for_test && *before_publication_for_test)
+    {
+      try
+      {
+        (*before_publication_for_test)(temporary_path);
+      }
+      catch (...)
+      {
+        return abandon_prepublication(ava::core::Error(ava::core::ErrorCategory::Unknown, "session recovery quarantine prepublication test hook failed"));
+      }
+    }
+    if (auto canceled = check_recovery_cancellation(cancel_requested); !canceled)
+      return abandon_prepublication(std::move(canceled.error()));
+
+    struct stat prepublication_status{};
+    if (fstat(quarantine_fd.get(), &prepublication_status) != 0)
+      return prepublication_io_failure("failed to verify session recovery quarantine before publication", errno);
+    if (!same_quarantine_metadata(initial_status, prepublication_status) || prepublication_status.st_nlink != 1 || !descriptor_content_matches())
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
+                                    "session recovery quarantine inode or content changed before descriptor-anchored publication");
+      error.with_context("link_count", std::to_string(prepublication_status.st_nlink));
+      return abandon_prepublication(std::move(error));
+    }
+
+    if (::linkat(quarantine_fd.get(), "", parent_fd, final_name.c_str(), AT_EMPTY_PATH) != 0)
+    {
+      int const error_number = errno;
+      auto failed = prepublication_io_failure("failed to publish exact session recovery quarantine inode", error_number);
+      if (error_number == EEXIST)
+        continue;
+      return failed;
+    }
+
+    struct stat linked_status{};
+    struct stat final_status{};
+    if (fstat(quarantine_fd.get(), &linked_status) != 0)
+      return published_failure("failed to inspect published session recovery quarantine", errno);
+    if (fstatat(parent_fd, final_name.c_str(), &final_status, AT_SYMLINK_NOFOLLOW) != 0)
+      return published_failure("failed to inspect final session recovery quarantine name", errno);
+    if (!same_quarantine_metadata(initial_status, linked_status) || !same_quarantine_metadata(initial_status, final_status) || linked_status.st_nlink != 2 ||
+        final_status.st_nlink != 2 || !descriptor_content_matches())
+    {
+      return published_failure("published session recovery quarantine does not identify the exact validated inode");
+    }
+
+    struct stat temporary_status{};
+    if (fstatat(parent_fd, temporary_name.c_str(), &temporary_status, AT_SYMLINK_NOFOLLOW) != 0)
+      return published_failure("published session recovery quarantine temporary name disappeared before verified cleanup", errno);
+    if (!same_quarantine_metadata(initial_status, temporary_status) || temporary_status.st_nlink != 2)
+      return published_failure("session recovery quarantine temporary name was replaced; replacement preserved");
+    if (::unlinkat(parent_fd, temporary_name.c_str(), 0) != 0)
+      return published_failure("session recovery quarantine was published but its verified temporary name could not be removed", errno);
+
+    struct stat committed_status{};
+    struct stat committed_final_status{};
+    if (fstat(quarantine_fd.get(), &committed_status) != 0 || fstatat(parent_fd, final_name.c_str(), &committed_final_status, AT_SYMLINK_NOFOLLOW) != 0)
+    {
+      return published_failure("failed to verify committed session recovery quarantine", errno);
+    }
+    if (!same_quarantine_metadata(initial_status, committed_status) || !same_quarantine_metadata(initial_status, committed_final_status) ||
+        committed_status.st_nlink != 1 || committed_final_status.st_nlink != 1 || !descriptor_content_matches())
+    {
+      return published_failure("committed session recovery quarantine failed inode, metadata, link-count, or content verification");
+    }
+
+    int const close_error = quarantine_fd.close_checked();
+    int const sync_error = fsync(parent_fd) == 0 ? 0 : errno;
+    if (close_error != 0)
+    {
+      auto error = path_io_error("session recovery quarantine was published but its descriptor close failed", final_path, close_error);
+      error.with_context("quarantine_path", final_path.string());
+      if (sync_error != 0)
+        error.with_context("directory_sync_cause", std::strerror(sync_error));
+      return std::unexpected(std::move(error));
+    }
+    if (sync_error != 0)
+    {
+      auto error = path_io_error("session recovery quarantine was published but the session directory sync failed", final_path, sync_error);
       error.with_context("quarantine_path", final_path.string());
       return std::unexpected(std::move(error));
     }
     return final_path;
   }
 
-  auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to allocate a unique torn session tail quarantine path");
+  auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to allocate a unique session recovery quarantine path");
   error.with_context("path", (parent_path / session_name).string());
   return std::unexpected(std::move(error));
 }
@@ -791,6 +937,11 @@ void SessionStore::set_append_write_for_test(std::function<ssize_t(int, std::str
   append_write_for_test_ = std::move(hook);
 }
 
+void SessionStore::set_before_recovery_quarantine_publication_for_test(std::function<void(std::filesystem::path const&)> hook)
+{
+  before_recovery_quarantine_publication_for_test_ = std::move(hook);
+}
+
 void SessionStore::set_after_recovery_quarantine_publication_for_test(std::function<void()> hook)
 {
   after_recovery_quarantine_publication_for_test_ = std::move(hook);
@@ -808,31 +959,165 @@ void SessionStore::set_after_created_file_rollback_detach_for_test(std::function
 
 ava::core::VoidResult SessionStore::append(SessionLease const& lease, SessionEntry const& entry)
 {
-  ava::core::VoidResult appended;
+  if (entry.type == EntryType::AssistantOutputItem || entry.type == EntryType::AssistantTurnCommit)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                  "raw SessionStore append cannot mutate v4 assistant-output records; use SessionAppendTarget or append_validated_copy");
+    error.with_context("entry_type", to_string(entry.type));
+    return std::unexpected(with_append_commit_state(std::move(error), AppendCommitState::NotStarted, session_path()));
+  }
   if (is_ephemeral())
   {
-    appended =
-        std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent session append lease cannot be used with an ephemeral store"));
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent session append lease cannot be used with an ephemeral store");
+    return std::unexpected(with_append_commit_state(std::move(error), AppendCommitState::NotStarted, session_path()));
   }
-  else
+
+  auto const path = session_path();
+  auto const canonical_path = normalized_absolute_path(path);
+  // Keep the legacy ordinary-record escape hatch from splitting a staged v4
+  // assistant transaction. Its authoritative snapshot, state transition, and
+  // durable write share the same per-path serialization as append targets.
+  if (!lease.active() || canonical_path != lease.canonical_path())
   {
-    appended = append_impl(&lease, entry);
+    auto appended = append_impl(&lease, entry);
+    if (!appended && !has_append_commit_state(appended.error()))
+      return std::unexpected(with_append_commit_state(std::move(appended.error()), AppendCommitState::NotStarted, path));
+    return appended;
   }
+
+  std::lock_guard serialization_lock(append_mutex_for_path(canonical_path));
+  std::vector<SessionEntry> history;
+  auto loaded = visit_entries_leased(
+      lease, legacy_unbounded_session_read_limits(),
+      [&](SessionEntry const& historical_entry) -> ava::core::Result<bool> {
+        history.push_back(historical_entry);
+        return true;
+      },
+      nullptr, false);
+  if (!loaded)
+    return std::unexpected(with_append_commit_state(std::move(loaded.error()), AppendCommitState::NotStarted, path));
+  auto current_state = AssistantOutputAppendState::from_validated_history(history);
+  if (!current_state)
+    return std::unexpected(with_append_commit_state(std::move(current_state.error()), AppendCommitState::NotStarted, path));
+  try
+  {
+    if (auto preflight = current_state->apply_candidate(entry); !preflight)
+      return std::unexpected(with_append_commit_state(std::move(preflight.error()), AppendCommitState::NotStarted, path));
+  }
+  catch (...)
+  {
+    return std::unexpected(with_append_commit_state(
+        ava::core::Error(ava::core::ErrorCategory::Unknown, "failed to preflight raw assistant-output append state"), AppendCommitState::NotStarted, path));
+  }
+
+  auto appended = append_impl(&lease, entry, true);
   if (!appended && !has_append_commit_state(appended.error()))
-    return std::unexpected(with_append_commit_state(std::move(appended.error()), AppendCommitState::NotStarted, session_path()));
+    return std::unexpected(with_append_commit_state(std::move(appended.error()), AppendCommitState::NotStarted, path));
   return appended;
 }
 
 ava::core::VoidResult SessionStore::append_ephemeral(SessionEntry const& entry)
 {
+  if (entry.type == EntryType::AssistantOutputItem || entry.type == EntryType::AssistantTurnCommit)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                  "raw SessionStore append cannot mutate v4 assistant-output records; use SessionAppendTarget");
+    error.with_context("entry_type", to_string(entry.type));
+    return std::unexpected(std::move(error));
+  }
   if (!is_ephemeral())
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent session append requires an active exact SessionLease"));
   }
-  return append_impl(nullptr, entry);
+
+  std::lock_guard serialization_lock(ephemeral_state_->mutation_mutex);
+  auto history = load();
+  if (!history)
+    return std::unexpected(std::move(history.error()));
+  auto current_state = AssistantOutputAppendState::from_validated_history(*history);
+  if (!current_state)
+    return std::unexpected(std::move(current_state.error()));
+  try
+  {
+    if (auto preflight = current_state->apply_candidate(entry); !preflight)
+      return std::unexpected(std::move(preflight.error()));
+  }
+  catch (...)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "failed to preflight raw assistant-output append state"));
+  }
+  return append_impl(nullptr, entry, true);
 }
 
-ava::core::VoidResult SessionStore::append_impl(SessionLease const* lease, SessionEntry const& entry)
+ava::core::VoidResult SessionStore::append_validated_copy(SessionLease const& lease, std::vector<SessionEntry> const& entries)
+{
+  if (is_ephemeral())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "validated session copy requires a persistent destination"));
+  if (!lease.active() || !lease.created_)
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "validated session copy requires the active creating SessionLease for a new destination"));
+
+  auto const path = session_path();
+  auto const canonical_path = normalized_absolute_path(path);
+  if (canonical_path != lease.canonical_path())
+  {
+    auto error = append_authority_error("validated session copy lease does not exactly match its destination", canonical_path);
+    error.with_context("lease_path", lease.canonical_path().string());
+    return std::unexpected(std::move(error));
+  }
+
+  for (auto const& entry : entries)
+  {
+    auto serialized = serialize_session_entry_line(entry);
+    if (!serialized)
+      return std::unexpected(std::move(serialized.error()));
+    auto strict = parse_strict_session_record(*serialized, path, false);
+    if (!strict)
+      return std::unexpected(std::move(strict.error()));
+  }
+  auto const replay = validate_session_replay(entries);
+  if (!replay.ok())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "validated session copy history fails replay validation");
+    error.with_context("errors", std::to_string(replay.error_count));
+    if (!replay.issues.empty())
+      error.with_context("first_issue", replay.issues.front().message).with_context("entry_id", replay.issues.front().entry_id);
+    return std::unexpected(std::move(error));
+  }
+  auto const assistant_output = classify_assistant_output(entries);
+  if (!assistant_output.diagnostics.empty())
+  {
+    auto const& diagnostic = assistant_output.diagnostics.front();
+    auto error =
+        ava::core::Error(ava::core::ErrorCategory::Session, "validated session copy history contains an assistant-output diagnostic and cannot be copied");
+    error.with_context("diagnostic_kind", std::string(to_string(diagnostic.kind)))
+        .with_context("diagnostic_entry_id", diagnostic.entry_id)
+        .with_context("diagnostic", diagnostic.message);
+    return std::unexpected(std::move(error));
+  }
+
+  auto& append_mutex = append_mutex_for_path(canonical_path);
+  std::lock_guard append_lock(append_mutex);
+  auto destination_entries = load(lease);
+  if (!destination_entries)
+    return std::unexpected(std::move(destination_entries.error()));
+  if (!destination_entries->empty())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "validated session copy destination must be newly created and empty");
+    error.with_context("path", path.string()).with_context("existing_entries", std::to_string(destination_entries->size()));
+    return std::unexpected(std::move(error));
+  }
+
+  for (auto const& entry : entries)
+  {
+    auto appended = append_impl(&lease, entry, true);
+    if (!appended)
+      return appended;
+  }
+  return {};
+}
+
+ava::core::VoidResult SessionStore::append_impl(SessionLease const* lease, SessionEntry const& entry, bool append_serialization_held)
 {
   std::optional<SessionTraceScope> trace;
   if (observation_attachment_->enabled.load(std::memory_order_acquire))
@@ -890,7 +1175,7 @@ ava::core::VoidResult SessionStore::append_impl(SessionLease const* lease, Sessi
   {
     if (lease != nullptr)
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "ephemeral session append must not receive a lease"));
-    std::lock_guard lock(ephemeral_state_->mutex);
+    std::lock_guard lock(ephemeral_state_->entries_mutex);
     ephemeral_state_->entries.push_back(entry);
     if (trace)
       trace->succeed();
@@ -915,7 +1200,9 @@ ava::core::VoidResult SessionStore::append_impl(SessionLease const* lease, Sessi
         with_append_commit_state(path_io_error("session append target has no basename", canonical_path), AppendCommitState::NotStarted, path));
 
   auto& append_mutex = append_mutex_for_path(canonical_path);
-  std::lock_guard append_lock(append_mutex);
+  std::optional<std::unique_lock<std::mutex>> append_lock;
+  if (!append_serialization_held)
+    append_lock.emplace(append_mutex);
 
   int parent_fd = ::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
   if (parent_fd < 0)
@@ -1096,7 +1383,8 @@ ava::core::VoidResult SessionStore::append_impl(SessionLease const* lease, Sessi
       error.with_context("append_close_cause", std::strerror(append_close_error));
     if (parent_close_error != 0)
       error.with_context("parent_close_cause", std::strerror(parent_close_error));
-    return std::unexpected(with_append_commit_state(std::move(error), AppendCommitState::PartialOrUnknown, path));
+    return std::unexpected(
+        with_append_commit_state(std::move(error), written == 0 ? AppendCommitState::NotStarted : AppendCommitState::PartialOrUnknown, path));
   }
 
   if (after_append_write_for_test_)
@@ -1608,7 +1896,7 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
     return std::optional<std::filesystem::path>{};
   }
 
-  auto const strict_status = ava::core::validate_strict_json(line, kMaxSessionJsonNestingDepth);
+  auto const strict_status = ava::core::validate_strict_json(line, ava::core::json::kMaxNestingDepth);
   bool const append_final_lf = strict_status == ava::core::StrictJsonStatus::Valid;
   if (append_final_lf)
   {
@@ -1689,7 +1977,8 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
     return std::optional<std::filesystem::path>{};
   }
 
-  auto quarantined = quarantine_session_tail(parent_fd.get(), parent_path, session_name, line, cancel_requested);
+  auto quarantined = quarantine_session_suffix(parent_fd.get(), parent_path, session_name, "torn-tail", line, cancel_requested,
+                                               before_recovery_quarantine_publication_for_test_ ? &before_recovery_quarantine_publication_for_test_ : nullptr);
   if (!quarantined)
   {
     auto error = std::move(quarantined.error());
@@ -1765,6 +2054,451 @@ ava::core::Result<std::optional<std::filesystem::path>> SessionStore::recover_to
   return std::optional<std::filesystem::path>(std::move(*quarantined));
 }
 
+ava::core::Result<std::optional<AssistantOutputSuffixRecovery>> SessionStore::recover_incomplete_assistant_output_suffix(
+    SessionReadLimits limits, SessionCancelCallback cancel_requested) const
+{
+  return recover_incomplete_assistant_output_suffix_ephemeral_impl(limits, std::move(cancel_requested), false);
+}
+
+ava::core::Result<std::optional<AssistantOutputSuffixRecovery>> SessionStore::recover_incomplete_assistant_output_suffix_ephemeral_impl(
+    SessionReadLimits limits, SessionCancelCallback cancel_requested, bool mutation_serialization_held) const
+{
+  if (!ephemeral_state_)
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "in-memory assistant-output suffix recovery requires an ephemeral session"));
+  }
+  if (auto valid_limits = validate_read_limits(limits); !valid_limits)
+    return std::unexpected(std::move(valid_limits.error()));
+
+  std::optional<std::unique_lock<std::mutex>> mutation_lock;
+  if (!mutation_serialization_held)
+    mutation_lock.emplace(ephemeral_state_->mutation_mutex);
+  std::lock_guard entries_lock(ephemeral_state_->entries_mutex);
+  std::vector<SessionEntry> const& entries = ephemeral_state_->entries;
+  std::unordered_set<std::string> entry_ids;
+  std::size_t total_bytes = 0;
+  for (std::size_t index = 0; index < entries.size(); ++index)
+  {
+    if (auto canceled = check_recovery_cancellation(cancel_requested); !canceled)
+      return std::unexpected(std::move(canceled.error()));
+    if (index >= limits.max_entries)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "ephemeral session entry count exceeds assistant-output recovery limit");
+      error.with_context("max_entries", std::to_string(limits.max_entries));
+      return std::unexpected(std::move(error));
+    }
+    if (entry_ids.contains(entries[index].id) || (!entries[index].parent_id.empty() && !entry_ids.contains(entries[index].parent_id)))
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "ephemeral assistant-output recovery found malformed session entry identity history");
+      error.with_context("entry_id", entries[index].id);
+      return std::unexpected(std::move(error));
+    }
+    entry_ids.insert(entries[index].id);
+    auto serialized = serialize_session_entry_line(entries[index]);
+    if (!serialized)
+      return std::unexpected(std::move(serialized.error()));
+    if (serialized->size() > limits.max_line_bytes || serialized->size() + 1 > limits.max_file_bytes - total_bytes)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "ephemeral session exceeds assistant-output recovery read limit");
+      error.with_context("max_file_bytes", std::to_string(limits.max_file_bytes)).with_context("max_line_bytes", std::to_string(limits.max_line_bytes));
+      return std::unexpected(std::move(error));
+    }
+    total_bytes += serialized->size() + 1;
+  }
+
+  auto const projection = classify_assistant_output(entries);
+  std::optional<std::size_t> suffix_start;
+  for (auto const& diagnostic : projection.diagnostics)
+  {
+    if (diagnostic.severity == AssistantOutputDiagnosticSeverity::Warning && diagnostic.kind == AssistantOutputDiagnosticKind::IncompleteAssistantTurn)
+    {
+      if (suffix_start || diagnostic.entry_index >= entries.size())
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "ephemeral assistant-output recovery found an ambiguous staging suffix"));
+      suffix_start = diagnostic.entry_index;
+      continue;
+    }
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "ephemeral assistant-output history is malformed; refusing suffix recovery");
+    error.with_context("diagnostic_kind", std::string(to_string(diagnostic.kind)))
+        .with_context("diagnostic_entry_id", diagnostic.entry_id)
+        .with_context("diagnostic", diagnostic.message);
+    return std::unexpected(std::move(error));
+  }
+  if (!suffix_start)
+    return std::optional<AssistantOutputSuffixRecovery>{};
+  for (std::size_t index = *suffix_start; index < entries.size(); ++index)
+  {
+    if (entries[index].type != EntryType::AssistantOutputItem)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "ephemeral assistant-output recovery suffix contains an unrelated entry"));
+    }
+  }
+
+  std::size_t removed_bytes = 0;
+  for (std::size_t index = *suffix_start; index < entries.size(); ++index)
+  {
+    auto serialized = serialize_session_entry_line(entries[index]);
+    if (!serialized)
+      return std::unexpected(std::move(serialized.error()));
+    removed_bytes += serialized->size() + 1;
+  }
+  auto const removed_entries = entries.size() - *suffix_start;
+  ephemeral_state_->entries.erase(ephemeral_state_->entries.begin() + static_cast<std::ptrdiff_t>(*suffix_start), ephemeral_state_->entries.end());
+  return std::optional<AssistantOutputSuffixRecovery>(
+      AssistantOutputSuffixRecovery{.quarantine_path = std::nullopt, .removed_entry_count = removed_entries, .removed_byte_count = removed_bytes});
+}
+
+ava::core::Result<std::optional<AssistantOutputSuffixRecovery>> SessionStore::recover_incomplete_assistant_output_suffix(
+    SessionLease const& lease, SessionReadLimits limits, SessionCancelCallback cancel_requested) const
+{
+  if (ephemeral_state_)
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent assistant-output suffix recovery does not accept an ephemeral session"));
+  }
+  if (auto valid_limits = validate_read_limits(limits); !valid_limits)
+    return std::unexpected(std::move(valid_limits.error()));
+  if (auto valid_session_id = validate_session_id(options_.session_id); !valid_session_id)
+    return std::unexpected(std::move(valid_session_id.error()));
+  if (!lease.active() || lease.canonical_path_.empty())
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "assistant-output suffix recovery requires an active session lease"));
+  }
+  auto const path = session_path();
+  if (normalized_absolute_path(path) != lease.canonical_path_)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "assistant-output suffix recovery lease does not exactly match the store");
+    error.with_context("path", path.string()).with_context("lease_path", lease.canonical_path_.string());
+    return std::unexpected(std::move(error));
+  }
+  if (auto canceled = check_recovery_cancellation(cancel_requested); !canceled)
+    return std::unexpected(std::move(canceled.error()));
+
+  auto const parent_path = path.parent_path();
+  auto const session_name = path.filename().string();
+  auto& append_mutex = append_mutex_for_path(path);
+  std::lock_guard append_lock(append_mutex);
+  ScopedFd parent_fd(::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
+  if (parent_fd.get() < 0)
+  {
+    return std::unexpected(path_io_error("failed to open the session directory for assistant-output suffix recovery", parent_path, errno));
+  }
+  ScopedFd repair_fd(::openat(parent_fd.get(), session_name.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW));
+  if (repair_fd.get() < 0)
+  {
+    auto error = path_io_error("failed to securely open the original session path for assistant-output suffix recovery", path, errno);
+    static_cast<void>(parent_fd.close_checked());
+    return std::unexpected(std::move(error));
+  }
+  auto close_both_best_effort = [&] {
+    static_cast<void>(repair_fd.close_checked());
+    static_cast<void>(parent_fd.close_checked());
+  };
+  auto close_without_repair = [&]() -> ava::core::Result<std::optional<AssistantOutputSuffixRecovery>> {
+    int const repair_close_error = repair_fd.close_checked();
+    int const parent_close_error = parent_fd.close_checked();
+    if (repair_close_error != 0)
+      return std::unexpected(path_io_error("failed to close complete session during assistant-output suffix recovery", path, repair_close_error));
+    if (parent_close_error != 0)
+      return std::unexpected(path_io_error("failed to close session directory during assistant-output suffix recovery", parent_path, parent_close_error));
+    return std::optional<AssistantOutputSuffixRecovery>{};
+  };
+
+  struct stat parent_status{};
+  if (fstat(parent_fd.get(), &parent_status) != 0 || !S_ISDIR(parent_status.st_mode))
+  {
+    int const error_number = errno;
+    close_both_best_effort();
+    return std::unexpected(path_io_error("session recovery parent is not a directory", parent_path, error_number));
+  }
+  struct stat lease_status{};
+  struct stat repair_status{};
+  if (fstat(lease.fd_, &lease_status) != 0)
+  {
+    auto error = path_io_error("failed to verify session lease for assistant-output suffix recovery", lease.canonical_path_, errno);
+    close_both_best_effort();
+    return std::unexpected(std::move(error));
+  }
+  if (fstat(repair_fd.get(), &repair_status) != 0)
+  {
+    auto error = path_io_error("failed to inspect session opened for assistant-output suffix recovery", path, errno);
+    close_both_best_effort();
+    return std::unexpected(std::move(error));
+  }
+  if (!same_file_identity(lease_status, repair_status))
+  {
+    close_both_best_effort();
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session lease does not identify the named assistant-output recovery target");
+    error.with_context("path", path.string()).with_context("lease_path", lease.canonical_path_.string());
+    return std::unexpected(std::move(error));
+  }
+  if (repair_status.st_size < 0 || static_cast<std::uintmax_t>(repair_status.st_size) > limits.max_file_bytes)
+  {
+    close_both_best_effort();
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session file exceeds assistant-output suffix recovery byte limit");
+    error.with_context("path", path.string()).with_context("max_file_bytes", std::to_string(limits.max_file_bytes));
+    return std::unexpected(std::move(error));
+  }
+  if (repair_status.st_size == 0)
+    return close_without_repair();
+
+  char final_byte = '\0';
+  ssize_t final_byte_count = 0;
+  do
+  {
+    final_byte_count = ::pread(repair_fd.get(), &final_byte, 1, repair_status.st_size - 1);
+  } while (final_byte_count < 0 && errno == EINTR);
+  if (final_byte_count != 1)
+  {
+    auto error = path_io_error("failed to inspect final session byte during assistant-output suffix recovery", path, final_byte_count < 0 ? errno : EIO);
+    close_both_best_effort();
+    return std::unexpected(std::move(error));
+  }
+  if (final_byte != '\n')
+  {
+    close_both_best_effort();
+    auto error =
+        ava::core::Error(ava::core::ErrorCategory::Session, "assistant-output suffix recovery requires torn-tail recovery before scanning complete records");
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
+
+  struct PhysicalRecord
+  {
+    off_t start = 0;
+    off_t end = 0;
+    SessionEntry entry;
+  };
+  std::vector<PhysicalRecord> records;
+  std::unordered_set<std::string> entry_ids;
+  std::array<char, 8192> buffer{};
+  std::string line;
+  line.reserve(std::min<std::size_t>(limits.max_line_bytes, buffer.size()));
+  off_t offset = 0;
+  off_t line_start = 0;
+  while (offset < repair_status.st_size)
+  {
+    if (auto canceled = check_recovery_cancellation(cancel_requested); !canceled)
+    {
+      close_both_best_effort();
+      return std::unexpected(std::move(canceled.error()));
+    }
+    auto const remaining = repair_status.st_size - offset;
+    auto const wanted = remaining < static_cast<off_t>(buffer.size()) ? static_cast<std::size_t>(remaining) : buffer.size();
+    ssize_t count = 0;
+    do
+    {
+      count = ::pread(repair_fd.get(), buffer.data(), wanted, offset);
+    } while (count < 0 && errno == EINTR);
+    if (count <= 0)
+    {
+      auto error = path_io_error("failed while scanning session for assistant-output suffix recovery", path, count < 0 ? errno : EIO);
+      close_both_best_effort();
+      return std::unexpected(std::move(error));
+    }
+    for (ssize_t index = 0; index < count; ++index)
+    {
+      char const ch = buffer[static_cast<std::size_t>(index)];
+      if (ch != '\n')
+      {
+        if (line.size() >= limits.max_line_bytes || line.size() + 1 >= kMaxSessionLineBytes)
+        {
+          close_both_best_effort();
+          auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session line exceeds assistant-output suffix recovery scan limit");
+          error.with_context("path", path.string()).with_context("max_line_bytes", std::to_string(limits.max_line_bytes));
+          return std::unexpected(std::move(error));
+        }
+        line.push_back(ch);
+        continue;
+      }
+
+      if (auto canceled = check_recovery_cancellation(cancel_requested); !canceled)
+      {
+        close_both_best_effort();
+        return std::unexpected(std::move(canceled.error()));
+      }
+      if (records.size() >= limits.max_entries)
+      {
+        close_both_best_effort();
+        auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session entry count exceeds assistant-output suffix recovery limit");
+        error.with_context("path", path.string()).with_context("max_entries", std::to_string(limits.max_entries));
+        return std::unexpected(std::move(error));
+      }
+      auto parsed = parse_strict_session_record(line, path, false);
+      if (!parsed)
+      {
+        auto error = std::move(parsed.error());
+        error.with_context("record_end_offset", std::to_string(offset + index + 1));
+        close_both_best_effort();
+        return std::unexpected(std::move(error));
+      }
+      if (entry_ids.contains(parsed->id) || (!parsed->parent_id.empty() && !entry_ids.contains(parsed->parent_id)))
+      {
+        close_both_best_effort();
+        auto error = ava::core::Error(ava::core::ErrorCategory::Session, "assistant-output suffix recovery found malformed session entry identity history");
+        error.with_context("entry_id", parsed->id).with_context("record_end_offset", std::to_string(offset + index + 1));
+        return std::unexpected(std::move(error));
+      }
+      entry_ids.insert(parsed->id);
+      records.push_back(PhysicalRecord{.start = line_start, .end = offset + index + 1, .entry = std::move(*parsed)});
+      line.clear();
+      line_start = offset + index + 1;
+    }
+    offset += count;
+  }
+  if (!line.empty() || records.empty())
+  {
+    close_both_best_effort();
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::Session, "assistant-output suffix recovery could not establish a complete framed session history"));
+  }
+
+  std::vector<SessionEntry> entries;
+  entries.reserve(records.size());
+  for (auto const& record : records) entries.push_back(record.entry);
+  auto const projection = classify_assistant_output(entries);
+  std::optional<std::size_t> suffix_start_index;
+  for (auto const& diagnostic : projection.diagnostics)
+  {
+    if (diagnostic.severity == AssistantOutputDiagnosticSeverity::Warning && diagnostic.kind == AssistantOutputDiagnosticKind::IncompleteAssistantTurn)
+    {
+      if (suffix_start_index || diagnostic.entry_index >= records.size())
+      {
+        close_both_best_effort();
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "assistant-output suffix recovery found an ambiguous final staging suffix"));
+      }
+      suffix_start_index = diagnostic.entry_index;
+      continue;
+    }
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "assistant-output history is malformed; refusing suffix recovery");
+    error.with_context("diagnostic_kind", std::string(to_string(diagnostic.kind)))
+        .with_context("diagnostic_entry_id", diagnostic.entry_id)
+        .with_context("diagnostic", diagnostic.message);
+    close_both_best_effort();
+    return std::unexpected(std::move(error));
+  }
+  if (!suffix_start_index)
+    return close_without_repair();
+  for (std::size_t index = *suffix_start_index; index < records.size(); ++index)
+  {
+    if (records[index].entry.type != EntryType::AssistantOutputItem)
+    {
+      close_both_best_effort();
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "assistant-output recovery suffix contains an unrelated session entry"));
+    }
+  }
+
+  off_t const suffix_start_offset = records[*suffix_start_index].start;
+  auto const removed_byte_count = static_cast<std::size_t>(repair_status.st_size - suffix_start_offset);
+  std::string suffix_bytes(removed_byte_count, '\0');
+  std::size_t suffix_offset = 0;
+  while (suffix_offset < suffix_bytes.size())
+  {
+    if (auto canceled = check_recovery_cancellation(cancel_requested); !canceled)
+    {
+      close_both_best_effort();
+      return std::unexpected(std::move(canceled.error()));
+    }
+    ssize_t count = 0;
+    do
+    {
+      count = ::pread(repair_fd.get(), suffix_bytes.data() + suffix_offset, suffix_bytes.size() - suffix_offset,
+                      suffix_start_offset + static_cast<off_t>(suffix_offset));
+    } while (count < 0 && errno == EINTR);
+    if (count <= 0)
+    {
+      auto error = path_io_error("failed to read the exact assistant-output suffix for quarantine", path, count < 0 ? errno : EIO);
+      close_both_best_effort();
+      return std::unexpected(std::move(error));
+    }
+    suffix_offset += static_cast<std::size_t>(count);
+  }
+  if (auto unchanged = require_unchanged_repair_namespace(repair_fd.get(), parent_fd.get(), repair_status, parent_status, parent_path, session_name, path);
+      !unchanged)
+  {
+    auto error = std::move(unchanged.error());
+    close_both_best_effort();
+    return std::unexpected(std::move(error));
+  }
+
+  auto quarantined = quarantine_session_suffix(parent_fd.get(), parent_path, session_name, "incomplete-assistant-output", suffix_bytes, cancel_requested,
+                                               before_recovery_quarantine_publication_for_test_ ? &before_recovery_quarantine_publication_for_test_ : nullptr);
+  if (!quarantined)
+  {
+    auto error = std::move(quarantined.error());
+    close_both_best_effort();
+    return std::unexpected(std::move(error));
+  }
+  if (after_recovery_quarantine_publication_for_test_)
+  {
+    try
+    {
+      after_recovery_quarantine_publication_for_test_();
+    }
+    catch (...)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "assistant-output suffix recovery post-publication test hook failed");
+      error.with_context("quarantine_path", quarantined->string());
+      close_both_best_effort();
+      return std::unexpected(std::move(error));
+    }
+  }
+  if (auto unchanged = require_unchanged_repair_namespace(repair_fd.get(), parent_fd.get(), repair_status, parent_status, parent_path, session_name, path);
+      !unchanged)
+  {
+    auto error = std::move(unchanged.error());
+    error.with_context("quarantine_path", quarantined->string());
+    close_both_best_effort();
+    return std::unexpected(std::move(error));
+  }
+  if (ftruncate(repair_fd.get(), suffix_start_offset) != 0)
+  {
+    auto error = path_io_error("failed to truncate quarantined incomplete assistant-output suffix", path, errno);
+    error.with_context("quarantine_path", quarantined->string());
+    close_both_best_effort();
+    return std::unexpected(std::move(error));
+  }
+  if (fdatasync(repair_fd.get()) != 0)
+  {
+    auto error = path_io_error("assistant-output suffix was truncated but the source sync failed", path, errno);
+    error.with_context("quarantine_path", quarantined->string());
+    close_both_best_effort();
+    return std::unexpected(std::move(error));
+  }
+  struct stat repaired_status{};
+  if (fstat(repair_fd.get(), &repaired_status) != 0)
+  {
+    auto error = path_io_error("failed to inspect session after truncating incomplete assistant-output suffix", path, errno);
+    error.with_context("quarantine_path", quarantined->string());
+    close_both_best_effort();
+    return std::unexpected(std::move(error));
+  }
+  if (auto unchanged = require_unchanged_repair_namespace(repair_fd.get(), parent_fd.get(), repaired_status, parent_status, parent_path, session_name, path);
+      !unchanged)
+  {
+    auto error = std::move(unchanged.error());
+    error.with_context("quarantine_path", quarantined->string());
+    close_both_best_effort();
+    return std::unexpected(std::move(error));
+  }
+  int const repair_close_error = repair_fd.close_checked();
+  int const parent_close_error = parent_fd.close_checked();
+  if (repair_close_error != 0)
+  {
+    auto error = path_io_error("failed to close repaired session after assistant-output suffix recovery", path, repair_close_error);
+    error.with_context("quarantine_path", quarantined->string());
+    return std::unexpected(std::move(error));
+  }
+  if (parent_close_error != 0)
+  {
+    auto error = path_io_error("failed to close session directory after assistant-output suffix recovery", parent_path, parent_close_error);
+    error.with_context("quarantine_path", quarantined->string());
+    return std::unexpected(std::move(error));
+  }
+  return std::optional<AssistantOutputSuffixRecovery>(AssistantOutputSuffixRecovery{
+      .quarantine_path = std::move(*quarantined), .removed_entry_count = records.size() - *suffix_start_index, .removed_byte_count = removed_byte_count});
+}
+
 ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const
 {
   std::optional<SessionTraceScope> trace;
@@ -1798,7 +2532,7 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const
 
   if (ephemeral_state_)
   {
-    std::lock_guard lock(ephemeral_state_->mutex);
+    std::lock_guard lock(ephemeral_state_->entries_mutex);
     auto entries = ephemeral_state_->entries;
     if (trace)
       trace->succeed(entries.size());
@@ -1873,7 +2607,7 @@ ava::core::VoidResult SessionStore::visit_entries(SessionReadLimits limits, Sess
   {
     std::vector<SessionEntry> snapshot;
     {
-      std::lock_guard lock(ephemeral_state_->mutex);
+      std::lock_guard lock(ephemeral_state_->entries_mutex);
       if (ephemeral_state_->entries.size() > limits.max_entries)
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "session entry count exceeds bounded read limit"));
       snapshot = ephemeral_state_->entries;
@@ -1898,7 +2632,7 @@ ava::core::VoidResult SessionStore::visit_entries(SessionReadLimits limits, Sess
 }
 
 ava::core::VoidResult SessionStore::visit_entries_leased(SessionLease const& lease, SessionReadLimits limits, SessionEntryVisitor const& visitor,
-                                                         SessionCancelCallback cancel_requested) const
+                                                         SessionCancelCallback cancel_requested, bool invoke_after_lease_bound_read_test_hook) const
 {
   if (auto valid = validate_read_limits(limits); !valid)
     return valid;
@@ -1996,8 +2730,9 @@ ava::core::VoidResult SessionStore::visit_entries_leased(SessionLease const& lea
     return std::unexpected(std::move(error));
   }
 
-  auto visited = visit_session_snapshot_fd(lease.fd_, initial_size, path, limits, visitor, cancel_requested, false,
-                                           after_lease_bound_read_for_test_ ? &after_lease_bound_read_for_test_ : nullptr);
+  auto visited =
+      visit_session_snapshot_fd(lease.fd_, initial_size, path, limits, visitor, cancel_requested, false,
+                                invoke_after_lease_bound_read_test_hook && after_lease_bound_read_for_test_ ? &after_lease_bound_read_for_test_ : nullptr);
   auto final = validate_identity("after snapshot");
   if (final && (!same_file_identity(initial->lease_status, final->lease_status) || final->lease_status.st_size < initial_size ||
                 final->named_status.st_size < initial_size))
@@ -2620,17 +3355,21 @@ off_t SessionLease::offset_for_test() const noexcept
 
 struct SessionReadAuthority::State
 {
-  State(SessionStore store_in, std::optional<SessionLease> lease_in) : store(std::move(store_in)), lease(std::move(lease_in)) { }
+  State(SessionStore store_in, std::optional<SessionLease> lease_in, SessionReadLimits limits_in)
+      : store(std::move(store_in)), lease(std::move(lease_in)), limits(limits_in)
+  {
+  }
 
   SessionStore store;
   std::optional<SessionLease> lease;
+  SessionReadLimits limits;
 };
 
 SessionReadAuthority::SessionReadAuthority(std::shared_ptr<State const> state) : state_(std::move(state))
 {
 }
 
-ava::core::Result<SessionReadAuthority> SessionReadAuthority::create_persistent(SessionStore const& store, SessionLease const& lease)
+ava::core::Result<SessionReadAuthority> SessionReadAuthority::create_persistent(SessionStore const& store, SessionLease const& lease, SessionReadLimits limits)
 {
   if (store.is_ephemeral())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent read authority requires a persistent store"));
@@ -2698,7 +3437,7 @@ ava::core::Result<SessionReadAuthority> SessionReadAuthority::create_persistent(
     SessionLease duplicated_lease(duplicate_fd, std::move(authority_lease_path), authority_created);
     if (fail_allocation_for_test)
       throw std::bad_alloc();
-    auto state = std::make_shared<State>(std::move(authority_store), std::optional<SessionLease>(std::move(duplicated_lease)));
+    auto state = std::make_shared<State>(std::move(authority_store), std::optional<SessionLease>(std::move(duplicated_lease)), limits);
     return SessionReadAuthority(std::move(state));
   }
   catch (...)
@@ -2707,13 +3446,13 @@ ava::core::Result<SessionReadAuthority> SessionReadAuthority::create_persistent(
   }
 }
 
-ava::core::Result<SessionReadAuthority> SessionReadAuthority::create_ephemeral(SessionStore const& store)
+ava::core::Result<SessionReadAuthority> SessionReadAuthority::create_ephemeral(SessionStore const& store, SessionReadLimits limits)
 {
   if (!store.is_ephemeral())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "ephemeral read authority requires an ephemeral store"));
   try
   {
-    auto state = std::make_shared<State>(store, std::nullopt);
+    auto state = std::make_shared<State>(store, std::nullopt, limits);
     return SessionReadAuthority(std::move(state));
   }
   catch (...)
@@ -2726,7 +3465,7 @@ ava::core::Result<std::vector<SessionEntry>> SessionReadAuthority::load() const
 {
   if (!state_)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session read authority is inactive"));
-  return state_->lease ? state_->store.load(*state_->lease) : state_->store.load();
+  return state_->lease ? state_->store.load_bounded(*state_->lease, state_->limits) : state_->store.load_bounded(state_->limits);
 }
 
 ava::core::Result<std::vector<SessionEntry>> SessionReadAuthority::load_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested) const
@@ -2745,11 +3484,14 @@ ava::core::Result<SessionSummary> SessionReadAuthority::inspect_bounded(SessionR
                        : state_->store.inspect_bounded(limits, std::move(cancel_requested));
 }
 
-SessionAppendTarget::SessionAppendTarget(SessionStore store, std::optional<SessionLease> lease) : store_(std::move(store)), lease_(std::move(lease))
+SessionAppendTarget::SessionAppendTarget(SessionStore store, std::optional<SessionLease> lease, AssistantOutputAppendState assistant_output_state,
+                                         SessionReadLimits read_limits)
+    : store_(std::move(store)), lease_(std::move(lease)), read_limits_(read_limits), assistant_output_state_(std::move(assistant_output_state))
 {
 }
 
-ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::create_persistent(SessionStore const& store, SessionLease const& lease)
+ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::create_persistent(SessionStore const& store, SessionLease const& lease,
+                                                                                               SessionReadLimits read_limits)
 {
   if (store.is_ephemeral())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent append target requires a persistent store"));
@@ -2797,9 +3539,17 @@ ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::cre
     error.with_context("path", path.string());
     return std::unexpected(std::move(error));
   }
+  auto history = store.load(lease);
+  if (!history)
+    return std::unexpected(std::move(history.error()));
+  auto assistant_output_state = AssistantOutputAppendState::from_validated_history(*history);
+  if (!assistant_output_state)
+    return std::unexpected(std::move(assistant_output_state.error()));
+
   struct PersistentTarget final : SessionAppendTarget
   {
-    PersistentTarget(SessionStore store_in, SessionLease lease_in) : SessionAppendTarget(std::move(store_in), std::optional<SessionLease>(std::move(lease_in)))
+    PersistentTarget(SessionStore store_in, SessionLease lease_in, AssistantOutputAppendState assistant_output_state_in, SessionReadLimits read_limits_in)
+        : SessionAppendTarget(std::move(store_in), std::optional<SessionLease>(std::move(lease_in)), std::move(assistant_output_state_in), read_limits_in)
     {
     }
   };
@@ -2819,7 +3569,7 @@ ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::cre
     SessionLease duplicated_lease(duplicate_fd, std::move(target_canonical_path), target_created);
     if (fail_allocation_for_test)
       throw std::bad_alloc();
-    return std::make_shared<PersistentTarget>(std::move(target_store), std::move(duplicated_lease));
+    return std::make_shared<PersistentTarget>(std::move(target_store), std::move(duplicated_lease), std::move(*assistant_output_state), read_limits);
   }
   catch (...)
   {
@@ -2827,17 +3577,26 @@ ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::cre
   }
 }
 
-ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::create_ephemeral(SessionStore const& store)
+ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::create_ephemeral(SessionStore const& store, SessionReadLimits read_limits)
 {
   if (!store.is_ephemeral())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "ephemeral append target requires an ephemeral store"));
+  auto history = store.load();
+  if (!history)
+    return std::unexpected(std::move(history.error()));
+  auto assistant_output_state = AssistantOutputAppendState::from_validated_history(*history);
+  if (!assistant_output_state)
+    return std::unexpected(std::move(assistant_output_state.error()));
   struct EphemeralTarget final : SessionAppendTarget
   {
-    explicit EphemeralTarget(SessionStore store_in) : SessionAppendTarget(std::move(store_in), std::nullopt) { }
+    EphemeralTarget(SessionStore store_in, AssistantOutputAppendState assistant_output_state_in, SessionReadLimits read_limits_in)
+        : SessionAppendTarget(std::move(store_in), std::nullopt, std::move(assistant_output_state_in), read_limits_in)
+    {
+    }
   };
   try
   {
-    return std::make_shared<EphemeralTarget>(store);
+    return std::make_shared<EphemeralTarget>(store, std::move(*assistant_output_state), read_limits);
   }
   catch (...)
   {
@@ -2845,26 +3604,201 @@ ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::cre
   }
 }
 
+static_assert(std::is_nothrow_move_assignable_v<AssistantOutputAppendState>);
+
 ava::core::VoidResult SessionAppendTarget::append(SessionEntry const& entry)
 {
+  std::lock_guard lock(mutex_);
+  if (recovery_required_)
+    return std::unexpected(append_target_recovery_required_error(store_.session_path()));
+
+  std::optional<std::unique_lock<std::mutex>> serialization_lock;
   if (lease_)
-    return store_.append(*lease_, entry);
-  return store_.append_ephemeral(entry);
+    serialization_lock.emplace(append_mutex_for_path(lease_->canonical_path()));
+  else
+    serialization_lock.emplace(store_.ephemeral_state_->mutation_mutex);
+
+  auto history = lease_ ? store_.load(*lease_) : store_.load();
+  if (!history)
+    return std::unexpected(std::move(history.error()));
+  auto current_state = AssistantOutputAppendState::from_validated_history(*history);
+  if (!current_state)
+    return std::unexpected(std::move(current_state.error()));
+
+  AssistantOutputAppendState next_state;
+  try
+  {
+    next_state = *current_state;
+    if (auto preflight = next_state.apply_candidate(entry); !preflight)
+      return std::unexpected(std::move(preflight.error()));
+  }
+  catch (...)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "failed to preflight assistant-output append state"));
+  }
+
+  auto appended = store_.append_impl(lease_ ? &*lease_ : nullptr, entry, true);
+  if (!appended && lease_ && !has_append_commit_state(appended.error()))
+    appended = std::unexpected(with_append_commit_state(std::move(appended.error()), AppendCommitState::NotStarted, store_.session_path()));
+  if (!appended)
+  {
+    auto error = std::move(appended.error());
+    if (append_partial_or_unknown(error))
+      recovery_required_ = true;
+    else if (append_committed_to_leased_inode(error))
+      assistant_output_state_ = std::move(next_state);
+    return std::unexpected(std::move(error));
+  }
+  assistant_output_state_ = std::move(next_state);
+  return {};
+}
+
+ava::core::VoidResult SessionAppendTarget::append_batch(std::vector<SessionEntry> entries)
+{
+  std::lock_guard lock(mutex_);
+  if (recovery_required_)
+    return std::unexpected(append_target_recovery_required_error(store_.session_path()));
+  if (entries.empty())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session append batch must not be empty"));
+  if (entries.size() > kMaxSessionAppendBatchEntries)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session append batch exceeds record limit");
+    error.with_context("max_records", std::to_string(kMaxSessionAppendBatchEntries));
+    return std::unexpected(std::move(error));
+  }
+  if (entries.back().type != EntryType::AssistantTurnCommit)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session append batch must end with one assistant_turn_commit"));
+  }
+  for (std::size_t index = 0; index + 1 < entries.size(); ++index)
+  {
+    if (entries[index].type != EntryType::AssistantOutputItem)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                              "session append batch may contain only assistant_output_item records before its final commit"));
+    }
+  }
+
+  std::size_t serialized_bytes = 0;
+  for (auto const& entry : entries)
+  {
+    auto serialized = serialize_session_entry_line(entry);
+    if (!serialized)
+      return std::unexpected(std::move(serialized.error()));
+    if (auto strict_entry = parse_strict_session_record(*serialized, store_.session_path(), false); !strict_entry)
+      return std::unexpected(std::move(strict_entry.error()));
+    if (serialized->size() >= kMaxSessionAppendBatchBytes || serialized_bytes >= kMaxSessionAppendBatchBytes ||
+        serialized->size() > kMaxSessionAppendBatchBytes - serialized_bytes - 1)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session append batch exceeds serialized byte limit");
+      error.with_context("max_bytes", std::to_string(kMaxSessionAppendBatchBytes));
+      return std::unexpected(std::move(error));
+    }
+    serialized_bytes += serialized->size() + 1;
+  }
+
+  // The same persistent-path or shared ephemeral mutation lock spans the
+  // authoritative history snapshot, v4 preflight, and every write. A second
+  // target constructed from an old snapshot therefore cannot commit stale
+  // state after this target advances the session.
+  std::optional<std::unique_lock<std::mutex>> serialization_lock;
+  if (lease_)
+    serialization_lock.emplace(append_mutex_for_path(lease_->canonical_path()));
+  else
+    serialization_lock.emplace(store_.ephemeral_state_->mutation_mutex);
+  auto history = lease_ ? store_.load(*lease_) : store_.load();
+  if (!history)
+    return std::unexpected(std::move(history.error()));
+  auto current_state = AssistantOutputAppendState::from_validated_history(*history);
+  if (!current_state)
+    return std::unexpected(std::move(current_state.error()));
+  if (!current_state->ready())
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::Session, "session append batch requires a ready assistant-output state with no staged transaction"));
+  }
+
+  AssistantOutputAppendState final_state;
+  try
+  {
+    final_state = *current_state;
+    for (auto const& entry : entries)
+    {
+      if (auto preflight = final_state.apply_candidate(entry); !preflight)
+        return std::unexpected(std::move(preflight.error()));
+    }
+  }
+  catch (...)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "failed to preflight assistant-output append batch state"));
+  }
+  if (!final_state.ready())
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::Session, "session append batch must complete its assistant-output transaction before writing"));
+  }
+
+  std::size_t persisted_entries = 0;
+  for (auto const& entry : entries)
+  {
+    auto appended = store_.append_impl(lease_ ? &*lease_ : nullptr, entry, true);
+    if (!appended && lease_ && !has_append_commit_state(appended.error()))
+      appended = std::unexpected(with_append_commit_state(std::move(appended.error()), AppendCommitState::NotStarted, store_.session_path()));
+    if (!appended)
+    {
+      auto error = std::move(appended.error());
+      bool const partial_or_unknown = append_partial_or_unknown(error);
+      if (append_committed_to_leased_inode(error))
+        ++persisted_entries;
+      if (partial_or_unknown || persisted_entries != 0)
+      {
+        recovery_required_ = true;
+        error = batch_partial_failure(error, store_.session_path(), persisted_entries);
+      }
+      return std::unexpected(std::move(error));
+    }
+    ++persisted_entries;
+  }
+  assistant_output_state_ = std::move(final_state);
+  return {};
 }
 
 ava::core::VoidResult SessionAppendTarget::recover()
 {
+  std::lock_guard lock(mutex_);
+  std::optional<std::unique_lock<std::mutex>> ephemeral_mutation_lock;
   if (!lease_)
-    return {};
-  auto recovered = store_.recover_torn_tail(*lease_, legacy_unbounded_session_read_limits());
-  if (!recovered)
-    return std::unexpected(std::move(recovered.error()));
+    ephemeral_mutation_lock.emplace(store_.ephemeral_state_->mutation_mutex);
+
+  if (lease_)
+  {
+    auto recovered = store_.recover_torn_tail(*lease_, read_limits_);
+    if (!recovered)
+      return std::unexpected(std::move(recovered.error()));
+    auto staged_recovery = store_.recover_incomplete_assistant_output_suffix(*lease_, read_limits_);
+    if (!staged_recovery)
+      return std::unexpected(std::move(staged_recovery.error()));
+  }
+  else
+  {
+    auto staged_recovery = store_.recover_incomplete_assistant_output_suffix_ephemeral_impl(read_limits_, nullptr, true);
+    if (!staged_recovery)
+      return std::unexpected(std::move(staged_recovery.error()));
+  }
+  auto history = lease_ ? store_.load(*lease_) : store_.load();
+  if (!history)
+    return std::unexpected(std::move(history.error()));
+  auto rebuilt_state = AssistantOutputAppendState::from_validated_history(*history);
+  if (!rebuilt_state)
+    return std::unexpected(std::move(rebuilt_state.error()));
+  assistant_output_state_ = std::move(*rebuilt_state);
+  recovery_required_ = false;
   return {};
 }
 
 ava::core::Result<SessionReadAuthority> SessionAppendTarget::read_authority() const
 {
-  return lease_ ? SessionReadAuthority::create_persistent(store_, *lease_) : SessionReadAuthority::create_ephemeral(store_);
+  return lease_ ? SessionReadAuthority::create_persistent(store_, *lease_, read_limits_) : SessionReadAuthority::create_ephemeral(store_, read_limits_);
 }
 
 bool SessionAppendTarget::is_ephemeral() const noexcept
@@ -2910,6 +3844,10 @@ std::string to_string(EntryType type)
       return "reasoning_block";
     case EntryType::ReasoningChange:
       return "reasoning_change";
+    case EntryType::AssistantOutputItem:
+      return "assistant_output_item";
+    case EntryType::AssistantTurnCommit:
+      return "assistant_turn_commit";
     case EntryType::Compaction:
       return "compaction";
     case EntryType::BranchSummary:
@@ -2946,6 +3884,10 @@ ava::core::Result<EntryType> parse_entry_type(std::string_view value)
     return EntryType::ReasoningBlock;
   if (value == "reasoning_change")
     return EntryType::ReasoningChange;
+  if (value == "assistant_output_item")
+    return EntryType::AssistantOutputItem;
+  if (value == "assistant_turn_commit")
+    return EntryType::AssistantTurnCommit;
   if (value == "compaction")
     return EntryType::Compaction;
   if (value == "branch_summary")

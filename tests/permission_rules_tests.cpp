@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "ava/command/private_group.h"
 #include "ava/tools/file_tools.h"
 #include "ava/permissions/permission_rules.h"
 
@@ -16,6 +17,9 @@ ava::permissions::PermissionRuleStore test_store(std::filesystem::path const& ro
 {
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
+  static_cast<void>(::chmod(temp_root().c_str(), S_IRWXU));
+  static_cast<void>(::chmod(root.c_str(), S_IRWXU));
+  static_cast<void>(::chmod(workspace.c_str(), S_IRWXU));
   return ava::permissions::PermissionRuleStore{.global_rules_file = root / "config" / "ava" / "permission-rules.json",
                                                .workspace_rules_file = workspace / ".ava" / "permission-rules.json",
                                                .workspace_dir = workspace};
@@ -24,6 +28,10 @@ ava::permissions::PermissionRuleStore test_store(std::filesystem::path const& ro
 void write_file_with_mode(std::filesystem::path const& path, std::string const& content, mode_t mode)
 {
   std::filesystem::create_directories(path.parent_path());
+  for (auto current = path.parent_path(); current != temp_root().parent_path(); current = current.parent_path())
+  {
+    static_cast<void>(::chmod(current.c_str(), S_IRWXU));
+  }
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << content;
   file.close();
@@ -58,6 +66,7 @@ void test_permission_rule_storage_add_list_remove()
   std::filesystem::remove_all(root, remove_error);
   auto const store = test_store(root);
   auto const outside = root / "outside.txt";
+  static_cast<void>(::chmod(root.c_str(), S_IRWXU));
 
   auto added =
       ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
@@ -228,6 +237,7 @@ void test_schema_v2_recipe_rules_bind_scope_and_deny_precedence()
   auto const workspace_b = root / "workspace-b";
   std::filesystem::create_directories(workspace_a);
   std::filesystem::create_directories(workspace_b);
+  static_cast<void>(::chmod(root.c_str(), S_IRWXU));
   auto const global_file = root / "config" / "ava" / "permission-rules.json";
   auto const store_a = ava::permissions::PermissionRuleStore{
       .global_rules_file = global_file, .workspace_rules_file = workspace_a / ".ava" / "permission-rules.json", .workspace_dir = workspace_a};
@@ -636,19 +646,19 @@ void test_critical_acknowledged_rejects_unavailable_containment()
   std::filesystem::remove_all(root, remove_error);
   auto const store = test_store(root);
   auto const command = std::string("curl https://example.test/releases");
-  auto acknowledged =
-      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
-                                                                                                    .action = ava::permissions::PermissionAction::Allow,
-                                                                                                    .operation = ava::permissions::Operation::RunCommand,
-                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
-                                                                                                    .tool_name = "bash",
-                                                                                                    .target_path = {},
-                                                                                                    .command = command,
-                                                                                                    .command_recipe_key = {},
-                                                                                                    .recipe_display = {},
-                                                                                                    .critical_acknowledged = true,
-                                                                                                    .reason = "exact critical allow for uncontained network command",
-                                                                                                    .actor = "test"});
+  auto acknowledged = ava::permissions::add_persistent_permission_rule(
+      store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                   .action = ava::permissions::PermissionAction::Allow,
+                                                   .operation = ava::permissions::Operation::RunCommand,
+                                                   .mode = ava::permissions::PermissionRuleMode::Build,
+                                                   .tool_name = "bash",
+                                                   .target_path = {},
+                                                   .command = command,
+                                                   .command_recipe_key = {},
+                                                   .recipe_display = {},
+                                                   .critical_acknowledged = true,
+                                                   .reason = "exact critical allow for uncontained network command",
+                                                   .actor = "test"});
   expect(acknowledged.has_value(), "critical_acknowledged allow can be created for exact curl command text");
   auto prompt = command_prompt(store, command);
 
@@ -725,6 +735,147 @@ void test_permission_rule_broad_permissions_rejected()
   expect(!loaded && loaded.error().category() == ava::core::ErrorCategory::PermissionDenied, "permission rule storage rejects group/world-readable rule files");
 }
 
+ava::permissions::PermissionRuleDraft persistent_deny_draft(std::filesystem::path const& target)
+{
+  return ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Global,
+                                               .action = ava::permissions::PermissionAction::Deny,
+                                               .operation = ava::permissions::Operation::ReadFile,
+                                               .mode = ava::permissions::PermissionRuleMode::Any,
+                                               .tool_name = "",
+                                               .target_path = target,
+                                               .command = "",
+                                               .command_recipe_key = {},
+                                               .recipe_display = {},
+                                               .critical_acknowledged = false,
+                                               .reason = "persistent deny must survive unsafe storage paths",
+                                               .actor = "test"};
+}
+
+void test_permission_rule_storage_rejects_unsafe_ancestor_without_dropping_denies()
+{
+  auto const root = temp_root() / "permission-rules-unsafe-ancestor";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto const target = root / "outside.txt";
+  auto deny = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(target));
+  auto const config_dir = store.global_rules_file.parent_path().parent_path();
+  expect(deny && ::chmod(config_dir.c_str(), S_IRWXU | S_IRWXO) == 0,
+         "unsafe ancestor fixture creates a persistent deny then makes its ancestor world writable without a root sticky namespace");
+
+  auto rejected_load = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  auto rejected_write = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(root / "other.txt"));
+  auto const unchanged = std::filesystem::exists(store.global_rules_file) && !rejected_load && !rejected_write;
+
+  expect(::chmod(config_dir.c_str(), S_IRWXU) == 0, "unsafe ancestor fixture restores private ancestor mode");
+  auto restored = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  expect(unchanged && restored && *restored && (*restored)->rule_id == deny->rule_id,
+         "a world-writable non-sticky permission-rule ancestor fails closed and cannot erase or rewrite a persisted Deny");
+}
+
+void test_permission_rule_storage_allows_private_primary_group_ancestor_when_verified()
+{
+  auto const root = temp_root() / "permission-rules-private-primary-group-ancestor";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto const config_dir = store.global_rules_file.parent_path().parent_path();
+  std::filesystem::create_directories(config_dir);
+  if (::chown(config_dir.c_str(), ::geteuid(), ::getegid()) != 0 || ::chmod(config_dir.c_str(), S_IRWXU | S_IRWXG) != 0)
+    return;
+
+  struct stat status{};
+  if (::stat(config_dir.c_str(), &status) != 0 || !ava::command::detail::is_current_user_private_primary_group_directory(status))
+    return;
+
+  auto const target = root / "outside.txt";
+  auto deny = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(target));
+  auto matched = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  expect(deny && matched && *matched && (*matched)->rule_id == deny->rule_id,
+         "a verified private-primary-group group-writable ancestor is accepted while final rules storage remains private");
+}
+
+void test_permission_rule_storage_rejects_symlinked_or_replaced_directories()
+{
+  auto const root = temp_root() / "permission-rules-replaced-directories";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto const target = root / "outside.txt";
+  auto deny = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(target));
+  auto const rules_dir = store.global_rules_file.parent_path();
+  auto const redirected_root = root / "redirected";
+  std::filesystem::create_directories(redirected_root);
+  expect(::chmod(redirected_root.c_str(), S_IRWXU) == 0, "replacement fixture creates private redirect destination");
+
+  auto const parked_dir = rules_dir.string() + ".parked";
+  std::error_code rename_error;
+  std::filesystem::rename(rules_dir, parked_dir, rename_error);
+  std::error_code link_error;
+  std::filesystem::create_directory_symlink(redirected_root, rules_dir, link_error);
+  auto symlink_load = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  auto symlink_write = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(root / "redirected-write.txt"));
+  auto const redirect_untouched = !std::filesystem::exists(redirected_root / "permission-rules.json");
+
+  std::filesystem::remove(rules_dir, remove_error);
+  std::filesystem::rename(parked_dir, rules_dir, rename_error);
+
+  auto const config_dir = rules_dir.parent_path();
+  auto const parked_config = config_dir.string() + ".parked";
+  std::filesystem::rename(config_dir, parked_config, rename_error);
+  std::filesystem::create_directory_symlink(redirected_root, config_dir, link_error);
+  auto ancestor_symlink_load = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  auto ancestor_symlink_write = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(root / "ancestor-redirected-write.txt"));
+  std::filesystem::remove(config_dir, remove_error);
+  std::filesystem::rename(parked_config, config_dir, rename_error);
+
+  auto const redirect_still_untouched =
+      !std::filesystem::exists(redirected_root / "permission-rules.json") && !std::filesystem::exists(redirected_root / "ava" / "permission-rules.json");
+  auto restored = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  expect(deny && !rename_error && !link_error && !symlink_load && !symlink_write && !ancestor_symlink_load && !ancestor_symlink_write && redirect_untouched &&
+             redirect_still_untouched && restored && *restored && (*restored)->rule_id == deny->rule_id,
+         "symlink-replaced path ancestors and final rule directories fail closed, cannot redirect writes, and leave the original Deny intact");
+}
+
+void test_permission_rule_storage_requires_owner_only_final_directory()
+{
+  auto const root = temp_root() / "permission-rules-final-directory-mode";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto const target = root / "outside.txt";
+  auto deny = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(target));
+  auto const rules_dir = store.global_rules_file.parent_path();
+  expect(deny && ::chmod(rules_dir.c_str(), S_IRWXU | S_IRGRP | S_IXGRP) == 0, "final rules-directory fixture makes an existing Deny directory non-private");
+
+  auto rejected_load = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  auto rejected_write = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(root / "other.txt"));
+  expect(::chmod(rules_dir.c_str(), S_IRWXU) == 0, "final rules-directory fixture restores exact 0700 mode");
+  auto restored = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  expect(!rejected_load && !rejected_write && restored && *restored && (*restored)->rule_id == deny->rule_id,
+         "a non-0700 final rule directory fails closed and cannot drop or replace a persisted Deny");
+}
+
+void test_permission_rule_storage_allows_root_sticky_temp_ancestor()
+{
+  auto const temporary_root = std::filesystem::temp_directory_path();
+  struct stat temporary_status{};
+  auto const root = temporary_root / ("ava-permission-rules-sticky-" + std::to_string(static_cast<long long>(::getpid())));
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(root);
+  auto const temporary_is_root_sticky =
+      ::stat(temporary_root.c_str(), &temporary_status) == 0 && temporary_status.st_uid == 0 && (temporary_status.st_mode & S_ISVTX) != 0;
+  expect(::chmod(root.c_str(), S_IRWXU) == 0, "root-sticky ancestor fixture creates an owned 0700 child");
+
+  auto const store = test_store(root);
+  auto const target = root / "outside.txt";
+  auto deny = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(target));
+  auto matched = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  expect(temporary_is_root_sticky && deny && matched && *matched && (*matched)->rule_id == deny->rule_id,
+         "a root-owned sticky temporary namespace is accepted when the rule-storage child is owned and exact 0700");
+}
+
 void test_permission_rule_workspace_legacy_path_is_not_enforceable()
 {
   auto const root = temp_root() / "permission-rules-legacy-workspace-path";
@@ -778,6 +929,8 @@ void test_file_tools_reject_enforceable_permission_rule_writes()
   std::filesystem::remove_all(root, remove_error);
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
+  static_cast<void>(::chmod(root.c_str(), S_IRWXU));
+  static_cast<void>(::chmod(workspace.c_str(), S_IRWXU));
   auto const store = ava::permissions::PermissionRuleStore{.global_rules_file = workspace / ".config" / "ava" / "permission-rules.json",
                                                            .workspace_rules_file = workspace / ".ava" / "permission-rules.json",
                                                            .workspace_dir = workspace};
@@ -886,6 +1039,11 @@ void run_permission_rules_tests()
   test_legacy_command_allows_do_not_authorize_sealed_critical_or_unverified_plans();
   test_permission_rule_storage_fail_closed();
   test_permission_rule_broad_permissions_rejected();
+  test_permission_rule_storage_rejects_unsafe_ancestor_without_dropping_denies();
+  test_permission_rule_storage_allows_private_primary_group_ancestor_when_verified();
+  test_permission_rule_storage_rejects_symlinked_or_replaced_directories();
+  test_permission_rule_storage_requires_owner_only_final_directory();
+  test_permission_rule_storage_allows_root_sticky_temp_ancestor();
   test_permission_rule_workspace_legacy_path_is_not_enforceable();
   test_file_tools_reject_workspace_permission_rule_writes();
   test_file_tools_reject_enforceable_permission_rule_writes();

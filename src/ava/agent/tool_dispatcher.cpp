@@ -507,7 +507,8 @@ ToolDispatchResult bash_result(ava::tools::ToolContext const& context, ProviderT
       ava::tools::run_bash(tool_context, *command,
                            ava::tools::BashOptions{.timeout = std::chrono::milliseconds(optional_size_arg(call.arguments_json, "timeout_ms", 30000, 120000)),
                                                    .max_bytes = optional_size_arg(call.arguments_json, "max_bytes", 50 * 1024, 512 * 1024),
-                                                   .max_lines = max_lines});
+                                                   .max_lines = max_lines,
+                                                   .invocation_source = ava::tools::BashOptions::InvocationSource::ModelCompatibility});
   if (!result)
     return tool_error_result(call, result.error());
   return ToolDispatchResult{.call_id = call.id,

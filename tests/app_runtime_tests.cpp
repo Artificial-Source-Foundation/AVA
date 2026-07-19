@@ -6,6 +6,7 @@
 #include "ava/app/clipboard_image.h"
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_palette.h"
+#include "ava/app/command_sessions.h"
 #include "ava/app/commands.h"
 #include "ava/app/connect_openai.h"
 #include "ava/app/display_settings.h"
@@ -18,8 +19,11 @@
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime_model.h"
 #include "ava/app/runtime_retry.h"
 #include "ava/agent/agent_loop.h"
+#include "ava/agent/agent_loop_session.h"
+#include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/bash_tool.h"
@@ -35,6 +39,7 @@
 #include "ava/config/openai_oauth.h"
 #include "ava/config/prompt_config.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/session/assistant_output.h"
 #include "ava/session/attachments.h"
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
@@ -43,6 +48,7 @@
 #include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
 #include "ava/session/stats.h"
+#include "ava/session/validation.h"
 #include "ava/permissions/permission.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/openai_provider.h"
@@ -667,6 +673,183 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
          "bounded runtime/ACP-style recovery rejects an over-entry source unchanged without quarantine");
 }
 
+void test_app_runtime_reconciles_committed_function_calls_on_resume()
+{
+  auto const root = temp_root() / "app-runtime-committed-function-reconciliation";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions options;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
+  auto seeded = ava::app::open_runtime_session(options);
+  expect(seeded.has_value(), "committed-function reconciliation fixture opens a session");
+  if (!seeded)
+    return;
+  auto const session_id = seeded->store.session_id();
+  auto function = [](std::string id, std::string call_id, std::size_t sequence) {
+    auto data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+        .assistant_turn_id = "reconcile-turn",
+        .sequence = sequence,
+        .kind = ava::session::AssistantOutputItemKind::FunctionCall,
+        .provider_item_id = "provider-" + std::to_string(sequence),
+        .provider_output_index = sequence,
+        .payload = ava::session::AssistantOutputFunctionCall{.call_id = std::move(call_id), .name = "read_file", .arguments_json = R"({"path":"note.txt"})"}});
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::AssistantOutputItem,
+                                      .timestamp = ava::session::now_timestamp(),
+                                      .data_json = data.value_or("{}")};
+  };
+  auto commit_data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{.assistant_turn_id = "reconcile-turn",
+                                                                                                               .item_count = 2,
+                                                                                                               .provider = "openai",
+                                                                                                               .model = "gpt-5.5",
+                                                                                                               .finish_reason = "tool_calls",
+                                                                                                               .usage_json = std::nullopt});
+  auto first = function("reconcile-function-one", "reconcile-call-one", 0);
+  auto second = function("reconcile-function-two", "reconcile-call-two", 1);
+  auto committed = seeded->append_owned(first);
+  committed = committed ? seeded->append_owned(second) : std::move(committed);
+  committed = committed ? seeded->append_owned(ava::session::SessionEntry{.id = "reconcile-commit",
+                                                                          .parent_id = "",
+                                                                          .type = ava::session::EntryType::AssistantTurnCommit,
+                                                                          .timestamp = ava::session::now_timestamp(),
+                                                                          .data_json = commit_data.value_or("{}")})
+                        : std::move(committed);
+  auto partial_result = committed
+                            ? ava::agent::append_tool_result(
+                                  seeded->owner_append_route(),
+                                  ava::agent::ToolDispatchResult{
+                                      .call_id = "reconcile-call-one", .name = "read_file", .success = true, .result_text = R"({"ok":true,"path":"note.txt"})"},
+                                  "reconcile-function-one")
+                            : ava::core::VoidResult(std::unexpected(committed.error()));
+  expect(committed && partial_result, "committed-function reconciliation fixture writes a committed turn with one preexisting exact result");
+  seeded = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release reconciliation fixture before resume"));
+
+  auto resume = options;
+  resume.requested_session_id = session_id;
+  resume.exact_session_id = true;
+  auto resumed = ava::app::open_runtime_session(resume);
+  auto entries = resumed ? resumed->store.load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(resumed.error()));
+  std::size_t first_results = 0;
+  std::size_t second_results = 0;
+  bool saw_unknown_nonretriable = false;
+  if (entries)
+  {
+    for (auto const& entry : *entries)
+    {
+      if (entry.type != ava::session::EntryType::ToolResult)
+        continue;
+      auto const call_id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
+      first_results += call_id == "reconcile-call-one";
+      second_results += call_id == "reconcile-call-two";
+      saw_unknown_nonretriable =
+          saw_unknown_nonretriable ||
+          (call_id == "reconcile-call-two" && entry.data_json.find("execution_outcome_unknown") != std::string::npos &&
+           entry.data_json.find("Do not retry automatically") != std::string::npos && entry.data_json.find("reconcile-function-two") != std::string::npos);
+    }
+  }
+  auto validation = entries ? ava::session::validate_session_replay(*entries) : ava::session::SessionReplayValidation{};
+  auto messages = entries ? ava::agent::build_provider_messages_from_entries(*entries, ava::agent::MessageBuildOptions{})
+                          : ava::core::Result<std::vector<ava::provider::ChatMessage>>(std::unexpected(resumed.error()));
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  auto request = messages ? provider.build_request(ava::provider::ProviderRequest{.provider_id = "openai",
+                                                                                  .model_id = "gpt-5.5",
+                                                                                  .system_prompt = "system",
+                                                                                  .messages = std::move(*messages),
+                                                                                  .tools_json = {},
+                                                                                  .stream = true},
+                                                   "token")
+                          : ava::core::Result<ava::provider::HttpRequest>(std::unexpected(messages.error()));
+  expect(resumed && entries && first_results == 1 && second_results == 1 && saw_unknown_nonretriable && validation.ok() && request,
+         "resume closes only unresolved committed v4 functions, preserves exact bindings, validates replay, and builds the next provider request");
+
+  resumed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release reconciled runtime before idempotence check"));
+  auto reopened = ava::app::open_runtime_session(resume);
+  auto reopened_entries = reopened ? reopened->store.load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(reopened.error()));
+  std::size_t second_results_after_reopen = 0;
+  if (reopened_entries)
+    for (auto const& entry : *reopened_entries)
+      second_results_after_reopen +=
+          entry.type == ava::session::EntryType::ToolResult && ava::core::json::string_field(entry.data_json, "call_id").value_or("") == "reconcile-call-two";
+  expect(reopened && reopened_entries && second_results_after_reopen == 1,
+         "reopening an already reconciled committed function turn never writes a duplicate synthetic result");
+
+  auto zero_result_seed = ava::app::open_runtime_session(options);
+  expect(zero_result_seed.has_value(), "zero-result reconciliation fixture opens a second session");
+  if (!zero_result_seed)
+    return;
+  auto const zero_result_session_id = zero_result_seed->store.session_id();
+  auto zero_commit_data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{.assistant_turn_id = "reconcile-turn",
+                                                                                                                    .item_count = 1,
+                                                                                                                    .provider = "openai",
+                                                                                                                    .model = "gpt-5.5",
+                                                                                                                    .finish_reason = "tool_calls",
+                                                                                                                    .usage_json = std::nullopt});
+  auto zero_committed = zero_result_seed->append_owned(function("zero-result-function", "zero-result-call", 0));
+  zero_committed = zero_committed ? zero_result_seed->append_owned(ava::session::SessionEntry{.id = "zero-result-commit",
+                                                                                              .parent_id = "",
+                                                                                              .type = ava::session::EntryType::AssistantTurnCommit,
+                                                                                              .timestamp = ava::session::now_timestamp(),
+                                                                                              .data_json = zero_commit_data.value_or("{}")})
+                                  : std::move(zero_committed);
+  expect(zero_committed.has_value(), "zero-result reconciliation fixture writes a committed v4 function without any result");
+  zero_result_seed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release zero-result fixture before resume"));
+  auto zero_resume = options;
+  zero_resume.requested_session_id = zero_result_session_id;
+  zero_resume.exact_session_id = true;
+  auto zero_result_reopened = ava::app::open_runtime_session(zero_resume);
+  auto zero_entries = zero_result_reopened ? zero_result_reopened->store.load()
+                                           : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(zero_result_reopened.error()));
+  std::size_t zero_synthetic_results = 0;
+  if (zero_entries)
+    for (auto const& entry : *zero_entries)
+      zero_synthetic_results += entry.type == ava::session::EntryType::ToolResult &&
+                                ava::core::json::string_field(entry.data_json, "call_id").value_or("") == "zero-result-call" &&
+                                entry.data_json.find("execution_outcome_unknown") != std::string::npos;
+  auto zero_validation = zero_entries ? ava::session::validate_session_replay(*zero_entries) : ava::session::SessionReplayValidation{};
+  expect(zero_result_reopened && zero_entries && zero_synthetic_results == 1 && zero_validation.ok(),
+         "resume closes a committed v4 function with zero prior results without re-executing it");
+
+  auto invalid_seed = ava::app::open_runtime_session(options);
+  expect(invalid_seed.has_value(), "invalid exact-result reconciliation fixture opens a third session");
+  if (!invalid_seed)
+    return;
+  auto const invalid_session_id = invalid_seed->store.session_id();
+  auto const invalid_session_path = invalid_seed->store.session_path();
+  auto invalid_committed = invalid_seed->append_owned(function("invalid-window-function", "invalid-window-call", 0));
+  invalid_committed = invalid_committed ? invalid_seed->append_owned(ava::session::SessionEntry{.id = "invalid-window-commit",
+                                                                                                .parent_id = "",
+                                                                                                .type = ava::session::EntryType::AssistantTurnCommit,
+                                                                                                .timestamp = ava::session::now_timestamp(),
+                                                                                                .data_json = zero_commit_data.value_or("{}")})
+                                        : std::move(invalid_committed);
+  invalid_committed = invalid_committed ? invalid_seed->append_owned(ava::session::SessionEntry{.id = "invalid-window-user",
+                                                                                                .parent_id = "",
+                                                                                                .type = ava::session::EntryType::UserMessage,
+                                                                                                .timestamp = ava::session::now_timestamp(),
+                                                                                                .data_json = "{\"text\":\"later input\"}"})
+                                        : std::move(invalid_committed);
+  auto invalid_result = invalid_committed
+                            ? ava::agent::append_tool_result(invalid_seed->owner_append_route(),
+                                                             {.call_id = "invalid-window-call", .name = "read_file", .success = true, .result_text = "late"},
+                                                             "invalid-window-function")
+                            : ava::core::VoidResult(std::unexpected(invalid_committed.error()));
+  auto const bytes_before_invalid_resume = app_read_binary_file(invalid_session_path);
+  invalid_seed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release invalid reconciliation fixture before resume"));
+  auto invalid_resume = options;
+  invalid_resume.requested_session_id = invalid_session_id;
+  invalid_resume.exact_session_id = true;
+  auto invalid_reopened = ava::app::open_runtime_session(invalid_resume);
+  expect(invalid_committed && invalid_result && !invalid_reopened && app_read_binary_file(invalid_session_path) == bytes_before_invalid_resume,
+         "runtime reconciliation rejects an out-of-window exact v4 result before appending any synthetic result");
+}
+
 void test_app_runtime_cli_prompt_overrides()
 {
   auto const root = temp_root() / "app-runtime-cli-prompt-overrides";
@@ -1234,9 +1417,9 @@ void test_app_run_prompt_emits_events()
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("runtime run context") != std::string::npos,
          "runtime run_prompt sends context-augmented system prompt to provider");
   auto entries = session->store.load();
-  expect(entries && entries->size() == 3 && (*entries)[1].type == ava::session::EntryType::UserMessage &&
-             (*entries)[2].type == ava::session::EntryType::AssistantMessage,
-         "runtime run_prompt persists user and assistant entries in the runtime session");
+  expect(entries && entries->size() == 4 && (*entries)[1].type == ava::session::EntryType::UserMessage &&
+             (*entries)[2].type == ava::session::EntryType::AssistantOutputItem && (*entries)[3].type == ava::session::EntryType::AssistantTurnCommit,
+         "runtime run_prompt persists one committed v4 assistant turn in the runtime session");
 }
 
 void test_app_run_prompt_expands_file_references()
@@ -1531,8 +1714,8 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
   auto state_json = ava::app::rpc::state_result_json(*session, false);
   auto has_observer_fields = [](std::string_view json) {
     return json.find("agent.run_start") != std::string_view::npos || json.find("transport.attempt_result") != std::string_view::npos ||
-           json.find("\"sequence\":") != std::string_view::npos || json.find("\"timestamp_ms\":") != std::string_view::npos ||
-           json.find("\"run_id\":") != std::string_view::npos || json.find("CANARY_RUNTIME_TOKEN") != std::string_view::npos;
+           json.find("\"timestamp_ms\":") != std::string_view::npos || json.find("\"run_id\":") != std::string_view::npos ||
+           json.find("CANARY_RUNTIME_TOKEN") != std::string_view::npos;
   };
   expect(messages_json && !has_observer_fields(session_json) && !has_observer_fields(*messages_json) && !has_observer_fields(prompt_json) &&
              !has_observer_fields(state_json),
@@ -2200,20 +2383,41 @@ void test_app_command_dispatcher()
   auto const shell_resolver =
       [&shell_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     ++shell_prompts;
-    expect(prompt.command_metadata && prompt.command_metadata->level == ava::command::CommandLevel::Critical,
-           "Pi-style shell helper receives a critical sealed command prompt");
+    expect(prompt.command_metadata && prompt.command_metadata->level == ava::command::CommandLevel::Critical &&
+               prompt.command_metadata->family == ava::command::CommandFamily::RawShell &&
+               prompt.command_metadata->execution_domain == ava::command::CommandExecutionDomain::RawShell &&
+               prompt.command_metadata->backend_maximum_scope == ava::command::InteractiveScope::Once &&
+               !ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata),
+           "Pi-style shell helper receives a critical one-shot raw-shell prompt");
     return ava::permissions::PermissionResolution::Allow;
   };
   auto bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!pwd", .permission_resolver = shell_resolver});
   expect(bang_shell && bang_shell->handled && bang_shell->tool_timeline.size() == 2 && bang_shell->tool_timeline[0].name == "bash" &&
-             bang_shell->tool_timeline[0].argument_summary == "pwd" && bang_shell->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success &&
-             !bang_shell->output.empty() && bang_shell->output[0].find("exit: 0") != std::string::npos,
+             bang_shell->tool_timeline[0].argument_summary == "<redacted one-shot command>" &&
+             bang_shell->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success && !bang_shell->output.empty() &&
+             bang_shell->output[0].find("exit: 0") != std::string::npos,
          "Pi-style ! shell helper runs through the permissioned bash command path");
   auto hidden_bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!! pwd", .permission_resolver = shell_resolver});
   expect(hidden_bang_shell && hidden_bang_shell->handled && hidden_bang_shell->tool_timeline.size() == 2 &&
-             hidden_bang_shell->tool_timeline[0].name == "bash" && hidden_bang_shell->tool_timeline[0].argument_summary == "pwd" &&
+             hidden_bang_shell->tool_timeline[0].name == "bash" && hidden_bang_shell->tool_timeline[0].argument_summary == "<redacted one-shot command>" &&
              hidden_bang_shell->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success && shell_prompts == 2,
          "Pi-style !! shell helper is accepted as the critical one-shot bash helper without bypassing permissions");
+  std::optional<ava::permissions::PermissionPrompt> explicit_bash_prompt;
+  auto explicit_bash =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/bash git status",
+                                                               .permission_resolver = [&explicit_bash_prompt](ava::permissions::PermissionPrompt const& prompt)
+                                                                   -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+                                                                 explicit_bash_prompt = prompt;
+                                                                 return ava::permissions::PermissionResolution::Deny;
+                                                               }});
+  expect(explicit_bash && explicit_bash->handled && explicit_bash_prompt && explicit_bash_prompt->command_metadata &&
+             explicit_bash_prompt->command_metadata->level == ava::command::CommandLevel::Critical &&
+             explicit_bash_prompt->command_metadata->family == ava::command::CommandFamily::RawShell &&
+             explicit_bash_prompt->command_metadata->execution_domain == ava::command::CommandExecutionDomain::RawShell &&
+             explicit_bash_prompt->command_metadata->backend_maximum_scope == ava::command::InteractiveScope::Once &&
+             !ava::permissions::command_permission_allows_reusable_grant(*explicit_bash_prompt->command_metadata) && !explicit_bash->tool_timeline.empty() &&
+             explicit_bash->tool_timeline.back().status == ava::agent::ToolTimelineStatus::Error,
+         "/bash git status is an explicit Critical raw-shell prompt and cannot create a reusable grant");
   auto missing_bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!"});
   expect(missing_bang_shell && missing_bang_shell->handled && !missing_bang_shell->output.empty() &&
              missing_bang_shell->output[0].find("!<command> or !!<command>") != std::string::npos,
@@ -2599,18 +2803,19 @@ void test_app_command_dispatcher()
   expect(append_permission_audit.has_value(), append_permission_audit
                                                   ? "command dispatcher test appends a permission audit entry"
                                                   : "command dispatcher test appends a permission audit entry: " + append_permission_audit.error().format());
-  auto permissions_audit = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit git push"});
+  auto permissions_audit = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit permreq_runtime_deny"});
   expect(permissions_audit && permissions_audit->handled && !permissions_audit->output.empty() &&
              permissions_audit->output[0].find("Permission audit:") != std::string::npos &&
              permissions_audit->output[0].find("permreq_runtime_deny") != std::string::npos &&
-             permissions_audit->output[0].find("git push origin main") != std::string::npos &&
+             permissions_audit->output[0].find("<redacted one-shot command>") != std::string::npos &&
+             permissions_audit->output[0].find("git push origin main") == std::string::npos &&
              permissions_audit->output[0].find("source=resolver") != std::string::npos &&
-             permissions_audit->output[0].find("remembered deny | rule") != std::string::npos,
+             permissions_audit->output[0].find("remembered deny | rule") == std::string::npos,
          "command dispatcher /permissions audit filters persisted permission decisions");
-  auto permissions_audit_summary = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit summary git push"});
+  auto permissions_audit_summary = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit summary permreq_runtime_deny"});
   expect(permissions_audit_summary && permissions_audit_summary->handled && !permissions_audit_summary->output.empty() &&
              permissions_audit_summary->output[0].find("Permission audit summary:") != std::string::npos &&
-             permissions_audit_summary->output[0].find("filter: git push") != std::string::npos &&
+             permissions_audit_summary->output[0].find("filter: permreq_runtime_deny") != std::string::npos &&
              permissions_audit_summary->output[0].find("entries: 1 matching") != std::string::npos &&
              permissions_audit_summary->output[0].find("denials: 1") != std::string::npos &&
              permissions_audit_summary->output[0].find("by action: deny=1") != std::string::npos &&
@@ -2620,24 +2825,26 @@ void test_app_command_dispatcher()
              permissions_audit_summary->output[0].find("by tool: bash=1") != std::string::npos &&
              permissions_audit_summary->output[0].find("/permissions audit show permreq_runtime_deny") != std::string::npos,
          "command dispatcher /permissions audit summary groups matching permission decisions for browsing");
-  auto permissions_audit_export = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit export git push"});
+  auto permissions_audit_export = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit export permreq_runtime_deny"});
   expect(permissions_audit_export && permissions_audit_export->handled && !permissions_audit_export->output.empty() &&
              permissions_audit_export->output[0].find("Permission audit export:") != std::string::npos &&
              permissions_audit_export->output[0].find("format: markdown table") != std::string::npos &&
              permissions_audit_export->output[0].find("| timestamp | entry | request | action | resolution |") != std::string::npos &&
              permissions_audit_export->output[0].find("| deny |") != std::string::npos &&
-             permissions_audit_export->output[0].find("git push origin main") != std::string::npos &&
-             permissions_audit_export->output[0].find("remembered deny \\| rule") != std::string::npos,
+             permissions_audit_export->output[0].find("<redacted one-shot command>") != std::string::npos &&
+             permissions_audit_export->output[0].find("git push origin main") == std::string::npos &&
+             permissions_audit_export->output[0].find("remembered deny \\| rule") == std::string::npos,
          "command dispatcher /permissions audit export renders copyable markdown and escapes table cells");
-  auto permissions_diagnose_denial = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions diagnose git push"});
+  auto permissions_diagnose_denial = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions diagnose permreq_runtime_deny"});
   expect(permissions_diagnose_denial && permissions_diagnose_denial->handled && !permissions_diagnose_denial->output.empty() &&
              permissions_diagnose_denial->output[0].find("Permission rule diagnostics:") != std::string::npos &&
              permissions_diagnose_denial->output[0].find("Recent permission denials:") != std::string::npos &&
              permissions_diagnose_denial->output[0].find("decision=deny") != std::string::npos &&
              permissions_diagnose_denial->output[0].find("source=resolver") != std::string::npos &&
-             permissions_diagnose_denial->output[0].find("git push origin main") != std::string::npos &&
+             permissions_diagnose_denial->output[0].find("command=\"<redacted one-shot command>\"") != std::string::npos &&
+             permissions_diagnose_denial->output[0].find("git push origin main") == std::string::npos &&
              permissions_diagnose_denial->output[0].find("reason: command can change external or destructive state") != std::string::npos &&
-             permissions_diagnose_denial->output[0].find("resolution reason: remembered deny | rule") != std::string::npos &&
+             permissions_diagnose_denial->output[0].find("resolution reason: remembered deny | rule") == std::string::npos &&
              permissions_diagnose_denial->output[0].find("next: /permissions explain " + permission_rule_id) != std::string::npos,
          "command dispatcher /permissions diagnose explains recent denied decisions with follow-up commands");
   auto permissions_audit_detail = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit show permreq_runtime"});
@@ -2646,8 +2853,9 @@ void test_app_command_dispatcher()
              permissions_audit_detail->output[0].find("selector: permreq_runtime") != std::string::npos &&
              permissions_audit_detail->output[0].find("matched entries: 1") != std::string::npos &&
              permissions_audit_detail->output[0].find("request: permreq_runtime_deny") != std::string::npos &&
-             permissions_audit_detail->output[0].find("command: git push origin main") != std::string::npos &&
-             permissions_audit_detail->output[0].find("resolution reason: remembered deny | rule") != std::string::npos &&
+             permissions_audit_detail->output[0].find("command: <redacted one-shot command>") != std::string::npos &&
+             permissions_audit_detail->output[0].find("git push origin main") == std::string::npos &&
+             permissions_audit_detail->output[0].find("resolution reason: remembered deny | rule") == std::string::npos &&
              permissions_audit_detail->output[0].find("/permissions audit export permreq_runtime") != std::string::npos &&
              permissions_audit_detail->output[0].find("/permissions explain " + permission_rule_id) != std::string::npos,
          "command dispatcher /permissions audit show drills into a permission request by id prefix");
@@ -3041,6 +3249,147 @@ void test_app_command_dispatcher()
            "command dispatcher /import rejects symlink archives without switching sessions");
   }
 
+  auto const fifo_import_path = workspace / "fifo-import.jsonl";
+  if (::mkfifo(fifo_import_path.c_str(), 0600) == 0)
+  {
+    auto fifo_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import fifo-import.jsonl --confirm"});
+    expect(fifo_import && fifo_import->handled && !fifo_import->output.empty() &&
+               fifo_import->output[0].find("session import path must be a regular file") != std::string::npos &&
+               session->store.session_id() == pre_failed_import_session_id,
+           "command dispatcher /import rejects a FIFO through its nonblocking opened descriptor");
+  }
+
+  auto const anchored_import_path = workspace / "anchored-import.jsonl";
+  auto const anchored_displaced_path = workspace / "anchored-import.original.jsonl";
+  auto anchored_line =
+      ava::session::serialize_session_entry_line(ava::session::SessionEntry{.id = "entry_anchored_start",
+                                                                            .parent_id = "",
+                                                                            .type = ava::session::EntryType::SessionStart,
+                                                                            .timestamp = "2026-05-02T00:00:00Z",
+                                                                            .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-5.5\"}"});
+  if (anchored_line)
+    write_app_test_file(anchored_import_path, *anchored_line + "\n");
+  bool import_name_replaced_after_open = false;
+  ava::app::set_after_session_import_open_for_test([&] {
+    std::filesystem::rename(anchored_import_path, anchored_displaced_path);
+    write_app_test_file(anchored_import_path, "IMPORT_REPLACEMENT_CANARY\n");
+    import_name_replaced_after_open = true;
+  });
+  auto anchored_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import anchored-import.jsonl"});
+  ava::app::set_after_session_import_open_for_test({});
+  expect(anchored_line && import_name_replaced_after_open && anchored_import && anchored_import->handled && !anchored_import->output.empty() &&
+             anchored_import->output[0].find("session import is ready") != std::string::npos &&
+             anchored_import->output[0].find("entries: 1") != std::string::npos &&
+             app_read_binary_file(anchored_import_path).find("IMPORT_REPLACEMENT_CANARY") != std::string::npos &&
+             app_read_binary_file(anchored_displaced_path) == *anchored_line + "\n",
+         "command dispatcher /import reads only the descriptor opened before a final-component replacement");
+
+  auto const oversized_file_import_path = workspace / "oversized-file-import.jsonl";
+  {
+    std::ofstream oversized_file(oversized_file_import_path, std::ios::binary | std::ios::trunc);
+  }
+  std::error_code resize_error;
+  std::filesystem::resize_file(oversized_file_import_path, ava::app::kMaxSessionImportFileBytes + 1, resize_error);
+  auto oversized_file_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import oversized-file-import.jsonl"});
+  expect(!resize_error && oversized_file_import && oversized_file_import->handled && !oversized_file_import->output.empty() &&
+             oversized_file_import->output[0].find("session import file exceeds byte limit") != std::string::npos &&
+             oversized_file_import->output[0].find("reduce or split") != std::string::npos,
+         "command dispatcher /import enforces its explicit file-byte cap with actionable remediation");
+
+  auto const oversized_line_import_path = workspace / "oversized-line-import.jsonl";
+  write_app_test_file(oversized_line_import_path, std::string(ava::app::kMaxSessionImportLineBytes, 'x'));
+  auto oversized_line_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import oversized-line-import.jsonl"});
+  expect(oversized_line_import && oversized_line_import->handled && !oversized_line_import->output.empty() &&
+             oversized_line_import->output[0].find("session import line exceeds byte limit") != std::string::npos &&
+             oversized_line_import->output[0].find("oversized JSONL record") != std::string::npos,
+         "command dispatcher /import enforces its explicit per-line cap before JSON parsing");
+
+  auto const excessive_entries_import_path = workspace / "excessive-entries-import.jsonl";
+  {
+    std::ofstream excessive_entries(excessive_entries_import_path, std::ios::binary | std::ios::trunc);
+    for (std::size_t index = 0; index <= ava::app::kMaxSessionImportEntries; ++index)
+    {
+      excessive_entries << "{\"version\":3,\"id\":\"entry_import_cap_" << index << "\",\"parent_id\":\"\",\"type\":\""
+                        << (index == 0 ? "session_start" : "user_message") << "\",\"timestamp\":\"2026-05-02T00:00:00Z\",\"data\":{} }\n";
+    }
+  }
+  auto excessive_entries_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import excessive-entries-import.jsonl"});
+  expect(excessive_entries_import && excessive_entries_import->handled && !excessive_entries_import->output.empty() &&
+             excessive_entries_import->output[0].find("session import entry count exceeds limit") != std::string::npos &&
+             excessive_entries_import->output[0].find("split the JSONL history") != std::string::npos,
+         "command dispatcher /import enforces its explicit entry-count cap before replay validation");
+
+  auto const incomplete_v4_import_path = workspace / "incomplete-v4-import.jsonl";
+  auto incomplete_v4_line = ava::session::serialize_session_entry_line(
+      ava::session::SessionEntry{.id = "entry_import_incomplete_v4",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantOutputItem,
+                                 .timestamp = "2026-07-18T00:00:00Z",
+                                 .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"turn_import_incomplete\",\"sequence\":0,\"kind\":\"text\","
+                                              "\"text\":\"staged\",\"assistant_phase\":\"commentary\"}"});
+  expect(incomplete_v4_line.has_value(), "test serializes an incomplete v4 import fixture");
+  if (incomplete_v4_line)
+    write_app_test_file(incomplete_v4_import_path, *incomplete_v4_line + "\n");
+  auto incomplete_v4_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import incomplete-v4-import.jsonl --confirm"});
+  expect(
+      incomplete_v4_import && incomplete_v4_import->handled && !incomplete_v4_import->output.empty() &&
+          incomplete_v4_import->output[0].find("session import has incomplete final assistant turn; recover the source under its lease") != std::string::npos &&
+          session->store.session_id() == pre_failed_import_session_id,
+      "command dispatcher /import rejects incomplete final v4 output before copying or switching sessions");
+
+  auto const out_of_window_import_path = workspace / "out-of-window-v4-import.jsonl";
+  auto import_function_data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+      .assistant_turn_id = "turn_import_window",
+      .sequence = 0,
+      .kind = ava::session::AssistantOutputItemKind::FunctionCall,
+      .provider_item_id = "fc_import_window",
+      .provider_output_index = 0,
+      .payload = ava::session::AssistantOutputFunctionCall{.call_id = "call_import_window", .name = "read_file", .arguments_json = "{}"}});
+  auto import_commit_data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{.assistant_turn_id = "turn_import_window",
+                                                                                                                      .item_count = 1,
+                                                                                                                      .provider = "openai",
+                                                                                                                      .model = "gpt-5.5",
+                                                                                                                      .finish_reason = "tool_calls",
+                                                                                                                      .usage_json = std::nullopt});
+  std::vector<ava::session::SessionEntry> const out_of_window_import_entries = {
+      {.id = "entry_import_window_function",
+       .parent_id = "",
+       .type = ava::session::EntryType::AssistantOutputItem,
+       .timestamp = "2026-07-18T00:00:00Z",
+       .data_json = import_function_data.value_or("{}")},
+      {.id = "entry_import_window_commit",
+       .parent_id = "",
+       .type = ava::session::EntryType::AssistantTurnCommit,
+       .timestamp = "2026-07-18T00:00:01Z",
+       .data_json = import_commit_data.value_or("{}")},
+      {.id = "entry_import_window_user",
+       .parent_id = "",
+       .type = ava::session::EntryType::UserMessage,
+       .timestamp = "2026-07-18T00:00:02Z",
+       .data_json = "{\"text\":\"later\"}"},
+      {.id = "entry_import_window_result",
+       .parent_id = "",
+       .type = ava::session::EntryType::ToolResult,
+       .timestamp = "2026-07-18T00:00:03Z",
+       .data_json = "{\"assistant_output_entry_id\":\"entry_import_window_function\",\"call_id\":\"call_import_window\",\"name\":\"read_file\","
+                    "\"success\":true,\"result\":\"late\"}"}};
+  {
+    std::ofstream import_file(out_of_window_import_path, std::ios::binary | std::ios::trunc);
+    for (auto const& entry : out_of_window_import_entries)
+    {
+      auto line = ava::session::serialize_session_entry_line(entry);
+      expect(line.has_value(), "test serializes a v4 out-of-window import fixture entry");
+      if (line)
+        import_file << *line << '\n';
+    }
+  }
+  auto out_of_window_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import out-of-window-v4-import.jsonl --confirm"});
+  expect(out_of_window_import && out_of_window_import->handled && !out_of_window_import->output.empty() &&
+             out_of_window_import->output[0].find("session import failed validation") != std::string::npos &&
+             out_of_window_import->output[0].find("immediate post-commit result window") != std::string::npos &&
+             session->store.session_id() == pre_failed_import_session_id,
+         "command dispatcher /import rejects a v4 result after its user-message window boundary before copying or switching sessions");
+
   auto const valid_import_path = workspace / "valid-import.jsonl";
   {
     std::ofstream valid_import(valid_import_path, std::ios::binary | std::ios::trunc);
@@ -3063,9 +3412,9 @@ void test_app_command_dispatcher()
   auto imported = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import valid-import.jsonl --confirm"});
   auto imported_entries = session->store.load();
   expect(imported && imported->handled && !imported->output.empty() && imported->output[0].find("imported session") != std::string::npos && imported_entries &&
-             imported_entries->size() >= 1 && session->store.session_id() != pre_import_session_id &&
-             std::ranges::all_of(*imported_entries, [](auto const& entry) { return entry.version == ava::session::kCurrentSessionEntryVersion; }),
-         "command dispatcher /import creates a new local session from validated JSONL and switches to it");
+             imported_entries->size() >= 1 && session->store.session_id() != pre_import_session_id && (*imported_entries)[0].version == 0 &&
+             std::ranges::any_of(*imported_entries, [](auto const& entry) { return entry.version == ava::session::kCurrentSessionEntryVersion; }),
+         "command dispatcher /import preserves canonical v0 records alongside current-version records");
   auto import_contender = ava::session::SessionLease::acquire(session->store.session_path());
   expect(!import_contender && import_contender.error().message().find("already owned") != std::string::npos,
          "confirmed /import retains its destination lease through append and runtime handoff");
@@ -3087,6 +3436,24 @@ void test_app_command_dispatcher()
   auto status = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/status"});
   expect(status && status->handled && !status->output.empty() && status->output[0] == stats->output[0],
          "command dispatcher /status aliases the backend-backed session stats surface");
+
+  auto appended_v4_for_export = session->append_owned(
+      ava::session::SessionEntry{.id = "entry_export_v4_private",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantOutputItem,
+                                 .timestamp = "2026-07-18T00:00:00Z",
+                                 .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"turn_export\",\"sequence\":0,\"kind\":\"reasoning\",\"text\":\"\","
+                                              "\"format\":\"openai_responses\",\"redacted\":true,\"signature\":\"V4_EXPORT_PRIVATE_CANARY\"}"});
+  auto projected_jsonl_export = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export jsonl"});
+  auto const projected_jsonl = projected_jsonl_export && !projected_jsonl_export->output.empty() ? projected_jsonl_export->output.front() : std::string{};
+  auto markdown_after_v4 = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export markdown"});
+  auto html_after_v4 = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export html"});
+  expect(appended_v4_for_export && projected_jsonl_export && projected_jsonl_export->handled && !projected_jsonl_export->output.empty() &&
+             !projected_jsonl.empty() && projected_jsonl.find("assistant_output_item") == std::string::npos &&
+             projected_jsonl.find("V4_EXPORT_PRIVATE_CANARY") == std::string::npos && markdown_after_v4 && !markdown_after_v4->output.empty() &&
+             markdown_after_v4->output.front().find("V4_EXPORT_PRIVATE_CANARY") == std::string::npos && html_after_v4 && !html_after_v4->output.empty() &&
+             html_after_v4->output.front().find("V4_EXPORT_PRIVATE_CANARY") == std::string::npos,
+         "portable JSONL and transcript exports omit only a valid final incomplete v4 staging suffix");
 
   auto quit = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/quit"});
   expect(quit && quit->handled && quit->quit, "command dispatcher /quit requests shell exit");
@@ -3465,6 +3832,107 @@ void test_app_session_metadata_commands()
   expect(cleared_name && cleared_name->handled && !cleared_name->output.empty() && cleared_name->output[0] == "session name cleared" &&
              metadata_after_clear_name && metadata_after_clear_name->name.empty(),
          "slash /name --clear appends empty name metadata");
+}
+
+void test_runtime_model_switch_rejects_committed_v4_history()
+{
+  auto const workspace = temp_root() / "runtime-model-v4-history";
+  std::error_code remove_error;
+  std::filesystem::remove_all(workspace, remove_error);
+  std::filesystem::create_directories(workspace);
+  auto store = ava::session::SessionStore::create_ephemeral(workspace);
+  expect(store.has_value(), "v4 model-switch test creates an ephemeral session store");
+  if (!store)
+    return;
+
+  auto function_data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+      .assistant_turn_id = "turn_model_v4",
+      .sequence = 0,
+      .kind = ava::session::AssistantOutputItemKind::FunctionCall,
+      .provider_item_id = std::nullopt,
+      .provider_output_index = std::nullopt,
+      .payload = ava::session::AssistantOutputFunctionCall{.call_id = "call_model_v4", .name = "read_file", .arguments_json = "{}"}});
+  auto reasoning_data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+      .assistant_turn_id = "turn_model_v4",
+      .sequence = 1,
+      .kind = ava::session::AssistantOutputItemKind::Reasoning,
+      .provider_item_id = std::nullopt,
+      .provider_output_index = std::nullopt,
+      .payload = ava::session::AssistantOutputReasoning{.text = "v4 reasoning",
+                                                        .format = "openai_responses",
+                                                        .redacted = false,
+                                                        .signature = "private",
+                                                        .redacted_data = std::nullopt,
+                                                        .native_item_json = "{\"id\":\"rs_model_v4\",\"type\":\"reasoning\",\"summary\":[]}"}});
+  auto commit_data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{.assistant_turn_id = "turn_model_v4",
+                                                                                                               .item_count = 2,
+                                                                                                               .provider = "openai",
+                                                                                                               .model = "gpt-5.5",
+                                                                                                               .finish_reason = "tool_calls",
+                                                                                                               .usage_json = std::nullopt});
+  auto append_target = ava::session::SessionAppendTarget::create_ephemeral(*store);
+  auto appended_function = function_data && append_target
+                               ? (*append_target)
+                                     ->append(ava::session::SessionEntry{.id = "out_model_function",
+                                                                         .parent_id = "",
+                                                                         .type = ava::session::EntryType::AssistantOutputItem,
+                                                                         .timestamp = "2026-07-18T00:00:00Z",
+                                                                         .data_json = *function_data})
+                               : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "missing v4 append target")));
+  auto appended_reasoning = reasoning_data && appended_function && append_target
+                                ? (*append_target)
+                                      ->append(ava::session::SessionEntry{.id = "out_model_reasoning",
+                                                                          .parent_id = "",
+                                                                          .type = ava::session::EntryType::AssistantOutputItem,
+                                                                          .timestamp = "2026-07-18T00:00:01Z",
+                                                                          .data_json = *reasoning_data})
+                                : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "v4 item append failed")));
+  auto appended_commit = commit_data && appended_reasoning && append_target
+                             ? (*append_target)
+                                   ->append(ava::session::SessionEntry{.id = "commit_model_v4",
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::AssistantTurnCommit,
+                                                                       .timestamp = "2026-07-18T00:00:02Z",
+                                                                       .data_json = *commit_data})
+                             : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "v4 commit append failed")));
+  auto authority = ava::session::SessionReadAuthority::create_ephemeral(*store);
+  auto no_tools = ava::config::ModelInfo{};
+  no_tools.provider_id = "openai";
+  no_tools.model_id = "no-tools";
+  no_tools.api_family = "openai_responses";
+  no_tools.supports_tools = false;
+  auto other_provider = ava::config::ModelInfo{};
+  other_provider.provider_id = "anthropic";
+  other_provider.model_id = "other";
+  other_provider.api_family = "anthropic_messages";
+  other_provider.supports_tools = true;
+  auto rejected_no_tools = authority ? ava::app::runtime::validate_runtime_model_history(*authority, no_tools)
+                                     : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "missing authority")));
+  auto rejected_provider = authority ? ava::app::runtime::validate_runtime_model_history(*authority, other_provider)
+                                     : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "missing authority")));
+  expect(appended_function && appended_reasoning && appended_commit && authority && !rejected_no_tools &&
+             rejected_no_tools.error().format().find("tool support") != std::string::npos && !rejected_provider &&
+             rejected_provider.error().format().find("another provider") != std::string::npos,
+         "runtime model switch inspects committed v4 functions and provider-native reasoning after the compaction boundary");
+
+  auto incomplete = ava::session::SessionStore::create_ephemeral(workspace / "incomplete");
+  if (!incomplete || !function_data)
+    return;
+  auto incomplete_target = ava::session::SessionAppendTarget::create_ephemeral(*incomplete);
+  auto appended_incomplete = incomplete_target ? (*incomplete_target)
+                                                     ->append(ava::session::SessionEntry{.id = "out_model_incomplete",
+                                                                                         .parent_id = "",
+                                                                                         .type = ava::session::EntryType::AssistantOutputItem,
+                                                                                         .timestamp = "2026-07-18T00:00:03Z",
+                                                                                         .data_json = *function_data})
+                                               : ava::core::VoidResult(std::unexpected(incomplete_target.error()));
+  auto incomplete_authority = ava::session::SessionReadAuthority::create_ephemeral(*incomplete);
+  auto rejected_incomplete = incomplete_authority
+                                 ? ava::app::runtime::validate_runtime_model_history(*incomplete_authority, other_provider)
+                                 : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "missing authority")));
+  expect(appended_incomplete && incomplete_authority && !rejected_incomplete &&
+             rejected_incomplete.error().format().find("incomplete assistant-output history") != std::string::npos,
+         "runtime model switch fails closed on incomplete v4 staging rather than treating it as empty history");
 }
 
 void test_app_runtime_model_switch_persists_and_reopens()
@@ -4159,6 +4627,7 @@ void run_app_runtime_tests()
   test_app_runtime_no_session_mode();
   test_app_runtime_session_startup_options();
   test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork();
+  test_app_runtime_reconciles_committed_function_calls_on_resume();
   test_app_runtime_cli_prompt_overrides();
   test_app_runtime_project_trust_malformed_diagnostics();
   test_app_runtime_enabled_plugin_resources_autoload();
@@ -4181,6 +4650,7 @@ void run_app_runtime_tests()
   test_app_session_branch_commands();
   test_app_session_new_resume_commands();
   test_app_session_metadata_commands();
+  test_runtime_model_switch_rejects_committed_v4_history();
   test_app_runtime_model_switch_persists_and_reopens();
   test_app_runtime_model_switch_rejects_incompatible_history();
   test_app_runtime_reasoning_selection_persists_and_requests();

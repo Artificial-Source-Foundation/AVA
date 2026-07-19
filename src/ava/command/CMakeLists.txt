@@ -1,5 +1,6 @@
 add_library(ava_command
   "intent.cpp"
+  "private_group.cpp"
   "discovery.cpp"
   "environment.cpp"
   "policy.cpp"

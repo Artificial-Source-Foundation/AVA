@@ -99,9 +99,9 @@ struct DevelopmentContainmentPlan
 [[nodiscard]] ava::core::VoidResult apply_containment_in_child(DevelopmentContainmentPlan const& plan);
 
 // Close inherited non-stdio file descriptors in the child before applying
-// seccomp. Skips the provided keep descriptors (for the containment handshake
-// pipes).
-void close_inherited_fds_except(int keep_fd_a, int keep_fd_b) noexcept;
+// seccomp. Skips the containment handshake descriptors and, when present, the
+// approved executable descriptor that must survive until descriptor exec.
+void close_inherited_fds_except(int keep_fd_a, int keep_fd_b, int keep_fd_c = -1) noexcept;
 
 [[nodiscard]] bool containment_is_available(DevelopmentContainmentPlan const& plan) noexcept;
 

@@ -117,6 +117,64 @@ ava::core::VoidResult validate_sealed_environment_root(PathMetadata const& root,
   return {};
 }
 
+void append_path_metadata(Sha256Builder& hash, PathMetadata const& metadata)
+{
+  hash.append_field(metadata.requested_path.string());
+  hash.append_field(metadata.canonical_path.string());
+  hash.append_number(metadata.device);
+  hash.append_number(metadata.inode);
+  hash.append_number(metadata.mode);
+  hash.append_number(metadata.size);
+  hash.append_number(metadata.owner);
+  hash.append_number(metadata.group);
+  hash.append_number(metadata.link_count);
+  hash.append_field(std::to_string(metadata.changed_seconds));
+  hash.append_field(std::to_string(metadata.changed_nanoseconds));
+  hash.append_field(metadata.requested_path_is_symlink ? "1" : "0");
+  hash.append_number(metadata.requested_device);
+  hash.append_number(metadata.requested_inode);
+  hash.append_number(metadata.requested_mode);
+  hash.append_number(metadata.requested_owner);
+  hash.append_number(metadata.requested_group);
+  hash.append_number(metadata.requested_link_count);
+  hash.append_field(std::to_string(metadata.requested_changed_seconds));
+  hash.append_field(std::to_string(metadata.requested_changed_nanoseconds));
+  hash.append_number(metadata.ancestor_metadata.size());
+  for (auto const& ancestor : metadata.ancestor_metadata)
+  {
+    hash.append_field(ancestor.path.string());
+    hash.append_number(ancestor.device);
+    hash.append_number(ancestor.inode);
+    hash.append_number(ancestor.mode);
+    hash.append_number(ancestor.owner);
+    hash.append_number(ancestor.group);
+    hash.append_number(ancestor.link_count);
+    hash.append_field(std::to_string(ancestor.changed_seconds));
+    hash.append_field(std::to_string(ancestor.changed_nanoseconds));
+    hash.append_field(ancestor.is_symlink ? "1" : "0");
+    hash.append_field(ancestor.identity_bound ? "1" : "0");
+  }
+}
+
+ava::core::VoidResult validate_sealed_rustup_home(PathMetadata const& root, CommandLimits const& limits)
+{
+  if (root.canonical_path.empty() || !root.canonical_path.is_absolute() || has_forbidden_path_byte(root.canonical_path) ||
+      root.canonical_path.string().size() > limits.max_path_bytes)
+  {
+    return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "RUSTUP_HOME is not a bounded canonical trusted toolchain path", "path",
+                                         root.canonical_path.string()));
+  }
+  auto fresh = path_metadata_is_fresh(root);
+  if (!fresh)
+    return std::unexpected(std::move(fresh.error()));
+  if (!*fresh)
+  {
+    return std::unexpected(
+        command_error(ava::core::ErrorCategory::Io, "sealed RUSTUP_HOME changed during environment construction", "path", root.requested_path.string()));
+  }
+  return {};
+}
+
 ava::core::Result<std::string> join_path(std::vector<CommandPathEntry> const& entries, CommandLimits const& limits)
 {
   std::string result;
@@ -150,10 +208,11 @@ ava::core::Result<std::string> join_path(std::vector<CommandPathEntry> const& en
   return result;
 }
 
-std::string environment_digest(std::string_view profile_id, std::vector<EnvironmentVariable> const& entries)
+std::string environment_digest(std::string_view profile_id, std::vector<EnvironmentVariable> const& entries,
+                               std::optional<PathMetadata> const& rustup_home_metadata)
 {
   Sha256Builder hash;
-  hash.append_field("ava-command-environment-v1");
+  hash.append_field("ava-command-environment-v2");
   hash.append_field(profile_id);
   hash.append_number(entries.size());
   for (auto const& entry : entries)
@@ -161,7 +220,10 @@ std::string environment_digest(std::string_view profile_id, std::vector<Environm
     hash.append_field(entry.key);
     hash.append_field(entry.value);
   }
-  return "sha256:ava-command-environment-v1:" + hash.hex();
+  hash.append_field(rustup_home_metadata ? "rustup-home-present" : "rustup-home-absent");
+  if (rustup_home_metadata)
+    append_path_metadata(hash, *rustup_home_metadata);
+  return "sha256:ava-command-environment-v2:" + hash.hex();
 }
 
 }  // namespace
@@ -199,8 +261,8 @@ std::string Sha256Builder::hex() const
 }
 
 ava::core::Result<CommandEnvironment> EnvironmentFactory::make(CommandEnvironmentOptions const& options, std::vector<CommandPathEntry> const& path_entries,
-                                                               SyntheticEnvironmentRoots roots, CommandLimits const& limits,
-                                                               CommandEnvironment::FactoryPasskey passkey)
+                                                               SyntheticEnvironmentRoots roots, std::optional<PathMetadata> rustup_home_metadata,
+                                                               CommandLimits const& limits, CommandEnvironment::FactoryPasskey passkey)
 {
   if (auto valid = validate_limits(limits); !valid)
     return std::unexpected(std::move(valid.error()));
@@ -225,10 +287,17 @@ ava::core::Result<CommandEnvironment> EnvironmentFactory::make(CommandEnvironmen
       return std::unexpected(std::move(valid.error()));
   }
 
+  if (rustup_home_metadata)
+  {
+    if (auto valid = validate_sealed_rustup_home(*rustup_home_metadata, limits); !valid)
+      return std::unexpected(std::move(valid.error()));
+  }
+
   auto path = join_path(path_entries, limits);
   if (!path)
     return std::unexpected(std::move(path.error()));
   CommandEnvironment environment(std::move(passkey), std::move(roots));
+  environment.rustup_home_metadata_ = std::move(rustup_home_metadata);
   environment.profile_id_ = options.profile_id;
   environment.entries_ = {{"LANG", "C.UTF-8"},
                           {"LC_ALL", "C.UTF-8"},
@@ -243,14 +312,16 @@ ava::core::Result<CommandEnvironment> EnvironmentFactory::make(CommandEnvironmen
                           {"XDG_DATA_HOME", environment.roots_.xdg_data_home.canonical_path.string()},
                           {"XDG_STATE_HOME", environment.roots_.xdg_state_home.canonical_path.string()},
                           {"TMPDIR", environment.roots_.tmpdir.canonical_path.string()}};
-  environment.digest_ = environment_digest(environment.profile_id_, environment.entries_);
+  if (environment.rustup_home_metadata_)
+    environment.entries_.push_back({"RUSTUP_HOME", environment.rustup_home_metadata_->canonical_path.string()});
+  environment.digest_ = environment_digest(environment.profile_id_, environment.entries_, environment.rustup_home_metadata_);
   return environment;
 }
 
 ava::core::VoidResult validate_environment_matches_plan(CommandEnvironment const& environment, CommandPlan const& plan)
 {
   if (environment.profile_id() != plan.environment_profile_id() || environment.digest() != plan.environment_digest() ||
-      environment.roots_ != plan.synthetic_environment_roots_)
+      environment.roots_ != plan.synthetic_environment_roots_ || environment.rustup_home_metadata_ != plan.rustup_home_metadata_)
   {
     return std::unexpected(
         command_error(ava::core::ErrorCategory::PermissionDenied, "prepared command environment does not match the sealed plan environment digest"));
@@ -284,6 +355,11 @@ std::vector<EnvironmentVariable> const& CommandEnvironment::entries() const noex
 SyntheticEnvironmentRoots const& CommandEnvironment::synthetic_roots() const noexcept
 {
   return roots_;
+}
+
+std::optional<PathMetadata> const& CommandEnvironment::rustup_home_metadata() const noexcept
+{
+  return rustup_home_metadata_;
 }
 
 }  // namespace ava::command

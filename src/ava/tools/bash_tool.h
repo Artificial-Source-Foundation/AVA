@@ -13,9 +13,19 @@ namespace ava::tools {
 
 struct BashOptions
 {
+  // Model-visible tool calls preserve a lossless direct-argv recipe when
+  // possible. Explicit user shell helpers must choose UserRawShell instead;
+  // source is never inferred from command text.
+  enum class InvocationSource
+  {
+    ModelCompatibility,
+    UserRawShell,
+  };
+
   std::chrono::milliseconds timeout = std::chrono::milliseconds(30'000);
   std::size_t max_bytes = 50 * 1024;
   std::size_t max_lines = 200;
+  InvocationSource invocation_source = InvocationSource::ModelCompatibility;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

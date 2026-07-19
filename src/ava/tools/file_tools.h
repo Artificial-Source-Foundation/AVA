@@ -106,9 +106,9 @@ struct ToolContext
   std::filesystem::path workspace_dir;
   std::filesystem::path spill_dir = {};
   ava::agent::Mode mode = ava::agent::Mode::Build;
-  // Local bash uses sealed planning in PromptOnly mode for this milestone.
-  // It does not imply containment or a reusable command-policy store.
-  ava::command::CommandRuntimeOptions command_runtime{.mode = ava::command::CommandRuntimeMode::PromptOnly};
+  // Local sealed command execution is enabled by default. Legacy and
+  // PromptOnly contexts remain explicit non-executing compatibility modes.
+  ava::command::CommandRuntimeOptions command_runtime{.mode = ava::command::CommandRuntimeMode::Enabled};
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   // Deny-only, non-interactive policy check used before a command's backend
   // auto-Allow. It must never prompt or return reusable authority.

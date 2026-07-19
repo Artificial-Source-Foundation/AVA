@@ -3,6 +3,7 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/app/EventEnvelope.h"
+#include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/rpc/catalog.h"
@@ -15,8 +16,10 @@
 #include "ava/app/rpc/session_operators.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Event.h"
 #include "ava/agent/question.h"
 #include "ava/config/auth.h"
+#include "ava/session/assistant_output.h"
 #include "ava/session/attachments.h"
 #include "ava/session/record.h"
 #include "ava/session/session_metadata.h"
@@ -78,6 +81,21 @@ class TerminalPublicationStreamBuf final : public std::streambuf
   {
     std::unique_lock lock(mutex_);
     return cv_.wait_for(lock, timeout, [&] { return text_.find(value) != std::string::npos; });
+  }
+
+  bool wait_for_occurrences(std::string_view value, std::size_t count, std::chrono::milliseconds timeout)
+  {
+    std::unique_lock lock(mutex_);
+    return cv_.wait_for(lock, timeout, [&] {
+      std::size_t found = 0;
+      std::size_t offset = 0;
+      while ((offset = text_.find(value, offset)) != std::string::npos)
+      {
+        ++found;
+        offset += value.size();
+      }
+      return found >= count;
+    });
   }
 
   void release_terminal()
@@ -1910,10 +1928,71 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                                                "\"branch_tip_entry_id\":\"entry_assistant\","
                                                                                                "\"summary\":\"branch summary\",\"provider\":\"openai\"," +
                                                                                                "\"model\":\"gpt-test\",\"reason\":\"test\"}"});
+  auto v4_text_data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+      .assistant_turn_id = "turn_rpc_projection",
+      .sequence = 0,
+      .kind = ava::session::AssistantOutputItemKind::Text,
+      .provider_item_id = "PRIVATE_RPC_ITEM",
+      .provider_output_index = 0,
+      .payload = ava::session::AssistantOutputText{.text = "rpc v4 commentary ", .assistant_phase = ava::session::AssistantOutputTextPhase::Commentary}});
+  auto v4_reasoning_data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+      .assistant_turn_id = "turn_rpc_projection",
+      .sequence = 1,
+      .kind = ava::session::AssistantOutputItemKind::Reasoning,
+      .provider_item_id = std::nullopt,
+      .provider_output_index = std::nullopt,
+      .payload = ava::session::AssistantOutputReasoning{.text = "rpc v4 reasoning",
+                                                        .format = "openai_responses",
+                                                        .redacted = false,
+                                                        .signature = "PRIVATE_RPC_SIGNATURE",
+                                                        .redacted_data = std::nullopt,
+                                                        .native_item_json = "{\"id\":\"PRIVATE_RPC_NATIVE\",\"type\":\"reasoning\",\"summary\":[]}"}});
+  auto v4_function_data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+      .assistant_turn_id = "turn_rpc_projection",
+      .sequence = 2,
+      .kind = ava::session::AssistantOutputItemKind::FunctionCall,
+      .provider_item_id = std::nullopt,
+      .provider_output_index = std::nullopt,
+      .payload =
+          ava::session::AssistantOutputFunctionCall{.call_id = "call_rpc_projection", .name = "read_file", .arguments_json = "{\"path\":\"README.md\"}"}});
+  auto v4_commit_data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{.assistant_turn_id = "turn_rpc_projection",
+                                                                                                                  .item_count = 3,
+                                                                                                                  .provider = "openai",
+                                                                                                                  .model = "gpt-5.5",
+                                                                                                                  .finish_reason = "tool_calls",
+                                                                                                                  .usage_json = std::nullopt});
+  auto appended_v4_text = v4_text_data && session->append_owned(ava::session::SessionEntry{.id = "rpc_v4_text",
+                                                                                           .parent_id = "",
+                                                                                           .type = ava::session::EntryType::AssistantOutputItem,
+                                                                                           .timestamp = ava::session::now_timestamp(),
+                                                                                           .data_json = *v4_text_data});
+  auto appended_v4_reasoning = v4_reasoning_data && session->append_owned(ava::session::SessionEntry{.id = "rpc_v4_reasoning",
+                                                                                                     .parent_id = "",
+                                                                                                     .type = ava::session::EntryType::AssistantOutputItem,
+                                                                                                     .timestamp = ava::session::now_timestamp(),
+                                                                                                     .data_json = *v4_reasoning_data});
+  auto appended_v4_function = v4_function_data && session->append_owned(ava::session::SessionEntry{.id = "rpc_v4_function",
+                                                                                                   .parent_id = "",
+                                                                                                   .type = ava::session::EntryType::AssistantOutputItem,
+                                                                                                   .timestamp = ava::session::now_timestamp(),
+                                                                                                   .data_json = *v4_function_data});
+  auto appended_v4_commit = v4_commit_data && session->append_owned(ava::session::SessionEntry{.id = "rpc_v4_commit",
+                                                                                               .parent_id = "",
+                                                                                               .type = ava::session::EntryType::AssistantTurnCommit,
+                                                                                               .timestamp = ava::session::now_timestamp(),
+                                                                                               .data_json = *v4_commit_data});
+  auto appended_v4_result =
+      session->append_owned(ava::session::SessionEntry{.id = "rpc_v4_result",
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::ToolResult,
+                                                       .timestamp = ava::session::now_timestamp(),
+                                                       .data_json = "{\"assistant_output_entry_id\":\"rpc_v4_function\",\"call_id\":\"call_rpc_projection\","
+                                                                    "\"name\":\"read_file\",\"success\":true,\"result\":\"rpc tool result\"}"});
   expect(appended_metadata.has_value() && appended_user.has_value() && appended_internal_replay.has_value() && appended_assistant.has_value() &&
              appended_unpriced_assistant.has_value() && appended_reasoning.has_value() && appended_redacted_reasoning.has_value() &&
-             appended_mode.has_value() && appended_compaction.has_value() && appended_cancel.has_value() && appended_branch_summary.has_value(),
-         "RPC protocol/session test appends messages and stats foundation entries");
+             appended_mode.has_value() && appended_compaction.has_value() && appended_cancel.has_value() && appended_branch_summary.has_value() &&
+             appended_v4_text && appended_v4_reasoning && appended_v4_function && appended_v4_commit && appended_v4_result.has_value(),
+         "RPC protocol/session test appends legacy and committed v4 message history");
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
@@ -1933,20 +2012,30 @@ void test_app_rpc_protocol_version_and_session_commands()
   auto const current_entry_version = std::string("\"version\":") + std::to_string(ava::session::kCurrentSessionEntryVersion);
   expect(result.has_value(), "RPC protocol/session loop completes successfully");
   expect(jsonl.find("\"id\":\"proto\"") != std::string::npos && jsonl.find("\"protocol_version\":1") != std::string::npos &&
-             jsonl.find("\"supported_protocol_versions\":[1]") != std::string::npos && jsonl.find("\"session_entry_version\":3") != std::string::npos &&
-             jsonl.find("\"supported_session_entry_versions\":[0,1,2,3]") != std::string::npos &&
+             jsonl.find("\"supported_protocol_versions\":[1]") != std::string::npos &&
+             jsonl.find("\"session_entry_version\":" + std::to_string(ava::session::kCurrentSessionEntryVersion)) != std::string::npos &&
+             jsonl.find("\"supported_session_entry_versions\":[0,1,2,3,4]") != std::string::npos &&
              jsonl.find("\"capabilities\":[\"direct_bash_rpc\"]") != std::string::npos &&
              jsonl.find("\"direct_command_types\":[\"run_bash\",\"run_command\"]") != std::string::npos,
          "RPC get_protocol reports supported protocol, session entry versions, and direct bash capabilities");
   expect(jsonl.find("\"id\":\"messages\"") != std::string::npos && jsonl.find("\"messages\"") != std::string::npos &&
              jsonl.find(current_entry_version) != std::string::npos && jsonl.find("hello") != std::string::npos && jsonl.find("answer") != std::string::npos &&
              jsonl.find("visible reasoning") != std::string::npos && jsonl.find("hidden redacted rpc reasoning") == std::string::npos &&
-             jsonl.find("\"signature_present\":true") != std::string::npos && jsonl.find("hidden rpc replay") == std::string::npos &&
-             jsonl.find("rpc-secret-signature") == std::string::npos && jsonl.find("rpc-redacted-secret-signature") == std::string::npos,
-         "RPC get_messages returns consumer-visible durable message entries without reasoning signatures");
-  expect(jsonl.find("\"id\":\"stats\"") != std::string::npos && jsonl.find("\"entry_count\":12") != std::string::npos &&
+             jsonl.find("rpc v4 commentary ") != std::string::npos && jsonl.find("rpc v4 reasoning") != std::string::npos &&
+             jsonl.find("call_rpc_projection") != std::string::npos && jsonl.find("rpc tool result") != std::string::npos &&
+             jsonl.find("\"ordered_output\":[{\"sequence\":0,\"kind\":\"text\",\"text\":\"rpc v4 commentary \",\"assistant_phase\":\"commentary\"}") !=
+                 std::string::npos &&
+             jsonl.find("\"sequence\":1,\"kind\":\"reasoning\"") != std::string::npos &&
+             jsonl.find("\"sequence\":2,\"kind\":\"function_call\"") != std::string::npos && jsonl.find("\"signature_present\":true") != std::string::npos &&
+             jsonl.find("hidden rpc replay") == std::string::npos && jsonl.find("rpc-secret-signature") == std::string::npos &&
+             jsonl.find("rpc-redacted-secret-signature") == std::string::npos && jsonl.find("PRIVATE_RPC_ITEM") == std::string::npos &&
+             jsonl.find("PRIVATE_RPC_SIGNATURE") == std::string::npos && jsonl.find("PRIVATE_RPC_NATIVE") == std::string::npos &&
+             jsonl.find("assistant_output_entry_id") == std::string::npos,
+         "RPC get_messages returns projected committed v4 content without private replay metadata or exact bindings");
+  expect(jsonl.find("\"id\":\"stats\"") != std::string::npos && jsonl.find("\"entry_count\":16") != std::string::npos &&
              jsonl.find("\"session_metadata\":1") != std::string::npos && jsonl.find("\"user_message\":1") != std::string::npos &&
-             jsonl.find("\"assistant_message\":2") != std::string::npos && jsonl.find("\"reasoning_block\":2") != std::string::npos &&
+             jsonl.find("\"assistant_message\":3") != std::string::npos && jsonl.find("\"reasoning_block\":3") != std::string::npos &&
+             jsonl.find("\"tool_call\":1") != std::string::npos && jsonl.find("\"tool_result\":1") != std::string::npos &&
              jsonl.find("\"mode_change\":1") != std::string::npos && jsonl.find("\"compaction\":1") != std::string::npos &&
              jsonl.find("\"branch_summary\":1") != std::string::npos && jsonl.find("\"cancel\":1") != std::string::npos,
          "RPC get_session_stats returns session counters");
@@ -1960,6 +2049,81 @@ void test_app_rpc_protocol_version_and_session_commands()
          "RPC new_session creates and switches to a new active session");
   expect(session->store.session_id() == initial_id && jsonl.find("\"id\":\"switch\"") != std::string::npos,
          "RPC switch_session switches back to the requested session");
+}
+
+void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
+{
+  auto const root = temp_root() / "app-rpc-messages-ordered-output-caps";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+
+  auto open_session = [&](std::string_view name) {
+    ava::app::runtime::OpenOptions options;
+    options.workspace_dir = workspace / std::string(name);
+    options.current_dir = options.workspace_dir;
+    options.paths = app_test_paths(root / std::string(name));
+    std::filesystem::create_directories(options.workspace_dir);
+    return ava::app::open_runtime_session(options);
+  };
+  auto append_v4_text_turn = [](ava::app::runtime::Session& session, std::size_t index, std::string text) {
+    auto const turn_id = "rpc_cap_turn_" + std::to_string(index);
+    auto const item_id = "rpc_cap_item_" + std::to_string(index);
+    auto item_data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+        .assistant_turn_id = turn_id,
+        .sequence = 0,
+        .kind = ava::session::AssistantOutputItemKind::Text,
+        .provider_item_id = "PRIVATE_RPC_CAP_ITEM_" + std::to_string(index),
+        .provider_output_index = 0,
+        .payload = ava::session::AssistantOutputText{.text = std::move(text), .assistant_phase = ava::session::AssistantOutputTextPhase::Commentary}});
+    auto commit_data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{
+        .assistant_turn_id = turn_id, .item_count = 1, .provider = "openai", .model = "gpt-5.5", .finish_reason = "completed", .usage_json = std::nullopt});
+    if (!item_data || !commit_data)
+      return false;
+    auto item = session.append_owned(ava::session::SessionEntry{.id = item_id,
+                                                                .parent_id = "",
+                                                                .type = ava::session::EntryType::AssistantOutputItem,
+                                                                .timestamp = ava::session::now_timestamp(),
+                                                                .data_json = std::move(*item_data)});
+    auto commit = session.append_owned(ava::session::SessionEntry{.id = "rpc_cap_commit_" + std::to_string(index),
+                                                                  .parent_id = item_id,
+                                                                  .type = ava::session::EntryType::AssistantTurnCommit,
+                                                                  .timestamp = ava::session::now_timestamp(),
+                                                                  .data_json = std::move(*commit_data)});
+    return item.has_value() && commit.has_value();
+  };
+
+  auto single_session = open_session("single");
+  bool const appended_single = single_session && append_v4_text_turn(*single_session, 0, "RPC_SINGLE_" + std::string(6'000, 's'));
+  std::optional<std::string> single_json;
+  if (appended_single)
+  {
+    auto serialized = ava::app::rpc::messages_result_json(*single_session);
+    if (serialized)
+      single_json = std::move(*serialized);
+  }
+  expect(single_json && single_json->find("RPC_SINGLE_") != std::string::npos && single_json->find("\"tool_calls\":0") != std::string::npos &&
+             single_json->find("\"ordered_output\"") == std::string::npos && single_json->find("\"message_count\":1") != std::string::npos &&
+             single_json->find("\"ordered_output_truncated\":true") != std::string::npos && single_json->find("PRIVATE_RPC_CAP_ITEM") == std::string::npos,
+         "RPC keeps a 5--8 KiB v1 assistant payload when additive ordered output exceeds its per-entry cap");
+
+  auto near_cap_session = open_session("near-cap");
+  bool appended_near_cap = near_cap_session.has_value();
+  for (std::size_t index = 0; appended_near_cap && index < 190; ++index)
+    appended_near_cap = append_v4_text_turn(*near_cap_session, index, "RPC_CAP_" + std::to_string(index) + "_" + std::string(6'000, 'n'));
+  std::optional<std::string> near_cap_json;
+  if (appended_near_cap)
+  {
+    auto serialized = ava::app::rpc::messages_result_json(*near_cap_session);
+    if (serialized)
+      near_cap_json = std::move(*serialized);
+  }
+  auto const near_cap_count = near_cap_json ? ava::core::json::integer_field(*near_cap_json, "message_count") : std::nullopt;
+  expect(near_cap_json && near_cap_json->size() <= ava::app::rpc::kMaxRpcMessagesResponseBytes && near_cap_count && *near_cap_count > 150 &&
+             near_cap_json->find("RPC_CAP_150_") != std::string::npos && near_cap_json->find("\"original_bytes\"") == std::string::npos &&
+             near_cap_json->find("\"ordered_output_truncated\":true") != std::string::npos && near_cap_json->find("PRIVATE_RPC_CAP_ITEM") == std::string::npos,
+         "near-cap RPC histories retain their legacy message count and data while reporting omitted ordered detail");
 }
 
 void test_app_rpc_protocol_version_and_resolver_reply_errors()
@@ -2218,8 +2382,9 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
   expect(transport.requests().empty(), "RPC direct command execution does not dispatch provider requests");
   expect(completed && jsonl.find("\"id\":\"cmd-allow\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos &&
              jsonl.find("\"operation\":\"bash\"") != std::string::npos && jsonl.find("\"command\":\"printf rpc-direct\"") != std::string::npos &&
+             jsonl.find("\"family\":\"raw_shell\"") != std::string::npos && jsonl.find("\"backend_maximum_scope\":\"once\"") != std::string::npos &&
              jsonl.find("\"tool\":\"bash\"") != std::string::npos && jsonl.find("\"permission_request_ids\":[\"permreq_") != std::string::npos,
-         "RPC direct command returns structured bash tool output linked to the permission request");
+         "RPC direct command is a one-shot raw-shell bash operation linked to its permission request");
   expect(audited_allow, "RPC direct command persists permission audit decisions in the session");
 }
 
@@ -2256,11 +2421,12 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
         ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, [&] noexcept { input_buffer.close(); });
   });
 
-  input_buffer.push(R"JSON({"id":"cmd-deny","type":"run_bash","command":"touch denied.txt"})JSON"
-                    "\n");
+  std::string const secret = "RPC_DENIED_COMMAND_SECRET_SENTINEL";
+  input_buffer.push("{\"id\":\"cmd-deny\",\"type\":\"run_bash\",\"command\":\"printf " + secret + "\"}\n");
   bool const permission_requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
   auto const request_id = rpc_string_field_from_output(output_buffer.str(), "resolver_request_id");
-  expect(permission_requested && request_id, "RPC direct command denial emits a permission request before execution");
+  expect(permission_requested && request_id && output_buffer.str().find(secret) != std::string::npos,
+         "RPC direct command denial emits a permission prompt that retains the authorized user's exact command");
   if (request_id)
   {
     input_buffer.push("{\"id\":\"deny\",\"type\":\"permission_reply\",\"request_id\":\"" + *request_id +
@@ -2272,17 +2438,22 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
 
   auto const jsonl = output_buffer.str();
   auto entries = session->store.load();
-  auto const audited_deny =
-      entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
-        return entry.type == ava::session::EntryType::PermissionDecision && entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
-               entry.data_json.find("\"command\":\"sensitive-workspace_mutation (workspace_mutation): literal=denied.txt\"") != std::string::npos &&
-               entry.data_json.find("\"resolution\":\"deny\"") != std::string::npos;
-      });
+  auto const audited_deny = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+                              return entry.type == ava::session::EntryType::PermissionDecision &&
+                                     entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
+                                     entry.data_json.find("\"command\":\"<redacted one-shot command>\"") != std::string::npos &&
+                                     entry.data_json.find("\"family\":\"raw_shell\"") != std::string::npos &&
+                                     entry.data_json.find("\"backend_maximum_scope\":\"once\"") != std::string::npos &&
+                                     entry.data_json.find("\"resolution\":\"deny\"") != std::string::npos;
+                            });
   expect(result.has_value(), "RPC direct command denial loop completes successfully");
-  expect(denied && jsonl.find("\"id\":\"cmd-deny\"") != std::string::npos && jsonl.find("\"tool\":\"bash\"") != std::string::npos,
-         "RPC direct command denial returns a structured bash tool error");
+  auto const session_secret_absent =
+      entries && std::ranges::all_of(*entries, [&](ava::session::SessionEntry const& entry) { return entry.data_json.find(secret) == std::string::npos; });
+  expect(denied && jsonl.find("\"id\":\"cmd-deny\"") != std::string::npos && jsonl.find("\"tool\":\"bash\"") != std::string::npos &&
+             count_substrings(jsonl, secret) == 1,
+         "RPC direct command denial keeps the argument only in its permission prompt, not its reply diagnostics");
   expect(!std::filesystem::exists(workspace / "denied.txt"), "RPC direct command denial blocks process execution before side effects");
-  expect(audited_deny, "RPC direct command denial persists the denied permission audit decision");
+  expect(audited_deny && session_secret_absent, "RPC direct command denial persists redacted session audits without command arguments");
 }
 
 void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
@@ -2383,8 +2554,8 @@ void test_app_rpc_compact_provider_failure_is_error_response()
   auto entries = session->store.load();
   expect(result.has_value() && failed, "RPC compact failure loop completes after error response");
   expect(jsonl.find("\"id\":\"cmp-fail\"") != std::string::npos && jsonl.find("\"success\":false") != std::string::npos &&
-             jsonl.find("compaction summary request failed with status 500") != std::string::npos && jsonl.find("summary failed") != std::string::npos,
-         "RPC compact provider failures are machine-readable error responses");
+             jsonl.find("compaction summary request failed with status 500") != std::string::npos && jsonl.find("summary failed") == std::string::npos,
+         "RPC compact provider failures are machine-readable responses without provider-controlled diagnostics");
   expect(entries && count_compaction_entries(*entries) == 0, "RPC compact provider failure leaves session without a compaction entry");
 }
 
@@ -2480,6 +2651,16 @@ void test_app_rpc_contract_validation_regressions()
   expect(invalid_response.find("\"code\":\"invalid_request\"") != std::string::npos &&
              std::ranges::all_of(invalid_response, [](char ch) { return static_cast<unsigned char>(ch) < 0x80U; }),
          "invalid UTF-8 produces an ASCII-safe recoverable error with stable code");
+
+  ava::app::runtime::Event invalid_event;
+  invalid_event.type = ava::app::runtime::EventType::ToolStart;
+  invalid_event.tool_arguments_json = "{\"path\":\"";
+  invalid_event.tool_arguments_json.push_back(static_cast<char>(0xFF));
+  invalid_event.tool_arguments_json += "\"}";
+  auto const serialized_invalid_event = ava::app::serialize_event_json(invalid_event);
+  expect(serialized_invalid_event.find("\"args\":{") == std::string::npos && serialized_invalid_event.find("\"args_json\":") != std::string::npos &&
+             ava::core::json::is_valid_utf8(serialized_invalid_event) && ava::core::json::is_valid_object(serialized_invalid_event),
+         "RPC event serialization rejects invalid UTF-8 argument JSON from object-form event payloads");
 
   auto active = ava::app::rpc::active_run_reject_error("prompt");
   auto canceled = ava::app::rpc::canceled_error();
@@ -2805,7 +2986,7 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
       bool const terminal_observable = output_buffer.wait_until_terminal(std::chrono::seconds(2));
       input_buffer.push("{\"id\":\"compact\",\"type\":\"compact\"}\n");
       output_buffer.release_terminal();
-      bool const second_completed = output_buffer.wait_contains("second", std::chrono::seconds(2));
+      bool const second_completed = output_buffer.wait_for_occurrences("\"id\":\"compact\",\"type\":\"response\"", 2, std::chrono::seconds(2));
       input_buffer.close();
       rpc_thread.join();
       auto const jsonl = output_buffer.str();
@@ -3166,6 +3347,7 @@ void run_app_rpc_tests()
   test_app_rpc_reasoning_commands();
   test_app_rpc_reasoning_model_serialization_exposes_resolved_maps();
   test_app_rpc_protocol_version_and_session_commands();
+  test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit();
   test_app_rpc_protocol_version_and_resolver_reply_errors();
   test_app_rpc_mcp_command_responses();
   test_app_rpc_command_responses_for_context_compact_export();

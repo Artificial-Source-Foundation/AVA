@@ -4,6 +4,7 @@
 #include "ava/agent/agent_loop.h"
 #include "ava/config/auth.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/session/assistant_output.h"
 #include "ava/session/session_store.h"
 #include "ava/provider/anthropic_provider.h"
 #include "ava/provider/provider_utils.h"
@@ -921,6 +922,17 @@ void test_anthropic_parsing()
   auto malformed = ava::provider::parse_anthropic_sse("data: not-json\n\n");
   expect(malformed && malformed->size() == 1 && (*malformed)[0].type == ava::provider::StreamEventType::Error,
          "Anthropic malformed SSE data produces a provider error event");
+  auto private_error = ava::provider::parse_anthropic_sse(
+      "data: {\"type\":\"error\",\"error\":{\"message\":\"event: error\\ndata: ANTHROPIC_SSE_MESSAGE_CANARY\","
+      "\"signature\":\"ANTHROPIC_SSE_SIGNATURE_CANARY\",\"native\":{\"reasoning\":\"ANTHROPIC_SSE_REASONING_CANARY\"}},"
+      "\"unknown\":\"ANTHROPIC_SSE_OUTER_CANARY\"}\n\n");
+  expect(private_error && private_error->size() == 1 && (*private_error)[0].type == ava::provider::StreamEventType::Error &&
+             (*private_error)[0].error_message == "Anthropic provider reported a streaming error" &&
+             (*private_error)[0].error_message.find("ANTHROPIC_SSE_MESSAGE_CANARY") == std::string::npos &&
+             (*private_error)[0].error_message.find("ANTHROPIC_SSE_SIGNATURE_CANARY") == std::string::npos &&
+             (*private_error)[0].error_message.find("ANTHROPIC_SSE_REASONING_CANARY") == std::string::npos &&
+             (*private_error)[0].error_message.find("ANTHROPIC_SSE_OUTER_CANARY") == std::string::npos,
+         "Anthropic SSE error diagnostics expose only a normalized provider message and reject embedded event-stream payloads");
 
   auto non_stream = ava::provider::parse_anthropic_response(ava::provider::HttpResponse{
       .status_code = 200,
@@ -932,6 +944,14 @@ void test_anthropic_parsing()
              (*non_stream)[4].usage->total_tokens == 8 && (*non_stream)[4].usage->cache_write_tokens == 1 &&
              (*non_stream)[4].finish_reason == ava::provider::ProviderFinishReason::Completed,
          "Anthropic non-stream response parses text, tools, usage, and stop reason");
+  auto saturated_usage = ava::provider::parse_anthropic_response(ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body =
+          R"({"content":[{"type":"text","text":"bounded"}],"stop_reason":"end_turn","usage":{"input_tokens":9223372036854775807,"output_tokens":9,"cache_read_input_tokens":7,"cache_creation_input_tokens":5}})"});
+  expect(saturated_usage && saturated_usage->back().usage && saturated_usage->back().usage->input_tokens == 9223372036854775807LL &&
+             saturated_usage->back().usage->total_tokens == 9223372036854775807LL,
+         "Anthropic usage parsing saturates near-LLONG_MAX input and total token arithmetic");
 
   auto non_stream_refusal = ava::provider::parse_anthropic_response(ava::provider::HttpResponse{
       .status_code = 200,
@@ -1009,13 +1029,15 @@ void test_anthropic_parsing()
       .status_code = 529,
       .headers = {},
       .body =
-          R"({"error":{"type":"overloaded_error","message":"Overloaded","api_key":"secret-key","signature":"secret-signature","redacted_data":"opaque-redacted","data":"opaque-data","thinking":"secret thinking"}})"});
+          R"({"error":{"type":"overloaded_error","message":"Overloaded","api_key":"ANTHROPIC_HTTP_KEY_CANARY","signature":"ANTHROPIC_HTTP_SIGNATURE_CANARY","redacted_data":"ANTHROPIC_HTTP_REDACTED_CANARY","data":"ANTHROPIC_HTTP_DATA_CANARY","thinking":"ANTHROPIC_HTTP_THINKING_CANARY","unknown":{"private":"ANTHROPIC_HTTP_NESTED_CANARY"}},"unknown":"ANTHROPIC_HTTP_OUTER_CANARY"})"});
   auto const error_text = http_error ? std::string{} : http_error.error().format();
-  expect(!http_error && error_text.find("provider_error_kind: transient") != std::string::npos && error_text.find("[redacted]") != std::string::npos &&
-             error_text.find("secret-key") == std::string::npos && error_text.find("secret-signature") == std::string::npos &&
-             error_text.find("opaque-redacted") == std::string::npos && error_text.find("opaque-data") == std::string::npos &&
-             error_text.find("secret thinking") == std::string::npos,
-         "Anthropic HTTP errors carry normalized kind without provider-private snippets");
+  expect(!http_error && error_text.find("provider_error_kind: transient") != std::string::npos && error_text.find("provider_message") == std::string::npos &&
+             error_text.find("body_snippet") == std::string::npos && error_text.find("ANTHROPIC_HTTP_KEY_CANARY") == std::string::npos &&
+             error_text.find("ANTHROPIC_HTTP_SIGNATURE_CANARY") == std::string::npos &&
+             error_text.find("ANTHROPIC_HTTP_REDACTED_CANARY") == std::string::npos && error_text.find("ANTHROPIC_HTTP_DATA_CANARY") == std::string::npos &&
+             error_text.find("ANTHROPIC_HTTP_THINKING_CANARY") == std::string::npos && error_text.find("ANTHROPIC_HTTP_NESTED_CANARY") == std::string::npos &&
+             error_text.find("ANTHROPIC_HTTP_OUTER_CANARY") == std::string::npos,
+         "Anthropic HTTP errors carry only fixed local status and classification diagnostics");
 }
 
 void test_anthropic_registry_and_env_auth()
@@ -1093,6 +1115,7 @@ void test_anthropic_agent_tool_loop_native_replay()
       .system_prompt = "system prompt",
       .access_token = "anthropic-key",
       .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("read note", store, provider, transport);
@@ -1158,6 +1181,7 @@ void test_anthropic_agent_reasoning_native_replay()
       .system_prompt = "system prompt",
       .access_token = "anthropic-key",
       .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),
   });
   auto first = loop.run_turn("first", store, provider, transport);
@@ -1176,16 +1200,17 @@ void test_anthropic_agent_reasoning_native_replay()
   expect(entries.has_value(), "Anthropic reasoning replay session loads");
   if (!entries)
     return;
+  auto const projection = ava::session::classify_assistant_output(*entries);
   bool saw_reasoning = false;
-  for (auto const& entry : *entries)
+  for (auto const& turn : projection.turns)
   {
-    if (entry.type == ava::session::EntryType::ReasoningBlock && entry.data_json.find("visible plan") != std::string::npos &&
-        entry.data_json.find("sig-1") != std::string::npos)
+    for (auto const& item : turn.items)
     {
-      saw_reasoning = true;
+      if (auto const* reasoning = std::get_if<ava::session::AssistantOutputReasoning>(&item.item.payload))
+        saw_reasoning = saw_reasoning || (reasoning->text == "visible plan" && reasoning->signature == std::optional<std::string>{"sig-1"});
     }
   }
-  expect(saw_reasoning, "Anthropic reasoning block is persisted for replay");
+  expect(saw_reasoning, "Anthropic reasoning is persisted in its committed v4 turn for replay");
 }
 
 void test_anthropic_agent_redacted_reasoning_native_replay()
@@ -1229,6 +1254,7 @@ void test_anthropic_agent_redacted_reasoning_native_replay()
       .system_prompt = "system prompt",
       .access_token = "anthropic-key",
       .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),
   });
   auto first = loop.run_turn("first", store, provider, transport);
@@ -1276,6 +1302,7 @@ void test_anthropic_agent_non_stream_reasoning_events()
         return {};
       },
       .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("first", store, provider, transport);
@@ -1346,6 +1373,7 @@ void test_anthropic_agent_multi_tool_native_replay()
       .system_prompt = "system prompt",
       .access_token = "anthropic-key",
       .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("read both notes", store, provider, transport);
@@ -1403,6 +1431,7 @@ void test_anthropic_agent_non_stream_tool_loop_native_replay()
       .access_token = "anthropic-key",
       .stream = false,
       .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),
   });
   auto result = loop.run_turn("read note", store, provider, transport);

@@ -489,13 +489,19 @@ class SmokeContext:
             self.restore_state,
             self.restore_data,
         ):
-            path.mkdir(parents=True, exist_ok=True)
+            path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            # Keep scenario fixtures owner-only and deterministic across umask
+            # values; private-primary-group behavior has focused C++ coverage.
+            path.chmod(0o700)
 
         self.ava_config = self.config / "ava"
         self.active_ava_config = self.active_config / "ava"
         self.restore_ava_config = self.restore_config / "ava"
         for path in (self.ava_config, self.active_ava_config, self.restore_ava_config):
-            path.mkdir(parents=True, exist_ok=True)
+            path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            # These directories hold AVA configuration authority, so unlike a
+            # private-group workspace they must stay strictly owner-only.
+            path.chmod(0o700)
 
         self.ava_config.joinpath("models.json").write_text(
             '{"models":[{"provider":"openai","id":"diagnostic-local","name":"Diagnostic Local","supports_reasoning":true}]}\n',
@@ -562,7 +568,8 @@ class SmokeContext:
             encoding="utf-8",
         )
         plugin_state_dir = self.state / "ava"
-        plugin_state_dir.mkdir(parents=True, exist_ok=True)
+        plugin_state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        plugin_state_dir.chmod(0o700)
         plugin_state_dir.joinpath("plugin-enablement.json").write_text(
             json.dumps(
                 {

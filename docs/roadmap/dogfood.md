@@ -17,7 +17,7 @@ Live checks use isolated temporary workspaces and configuration roots. Credentia
 | Task subagents | Pass | Built-in and custom foreground agents; custom background agent start, child-session persistence, and shutdown join |
 | Sessions | Pass | Persistent session creation, tool records, private reasoning replay state, process restart, and `--continue` |
 
-The current OpenAI continuation path has been proven live for the common contiguous sequence of reasoning, assistant text, function call, function output, and final answer. Arbitrary interleaving of reasoning/commentary/function items and preservation of assistant `phase` require a prefix-safe ordered session representation and remain a separate roadmap item.
+OpenAI continuation now persists each assistant turn as one ordered session-v4 transaction. Streaming and non-streaming capture preserve commentary/final text phase, reasoning, function-call identity, and exact emitted order; restart replay reconstructs the same native Responses items. A live OpenAI OAuth check on 2026-07-18 with `gpt-5.6-luna` emitted and persisted `reasoning` → commentary text → `read_file` in one turn, then final-answer text after the bound tool result; RPC validation, public projection, and `--continue` replay all succeeded. Other legal interleavings are additionally covered by deterministic parser, persistence, restart, privacy, and request-serialization tests because a live provider cannot be required to emit every ordering on demand.
 
 ## Offline qualification
 
@@ -41,13 +41,14 @@ Dogfooding found and fixed:
 - OpenAI tool calls were replayed as synthetic text rather than native Responses items.
 - OpenAI reasoning-plus-tool continuation needed private native reasoning-item replay.
 - OpenAI complete function arguments required lifecycle reconciliation.
+- Separate reasoning/text/tool persistence lost legal interleaving and assistant phase across restart; session-v4 now commits one ordered assistant-output transaction and binds tool results to exact function items.
+- Crash/cancellation windows could strand staged turns or unresolved committed calls; lease-gated suffix recovery and non-reexecuting interrupted-result reconciliation now close those histories safely.
 
 Remaining workflow gaps:
 
 - Background jobs can start and persist child sessions, but there is no public status, wait, result, or cancel command.
 - The permissioned shell uses a fixed PATH; bare user-installed build commands may be unavailable even after approval.
 - Real LSP behavior still needs a zero-configuration server recipe; deterministic fake-server coverage passes.
-- Full ordered OpenAI output-item and assistant-phase replay is not yet represented in the session format.
 
 ## Public release blocker: ai-utils licensing
 

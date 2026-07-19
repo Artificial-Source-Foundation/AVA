@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/command/private_group.h"
 #include "ava/containment/containment.h"
 
 #include <cerrno>
@@ -173,10 +174,10 @@ namespace {
 }
 
 // Validate that a path is an existing non-symlink directory owned by the
-// current user. Group/world read/execute (0755/0750) is permitted, but any
-// group/world write bit, symlink, special file type, or identity mismatch is
-// rejected. This is used for the workspace root, which may be a shared project
-// directory with group read access.
+// current user. Group/world read/execute (0755/0750) is permitted. Group write
+// is permitted only for the current account's verified private primary group;
+// world write, symlinks, special file types, and identity mismatches are
+// rejected. This is used for the workspace root.
 [[nodiscard]] ava::core::VoidResult validate_writable_root(std::filesystem::path const& path)
 {
   struct stat status{};
@@ -188,8 +189,34 @@ namespace {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Landlock writable root is a symlink"));
   if (status.st_uid != ::geteuid())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Landlock writable root is not owned by the current user"));
-  if ((status.st_mode & (S_IWGRP | S_IWOTH)) != 0)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Landlock writable root has group or world write permissions"));
+  if ((status.st_mode & S_IWOTH) != 0 || ((status.st_mode & S_IWGRP) != 0 && !ava::command::detail::is_current_user_private_primary_group_directory(status)))
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
+                                            "Landlock writable root has group/world write permissions outside the verified private-primary-group exception"));
+  }
+  return {};
+}
+
+// Validate the optional real-home rustup state root before granting its
+// read/execute-only Landlock rule. It has the same narrow ownership/mode
+// contract used while sealing: current user, no world write, and group write
+// only through the verified private-primary-group exception.
+[[nodiscard]] ava::core::VoidResult validate_read_only_toolchain_root(std::filesystem::path const& path)
+{
+  struct stat status{};
+  if (::lstat(path.c_str(), &status) != 0)
+    return std::unexpected(landlock_error("failed to inspect Landlock trusted toolchain root"));
+  if (!S_ISDIR(status.st_mode))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Landlock trusted toolchain root is not a directory"));
+  if (S_ISLNK(status.st_mode))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Landlock trusted toolchain root is a symlink"));
+  if (status.st_uid != ::geteuid())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Landlock trusted toolchain root is not owned by the current user"));
+  if ((status.st_mode & S_IWOTH) != 0 || ((status.st_mode & S_IWGRP) != 0 && !ava::command::detail::is_current_user_private_primary_group_directory(status)))
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Landlock trusted toolchain root has unsafe group/world write permissions"));
+  }
   return {};
 }
 
@@ -283,6 +310,11 @@ ava::core::VoidResult validate_synthetic_directory_root(std::filesystem::path co
 ava::core::VoidResult validate_writable_directory_root(std::filesystem::path const& path)
 {
   return validate_writable_root(path);
+}
+
+ava::core::VoidResult validate_read_only_toolchain_directory_root(std::filesystem::path const& path)
+{
+  return validate_read_only_toolchain_root(path);
 }
 
 ava::core::VoidResult validate_device_root(std::filesystem::path const& path)

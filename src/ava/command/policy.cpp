@@ -303,7 +303,14 @@ CommandClassification classify_raw_shell(ResolvedExecutable const& executable)
 CommandClassification classify_command(std::vector<std::string> const& argv, ResolvedExecutable const& executable, std::filesystem::path const& cwd,
                                        std::filesystem::path const& workspace, std::vector<WorkspaceScriptRecipe> const& workspace_recipes)
 {
-  auto const executable_name = lowercase(executable.executable.canonical_path.filename().string());
+  // Classify by the invoked basename when the sealed executable is a symlink.
+  // Multi-call toolchains commonly expose trusted aliases this way (for
+  // example cargo -> rustup and npm -> npm-cli.js). The canonical target and
+  // origin still bind permission identity and execution, so bare and absolute
+  // spellings of the same alias cannot select different authority.
+  auto const& classification_path =
+      executable.executable.requested_path_is_symlink ? executable.executable.requested_path : executable.executable.canonical_path;
+  auto const executable_name = lowercase(classification_path.filename().string());
   CommandClassification classification;
   if (!executable.shebang_fully_resolved)
     classification = critical_classification(CommandFamily::UnknownWrapper, CommandCapabilities{.unknown_wrapper = true});

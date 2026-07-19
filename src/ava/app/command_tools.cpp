@@ -204,33 +204,35 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
       .mode = session.mode,
       .permission_resolver = permission_resolver,
   });
-  return ava::tools::ToolContext{.workspace_dir = session.workspace_dir,
-                                 .spill_dir = session.store.session_path().parent_path() / "spill",
-                                 .mode = session.mode,
-                                 .permission_resolver = std::move(permission_resolver),
-                                 .command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(permission_rule_store_for_session(session)),
-                                 .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
-                                   auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                           .parent_id = "",
-                                                                           .type = ava::session::EntryType::PermissionDecision,
-                                                                           .timestamp = ava::session::now_timestamp(),
-                                                                           .data_json = ava::tools::permission_audit_data_json(event)};
-                                   return session.append_owned(std::move(entry));
-                                 },
-                                 .ava_authority_roots = command_authority_roots_for_session(session),
-                                 .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
-                                 .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
-                                 .plugin_project_plugins_dir = include_project_resources ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{},
-                                 .plugin_enablement_file = session.paths.ava_state_dir / "plugin-enablement.json",
-                                 .include_project_plugins = include_project_resources,
-                                 .mcp_global_config_file = session.paths.ava_config_dir / "mcp.json",
-                                 .mcp_project_config_file = include_project_resources ? session.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{},
-                                 .include_project_mcp_config = include_project_resources,
-                                 .include_project_skills = include_project_resources,
-                                 .session_id = session.store.session_id(),
-                                 .provider_id = session.model.provider_id,
-                                 .model_id = session.model.model_id,
-                                 .current_dir = session.current_dir};
+  return ava::tools::ToolContext{
+      .workspace_dir = session.workspace_dir,
+      .spill_dir = session.store.session_path().parent_path() / "spill",
+      .mode = session.mode,
+      .command_runtime = ava::command::CommandRuntimeOptions{.mode = ava::command::CommandRuntimeMode::Enabled},
+      .permission_resolver = std::move(permission_resolver),
+      .command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(permission_rule_store_for_session(session)),
+      .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+        auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                .parent_id = "",
+                                                .type = ava::session::EntryType::PermissionDecision,
+                                                .timestamp = ava::session::now_timestamp(),
+                                                .data_json = ava::tools::permission_audit_data_json(event)};
+        return session.append_owned(std::move(entry));
+      },
+      .ava_authority_roots = command_authority_roots_for_session(session),
+      .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
+      .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
+      .plugin_project_plugins_dir = include_project_resources ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{},
+      .plugin_enablement_file = session.paths.ava_state_dir / "plugin-enablement.json",
+      .include_project_plugins = include_project_resources,
+      .mcp_global_config_file = session.paths.ava_config_dir / "mcp.json",
+      .mcp_project_config_file = include_project_resources ? session.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{},
+      .include_project_mcp_config = include_project_resources,
+      .include_project_skills = include_project_resources,
+      .session_id = session.store.session_id(),
+      .provider_id = session.model.provider_id,
+      .model_id = session.model.model_id,
+      .current_dir = session.current_dir};
 }
 
 ava::core::VoidResult record_tool_start(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result, std::string const& call_id,
@@ -521,11 +523,12 @@ ava::core::Result<CommandResult> run_tool_command(runtime::Session& session, Com
   {
     auto const command = line.substr(6);
     auto const call_id = ava::core::make_id("cmd");
-    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "bash", command); !recorded)
+    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "bash", "<redacted one-shot command>"); !recorded)
     {
       return std::unexpected(std::move(recorded.error()));
     }
-    auto const bash = ava::tools::run_bash(context, command);
+    auto const bash =
+        ava::tools::run_bash(context, command, ava::tools::BashOptions{.invocation_source = ava::tools::BashOptions::InvocationSource::UserRawShell});
     if (!bash)
     {
       auto const text = bash.error().format();

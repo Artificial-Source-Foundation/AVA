@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -58,17 +59,6 @@ ProviderFinishReason normalized_anthropic_finish_reason(std::string_view reason)
   return normalize_provider_finish_reason(ProviderProtocol::Anthropic, reason);
 }
 
-std::string stream_error_message(std::string_view message)
-{
-  return message.empty() ? "unrecognized Anthropic stream event" : std::string(message);
-}
-
-std::string sanitized_anthropic_body_snippet(std::string_view body)
-{
-  return sanitized_body_snippet(body,
-                                {"access_token", "refresh_token", "api_key", "x-api-key", "Authorization", "signature", "redacted_data", "data", "thinking"});
-}
-
 std::string stop_details_explanation(std::string_view object)
 {
   auto const stop_details = ava::core::json::object_field(object, "stop_details");
@@ -84,8 +74,10 @@ bool has_stop_details(std::string_view object)
 
 void append_stream_error(std::vector<StreamEvent>& events, std::string_view message)
 {
+  // Callers pass AVA-owned parser diagnostics only; response fields must never
+  // become an Error event payload.
   events.push_back(StreamEvent{
-      .type = StreamEventType::Error, .text = "", .tool_call_id = "", .tool_name = "", .error_message = stream_error_message(message), .usage = std::nullopt});
+      .type = StreamEventType::Error, .text = "", .tool_call_id = "", .tool_name = "", .error_message = std::string(message), .usage = std::nullopt});
 }
 
 std::optional<long long> non_negative_integer_field(std::string_view object, std::string_view key)
@@ -94,6 +86,12 @@ std::optional<long long> non_negative_integer_field(std::string_view object, std
   if (!value || *value < 0)
     return std::nullopt;
   return value;
+}
+
+long long saturating_token_add(long long left, long long right) noexcept
+{
+  constexpr auto maximum = std::numeric_limits<long long>::max();
+  return right > maximum - left ? maximum : left + right;
 }
 
 void merge_usage(TokenUsage& target, TokenUsage const& source)
@@ -331,14 +329,12 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<long long,
   {
     error_seen = true;
     message_stop_seen = true;
-    auto const error = ava::core::json::object_field(data, "error");
-    events.push_back(StreamEvent{
-        .type = StreamEventType::Error,
-        .text = "",
-        .tool_call_id = "",
-        .tool_name = "",
-        .error_message = error ? ava::core::json::string_field(*error, "message").value_or("") : ava::core::json::string_field(data, "message").value_or(""),
-        .usage = std::nullopt});
+    events.push_back(StreamEvent{.type = StreamEventType::Error,
+                                 .text = "",
+                                 .tool_call_id = "",
+                                 .tool_name = "",
+                                 .error_message = "Anthropic provider reported a streaming error",
+                                 .usage = std::nullopt});
     return;
   }
   append_terminal_error("unrecognized Anthropic stream event");
@@ -482,10 +478,6 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse_response(HttpRes
     error.with_context("provider_error_kind", to_string(classify_provider_error(response)));
     if (auto const retry_after = retry_after_header(response))
       error.with_context("retry_after", *retry_after);
-    if (!response.body.empty())
-    {
-      error.with_context("body_snippet", sanitized_anthropic_body_snippet(response.body));
-    }
     return std::unexpected(std::move(error));
   }
   return parse_anthropic_sse(response.body);
@@ -495,11 +487,16 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(HttpRespons
 {
   if (response.status_code < 200 || response.status_code >= 300)
     return parse_anthropic_sse_response(response);
+  if (!is_valid_json_object(response.body))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "Anthropic response was malformed JSON"));
   std::vector<StreamEvent> events;
   bool parsed_content = false;
   auto const raw_finish_reason = ava::core::json::string_field(response.body, "stop_reason").value_or("");
   auto finish_reason = normalized_anthropic_finish_reason(raw_finish_reason);
-  for (auto const& block : ava::core::json::objects_in_array_field(response.body, "content"))
+  auto const content = ava::core::json::strict_objects_in_array_field(response.body, "content", kMaxProviderParserArrayItems);
+  if (ava::core::json::field_value_start(response.body, "content") && !content)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "Anthropic response parser limit exceeded"));
+  for (auto const& block : content.value_or(std::vector<std::string>{}))
   {
     auto const type = ava::core::json::string_field(block, "type").value_or("");
     if (type == "text")
@@ -614,14 +611,7 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(HttpRespons
     }
   }
   if (!parsed_content)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "Anthropic response content is missing");
-    if (!response.body.empty())
-    {
-      error.with_context("body_snippet", sanitized_anthropic_body_snippet(response.body));
-    }
-    return std::unexpected(std::move(error));
-  }
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "Anthropic response content is missing"));
   if (raw_finish_reason.empty())
   {
     bool const has_tool_call = std::ranges::any_of(events, [](StreamEvent const& event) { return event.type == StreamEventType::ToolCallStart; });
@@ -646,10 +636,11 @@ std::optional<TokenUsage> parse_anthropic_usage(std::string_view body)
   usage.output_tokens = non_negative_integer_field(usage_view, "output_tokens");
   usage.cache_read_tokens = non_negative_integer_field(usage_view, "cache_read_input_tokens");
   usage.cache_write_tokens = non_negative_integer_field(usage_view, "cache_creation_input_tokens");
-  long long const input_total = regular_input_tokens.value_or(0) + usage.cache_read_tokens.value_or(0) + usage.cache_write_tokens.value_or(0);
+  auto input_total = saturating_token_add(regular_input_tokens.value_or(0), usage.cache_read_tokens.value_or(0));
+  input_total = saturating_token_add(input_total, usage.cache_write_tokens.value_or(0));
   if (input_total > 0)
     usage.input_tokens = input_total;
-  long long const total = input_total + usage.output_tokens.value_or(0);
+  long long const total = saturating_token_add(input_total, usage.output_tokens.value_or(0));
   if (total > 0)
     usage.total_tokens = total;
   if (!usage.input_tokens && !usage.output_tokens && !usage.cache_read_tokens && !usage.cache_write_tokens)

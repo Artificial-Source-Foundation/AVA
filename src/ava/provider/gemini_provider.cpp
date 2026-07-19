@@ -348,11 +348,6 @@ ProviderFinishReason normalized_finish_reason(std::string_view reason)
   return normalize_provider_finish_reason(ProviderProtocol::Gemini, reason);
 }
 
-std::string sanitized_gemini_body_snippet(std::string_view body)
-{
-  return sanitized_body_snippet(body, {"access_token", "refresh_token", "api_key", "key", "x-goog-api-key", "Authorization", "authorization"});
-}
-
 std::string prompt_block_reason(std::string_view body)
 {
   auto const prompt_feedback = ava::core::json::object_field(body, "promptFeedback");
@@ -424,10 +419,10 @@ void append_part_events(std::vector<StreamEvent>& events, std::string_view part,
 
 void append_response_events(std::vector<StreamEvent>& events, GeminiParseState& state, std::string_view body)
 {
-  if (auto const error = ava::core::json::object_field(body, "error"))
+  if (ava::core::json::object_field(body, "error"))
   {
     state.error_seen = true;
-    append_error_event(events, sanitized_gemini_body_snippet(ava::core::json::string_field(*error, "message").value_or("Gemini API error")));
+    append_error_event(events, "Gemini provider reported an error");
     return;
   }
   if (auto usage = parse_gemini_usage(body))
@@ -448,21 +443,33 @@ void append_response_events(std::vector<StreamEvent>& events, GeminiParseState& 
     else
     {
       state.error_seen = true;
-      append_error_event(events, "Gemini prompt was blocked: " + block_reason);
+      append_error_event(events, "Gemini prompt was blocked");
     }
     return;
   }
 
-  auto const candidates = ava::core::json::objects_in_array_field(body, "candidates");
-  for (std::size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index)
+  auto const candidates = ava::core::json::strict_objects_in_array_field(body, "candidates", kMaxProviderParserArrayItems);
+  if (ava::core::json::field_value_start(body, "candidates") && !candidates)
   {
-    auto const& candidate = candidates[candidate_index];
+    state.error_seen = true;
+    append_error_event(events, "Gemini response parser limit exceeded");
+    return;
+  }
+  for (std::size_t candidate_index = 0; candidates && candidate_index < candidates->size(); ++candidate_index)
+  {
+    auto const& candidate = candidates->at(candidate_index);
     if (auto const content = ava::core::json::object_field(candidate, "content"))
     {
-      auto const parts = ava::core::json::objects_in_array_field(*content, "parts");
-      for (std::size_t part_index = 0; part_index < parts.size(); ++part_index)
+      auto const parts = ava::core::json::strict_objects_in_array_field(*content, "parts", kMaxProviderParserArrayItems);
+      if (ava::core::json::field_value_start(*content, "parts") && !parts)
       {
-        append_part_events(events, parts[part_index], candidate_index, part_index, state);
+        state.error_seen = true;
+        append_error_event(events, "Gemini response parser limit exceeded");
+        return;
+      }
+      for (std::size_t part_index = 0; parts && part_index < parts->size(); ++part_index)
+      {
+        append_part_events(events, parts->at(part_index), candidate_index, part_index, state);
       }
     }
     if (auto const finish_reason = ava::core::json::string_field(candidate, "finishReason"); finish_reason && !finish_reason->empty())
@@ -528,8 +535,6 @@ ava::core::Result<std::vector<StreamEvent>> gemini_http_error(HttpResponse const
   error.with_context("provider_error_kind", to_string(classify_provider_error(response)));
   if (auto const retry_after = retry_after_header(response))
     error.with_context("retry_after", *retry_after);
-  if (!response.body.empty())
-    error.with_context("body_snippet", sanitized_gemini_body_snippet(response.body));
   return std::unexpected(std::move(error));
 }
 
@@ -672,12 +677,7 @@ ava::core::Result<std::vector<StreamEvent>> parse_gemini_response(HttpResponse c
   std::vector<StreamEvent> events;
   GeminiParseState state{.fallback_tool_call_prefix = ava::core::make_id("gemini_call")};
   if (!is_json_object_shape(response.body))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "Gemini response was malformed JSON");
-    if (!response.body.empty())
-      error.with_context("body_snippet", sanitized_gemini_body_snippet(response.body));
-    return std::unexpected(std::move(error));
-  }
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "Gemini response was malformed JSON"));
   append_response_events(events, state, response.body);
   if (state.error_seen)
     return events;
@@ -686,8 +686,6 @@ ava::core::Result<std::vector<StreamEvent>> parse_gemini_response(HttpResponse c
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "Gemini response content is missing");
     if (state.finish_reason.has_value())
       error.with_context("finish_reason", std::string(to_string(*state.finish_reason)));
-    if (!response.body.empty())
-      error.with_context("body_snippet", sanitized_gemini_body_snippet(response.body));
     return std::unexpected(std::move(error));
   }
   append_done_event(events, std::move(state.usage), state.finish_reason);

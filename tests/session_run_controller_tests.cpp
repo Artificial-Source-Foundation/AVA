@@ -1116,6 +1116,92 @@ void test_session_run_controller_failure_drains_tickets_with_exact_accounting()
          "one immutable partial failure terminally drains every accepted ticket, prevents queued writes, and recovers without byte-account drift");
 }
 
+void test_session_run_controller_batch_is_one_ticket_and_latches_failure()
+{
+  std::error_code error;
+  auto const root = temp_root() / "session-run-controller-batch";
+  std::filesystem::remove_all(root, error);
+  auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+  auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                     : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+  if (!store || !lease)
+    return;
+
+  std::mutex gate_mutex;
+  std::condition_variable gate_changed;
+  bool entered = false;
+  bool release = false;
+  store->set_before_append_identity_check_for_test([&] {
+    std::unique_lock lock(gate_mutex);
+    entered = true;
+    gate_changed.notify_all();
+    static_cast<void>(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return release; }));
+  });
+  store->set_append_write_for_test([](int, std::string_view) -> ssize_t {
+    errno = EIO;
+    return -1;
+  });
+
+  auto target = persistent_controller_target(*store, *lease);
+  if (!target)
+    return;
+  ava::app::SessionRunController controller(std::move(*target));
+  auto admitted = controller.admit({.request_id = "batch"});
+  if (!admitted)
+    return;
+  auto guard = std::move(*admitted);
+  auto route = guard.append_batch_route();
+  auto output_data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+      .assistant_turn_id = "controller-batch-turn",
+      .sequence = 0,
+      .kind = ava::session::AssistantOutputItemKind::Text,
+      .provider_item_id = "controller-batch-item",
+      .provider_output_index = 0,
+      .payload = ava::session::AssistantOutputText{.text = "staged", .assistant_phase = ava::session::AssistantOutputTextPhase::Commentary}});
+  auto commit_data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{.assistant_turn_id = "controller-batch-turn",
+                                                                                                               .item_count = 1,
+                                                                                                               .provider = "openai",
+                                                                                                               .model = "gpt-5.5",
+                                                                                                               .finish_reason = "completed",
+                                                                                                               .usage_json = std::nullopt});
+  if (!output_data || !commit_data)
+    return;
+  std::vector<ava::session::SessionEntry> entries;
+  auto output = append_entry("batch-output");
+  output.type = ava::session::EntryType::AssistantOutputItem;
+  output.data_json = std::move(*output_data);
+  entries.push_back(std::move(output));
+  auto commit = append_entry("batch-commit");
+  commit.type = ava::session::EntryType::AssistantTurnCommit;
+  commit.data_json = std::move(*commit_data);
+  entries.push_back(std::move(commit));
+  auto bytes = [](ava::session::SessionEntry const& entry) {
+    return entry.id.size() + entry.parent_id.size() + entry.timestamp.size() + entry.data_json.size() + 32;
+  };
+  auto const expected_bytes = bytes(entries[0]) + bytes(entries[1]);
+  std::optional<ava::core::VoidResult> result;
+  std::jthread writer([&] { result.emplace(route(std::move(entries))); });
+  bool reached_gate = false;
+  {
+    std::unique_lock lock(gate_mutex);
+    reached_gate = gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return entered; });
+  }
+  auto queued = controller.snapshot();
+  {
+    std::lock_guard lock(gate_mutex);
+    release = true;
+  }
+  gate_changed.notify_all();
+  writer.join();
+
+  auto outcome = guard.complete({.run_id = {}, .reason = ava::app::StopReason::ProviderError});
+  auto drained = controller.snapshot();
+  expect(reached_gate && queued.queued_appends == 1 && queued.queued_append_bytes == expected_bytes && result && !*result && outcome &&
+             outcome->reason == ava::app::StopReason::PersistenceError && drained.queued_appends == 0 && drained.queued_append_bytes == 0 &&
+             controller.inspect_admission({.request_id = "blocked"}) == ava::app::AdmissionDisposition::RejectPersistenceFailure,
+         "one session append batch reserves one bounded controller ticket and latches a persistence failure exactly like a single append");
+}
+
 void test_session_run_controller_concurrent_fifo_appends()
 {
   std::error_code error;
@@ -1247,6 +1333,7 @@ void run_session_run_controller_tests()
   test_session_run_controller_nested_controller_membership_is_stack_aware();
   test_session_run_controller_unrelated_observer_shutdown_without_active_append();
   test_session_run_controller_failure_drains_tickets_with_exact_accounting();
+  test_session_run_controller_batch_is_one_ticket_and_latches_failure();
   test_session_run_controller_concurrent_fifo_appends();
   test_session_run_controller_routes_release_target_on_shutdown();
   test_session_run_controller_bounds_and_reentrant_snapshot();

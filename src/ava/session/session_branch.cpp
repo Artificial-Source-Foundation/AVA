@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/session/assistant_output.h"
 #include "ava/session/attachments.h"
 #include "ava/session/record.h"
 #include "ava/session/session_branch.h"
@@ -331,6 +332,18 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
   if (!copy_count)
     return std::unexpected(std::move(copy_count.error()));
 
+  std::vector<SessionEntry> const prefix(source_entries->begin(), source_entries->begin() + static_cast<std::ptrdiff_t>(*copy_count));
+  auto const output_projection = classify_assistant_output(prefix);
+  if (!output_projection.diagnostics.empty())
+  {
+    auto error = branch_error(ava::core::ErrorCategory::Session,
+                              "branch prefix contains an assistant-output diagnostic; choose a committed boundary or recover the source session");
+    error.with_context("source_session_id", options.source_session_id);
+    error.with_context("diagnostic_kind", std::string(to_string(output_projection.diagnostics.front().kind)));
+    error.with_context("diagnostic_entry_id", output_projection.diagnostics.front().entry_id);
+    return std::unexpected(std::move(error));
+  }
+
   auto created = SessionStore::create(options.workspace_dir, options.root_dir);
   if (!created)
     return std::unexpected(std::move(created.error()));
@@ -342,15 +355,12 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
     return std::unexpected(std::move(error));
   }
 
-  for (std::size_t index = 0; index < *copy_count; ++index)
+  if (auto copied = created->append_validated_copy(*destination_lease, prefix); !copied)
   {
-    if (auto appended = created->append(*destination_lease, (*source_entries)[index]); !appended)
-    {
-      auto error = std::move(appended.error());
-      error.with_context("source_session_id", options.source_session_id);
-      rollback_created_session_with_context(*created, *destination_lease, error);
-      return std::unexpected(std::move(error));
-    }
+    auto error = std::move(copied.error());
+    error.with_context("source_session_id", options.source_session_id);
+    rollback_created_session_with_context(*created, *destination_lease, error);
+    return std::unexpected(std::move(error));
   }
 
   if (auto copied_attachments = copy_branch_image_attachments(*source, *created, *source_entries, *copy_count); !copied_attachments)
@@ -443,6 +453,16 @@ ava::core::Result<BranchSummaryResult> prepare_branch_summary(BranchSummaryOptio
   if (entries->empty())
   {
     return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "source session has no entries"));
+  }
+  auto const assistant_output = classify_assistant_output(*entries);
+  if (!assistant_output.diagnostics.empty())
+  {
+    auto error = branch_error(ava::core::ErrorCategory::Session,
+                              "branch summary source contains an assistant-output diagnostic; recover or commit the staged turn before appending");
+    error.with_context("source_session_id", options.source_session_id)
+        .with_context("diagnostic_kind", std::string(to_string(assistant_output.diagnostics.front().kind)))
+        .with_context("diagnostic_entry_id", assistant_output.diagnostics.front().entry_id);
+    return std::unexpected(std::move(error));
   }
   auto range = resolve_branch_summary_range(*entries, options.branch_root_entry_id, options.branch_tip_entry_id);
   if (!range)

@@ -1909,9 +1909,18 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "!pwd")
     send_keys(tmux_exe, session, "Enter")
-    bang_shell = wait_for(tmux_exe, session, r"(?s)!pwd.*exit: 0", "bang shell helper")
+    bang_permission = wait_for(
+        tmux_exe,
+        session,
+        r"(?s)Permission required.*bash: pwd.*risk critical",
+        "bang shell critical permission",
+    )
+    if "Allow once" not in bang_permission or "Always" in bang_permission:
+        raise RuntimeError(f"raw ! shell helper did not expose one-shot-only approval\nscreen:\n{bang_permission}")
+    send_keys(tmux_exe, session, "A", "Enter")
+    bang_shell = wait_for(tmux_exe, session, r"(?s)!pwd.*exit: 0", "allowed bang shell helper")
     if "Permission required" in bang_shell or "PERMISSION REQUIRED" in bang_shell:
-        raise RuntimeError(f"! shell helper unexpectedly opened a permission prompt for pwd\nscreen:\n{bang_shell}")
+        raise RuntimeError(f"allowed ! shell helper left its permission prompt open\nscreen:\n{bang_shell}")
 
 
     _finish_main(tmux_exe, session)
@@ -1925,23 +1934,27 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     permission = wait_for(
         tmux_exe,
         session,
-        r"Permission required.*risk high|risk high.*reason command can",
+        r"(?s)Permission required.*risk critical.*reason sealed",
         "permission prompt risk metadata",
     )
-    if "risk high" not in permission or "id permreq_" not in permission or "reason command can" not in permission:
+    if "risk critical" not in permission or "id permreq_" not in permission or "reason sealed" not in permission:
         raise RuntimeError(f"permission prompt did not expose risk, request id, and reason metadata\nscreen:\n{permission}")
-    if "[Reject rule]" not in permission or "[Always]" not in permission:
-        raise RuntimeError(f"permission prompt did not expose remembered rule choices\nscreen:\n{permission}")
+    if ("[Reject rule]" not in permission and "[DR]" not in permission) or "[Always]" in permission or "[AR]" in permission:
+        raise RuntimeError(f"critical raw-shell prompt did not expose reject-rule and one-shot-only allow choices\nscreen:\n{permission}")
+    permission_request_match = re.search(r"id (permreq_[A-Za-z0-9_]+)", permission)
+    if not permission_request_match:
+        raise RuntimeError(f"permission prompt did not expose a reusable request-id selector\nscreen:\n{permission}")
+    permission_request_prefix = permission_request_match.group(1)
     save_evidence(root, "permission-prompt-risk-request", permission)
     send_keys(tmux_exe, session, "R", "Enter")
     wait_for_absent(tmux_exe, session, r"Permission required", "permission prompt denied")
     denied_card = wait_for(
         tmux_exe,
         session,
-        r"permission deny.*reason command can change|reason command can change.*permission deny",
+        r"(?s)permission deny.*reason command permission denied",
         "permission denial tool-card audit",
     )
-    if "permission deny" not in denied_card or "reason command can change" not in denied_card:
+    if "permission deny" not in denied_card or "reason command permission denied" not in denied_card:
         raise RuntimeError(f"permission denial did not remain visible on the tool card\nscreen:\n{denied_card}")
     save_evidence(root, "permission-denied-tool-card", denied_card)
 
@@ -1951,18 +1964,20 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     remembered_rule = wait_for(
         tmux_exe,
         session,
-        r"(?s)permrule_.*git push origin main",
+        r'(?s)permrule_.*deny bash.*command="git push origin main"',
         "remembered permission rule listing",
     )
-    if "git push origin main" not in remembered_rule or "deny bash" not in remembered_rule:
-        raise RuntimeError(f"remembered deny rule was not listed\nscreen:\n{remembered_rule}")
+    if 'command="git push origin main"' not in remembered_rule or "deny bash" not in remembered_rule:
+        raise RuntimeError(f"remembered exact critical-command deny rule was not listed\nscreen:\n{remembered_rule}")
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/bash git push origin main")
-    repeated_denial_before = capture(tmux_exe, session)
     send_keys(tmux_exe, session, "Enter")
-    repeated_denial = wait_for_screen_change(
-        tmux_exe, session, repeated_denial_before, "remembered denial result"
+    repeated_denial = wait_for(
+        tmux_exe,
+        session,
+        r"(?s)/bash git push origin main.*\[x\] bash\s+error.*permission deny.*reason command permission denied",
+        "remembered denial result",
     )
     if "Permission required" in repeated_denial or "PERMISSION REQUIRED" in repeated_denial:
         raise RuntimeError(f"remembered deny rule did not suppress a repeated prompt\nscreen:\n{repeated_denial}")
@@ -1970,12 +1985,12 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     expanded_tool_details = wait_for(
         tmux_exe,
         session,
-        r"(?s)request_id: permreq_.*command: git push origin main.*inspect: /permissions audit show",
+        r"(?s)request_id: permreq_.*command: <redacted one-shot command>.*inspect: /permissions audit show",
         "ctrl-o tool detail expansion",
     )
     if (
         "request_id: permreq_" not in expanded_tool_details
-        or "command: git push origin main" not in expanded_tool_details
+        or "command: <redacted one-shot command>" not in expanded_tool_details
         or "inspect: /permissions audit show" not in expanded_tool_details
         or "diagnose: /permissions diagnose" not in expanded_tool_details
     ):
@@ -1984,16 +1999,17 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     narrow_plain_permission = wait_for(
         tmux_exe,
         session,
-        r"(?s)permission_denied: command requires permission.*action: ask.*reason: command can change.*risk: high.*request_id:\s*permreq_.*command: git push origin main.*inspect: /permissions audit show\s*permreq_.*diagnose: /permissions diagnose\s*permreq_",
+        r"(?s)permission_denied: command requires permission.*action: ask.*reason: command permission denied.*risk: critical.*request_id:\s*permreq_.*command: <redacted one-shot command>.*inspect: /permissions audit show\s*permreq_.*diagnose: /permissions diagnose\s*permreq_",
         "narrow plain permission detail rows",
     )
     if (
         "permission_denied: command requires permission" not in narrow_plain_permission
         or "action: ask" not in narrow_plain_permission
-        or "risk: high" not in narrow_plain_permission
+        or "risk: critical" not in narrow_plain_permission
         or "request_id:" not in narrow_plain_permission
         or "permreq_" not in narrow_plain_permission
-        or "reason: command can change" not in narrow_plain_permission
+        or "reason: command permission denied" not in narrow_plain_permission
+        or "command: <redacted one-shot command>" not in narrow_plain_permission
         or "inspect: /permissions audit show" not in narrow_plain_permission
         or "diagnose: /permissions diagnose" not in narrow_plain_permission
     ):
@@ -2007,7 +2023,7 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
             f"narrow NO_COLOR permission details still captured ANSI style escapes\nscreen:\n{styled_narrow_permission}"
         )
     tmux(tmux_exe, "resize-window", "-t", session, "-x", "120", "-y", "32")
-    wait_for(tmux_exe, session, r"command: git push origin main", "permission detail rows after resize restore")
+    wait_for(tmux_exe, session, r"command: <redacted one-shot command>", "permission detail rows after resize restore")
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/copy tool")
@@ -2017,7 +2033,7 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
         raise RuntimeError(f"/copy tool did not report a copied tool-detail payload\nscreen:\n{copied_tool}")
 
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/copy permission git push")
+    send_literal(tmux_exe, session, f"/copy permission {permission_request_prefix}")
     send_keys(tmux_exe, session, "Enter")
     copied_permission = wait_for(
         tmux_exe,
@@ -2108,19 +2124,19 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
         raise RuntimeError(f"/copy tool <query> did not report a copied matching tool\nscreen:\n{copied_matching_tool}")
 
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/permissions audit git push")
+    send_literal(tmux_exe, session, f"/permissions audit {permission_request_prefix}")
     send_keys(tmux_exe, session, "Enter")
     permission_audit = wait_for(
         tmux_exe,
         session,
-        r"(?s)session permission decisions.*git push origin",
+        r"(?s)request=permreq_.*<redacted one-shot command>",
         "permission audit command output",
     )
-    if "session permission decisions" not in permission_audit or "git push origin" not in permission_audit:
-        raise RuntimeError(f"permission audit command did not render the denied command\nscreen:\n{permission_audit}")
+    if "request=permreq_" not in permission_audit or "<redacted one-shot command>" not in permission_audit:
+        raise RuntimeError(f"permission audit command did not render the redacted denied command\nscreen:\n{permission_audit}")
 
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/permissions audit summary git push")
+    send_literal(tmux_exe, session, f"/permissions audit summary {permission_request_prefix}")
     send_keys(tmux_exe, session, "Enter")
     permission_audit_summary = wait_for(
         tmux_exe,
@@ -2139,36 +2155,32 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     save_evidence(root, "permission-audit-summary", permission_audit_summary)
 
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/permissions audit export git push")
+    send_literal(tmux_exe, session, f"/permissions audit export {permission_request_prefix}")
     send_keys(tmux_exe, session, "Enter")
     permission_audit_export = wait_for(
         tmux_exe,
         session,
-        r"(?s)``` markdown.*git push origin",
+        r"(?s)<redacted one-shot command>.*```",
         "permission audit export command output",
     )
-    if "``` markdown" not in permission_audit_export or "git push origin" not in permission_audit_export:
+    if "```" not in permission_audit_export or "<redacted one-shot command>" not in permission_audit_export:
         raise RuntimeError(
-            f"permission audit export command did not render the denied command\nscreen:\n{permission_audit_export}"
+            f"permission audit export command did not render the redacted denied command\nscreen:\n{permission_audit_export}"
         )
 
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/permissions diagnose git push")
+    send_literal(tmux_exe, session, f"/permissions diagnose {permission_request_prefix}")
     send_keys(tmux_exe, session, "Enter")
     permission_diagnostics = wait_for(
         tmux_exe,
         session,
-        r"(?s)Recent permission denials:.*git push origin",
+        r"(?s)Recent permission denials:.*<redacted one-shot command>",
         "permission denial diagnostics command output",
     )
-    if "Recent permission denials:" not in permission_diagnostics or "git push origin" not in permission_diagnostics:
+    if "Recent permission denials:" not in permission_diagnostics or "<redacted one-shot command>" not in permission_diagnostics:
         raise RuntimeError(
-            f"permission denial diagnostics command did not explain the denied command\nscreen:\n{permission_diagnostics}"
+            f"permission denial diagnostics command did not explain the redacted denied command\nscreen:\n{permission_diagnostics}"
         )
-    request_match = re.search(r"request=(permreq_[A-Za-z0-9_]+)", permission_diagnostics)
-    if not request_match:
-        raise RuntimeError(f"permission diagnostics did not expose a request id\nscreen:\n{permission_diagnostics}")
-    permission_request_prefix = request_match.group(1)
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, f"/permissions audit show {permission_request_prefix}")
@@ -2176,12 +2188,12 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     permission_audit_detail = wait_for(
         tmux_exe,
         session,
-        r"(?s)request: permreq_.*git push origin.*Related commands",
+        r"(?s)command: <redacted one-shot command>.*Related commands",
         "permission audit detail command output",
     )
-    if "request: permreq_" not in permission_audit_detail or "git push origin" not in permission_audit_detail:
+    if "command: <redacted one-shot command>" not in permission_audit_detail or "Related commands" not in permission_audit_detail:
         raise RuntimeError(
-            f"permission audit detail command did not render the denied command\nscreen:\n{permission_audit_detail}"
+            f"permission audit detail command did not render the redacted denied command\nscreen:\n{permission_audit_detail}"
         )
 
 
@@ -2278,6 +2290,13 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     wait_for(tmux_exe, session, r"session .* labels set: picker,bookmark", "session selector labels command")
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/sessions picker")
+    # Post-submit state refreshes the dynamic session completion catalog. Wait
+    # until its argument palette is actually active before dismissing it; an
+    # early Escape can race the asynchronous state refresh and leave Enter to
+    # accept a session-id completion.
+    wait_for(tmux_exe, session, r"›|> .*session_", "literal sessions query completion active")
+    send_keys(tmux_exe, session, "Escape")
+    wait_for_absent(tmux_exe, session, r"›|Search sessions", "literal sessions query completion dismissed")
     send_keys(tmux_exe, session, "Enter")
     wait_for(
         tmux_exe,

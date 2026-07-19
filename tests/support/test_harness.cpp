@@ -1,7 +1,7 @@
 #include "tests/support/test_harness.h"
-#include "ava/core/ids.h"
 #include "ava/session/record.h"
 #include "ava/session/validation.h"
+#include "ava/core/ids.h"
 
 #include <climits>
 #include <cstdlib>
@@ -127,7 +127,12 @@ std::filesystem::path temp_root()
 {
   auto const build_name = std::filesystem::current_path().filename();
   auto const process_id = static_cast<unsigned long long>(::getpid());
-  return std::filesystem::temp_directory_path() / ("ava_core_tests_" + build_name.string() + "_" + std::to_string(process_id));
+  auto const root = std::filesystem::temp_directory_path() / ("ava_core_tests_" + build_name.string() + "_" + std::to_string(process_id));
+  std::error_code create_error;
+  std::filesystem::create_directories(root, create_error);
+  if (!create_error)
+    static_cast<void>(::chmod(root.c_str(), S_IRWXU));
+  return root;
 }
 
 ScopedEnvVar::ScopedEnvVar(std::string name, std::string value) : name_(std::move(name))
@@ -216,6 +221,21 @@ ava::core::Result<ava::session::SessionLease> acquire_test_session_lease(ava::se
 
 ava::core::VoidResult append_session_entry_for_test(ava::session::SessionStore& store, ava::session::SessionEntry const& entry)
 {
+  // Test fixtures follow the same authority boundary as production for v4.
+  // Tests that need malformed physical bytes write their fixture directly.
+  if (entry.type == ava::session::EntryType::AssistantOutputItem || entry.type == ava::session::EntryType::AssistantTurnCommit)
+  {
+    if (store.is_ephemeral())
+    {
+      auto target = ava::session::SessionAppendTarget::create_ephemeral(store);
+      return target ? (*target)->append(entry) : ava::core::VoidResult(std::unexpected(std::move(target.error())));
+    }
+    auto lease = acquire_test_session_lease(store);
+    if (!lease)
+      return std::unexpected(std::move(lease.error()));
+    auto target = ava::session::SessionAppendTarget::create_persistent(store, *lease);
+    return target ? (*target)->append(entry) : ava::core::VoidResult(std::unexpected(std::move(target.error())));
+  }
   if (store.is_ephemeral())
     return store.append_ephemeral(entry);
   auto lease = acquire_test_session_lease(store);
@@ -229,11 +249,11 @@ std::function<ava::core::VoidResult(ava::session::SessionEntry const&)> append_r
   ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>> target =
       store.is_ephemeral() ? ava::session::SessionAppendTarget::create_ephemeral(store)
                            : [&]() -> ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>> {
-                               auto lease = acquire_test_session_lease(store);
-                               if (!lease)
-                                 return std::unexpected(std::move(lease.error()));
-                               return ava::session::SessionAppendTarget::create_persistent(store, *lease);
-                             }();
+    auto lease = acquire_test_session_lease(store);
+    if (!lease)
+      return std::unexpected(std::move(lease.error()));
+    return ava::session::SessionAppendTarget::create_persistent(store, *lease);
+  }();
   if (target)
   {
     auto retained_target = std::move(*target);
@@ -246,6 +266,23 @@ std::function<ava::core::VoidResult(ava::session::SessionEntry const&)> append_r
   auto const message = target.error().format();
   return [message](ava::session::SessionEntry const&) {
     return ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, message)));
+  };
+}
+
+std::function<ava::core::VoidResult(std::vector<ava::session::SessionEntry>)> append_batch_route_for_test(ava::session::SessionStore const& store)
+{
+  std::shared_ptr<ava::session::SessionAppendTarget> target;
+  {
+    std::lock_guard lock(test_authority_mutex);
+    auto const found = test_append_targets.find(store.session_path().string());
+    if (found != test_append_targets.end())
+      target = found->second.lock();
+  }
+  if (target)
+    return [target = std::move(target)](std::vector<ava::session::SessionEntry> entries) { return target->append_batch(std::move(entries)); };
+  return [](std::vector<ava::session::SessionEntry>) {
+    return ava::core::VoidResult(
+        std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "test batch append route requires append_route_for_test to be initialized first")));
   };
 }
 
@@ -267,7 +304,7 @@ ava::session::SessionReadAuthority read_authority_for_test(ava::session::Session
 }
 
 ava::core::Result<ava::session::SessionMetadataView> append_session_metadata_for_test(ava::session::SessionStore& store,
-                                                                                       ava::session::SessionMetadataUpdate update)
+                                                                                      ava::session::SessionMetadataUpdate update)
 {
   if (store.is_ephemeral())
     return ava::session::append_session_metadata_ephemeral(store, std::move(update));
@@ -290,10 +327,10 @@ ava::core::VoidResult append_manual_compaction_for_test(ava::session::SessionSto
 ava::core::VoidResult append_permission_audit_for_test(ava::session::SessionStore& store, ava::tools::PermissionAuditEvent const& event)
 {
   return append_session_entry_for_test(store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                          .parent_id = "",
-                                                                          .type = ava::session::EntryType::PermissionDecision,
-                                                                          .timestamp = ava::session::now_timestamp(),
-                                                                          .data_json = ava::tools::permission_audit_data_json(event)});
+                                                                         .parent_id = "",
+                                                                         .type = ava::session::EntryType::PermissionDecision,
+                                                                         .timestamp = ava::session::now_timestamp(),
+                                                                         .data_json = ava::tools::permission_audit_data_json(event)});
 }
 
 std::vector<ava::session::SessionEntry> permission_entries(std::vector<ava::session::SessionEntry> const& entries)

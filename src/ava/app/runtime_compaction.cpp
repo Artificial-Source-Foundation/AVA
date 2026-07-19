@@ -3,6 +3,7 @@
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_retry.h"
 #include "ava/agent/message_builder.h"
+#include "ava/session/logical_projection.h"
 #include "ava/session/validation.h"
 #include "ava/core/json.h"
 
@@ -185,9 +186,10 @@ ava::core::Result<std::string> parse_compaction_response_text(ava::provider::Pro
   auto events = provider.parse_response(response, stream);
   if (!events)
   {
+    // Provider parser errors may contain response diagnostics. Keep only the
+    // locally-derived HTTP status on the public/session-facing error.
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "compaction summary request failed with status " + std::to_string(response.status_code));
     error.with_context("status", std::to_string(response.status_code));
-    error.with_context("provider_error", events.error().format());
     return std::unexpected(std::move(error));
   }
   std::string streamed_text;
@@ -197,11 +199,9 @@ ava::core::Result<std::string> parse_compaction_response_text(ava::provider::Pro
     {
       streamed_text += event.text;
     }
-    else if (event.type == ava::provider::StreamEventType::Error && !event.error_message.empty())
+    else if (event.type == ava::provider::StreamEventType::Error)
     {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "compaction summary stream error");
-      error.with_context("provider_message", event.error_message);
-      return std::unexpected(std::move(error));
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "compaction summary stream error"));
     }
   }
   if (!streamed_text.empty())
@@ -235,9 +235,14 @@ ava::core::Error stale_compaction_snapshot_error(std::string_view trigger, std::
   return error;
 }
 
-std::string build_compaction_summary_prompt(std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
-                                            std::string_view instructions, std::size_t estimated_tokens)
+ava::core::Result<std::string> build_compaction_summary_prompt(std::vector<ava::session::SessionEntry> const& entries,
+                                                               ava::session::CompactionConfig const& config, std::string_view instructions,
+                                                               std::size_t estimated_tokens)
 {
+  auto projected = ava::session::project_ordered_public_session_history(entries);
+  if (!projected)
+    return std::unexpected(std::move(projected.error()));
+
   std::string prompt;
   prompt += "Generate a provider-backed AVA /compact summary for the session below.\n";
   prompt += "Return only Markdown with exactly these top-level sections, in this order:\n";
@@ -260,9 +265,9 @@ std::string build_compaction_summary_prompt(std::vector<ava::session::SessionEnt
   prompt += "- summary_model: " + config.model_id + "\n\n";
   prompt += "Session entries in chronological order:\n";
   std::size_t visible_index = 0;
-  for (std::size_t index = 0; index < entries.size(); ++index)
+  for (std::size_t index = 0; index < projected->size(); ++index)
   {
-    auto const& entry = entries[index];
+    auto const& entry = projected->at(index);
     if (ava::session::is_internal_replay_user_message(entry))
       continue;
     ++visible_index;
@@ -321,11 +326,13 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
   constexpr std::string_view system_prompt =
       "You are AVA's deterministic session compaction summarizer. Create faithful continuation context from the "
       "provided session record. Return only the requested Markdown summary; do not include prefaces or code fences.";
-  auto const prompt = build_compaction_summary_prompt(entries, config, instructions, estimated_tokens);
+  auto prompt = build_compaction_summary_prompt(entries, config, instructions, estimated_tokens);
+  if (!prompt)
+    return std::unexpected(std::move(prompt.error()));
   ava::provider::ProviderRequest const provider_request{.provider_id = session.model.provider_id,
                                                         .model_id = config.model_id,
                                                         .system_prompt = std::string(system_prompt),
-                                                        .messages = {ava::provider::ChatMessage{.role = "user", .content = prompt}},
+                                                        .messages = {ava::provider::ChatMessage{.role = "user", .content = std::move(*prompt)}},
                                                         .tools_json = {},
                                                         .stream = summary_options.openai_oauth && session.model.supports_streaming.value_or(true),
                                                         .max_output_tokens = session.model.max_output_tokens};
@@ -412,15 +419,20 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
       return std::unexpected(std::move(entries.error()));
 
     auto const threshold = ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens);
-    std::size_t estimated_tokens = ava::session::estimate_session_tokens(*entries);
+    auto estimated = ava::session::estimate_session_tokens(*entries);
+    if (!estimated)
+      return std::unexpected(std::move(estimated.error()));
+    std::size_t estimated_tokens = *estimated;
     std::size_t threshold_tokens = threshold;
     if (trigger == "auto")
     {
-      auto const decision = ava::session::should_auto_compact(*entries, *config, session.model.context_window_tokens);
-      if (!decision.should_compact)
+      auto decision = ava::session::should_auto_compact(*entries, *config, session.model.context_window_tokens);
+      if (!decision)
+        return std::unexpected(std::move(decision.error()));
+      if (!decision->should_compact)
         return false;
-      estimated_tokens = decision.estimated_tokens;
-      threshold_tokens = decision.threshold_tokens;
+      estimated_tokens = decision->estimated_tokens;
+      threshold_tokens = decision->threshold_tokens;
     }
 
     if (trigger == "context_overflow" && !context_retry_event_emitted)

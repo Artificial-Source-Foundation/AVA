@@ -95,9 +95,12 @@ ava::core::VoidResult recover_source_session_for_mutation(runtime::Session& curr
 {
   if (source_session_id == current.store.session_id())
   {
-    auto recovered = current.store.recover_torn_tail(current.lease, ava::session::legacy_unbounded_session_read_limits());
+    auto recovered = current.store.recover_torn_tail(current.lease, current.session_read_limits);
     if (!recovered)
       return std::unexpected(std::move(recovered.error()));
+    auto staged_recovery = current.store.recover_incomplete_assistant_output_suffix(current.lease, current.session_read_limits);
+    if (!staged_recovery)
+      return std::unexpected(std::move(staged_recovery.error()));
     return {};
   }
 
@@ -108,9 +111,12 @@ ava::core::VoidResult recover_source_session_for_mutation(runtime::Session& curr
   if (!acquired)
     return std::unexpected(std::move(acquired.error()));
   temporary_source_lease.emplace(std::move(*acquired));
-  auto recovered = source->recover_torn_tail(*temporary_source_lease, ava::session::legacy_unbounded_session_read_limits());
+  auto recovered = source->recover_torn_tail(*temporary_source_lease, current.session_read_limits);
   if (!recovered)
     return std::unexpected(std::move(recovered.error()));
+  auto staged_recovery = source->recover_incomplete_assistant_output_suffix(*temporary_source_lease, current.session_read_limits);
+  if (!staged_recovery)
+    return std::unexpected(std::move(staged_recovery.error()));
   return {};
 }
 

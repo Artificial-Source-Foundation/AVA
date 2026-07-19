@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/core/json.h"
 
+#include <algorithm>
 #include <cctype>
 #include <iomanip>
 #include <sstream>
@@ -78,6 +79,42 @@ bool is_json_whitespace(char ch)
   return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
 }
 
+bool nesting_within_limit(std::string_view value) noexcept
+{
+  std::size_t depth = 0;
+  bool in_string = false;
+  bool escaped = false;
+  for (char const ch : value)
+  {
+    if (in_string)
+    {
+      if (escaped)
+        escaped = false;
+      else if (ch == '\\')
+        escaped = true;
+      else if (ch == '"')
+        in_string = false;
+      continue;
+    }
+    if (ch == '"')
+    {
+      in_string = true;
+      continue;
+    }
+    if (ch == '{' || ch == '[')
+    {
+      if (depth == kMaxNestingDepth)
+        return false;
+      ++depth;
+    }
+    else if ((ch == '}' || ch == ']') && depth > 0)
+    {
+      --depth;
+    }
+  }
+  return true;
+}
+
 class JsonValidator
 {
  public:
@@ -85,6 +122,15 @@ class JsonValidator
 
   [[nodiscard]] bool valid_object()
   {
+    // JSON text is Unicode. Reject malformed source bytes before scanning or
+    // recursively validating its syntax so every accepted string is safe to
+    // expose on a JSON/RPC boundary.
+    if (!is_valid_utf8(value_))
+      return false;
+    // Preflight iteratively so hostile over-depth input is rejected before the
+    // recursive syntax validator can consume stack.
+    if (!nesting_within_limit(value_))
+      return false;
     skip_ws();
     if (!parse_object())
       return false;
@@ -94,6 +140,8 @@ class JsonValidator
 
   [[nodiscard]] bool valid_array()
   {
+    if (!is_valid_utf8(value_) || !nesting_within_limit(value_))
+      return false;
     skip_ws();
     if (!parse_array())
       return false;
@@ -379,13 +427,13 @@ std::optional<std::size_t> string_literal_end(std::string_view text, std::size_t
   return std::nullopt;
 }
 
-std::optional<std::string> parse_balanced(std::string_view text, std::size_t start, char open, char close)
+std::optional<std::size_t> balanced_end(std::string_view text, std::size_t start, char open, char close)
 {
   if (start >= text.size() || text[start] != open)
     return std::nullopt;
   bool in_string = false;
   bool escaped = false;
-  int depth = 0;
+  std::size_t depth = 0;
   for (std::size_t index = start; index < text.size(); ++index)
   {
     char const ch = text[index];
@@ -410,12 +458,20 @@ std::optional<std::string> parse_balanced(std::string_view text, std::size_t sta
       ++depth;
     if (ch == close)
     {
+      if (depth == 0)
+        return std::nullopt;
       --depth;
       if (depth == 0)
-        return std::string(text.substr(start, index - start + 1));
+        return index + 1;
     }
   }
   return std::nullopt;
+}
+
+std::optional<std::string> parse_balanced(std::string_view text, std::size_t start, char open, char close)
+{
+  auto const end = balanced_end(text, start, open, close);
+  return end ? std::optional<std::string>(std::string(text.substr(start, *end - start))) : std::nullopt;
 }
 
 std::size_t valid_utf8_sequence_length(std::string_view value, std::size_t index) noexcept
@@ -701,37 +757,46 @@ std::vector<std::string> objects_in_array_field(std::string_view object, std::st
   return result;
 }
 
-std::optional<std::vector<std::string>> strict_objects_in_array_field(std::string_view object, std::string_view key)
+std::optional<std::vector<std::string>> strict_objects_in_array_field(std::string_view object, std::string_view key, std::size_t max_items)
 {
+  if (!is_valid_utf8(object))
+    return std::nullopt;
   auto const start = field_value_start(object, key);
   if (!start || *start >= object.size() || object[*start] != '[')
     return std::nullopt;
-  auto const array = parse_balanced(object, *start, '[', ']');
-  if (!array || !JsonValidator(*array).valid_array())
+  auto const array_end = balanced_end(object, *start, '[', ']');
+  if (!array_end)
+    return std::nullopt;
+  auto const array = object.substr(*start, *array_end - *start);
+  if (!JsonValidator(array).valid_array())
     return std::nullopt;
 
   std::vector<std::string> result;
+  result.reserve(std::min<std::size_t>(max_items, 16));
   std::size_t index = 1;
   while (true)
   {
-    while (index < array->size() && std::isspace(static_cast<unsigned char>((*array)[index])) != 0) ++index;
-    if (index >= array->size())
+    while (index < array.size() && std::isspace(static_cast<unsigned char>(array[index])) != 0) ++index;
+    if (index >= array.size())
       return std::nullopt;
-    if ((*array)[index] == ']')
+    if (array[index] == ']')
       return result;
-    if ((*array)[index] != '{')
+    if (array[index] != '{' || result.size() == max_items)
       return std::nullopt;
-    auto const item = parse_balanced(*array, index, '{', '}');
-    if (!item || !JsonValidator(*item).valid_object())
+    auto const item_end = balanced_end(array, index, '{', '}');
+    if (!item_end)
       return std::nullopt;
-    result.push_back(*item);
-    index += item->size();
-    while (index < array->size() && std::isspace(static_cast<unsigned char>((*array)[index])) != 0) ++index;
-    if (index >= array->size())
+    auto const item = array.substr(index, *item_end - index);
+    if (!JsonValidator(item).valid_object())
       return std::nullopt;
-    if ((*array)[index] == ']')
+    result.emplace_back(item);
+    index = *item_end;
+    while (index < array.size() && std::isspace(static_cast<unsigned char>(array[index])) != 0) ++index;
+    if (index >= array.size())
+      return std::nullopt;
+    if (array[index] == ']')
       return result;
-    if ((*array)[index] != ',')
+    if (array[index] != ',')
       return std::nullopt;
     ++index;
   }

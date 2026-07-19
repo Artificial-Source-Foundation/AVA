@@ -6,6 +6,7 @@
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/runtime.h"
+#include "ava/session/assistant_output.h"
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
 #include "ava/session/record.h"
@@ -271,8 +272,8 @@ void test_app_compact_provider_failure_leaves_session_untouched()
   auto entries = session->store.load();
   expect(compact && compact->handled && !compact->output.empty() &&
              compact->output[0].find("compaction summary request failed with status 500") != std::string::npos &&
-             compact->output[0].find("boom") != std::string::npos,
-         "provider-backed /compact reports provider failure with status and body details");
+             compact->output[0].find("boom") == std::string::npos,
+         "provider-backed /compact reports fixed local failure status without a provider body diagnostic");
   expect(entries && std::ranges::none_of(*entries, [](ava::session::SessionEntry const& entry) { return entry.type == ava::session::EntryType::Compaction; }),
          "provider-backed /compact failure leaves session without compaction entry");
 }
@@ -445,11 +446,16 @@ void test_app_compaction_prompt_builder_sections()
 {
   auto config = ava::session::default_compaction_config();
   std::vector<ava::session::SessionEntry> const entries = {
+      ava::session::SessionEntry{.id = "entry_tool_call",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-05-01T00:00:00Z",
+                                 .data_json = "{\"call_id\":\"call_compaction\",\"name\":\"read\",\"arguments\":\"{}\"}"},
       ava::session::SessionEntry{.id = "entry_tool",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ToolResult,
                                  .timestamp = "2026-05-01T00:00:00Z",
-                                 .data_json = "{\"name\":\"read\",\"result\":\"src/main.cpp contents\"}"},
+                                 .data_json = "{\"call_id\":\"call_compaction\",\"name\":\"read\",\"success\":true,\"result\":\"src/main.cpp contents\"}"},
       ava::session::SessionEntry{.id = "entry_replay",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::UserMessage,
@@ -457,10 +463,10 @@ void test_app_compaction_prompt_builder_sections()
                                  .data_json = "{\"text\":\"duplicated active prompt\",\"internal_replay\":true,"
                                               "\"replay_of\":\"entry_user\"}"}};
   auto const prompt = ava::app::build_compaction_summary_prompt(entries, config, "preserve files", 42);
-  expect(prompt.find("# Goal") != std::string::npos && prompt.find("# Constraints / Preferences") != std::string::npos &&
-             prompt.find("# Files Read or Modified") != std::string::npos && prompt.find("src/main.cpp") != std::string::npos &&
-             prompt.find("preserve files") != std::string::npos && prompt.find("internal_replay") == std::string::npos &&
-             prompt.find("duplicated active prompt") == std::string::npos,
+  expect(prompt && prompt->find("# Goal") != std::string::npos && prompt->find("# Constraints / Preferences") != std::string::npos &&
+             prompt->find("# Files Read or Modified") != std::string::npos && prompt->find("src/main.cpp") != std::string::npos &&
+             prompt->find("preserve files") != std::string::npos && prompt->find("internal_replay") == std::string::npos &&
+             prompt->find("duplicated active prompt") == std::string::npos,
          "compaction prompt builder includes source data and skips internal replay messages");
 }
 
@@ -856,8 +862,8 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
   expect(entries && std::ranges::count_if(*entries, ava::session::is_internal_replay_user_message) == 1,
          "context overflow compaction stores active prompt replay as an internal user message");
   auto const markdown = entries ? ava::session::format_session_markdown(*entries) : std::string{};
-  auto const stats = entries ? ava::session::compute_session_stats(*entries) : ava::session::SessionStats{};
-  expect(markdown.find("internal_replay") == std::string::npos && count_substrings(markdown, "overflow prompt") == 1 && stats.counts.user_message == 1,
+  auto const stats = entries ? ava::session::compute_session_stats(*entries) : ava::core::Result<ava::session::SessionStats>(ava::session::SessionStats{});
+  expect(markdown.find("internal_replay") == std::string::npos && count_substrings(markdown, "overflow prompt") == 1 && stats->counts.user_message == 1,
          "consumer-facing export and stats hide internal active prompt replays");
 }
 
@@ -889,8 +895,9 @@ void test_app_context_overflow_compaction_failure_leaves_no_partial_entry()
   auto result = ava::app::run_prompt(*session, "overflow then summary fails", provider, transport, run_options);
   auto entries = session->store.load();
   expect(!result && result.error().message() == "context overflow compaction failed", "context overflow returns clear compaction failure");
-  expect(!result && result.error().format().find("429") != std::string::npos && result.error().format().find("summary quota exhausted") != std::string::npos,
-         "context overflow compaction failure preserves provider status and error body details");
+  expect(!result && result.error().format().find("compaction_provider_status: 429") != std::string::npos &&
+             result.error().format().find("summary quota exhausted") == std::string::npos,
+         "context overflow compaction failure preserves only allowlisted provider status metadata");
   expect(transport.requests().size() == 2, "failed context overflow compaction does not retry provider call");
   expect(entries && count_compaction_entries(*entries) == 0, "failed context overflow compaction leaves no partial compaction entry");
 }
@@ -928,6 +935,78 @@ void test_app_non_overflow_provider_error_does_not_compact_or_retry()
   auto auth_error = ava::core::Error(ava::core::ErrorCategory::Provider, "authentication failed");
   expect(ava::provider::is_context_overflow_error(context_error) && !ava::provider::is_context_overflow_error(auth_error),
          "context overflow helper distinguishes token-window errors from unrelated provider errors");
+}
+
+void test_app_compaction_projects_committed_v4_and_ignores_incomplete_staging()
+{
+  auto config = ava::session::default_compaction_config();
+  auto item = [](std::string id, std::size_t sequence, ava::session::AssistantOutputItemPayload payload) {
+    auto data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+        .assistant_turn_id = "turn_compaction",
+        .sequence = sequence,
+        .kind = std::holds_alternative<ava::session::AssistantOutputText>(payload)
+                    ? ava::session::AssistantOutputItemKind::Text
+                    : (std::holds_alternative<ava::session::AssistantOutputReasoning>(payload) ? ava::session::AssistantOutputItemKind::Reasoning
+                                                                                               : ava::session::AssistantOutputItemKind::FunctionCall),
+        .provider_item_id = std::nullopt,
+        .provider_output_index = std::nullopt,
+        .payload = std::move(payload)});
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::AssistantOutputItem,
+                                      .timestamp = "2026-07-18T00:00:01Z",
+                                      .data_json = data.value_or("{}")};
+  };
+  auto commit_data = ava::session::serialize_assistant_turn_commit_data_json(
+      ava::session::AssistantTurnCommit{.assistant_turn_id = "turn_compaction",
+                                        .item_count = 3,
+                                        .provider = "openai",
+                                        .model = "gpt-5.5",
+                                        .finish_reason = "tool_calls",
+                                        .usage_json = "{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3,\"source\":\"provider\"}"});
+  std::vector<ava::session::SessionEntry> const entries = {
+      ava::session::SessionEntry{.id = "safe_user",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-07-18T00:00:00Z",
+                                 .data_json = "{\"text\":\"safe compaction context\"}"},
+      item("v4_text", 0,
+           ava::session::AssistantOutputText{.text = "visible v4 commentary", .assistant_phase = ava::session::AssistantOutputTextPhase::Commentary}),
+      item("v4_reasoning", 1,
+           ava::session::AssistantOutputReasoning{.text = "visible v4 reasoning",
+                                                  .format = "openai_responses",
+                                                  .redacted = false,
+                                                  .signature = "V4_COMPACTION_PRIVATE_SIGNATURE",
+                                                  .redacted_data = "V4_COMPACTION_PRIVATE_REDACTED",
+                                                  .native_item_json = "{\"id\":\"rs_compaction\",\"type\":\"reasoning\",\"summary\":[]}"}),
+      item("v4_function", 2,
+           ava::session::AssistantOutputFunctionCall{.call_id = "call_compaction_v4", .name = "read_file", .arguments_json = "{\"path\":\"src/main.cpp\"}"}),
+      ava::session::SessionEntry{.id = "v4_commit",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantTurnCommit,
+                                 .timestamp = "2026-07-18T00:00:02Z",
+                                 .data_json = commit_data.value_or("{}")},
+      ava::session::SessionEntry{.id = "v4_result",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-07-18T00:00:03Z",
+                                 .data_json = "{\"assistant_output_entry_id\":\"v4_function\",\"call_id\":\"call_compaction_v4\",\"name\":\"read_file\","
+                                              "\"success\":true,\"result\":\"src/main.cpp\"}"},
+      ava::session::SessionEntry{.id = "v4_staged_private",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantOutputItem,
+                                 .timestamp = "2026-07-18T00:00:04Z",
+                                 .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"tail_compaction\",\"sequence\":0,\"kind\":\"text\",\"text\":\"V4_"
+                                              "COMPACTION_STAGED_CANARY\",\"assistant_phase\":\"commentary\"}"},
+  };
+
+  auto const prompt = ava::app::build_compaction_summary_prompt(entries, config, "", 42);
+  expect(prompt && prompt->find("safe compaction context") != std::string::npos && prompt->find("visible v4 commentary") != std::string::npos &&
+             prompt->find("visible v4 reasoning") != std::string::npos && prompt->find("src/main.cpp") != std::string::npos &&
+             prompt->find("V4_COMPACTION_PRIVATE_SIGNATURE") == std::string::npos && prompt->find("V4_COMPACTION_PRIVATE_REDACTED") == std::string::npos &&
+             prompt->find("rs_compaction") == std::string::npos && prompt->find("V4_COMPACTION_STAGED_CANARY") == std::string::npos &&
+             prompt->find("assistant_output_entry_id") == std::string::npos,
+         "compaction prompt uses the committed v4 logical projection and excludes private/incomplete staging data");
 }
 
 void test_app_context_overflow_retry_is_bounded()
@@ -986,5 +1065,6 @@ void run_app_compaction_tests()
   test_app_context_overflow_compacts_and_retries_once_successfully();
   test_app_context_overflow_compaction_failure_leaves_no_partial_entry();
   test_app_non_overflow_provider_error_does_not_compact_or_retry();
+  test_app_compaction_projects_committed_v4_and_ignores_incomplete_staging();
   test_app_context_overflow_retry_is_bounded();
 }

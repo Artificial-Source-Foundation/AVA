@@ -1586,7 +1586,7 @@ void test_acp_cancel_terminal_arbitration_and_provider_setup_paths()
     std::size_t assistant_entries = 0;
     if (entries)
       assistant_entries = static_cast<std::size_t>(
-          std::count_if(entries->begin(), entries->end(), [](auto const& entry) { return entry.type == ava::session::EntryType::AssistantMessage; }));
+          std::count_if(entries->begin(), entries->end(), [](auto const& entry) { return entry.type == ava::session::EntryType::AssistantTurnCommit; }));
 
     if (expect_cancel)
     {
@@ -1710,19 +1710,19 @@ void test_acp_critical_persistent_command_authority_respects_containment()
   ava::permissions::PermissionRuleStore const rule_store{.global_rules_file = paths.ava_config_dir / "permission-rules.json",
                                                          .workspace_rules_file = workspace / ".ava" / "permission-rules.json",
                                                          .workspace_dir = workspace};
-  auto added = ava::permissions::add_persistent_permission_rule(
-      rule_store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
-                                                        .action = ava::permissions::PermissionAction::Allow,
-                                                        .operation = ava::permissions::Operation::RunCommand,
-                                                        .mode = ava::permissions::PermissionRuleMode::Build,
-                                                        .tool_name = "bash",
-                                                        .target_path = {},
-                                                        .command = "true",
-                                                        .command_recipe_key = {},
-                                                        .recipe_display = {},
-                                                        .critical_acknowledged = true,
-                                                        .reason = "operator acknowledged exact critical command",
-                                                        .actor = "test"});
+  auto added = ava::permissions::add_persistent_permission_rule(rule_store,
+                                                                ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                      .action = ava::permissions::PermissionAction::Allow,
+                                                                                                      .operation = ava::permissions::Operation::RunCommand,
+                                                                                                      .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                      .tool_name = "bash",
+                                                                                                      .target_path = {},
+                                                                                                      .command = "true",
+                                                                                                      .command_recipe_key = {},
+                                                                                                      .recipe_display = {},
+                                                                                                      .critical_acknowledged = true,
+                                                                                                      .reason = "operator acknowledged exact critical command",
+                                                                                                      .actor = "test"});
   expect(added.has_value(), "ACP critical persistent-command test stores an exact acknowledged Allow");
   if (!added)
     return;
@@ -1731,7 +1731,8 @@ void test_acp_critical_persistent_command_authority_respects_containment()
   auto const bash_response = ava::provider::HttpResponse{
       .status_code = 200,
       .headers = {},
-      .body = R"({"choices":[{"message":{"tool_calls":[{"id":"call_critical","function":{"name":"bash","arguments":"{\"command\":\"true\"}"}}]},"finish_reason":"tool_calls"}]})"};
+      .body =
+          R"({"choices":[{"message":{"tool_calls":[{"id":"call_critical","function":{"name":"bash","arguments":"{\"command\":\"true\"}"}}]},"finish_reason":"tool_calls"}]})"};
   AgentServiceOptions options;
   options.agent_version = "1";
   options.launch_root = std::filesystem::canonical(workspace);
@@ -1741,8 +1742,7 @@ void test_acp_critical_persistent_command_authority_respects_containment()
   service.bind_update_sender([](std::string_view, std::string_view) -> ava::core::VoidResult { return {}; });
   std::atomic_int permission_requests = 0;
   service.bind_client_request_sender(
-      [&permission_requests](std::string method, std::optional<std::string>, std::chrono::milliseconds,
-                             OutboundCallPolicy) -> ava::core::Result<PendingCall> {
+      [&permission_requests](std::string method, std::optional<std::string>, std::chrono::milliseconds, OutboundCallPolicy) -> ava::core::Result<PendingCall> {
         if (method == "session/request_permission")
           ++permission_requests;
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "unexpected ACP client permission request"));
@@ -1750,8 +1750,7 @@ void test_acp_critical_persistent_command_authority_respects_containment()
       [](JsonRpcId const&, std::string) { return true; });
   static_cast<void>(service.handle_request(initialize_request(), {}));
   auto created = service.handle_request(
-      Request{.id = std::int64_t(2), .method = "session/new", .params_json = std::string("{\"cwd\":\"") + workspace.string() + "\",\"mcpServers\":[]}"},
-      {});
+      Request{.id = std::int64_t(2), .method = "session/new", .params_json = std::string("{\"cwd\":\"") + workspace.string() + "\",\"mcpServers\":[]}"}, {});
   auto const session_id = created ? ava::core::json::string_field(*created, "sessionId") : std::nullopt;
   RequestResult prompted;
   if (session_id)
@@ -1783,18 +1782,17 @@ void test_acp_critical_persistent_command_authority_respects_containment()
   unavailable_metadata.containment_status = ava::permissions::CommandContainmentStatus::Unavailable;
   unavailable_metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
   auto unavailable = resolver(ava::permissions::PermissionPrompt{.permission_request_id = "permreq_acp_unavailable",
-                                                                   .tool_call_id = "call_unavailable",
-                                                                   .operation = ava::permissions::Operation::RunCommand,
-                                                                   .mode = ava::agent::Mode::Build,
-                                                                   .workspace_dir = workspace,
-                                                                   .target_path = workspace,
-                                                                   .command = "true",
-                                                                   .tool_name = "bash",
-                                                                   .reason = "critical command",
-                                                                   .risk = ava::permissions::PermissionRisk::Critical,
-                                                                   .command_metadata = unavailable_metadata});
-  expect(unavailable && *unavailable == ava::permissions::PermissionResolution::Deny && fallback_calls == 1 &&
-             unavailable->resolution_source == "client",
+                                                                 .tool_call_id = "call_unavailable",
+                                                                 .operation = ava::permissions::Operation::RunCommand,
+                                                                 .mode = ava::agent::Mode::Build,
+                                                                 .workspace_dir = workspace,
+                                                                 .target_path = workspace,
+                                                                 .command = "true",
+                                                                 .tool_name = "bash",
+                                                                 .reason = "critical command",
+                                                                 .risk = ava::permissions::PermissionRisk::Critical,
+                                                                 .command_metadata = unavailable_metadata});
+  expect(unavailable && *unavailable == ava::permissions::PermissionResolution::Deny && fallback_calls == 1 && unavailable->resolution_source == "client",
          "the same exact Critical acknowledgement with Unavailable containment is not authoritative and falls through to ACP client denial");
 
   std::error_code cleanup;
@@ -2649,7 +2647,7 @@ void test_acp_peer_prompt_terminal_commit_arbitration()
     auto store = ava::session::SessionStore::open(workspace, *session_id, options.paths.sessions_dir);
     auto entries = store ? store->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(store.error()));
     auto const assistant_count =
-        entries ? std::count_if(entries->begin(), entries->end(), [](auto const& entry) { return entry.type == ava::session::EntryType::AssistantMessage; })
+        entries ? std::count_if(entries->begin(), entries->end(), [](auto const& entry) { return entry.type == ava::session::EntryType::AssistantTurnCommit; })
                 : 0;
     if (cancel_wins)
     {

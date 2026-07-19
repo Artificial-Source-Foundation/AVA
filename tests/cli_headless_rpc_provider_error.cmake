@@ -157,9 +157,6 @@ foreach(NEEDLE
         "\"category\":\"provider\""
         "Moonshot HTTP request failed with status 500"
         "provider_error_kind: transient"
-        "body_snippet"
-        "provider unavailable"
-        "[redacted]"
         "\"id\":\"state-after\""
         "\"success\":true"
         "\"protocol_version\":1")
@@ -169,7 +166,7 @@ foreach(NEEDLE
   endif()
 endforeach()
 
-foreach(SECRET "secret reasoning" "secret thinking" "secret-key")
+foreach(SECRET "provider_message" "provider unavailable" "body_snippet" "secret reasoning" "secret thinking" "secret-key" "FAKE_UNKNOWN_DISCRIMINATOR_CANARY")
   string(FIND "${AVA_OUTPUT}" "${SECRET}" SECRET_INDEX)
   if(NOT SECRET_INDEX EQUAL -1)
     message(FATAL_ERROR "ava --rpc output leaked ${SECRET}\nstdout:\n${AVA_OUTPUT}\nstderr:\n${AVA_ERROR}")

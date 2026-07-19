@@ -365,6 +365,56 @@ void test_bash_tool()
   expect(!ask_failed && ask_failed.error().format().find("resolution: resolver_failed") != std::string::npos, "run_bash fails closed when resolver fails");
 }
 
+void test_bash_runtime_and_invocation_contract()
+{
+  auto const root = temp_root() / "bash-runtime-invocation-contract";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  std::filesystem::create_directories(root);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0, "bash runtime contract fixture workspace is owner-only");
+
+  std::vector<ava::tools::PermissionAuditEvent> model_audits;
+  ava::tools::ToolContext model_context{.workspace_dir = root,
+                                        .mode = ava::agent::Mode::Build,
+                                        .permission_audit_sink = [&model_audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+                                          model_audits.push_back(event);
+                                          return {};
+                                        }};
+  auto model_git = ava::tools::run_bash(model_context, "git status", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+  auto const model_metadata = model_audits.empty() ? std::optional<ava::permissions::CommandPermissionMetadata>{} : model_audits.front().command_metadata;
+
+  auto legacy_context = model_context;
+  legacy_context.command_runtime.mode = ava::command::CommandRuntimeMode::Legacy;
+  auto legacy = ava::tools::run_bash(legacy_context, "git status");
+  auto prompt_only_context = model_context;
+  prompt_only_context.command_runtime.mode = ava::command::CommandRuntimeMode::PromptOnly;
+  auto prompt_only = ava::tools::run_bash(prompt_only_context, "git status");
+
+  std::optional<ava::permissions::PermissionPrompt> user_prompt;
+  auto user_context = model_context;
+  user_context.permission_resolver =
+      [&user_prompt](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    user_prompt = prompt;
+    return ava::permissions::PermissionResolution::AllowSessionGrant;
+  };
+  auto user_git = ava::tools::run_bash(
+      user_context, "git status",
+      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .invocation_source = ava::tools::BashOptions::InvocationSource::UserRawShell});
+
+  expect(model_context.command_runtime.mode == ava::command::CommandRuntimeMode::Enabled && model_git && model_metadata &&
+             model_metadata->level == ava::command::CommandLevel::Standard &&
+             model_metadata->execution_domain == ava::command::CommandExecutionDomain::DirectArgv &&
+             model_metadata->family == ava::command::CommandFamily::Inspection && !legacy && !prompt_only &&
+             legacy.error().message().find("Enabled") != std::string::npos && prompt_only.error().message().find("Enabled") != std::string::npos,
+         "Enabled is the ToolContext default and only executable runtime mode; model git status remains a Standard direct-argv recipe");
+  expect(!user_git && user_prompt && user_prompt->command_metadata && user_prompt->command_metadata->level == ava::command::CommandLevel::Critical &&
+             user_prompt->command_metadata->family == ava::command::CommandFamily::RawShell &&
+             user_prompt->command_metadata->execution_domain == ava::command::CommandExecutionDomain::RawShell &&
+             user_prompt->command_metadata->backend_maximum_scope == ava::command::InteractiveScope::Once &&
+             !ava::permissions::command_permission_allows_reusable_grant(*user_prompt->command_metadata),
+         "explicit user shell source makes git status Critical raw-shell, prompts, and rejects reusable grants");
+}
+
 void test_injected_command_executor()
 {
   auto const workspace = temp_root() / "injected-command-workspace";
@@ -575,6 +625,55 @@ void test_sealed_local_bash_contract()
              critical_prompts[0].command_metadata->resolved_executable == critical_prompts[1].command_metadata->resolved_executable,
          "npm project code auto-allows under verified development containment, while bare/absolute Python, bash, destructive, and raw-shell commands remain "
          "critical one-shot prompts");
+
+  auto const binary_path = first_bin / "descriptor-binary";
+  std::error_code copy_error;
+  std::filesystem::copy_file("/bin/true", binary_path, std::filesystem::copy_options::overwrite_existing, copy_error);
+  if (!copy_error)
+    static_cast<void>(::chmod(binary_path.c_str(), S_IRUSR | S_IWUSR | S_IXUSR));
+  auto binary = ava::tools::run_bash(context, "descriptor-binary", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+
+  auto const bound_script = first_bin / "descriptor-race";
+  auto const replacement_script = first_bin / "descriptor-race.replacement";
+  bool swapped_after_binding = false;
+  bool const race_script_written = write_executable(bound_script, "#!/bin/sh\nprintf approved-descriptor\n") &&
+                                   write_executable(replacement_script, "#!/bin/sh\nprintf replacement-must-not-run\n");
+  ava::tools::ToolContext bound_context = context;
+  bound_context.announce_execution_after_permission = true;
+  bound_context.execution_started = std::make_shared<std::atomic_bool>(false);
+  bound_context.progress_sink = [&bound_script, &replacement_script,
+                                 &swapped_after_binding](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
+    if (event.status != "in_progress")
+      return {};
+    std::error_code rename_error;
+    std::filesystem::rename(replacement_script, bound_script, rename_error);
+    if (rename_error)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to swap descriptor race fixture"));
+    swapped_after_binding = true;
+    return {};
+  };
+  auto bound_script_result = ava::tools::run_bash(bound_context, "descriptor-race", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+
+  auto const failed_script = first_bin / "descriptor-exec-failure";
+  bool const failure_script_written = write_executable(failed_script, "#!/bin/sh\nprintf must-not-start\n");
+  ava::tools::ToolContext failure_context = context;
+  failure_context.announce_execution_after_permission = true;
+  failure_context.execution_started = std::make_shared<std::atomic_bool>(false);
+  failure_context.progress_sink = [&failed_script](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
+    if (event.status == "in_progress" && ::chmod(failed_script.c_str(), S_IRUSR | S_IWUSR) != 0)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to revoke descriptor-exec fixture permission"));
+    return {};
+  };
+  auto descriptor_exec_failure =
+      ava::tools::run_bash(failure_context, "descriptor-exec-failure", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+
+  expect(!copy_error && binary && binary->exit_code == 0, "a regular binary executes from its approved descriptor");
+  expect(race_script_written && swapped_after_binding && bound_script_result && bound_script_result->exit_code == 0 &&
+             bound_script_result->output == "approved-descriptor",
+         "a shebang script executes from its approved descriptor after a post-binding canonical-path replacement");
+  expect(failure_script_written && !descriptor_exec_failure && descriptor_exec_failure.error().message().find("bound descriptor") != std::string::npos &&
+             descriptor_exec_failure.error().format().find("descriptor-exec-failure") == std::string::npos,
+         "descriptor-exec failure is actionable, redacted, and occurs after process-group cleanup");
 
   auto const normal_group_file = workspace / "normal-background-pgid";
   ava::tools::ToolContext const group_context{
@@ -954,6 +1053,61 @@ void test_credential_command_audit_omits_secrets()
   }
 }
 
+void test_denied_command_diagnostics_redact_arguments()
+{
+  auto const root = temp_root() / "denied-command-diagnostic-redaction";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  std::filesystem::create_directories(root);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0, "denied-command diagnostic fixture is owner-only");
+  std::string const secret = "AVA_DENIED_COMMAND_SECRET_SENTINEL";
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  std::vector<std::string> prompts;
+  auto audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+    audits.push_back(event);
+    return {};
+  };
+  auto run = [&](ava::permissions::PermissionResolver resolver, bool redact_permission_audit_arguments) {
+    ava::tools::ToolContext context{.workspace_dir = root,
+                                    .mode = ava::agent::Mode::Build,
+                                    .permission_resolver = std::move(resolver),
+                                    .permission_audit_sink = audit_sink,
+                                    .redact_permission_audit_arguments = redact_permission_audit_arguments};
+    return ava::tools::ensure_permission(context, ava::permissions::Operation::RunCommand, root, "printf " + secret, "bash", "command requires permission");
+  };
+
+  auto no_resolver = run(nullptr, false);
+  auto denied = run(
+      [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        prompts.push_back(prompt.command);
+        return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Deny, "denied by local user"};
+      },
+      true);
+  auto resolver_failed = run(
+      [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        prompts.push_back(prompt.command);
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
+      },
+      false);
+  auto canceled = run(
+      [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        prompts.push_back(prompt.command);
+        return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Cancel, "canceled by local user"};
+      },
+      true);
+
+  auto contains_secret = [&](ava::core::VoidResult const& result) { return !result && result.error().format().find(secret) != std::string::npos; };
+  bool const audits_redacted = std::ranges::all_of(audits, [&](ava::tools::PermissionAuditEvent const& event) {
+    return event.command.find(secret) == std::string::npos && event.reason.find(secret) == std::string::npos &&
+           event.resolution_reason.find(secret) == std::string::npos && ava::tools::permission_audit_data_json(event).find(secret) == std::string::npos;
+  });
+  expect(
+      !no_resolver && !denied && !resolver_failed && !canceled && !contains_secret(no_resolver) && !contains_secret(denied) &&
+          !contains_secret(resolver_failed) && !contains_secret(canceled) && prompts.size() == 3 &&
+          std::ranges::all_of(prompts, [&](std::string const& prompt) { return prompt.find(secret) != std::string::npos; }) && audits_redacted,
+      "RunCommand denial diagnostics and audits redact arguments on no-resolver, deny, resolver-failure, and cancel paths while the local prompt retains them");
+}
+
 void test_payload_command_audits_persist_no_markers_or_recipes()
 {
   auto const test_root = temp_root();
@@ -1031,11 +1185,13 @@ void test_payload_command_audits_persist_no_markers_or_recipes()
 void run_tools_process_network_tests()
 {
   test_bash_tool();
+  test_bash_runtime_and_invocation_contract();
   test_injected_command_executor();
   test_sealed_local_bash_contract();
   test_sealed_process_group_sentinel_and_grace();
   test_webfetch_tool();
   test_websearch_tool();
   test_credential_command_audit_omits_secrets();
+  test_denied_command_diagnostics_redact_arguments();
   test_payload_command_audits_persist_no_markers_or_recipes();
 }

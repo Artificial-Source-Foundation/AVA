@@ -197,10 +197,18 @@ void test_gemini_response_parsing()
          "Gemini non-stream response requires content events");
 
   auto const http_error = provider.parse_response(
-      ava::provider::HttpResponse{.status_code = 403, .headers = {}, .body = R"({"error":{"message":"bad key","x-goog-api-key":"secret"}})"}, false);
-  expect(!http_error && http_error.error().format().find("provider_error_kind: authentication") != std::string::npos &&
-             http_error.error().format().find("secret") == std::string::npos,
-         "Gemini HTTP errors are classified and sanitized");
+      ava::provider::HttpResponse{
+          .status_code = 403,
+          .headers = {},
+          .body =
+              R"({"error":{"message":"bad key","x-goog-api-key":"GEMINI_HTTP_KEY_CANARY","unknown":{"private":"GEMINI_HTTP_NESTED_CANARY"}},"unknown":"GEMINI_HTTP_OUTER_CANARY"})"},
+      false);
+  auto const error_text = http_error ? std::string{} : http_error.error().format();
+  expect(!http_error && error_text.find("provider_error_kind: authentication") != std::string::npos &&
+             error_text.find("provider_message") == std::string::npos && error_text.find("body_snippet") == std::string::npos &&
+             error_text.find("GEMINI_HTTP_KEY_CANARY") == std::string::npos && error_text.find("GEMINI_HTTP_NESTED_CANARY") == std::string::npos &&
+             error_text.find("GEMINI_HTTP_OUTER_CANARY") == std::string::npos,
+         "Gemini HTTP errors expose only fixed local status and classification diagnostics");
 }
 
 void test_gemini_sse_parsing_and_fake_transport()

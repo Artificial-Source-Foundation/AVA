@@ -7,7 +7,9 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
+#include "debug.h"
 
 namespace ava::agent {
 
@@ -24,8 +26,58 @@ struct ParsedReasoningBlock
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// Provider item identity is separate from a function's logical call ID.
+// Unknown phase is retained only for provider families without native phase
+// metadata; OpenAI Responses message lifecycles validate known phases before
+// reaching this assembler.
+struct AssistantItemMetadata
+{
+  std::string provider_item_id = {};
+  std::optional<std::size_t> provider_output_index = std::nullopt;
+  ava::provider::AssistantPhase phase = ava::provider::AssistantPhase::Unknown;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+struct AssistantTextItem
+{
+  AssistantItemMetadata metadata = {};
+  std::string text = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+struct AssistantReasoningItem
+{
+  AssistantItemMetadata metadata = {};
+  ParsedReasoningBlock reasoning = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+struct AssistantFunctionCallItem
+{
+  AssistantItemMetadata metadata = {};
+  ProviderToolCall tool_call = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+using AssistantItem = std::variant<AssistantTextItem, AssistantReasoningItem, AssistantFunctionCallItem>;
+
+struct OrderedAssistantItem
+{
+  std::size_t sequence = 0;
+  AssistantItem item = AssistantTextItem{};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct ParsedAssistantTurn
 {
+  // This is the sole mutable representation produced by the parser. The
+  // legacy aggregate fields below are rebuilt from it once at completion.
+  std::vector<OrderedAssistantItem> ordered_items;
   std::string text;
   std::vector<ParsedReasoningBlock> reasoning_blocks;
   std::vector<ProviderToolCall> tool_calls;

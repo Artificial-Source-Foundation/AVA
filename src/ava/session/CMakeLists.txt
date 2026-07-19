@@ -1,7 +1,10 @@
 add_library(ava_session
+  "assistant_output.cpp"
   "attachments.cpp"
   "compaction.cpp"
   "export.cpp"
+  "logical_projection.cpp"
+  "portable_sanitization.cpp"
   "record.cpp"
   "session_branch.cpp"
   "session_metadata.cpp"

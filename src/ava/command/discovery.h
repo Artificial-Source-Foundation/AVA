@@ -13,6 +13,9 @@ struct SealedCommandContext
   PathMetadata trusted_home_metadata;
   std::vector<PathMetadata> ava_authority_root_metadata;
   SyntheticEnvironmentRoots synthetic_environment_roots;
+  // Optional sealed ${trusted_home}/.rustup root. No other real-home
+  // toolchain root is discovered for child-environment exposure.
+  std::optional<PathMetadata> rustup_home_metadata;
   std::vector<CommandPathEntry> path_entries;
 
   AVA_DEBUG_PRINT_MEMBERS_ON

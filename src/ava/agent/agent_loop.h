@@ -156,10 +156,16 @@ struct AgentLoopOptions
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Transport>>()> background_transport_factory = nullptr;
   std::shared_ptr<BackgroundJobRegistry> background_jobs = nullptr;
   std::mutex* session_mutex = nullptr;
-  // Immutable generation route for records produced by this run.
+  // Immutable generation routes for records produced by this run. Persistent
+  // provider assistant turns require the batch route so v4 staging and its
+  // commit are appended through one guarded authority.
   SessionAppendSink append_entry = nullptr;
+  SessionAppendBatchSink append_batch = nullptr;
   // Copyable exact-lease (or in-memory) authority used for every history read.
   std::optional<ava::session::SessionReadAuthority> session_read_authority = std::nullopt;
+  // Must match the policy established when the runtime session was opened.
+  // Direct unit construction retains historical unbounded behavior.
+  ava::session::SessionReadLimits session_read_limits = ava::session::legacy_unbounded_session_read_limits();
   // Stable session-owner route for parent notices produced by background
   // children. Unlike append_entry it remains valid between generations.
   SessionAppendSink parent_notification_sink = nullptr;

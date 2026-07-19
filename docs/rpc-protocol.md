@@ -33,10 +33,12 @@ A request may contain integer `protocol_version:1`. Omission means legacy v1 and
 `get_protocol` returns:
 
 ```json
-{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":3,"supported_session_entry_versions":[0,1,2,3],"capabilities":["direct_bash_rpc"],"direct_command_types":["run_bash","run_command"]}
+{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":4,"supported_session_entry_versions":[0,1,2,3,4],"capabilities":["direct_bash_rpc"],"direct_command_types":["run_bash","run_command"]}
 ```
 
-Protocol, event-envelope, and session-entry versions are independent. Unknown additive object fields and unknown future event names must be ignored. A client must not infer support for another protocol version from an event or session version.
+Protocol, event-envelope, and session-entry versions are independent. The supported session-version array is generated from the reader's accepted contiguous range `0..kCurrentSessionEntryVersion`; clients must use that field rather than hard-code a historical list. Unknown additive object fields and unknown future event names must be ignored. A client must not infer support for another protocol version from an event or session version.
+
+Session entry v4 adds private physical ordered-output records (`assistant_output_item` and `assistant_turn_commit`). RPC public callbacks and `get_messages` use the compatibility projection: existing assistant `text`, `tool_calls`, and usage fields remain, while a committed v4 assistant message may add a private-free `ordered_output` array. Its text elements carry additive `assistant_phase`; reasoning elements carry only visible text/format/redaction and omission-presence booleans; function elements carry call id/name/arguments. Legacy-compatible entry selection and the established 8 KiB per-entry/1 MiB response caps are applied before this additive detail. If ordered detail is omitted, the response adds `ordered_output_truncated:true` and `ordered_output_omitted_count`; its legacy `messages` and `message_count` remain unchanged. It never exposes staging fields, provider item IDs/output indexes, native reasoning replay payloads, signatures, redacted payloads, or exact tool-result bindings. A valid final incomplete staging suffix is ignored by public reads; every other v4 classifier diagnostic is returned as an error. Portable JSONL is separately import-valid and preserves committed v4 physical order/bindings after sanitization.
 
 ## Message Categories And Envelopes
 
@@ -100,7 +102,7 @@ Tool records use `status` (`running`, `success`, `error`, or `canceled` as appli
 
 ### Permission request/reply
 
-`permission_requested.payload` includes `resolver_request_id`, optional durable `permission_request_id`, `operation`, `mode`, `target_path`, `command`, `tool_name`, `reason`, `risk`, and optional `diff_preview`/`diff_truncated`. Reply with `decision` equal to `allow`, `allow_session`, or `deny`; optional `reason` is at most 1024 bytes. `allow_session` creates an in-memory exact-match grant for this RPC process. Persistent allow/deny rules are separate commands and never override built-in hard denies.
+`permission_requested.payload` includes `resolver_request_id`, optional durable `permission_request_id`, `operation`, `mode`, `target_path`, `command`, `tool_name`, `reason`, `risk`, and optional `diff_preview`/`diff_truncated`. Reply with `decision` equal to `allow`, `allow_session`, or `deny`; optional `reason` is at most 1024 bytes. `allow_session` creates an in-memory exact-match grant for this RPC process. Sealed commands bind that grant to the stable workspace recipe key supplied by backend metadata rather than raw command text; commands whose backend scope is one-shot cannot create a reusable grant. Persistent allow/deny rules are separate commands and never override built-in hard denies.
 
 When `operation` is `bash` and the request originates from a sealed command plan, `permission_requested.payload` includes an optional `command_metadata` object with the following additive fields:
 
@@ -108,19 +110,26 @@ When `operation` is `bash` and the request originates from a sealed command plan
 |-------|------|-------------|
 | `level` | string | Command risk level: `standard`, `sensitive`, or `critical`. |
 | `family` | string | Command family (e.g. `inspection`, `cmake_build`, `interpreter_inline`, `raw_shell`). |
-| `fingerprint` | string | Instantaneous integrity binding for the sealed plan (`sha256:ava-command-plan-v3:...`); never a durable grant identity. |
+| `fingerprint` | string | Instantaneous integrity binding for the sealed plan (`sha256:ava-command-plan-v4:...`); never a durable grant identity. |
 | `execution_domain` | string | `direct_argv` or `raw_shell`. |
 | `resolved_executable` | string | Canonical path of the resolved executable. |
 | `origin` | string | Executable provenance: `system`, `user`, or `workspace`. |
 | `cwd` | string | Canonical working directory. |
-| `containment_available` | boolean | Whether process containment is available (always `false` in this milestone). |
-| `containment_status` | string | `not_required`, `unavailable`, or `unverified_delegated_executor`. |
-| `backend_maximum_scope` | string | Maximum reusable scope: `once`, `session`, or `workspace`. All commands are `once` during this milestone. |
-| `environment_profile_id` | string | Synthetic environment profile identifier. |
+| `containment_available` | boolean | Whether verified local process containment is available for the planned command. |
+| `containment_status` | string | `not_required`, `available`, `active`, `unavailable`, or `unverified_delegated_executor` as applicable to the current boundary. |
+| `backend_maximum_scope` | string | Maximum reusable scope: `once`, `session`, or `workspace`; the frontend cannot widen it. |
+| `recipe_payload_version` | string | Stable recipe payload schema when a reusable recipe exists. |
+| `global_recipe_key` | string | Stable global recipe identity, empty when reuse is not legal. |
+| `workspace_recipe_key` | string | Stable canonical-workspace recipe identity used by session/workspace grants, empty when reuse is not legal. |
+| `recipe_display` | string | Safe human-readable recipe summary; display-only, never authority. |
+| `effective_allowed_scopes` | string array | Backend-approved interactive choices after containment and identity checks. |
+| `containment_profile_id` | string | Verified containment profile identifier when planned. |
+| `containment_network_allowed` | boolean | Whether the containment plan permits network syscalls. |
+| `environment_profile_id` | string | Synthetic positive-list environment profile identifier. |
 | `environment_digest` | string | Synthetic environment digest (no environment values). |
-| `executor_identity_verified` | boolean | Whether the executor identity is verified (always `false` for delegated execution). |
+| `executor_identity_verified` | boolean | Whether AVA can bind permission to the executor identity; delegated ACP execution reports false. |
 
-Session grant serialization (`permission_grants` result) includes an additive `command_fingerprint` string field when a sealed command plan is bound; it is omitted for non-command grants. Until the separate stable recipe identity/store exists, every planned command is one-shot only (`backend_maximum_scope` is `once`), so `allow_session` replies for commands return a one-shot `allow` without creating a reusable grant. Legacy v1 persistent command Allow rules are ignored; only authoritative Denies are retained.
+Session grant serialization (`permission_grants` result) includes additive `command_recipe_key` and `recipe_display` fields when a reusable sealed command recipe is bound; they are omitted for non-command grants. `allow_session` downgrades to one-shot `allow` when backend metadata does not permit session scope. Persistent schema-v2 command Allows use the audited global/workspace recipe key; legacy schema-v1 command Allows remain non-authoritative while exact Denies remain active.
 
 ### Question request/reply
 
@@ -159,7 +168,7 @@ The payload column defines recognized fields. Unless marked required, listed fie
 | `permission_grant_revoke` | Required string `grant_id`. Returns and emits the revoked grant. |
 | `permission_grants_clear` | No payload. Returns/emits cleared count. |
 | `permission_rules` | No payload. Lists persistent global/workspace rules and files. |
-| `permission_rule_add` | Required strings `action`, `operation`, `reason`; optional `scope`, `mode`, `tool_name`, `target_path`/`path`, `command`. Adds/emits a rule. |
+| `permission_rule_add` | Required strings `action`, `operation`, `reason`; optional `scope`, `mode`, `tool_name`, `target_path`/`path`, `command`, `command_recipe_key`, `recipe_display`, and boolean `critical_acknowledged`. Adds/emits a rule under backend validation. |
 | `permission_rule_remove` | Required string `rule_id`. Removes/emits a persistent rule. |
 | `get_messages` | No payload. Returns bounded visible message-like entries; hides internal replay and secrets/signatures. |
 | `get_session_stats` | No payload. Returns bounded entry/usage/cost/type statistics. |
@@ -238,7 +247,7 @@ Protocol discovery:
 
 ```text
 > {"id":"protocol","type":"get_protocol","protocol_version":1}\n
-< {"id":"protocol","type":"response","success":true,"result":{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":3,"supported_session_entry_versions":[0,1,2,3],"capabilities":["direct_bash_rpc"],"direct_command_types":["run_bash","run_command"]}}\n
+< {"id":"protocol","type":"response","success":true,"result":{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":4,"supported_session_entry_versions":[0,1,2,3,4],"capabilities":["direct_bash_rpc"],"direct_command_types":["run_bash","run_command"]}}\n
 ```
 
 Prompt success with tool summary/timeline (events for this run may appear before the response):

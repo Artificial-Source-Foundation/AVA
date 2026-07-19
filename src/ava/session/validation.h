@@ -8,12 +8,14 @@
 
 namespace ava::session {
 
-enum class SessionReplayIssueSeverity {
+enum class SessionReplayIssueSeverity
+{
   Warning,
   Error,
 };
 
-enum class SessionReplayIssueKind {
+enum class SessionReplayIssueKind
+{
   UnsupportedEntryVersion,
   DuplicateEntryId,
   UnknownParentId,
@@ -37,9 +39,15 @@ enum class SessionReplayIssueKind {
   CompactionWithUnresolvedPermissionPrompt,
   InvalidModelEntry,
   InvalidReasoningEntry,
+  InvalidAssistantOutputItem,
+  InvalidAssistantTurnCommit,
+  IncompleteAssistantTurn,
+  MalformedAssistantTurn,
+  ToolResultOutputItemMismatch,
 };
 
-struct SessionReplayIssue {
+struct SessionReplayIssue
+{
   SessionReplayIssueSeverity severity = SessionReplayIssueSeverity::Error;
   SessionReplayIssueKind kind = SessionReplayIssueKind::DuplicateEntryId;
   std::size_t entry_index = 0;
@@ -50,7 +58,8 @@ struct SessionReplayIssue {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct SessionReplayValidationOptions {
+struct SessionReplayValidationOptions
+{
   bool require_entry_versions = true;
   bool require_known_parent_ids = true;
   bool require_tool_result_pairing = true;
@@ -62,7 +71,8 @@ struct SessionReplayValidationOptions {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct SessionReplayValidation {
+struct SessionReplayValidation
+{
   std::vector<SessionReplayIssue> issues;
   std::size_t error_count = 0;
   std::size_t warning_count = 0;
@@ -75,7 +85,6 @@ struct SessionReplayValidation {
 [[nodiscard]] std::string_view to_string(SessionReplayIssueSeverity severity) noexcept;
 [[nodiscard]] std::string_view to_string(SessionReplayIssueKind kind) noexcept;
 [[nodiscard]] std::string sanitized_message_data_json(std::string_view data_json, bool allow_attachments = true);
-[[nodiscard]] SessionReplayValidation validate_session_replay(std::vector<SessionEntry> const& entries,
-                                                              SessionReplayValidationOptions options = {});
+[[nodiscard]] SessionReplayValidation validate_session_replay(std::vector<SessionEntry> const& entries, SessionReplayValidationOptions options = {});
 
 }  // namespace ava::session

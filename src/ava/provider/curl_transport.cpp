@@ -344,8 +344,7 @@ ava::core::Result<HttpResponse> parse_curl_output(std::string output, bool inclu
   if (marker_pos == std::string::npos)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl response did not include an HTTP status");
-    if (!output.empty())
-      error.with_context("output", output.substr(0, 512));
+    error.with_context("response_bytes", std::to_string(output.size()));
     return std::unexpected(std::move(error));
   }
 
@@ -540,8 +539,7 @@ ava::core::Result<HttpResponse> CurlCliTransport::send(HttpRequest const& reques
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl transport failed");
     error.with_context("exit_code", WIFEXITED(status) ? std::to_string(WEXITSTATUS(status)) : "signaled");
-    if (!output.empty())
-      error.with_context("output", output.substr(0, 512));
+    error.with_context("response_bytes", std::to_string(output.size()));
     return std::unexpected(std::move(error));
   }
   return parse_curl_output(std::move(output), request.include_response_headers);
@@ -735,18 +733,14 @@ ava::core::Result<HttpResponse> CurlCliTransport::send_streaming(HttpRequest con
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl transport failed");
     error.with_context("exit_code", WIFEXITED(status) ? std::to_string(WEXITSTATUS(status)) : "signaled");
-    if (!stderr_output.empty())
-      error.with_context("stderr", stderr_output.substr(0, 512));
-    if (!body.empty())
-      error.with_context("output", body.substr(0, 512));
+    error.with_context("stderr_bytes", std::to_string(stderr_output.size()));
     return std::unexpected(std::move(error));
   }
 
   auto final = parse_curl_output(std::move(pending_stdout), false);
   if (!final)
   {
-    if (!stderr_output.empty())
-      final.error().with_context("stderr", stderr_output.substr(0, 512));
+    final.error().with_context("stderr_bytes", std::to_string(stderr_output.size()));
     return std::unexpected(std::move(final.error()));
   }
   if (auto delivered = deliver_body(final->body); !delivered)

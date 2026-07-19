@@ -24,6 +24,19 @@ std::string_view trim(std::string_view value)
   return value;
 }
 
+std::string supported_session_entry_versions_json()
+{
+  std::string versions = "[";
+  for (long long version = 0; version <= ava::session::kCurrentSessionEntryVersion; ++version)
+  {
+    if (version != 0)
+      versions += ',';
+    versions += std::to_string(version);
+  }
+  versions += ']';
+  return versions;
+}
+
 bool is_json_object_line(std::string_view line)
 {
   line = trim(line);
@@ -626,9 +639,9 @@ std::string rpc_protocol_result_json()
   return "{\"protocol_version\":" + std::to_string(kRpcProtocolVersions.protocol) + ",\"supported_protocol_versions\":[" +
          std::to_string(kRpcProtocolVersions.protocol) + "],\"event_schema_version\":" + std::to_string(kRpcProtocolVersions.event_schema) +
          ",\"supported_event_schema_versions\":[" + std::to_string(kRpcProtocolVersions.event_schema) +
-         "],\"session_entry_version\":" + std::to_string(ava::session::kCurrentSessionEntryVersion) + ",\"supported_session_entry_versions\":[0,1,2," +
-         std::to_string(ava::session::kCurrentSessionEntryVersion) +
-         "],\"capabilities\":[\"direct_bash_rpc\"],\"direct_command_types\":[\"run_bash\",\"run_command\"]}";
+         "],\"session_entry_version\":" + std::to_string(ava::session::kCurrentSessionEntryVersion) +
+         ",\"supported_session_entry_versions\":" + supported_session_entry_versions_json() +
+         ",\"capabilities\":[\"direct_bash_rpc\"],\"direct_command_types\":[\"run_bash\",\"run_command\"]}";
 }
 
 std::string parse_error_response_id(std::string_view line)

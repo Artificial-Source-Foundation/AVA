@@ -55,6 +55,8 @@ struct SessionStats
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-[[nodiscard]] SessionStats compute_session_stats(std::vector<SessionEntry> const& entries);
+// Produces stats only from a classifier-valid logical history. A malformed v4
+// transaction is never silently omitted from accounting or status surfaces.
+[[nodiscard]] ava::core::Result<SessionStats> compute_session_stats(std::vector<SessionEntry> const& entries);
 
 }  // namespace ava::session

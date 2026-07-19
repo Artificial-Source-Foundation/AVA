@@ -2,8 +2,8 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
-#include "ava/app/connect_openai.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/connect_openai.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/runtime.h"
@@ -423,8 +423,9 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
   std::ostringstream error_err;
   auto error_result = ava::app::run_print_prompt(*error_session, "bad terminal sanitize", provider, error_transport, run_options, error_out, error_err);
   expect(!error_result && error_out.str().empty() && error_err.str().find('\x1b') == std::string::npos &&
-             error_err.str().find("?]52;c;RElBRw==? diagnostic") != std::string::npos,
-         "print text mode strips terminal controls from tty-bound diagnostics");
+             error_err.str().find("provider streaming diagnostic omitted") != std::string::npos && error_err.str().find("RElBRw==") == std::string::npos &&
+             error_err.str().find('\a') == std::string::npos,
+         "print diagnostics use fixed local provider errors without terminal-control or payload leakage");
 }
 
 void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
@@ -667,30 +668,30 @@ void test_app_print_mode_model_command_persistent_deny_preflight()
   if (!session)
     return;
 
-  auto added = ava::permissions::add_persistent_permission_rule(
-      ava::app::permission_rule_store_for_session(*session),
-      ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
-                                            .action = ava::permissions::PermissionAction::Deny,
-                                            .operation = ava::permissions::Operation::RunCommand,
-                                            .mode = ava::permissions::PermissionRuleMode::Build,
-                                            .tool_name = "bash",
-                                            .target_path = {},
-                                            .command = "ls",
-                                            .command_recipe_key = {},
-                                            .recipe_display = {},
-                                            .critical_acknowledged = false,
-                                            .reason = "external exact model-command deny",
-                                            .actor = "test"});
+  auto added = ava::permissions::add_persistent_permission_rule(ava::app::permission_rule_store_for_session(*session),
+                                                                ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                      .action = ava::permissions::PermissionAction::Deny,
+                                                                                                      .operation = ava::permissions::Operation::RunCommand,
+                                                                                                      .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                      .tool_name = "bash",
+                                                                                                      .target_path = {},
+                                                                                                      .command = "ls",
+                                                                                                      .command_recipe_key = {},
+                                                                                                      .recipe_display = {},
+                                                                                                      .critical_acknowledged = false,
+                                                                                                      .reason = "external exact model-command deny",
+                                                                                                      .actor = "test"});
   expect(added.has_value(), "print model-command persistent Deny test stores an external exact Deny");
   if (!added)
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_print_bash\",\"name\":\"bash\"}\n\n"
-                                                    "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_print_bash\",\"delta\":\"{\\\"command\\\":\\\"ls\\\"}\"}\n\n"
-                                                    "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_print_bash\"}\n\n"
-                                                    "data: [DONE]\n\n"),
-                                       sse_response(final_text_sse("persistent model deny handled"))});
+  ava::tests::FakeTransport transport(
+      {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_print_bash\",\"name\":\"bash\"}\n\n"
+                    "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_print_bash\",\"delta\":\"{\\\"command\\\":\\\"ls\\\"}\"}\n\n"
+                    "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_print_bash\"}\n\n"
+                    "data: [DONE]\n\n"),
+       sse_response(final_text_sse("persistent model deny handled"))});
   int interactive_prompts = 0;
   ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
@@ -710,11 +711,10 @@ void test_app_print_mode_model_command_persistent_deny_preflight()
   {
     for (auto const& entry : *entries)
     {
-      saw_preflight_deny = saw_preflight_deny ||
-                            (entry.type == ava::session::EntryType::PermissionDecision &&
-                             ava::core::json::string_field(entry.data_json, "resolution") == "deny" &&
-                             ava::core::json::string_field(entry.data_json, "resolution_source") == "persistent_rule" &&
-                             ava::core::json::string_field(entry.data_json, "rule_id") == added->rule_id);
+      saw_preflight_deny = saw_preflight_deny || (entry.type == ava::session::EntryType::PermissionDecision &&
+                                                  ava::core::json::string_field(entry.data_json, "resolution") == "deny" &&
+                                                  ava::core::json::string_field(entry.data_json, "resolution_source") == "persistent_rule" &&
+                                                  ava::core::json::string_field(entry.data_json, "rule_id") == added->rule_id);
     }
   }
   expect(result && result->final_text == "persistent model deny handled" && result->tool_calls == 1 && interactive_prompts == 0 &&
@@ -1099,7 +1099,8 @@ void test_app_print_json_mode_outputs_runtime_events()
   ava::tests::FakeTransport error_transport({ava::provider::HttpResponse{
       .status_code = 500,
       .headers = {},
-      .body = "upstream failure",
+      .body =
+          R"({"error":{"message":"safe upstream failure","unknown":{"private":"CLI_HTTP_NESTED_CANARY"}},"unknown":"CLI_HTTP_OUTER_CANARY","authorization":"Bearer CLI_HTTP_BEARER_CANARY"})",
   }});
   std::ostringstream error_out;
   std::ostringstream error_err;
@@ -1107,8 +1108,15 @@ void test_app_print_json_mode_outputs_runtime_events()
   auto const error_jsonl = error_out.str();
   auto const error_last_break = error_jsonl.size() > 1 ? error_jsonl.rfind('\n', error_jsonl.size() - 2) : std::string::npos;
   auto const error_last_line = error_jsonl.substr(error_last_break == std::string::npos ? 0 : error_last_break + 1);
-  expect(!error_result && error_err.str().empty() && error_last_line.find("\"name\":\"error\"") != std::string::npos,
-         "print json mode writes failed turns as JSONL envelopes ending in error");
+  auto const formatted_error = error_result ? std::string{} : error_result.error().format();
+  auto const combined_error_output = error_jsonl + error_err.str() + formatted_error;
+  expect(!error_result && error_err.str().empty() && error_last_line.find("\"name\":\"error\"") != std::string::npos &&
+             combined_error_output.find("OpenAI HTTP request failed with status 500") != std::string::npos &&
+             combined_error_output.find("safe upstream failure") == std::string::npos &&
+             combined_error_output.find("CLI_HTTP_NESTED_CANARY") == std::string::npos &&
+             combined_error_output.find("CLI_HTTP_OUTER_CANARY") == std::string::npos &&
+             combined_error_output.find("CLI_HTTP_BEARER_CANARY") == std::string::npos,
+         "print JSON CLI errors expose fixed status diagnostics without provider-controlled payload fields");
 }
 
 void test_app_print_json_mode_streams_provider_deltas_before_final_message()

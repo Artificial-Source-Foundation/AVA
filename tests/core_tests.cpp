@@ -137,6 +137,12 @@ int main(int argc, char** argv)
   }
   catch (...)
   {
+    Dout(dc::warning, "For correct testing, the environment variable PWD should be set to the Working Directory that ctest is using.");
+    Dout(dc::warning, "Run `ctest` as follows:");
+    Dout(dc::warning, "    export PWD=\"$BUILDDIR/tests\" && ctest --test-dir \"$BUILDDIR\" --output-on-failure test \"$@\"");
+    Dout(dc::warning, "where $BUILDDIR is your build directory and \"$@\" stands for any optional arguments that you want to pass.");
+
+    // Use the physical path for now.
     char buffer[4096];
     if (::getcwd(buffer, sizeof(buffer)) != nullptr)
       ::setenv("PWD", buffer, 1);

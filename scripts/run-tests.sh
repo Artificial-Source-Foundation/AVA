@@ -98,4 +98,4 @@ fi
 
 ava_parallel_acquire_tree_lock "$build_dir"
 printf 'Running AVA tests with %s parallel jobs in %s\n' "$jobs" "$build_dir"
-ava_parallel_run_locked "$ctest_command" --test-dir "$build_dir" --output-on-failure --parallel "$jobs" "${ctest_args[@]}"
+PWD="$build_dir/tests" ava_parallel_run_locked "$ctest_command" --test-dir "$build_dir" --output-on-failure --parallel "$jobs" "${ctest_args[@]}"

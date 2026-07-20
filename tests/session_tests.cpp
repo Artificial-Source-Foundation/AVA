@@ -2246,6 +2246,33 @@ void test_session_replay_validation()
   expect(!malformed_compaction_metadata.ok() && has_replay_issue(malformed_compaction_metadata, ava::session::SessionReplayIssueKind::InvalidCompactionEntry),
          "session replay validator flags non-integer compaction token metadata");
 
+  std::vector<std::string> const malformed_additive_compaction_metadata = {R"({"summary":"durable","provider":""})",
+                                                                           R"({"summary":"durable","reason":"other"})",
+                                                                           R"({"summary":"durable","threshold_type":"bytes"})",
+                                                                           R"({"summary":"durable","configured_threshold_tokens":1.5})",
+                                                                           R"({"summary":"durable","configured_threshold_percent":1e2})",
+                                                                           R"({"summary":"durable","active_pre_compaction_tokens":false})",
+                                                                           R"({"summary":"durable","retained_tokens":-1})",
+                                                                           R"({"summary":"durable","post_compaction_estimated_tokens":null})",
+                                                                           R"({"summary":"durable","keep_recent_turns":"2"})",
+                                                                           R"({"summary":"durable","recent_context_omitted":0})",
+                                                                           R"({"summary":"durable","overflow_retry_outcome":7})",
+                                                                           R"({"summary":"durable","overflow_retry_outcome":"other"})"};
+  bool rejects_malformed_additive_metadata = true;
+  for (std::size_t index = 0; index < malformed_additive_compaction_metadata.size(); ++index)
+  {
+    auto malformed = valid_entries;
+    malformed.push_back(ava::session::SessionEntry{.id = "compaction_additive_" + std::to_string(index),
+                                                   .parent_id = "tool_result",
+                                                   .type = ava::session::EntryType::Compaction,
+                                                   .timestamp = "2026-04-29T00:00:05Z",
+                                                   .data_json = malformed_additive_compaction_metadata[index]});
+    auto const validation = ava::session::validate_session_replay(malformed);
+    rejects_malformed_additive_metadata =
+        rejects_malformed_additive_metadata && !validation.ok() && has_replay_issue(validation, ava::session::SessionReplayIssueKind::InvalidCompactionEntry);
+  }
+  expect(rejects_malformed_additive_metadata, "additive compaction metadata remains optional but is strictly typed and enum-validated whenever present");
+
   auto unresolved_tool_compaction_entries = valid_entries;
   unresolved_tool_compaction_entries.pop_back();
   unresolved_tool_compaction_entries.push_back(ava::session::SessionEntry{.id = "compaction_before_tool_result",
@@ -3321,6 +3348,50 @@ void test_session_compaction_entry_round_trip()
           .summary = "xx", .instructions = "", .config = tiny_config, .estimated_tokens = 0, .threshold_tokens = 0, .trigger = "manual", .recent_context = ""});
   expect(!oversized_summary && oversized_summary.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "manual compaction rejects oversized user summary with tiny summary limit");
+
+  auto direct_entry = ava::session::make_manual_compaction_entry(ava::session::ManualCompactionRequest{.summary = "direct compatibility summary",
+                                                                                                       .instructions = "",
+                                                                                                       .config = ava::session::default_compaction_config(),
+                                                                                                       .estimated_tokens = 0,
+                                                                                                       .threshold_tokens = 0,
+                                                                                                       .retained_tokens = 0,
+                                                                                                       .trigger = "manual",
+                                                                                                       .recent_context = "",
+                                                                                                       .recent_context_omitted = false});
+  bool direct_round_trip = false;
+  if (direct_entry)
+  {
+    auto direct_line = ava::session::serialize_session_entry_line(*direct_entry);
+    if (direct_line)
+    {
+      auto direct_parsed = ava::session::parse_session_entry_line(*direct_line, "direct-compaction.jsonl");
+      if (direct_parsed)
+      {
+        auto const direct_validation = ava::session::validate_session_replay({*direct_parsed});
+        direct_round_trip = direct_validation.ok() && ava::core::json::string_field(direct_parsed->data_json, "model").value_or("") == "gpt-5.5" &&
+                            !ava::core::json::field_value_start(direct_parsed->data_json, "provider");
+      }
+    }
+  }
+  expect(direct_round_trip, "direct default compaction entry retains a non-empty compatibility model and round-trips through replay validation");
+
+  std::vector<ava::session::SessionEntry> legacy_entries;
+  for (long long version = 0; version <= ava::session::kCurrentSessionEntryVersion; ++version)
+  {
+    auto const version_field = version == 0 ? std::string{} : "\"version\":" + std::to_string(version) + ",";
+    auto const line = "{" + version_field + "\"id\":\"legacy_compaction_" + std::to_string(version) +
+                      "\",\"parent_id\":\"\",\"type\":\"compaction\",\"timestamp\":\"2026-04-29T00:00:00Z\",\"data\":{"
+                      "\"trigger\":\"manual\",\"status\":\"recorded\",\"summary_unavailable\":false,"
+                      "\"summary\":\"legacy summary\",\"instructions\":\"\",\"model\":\"gpt-5.5\","
+                      "\"threshold_tokens\":100,\"estimated_tokens\":125,\"keep_recent_tokens\":64,"
+                      "\"keep_recent_messages\":4,\"max_summary_bytes\":65536,\"recent_context\":\"\"}}";
+    auto parsed = ava::session::parse_session_entry_line(line, "legacy-import.jsonl");
+    if (parsed)
+      legacy_entries.push_back(std::move(*parsed));
+  }
+  auto const legacy_validation = ava::session::validate_session_replay(legacy_entries);
+  expect(legacy_entries.size() == static_cast<std::size_t>(ava::session::kCurrentSessionEntryVersion + 1) && legacy_validation.ok(),
+         "literal legacy v0-v4 compaction records remain import/replay compatible without additive metadata");
 }
 
 void test_session_markdown_export()
@@ -3546,7 +3617,10 @@ void test_compaction_config_and_thresholds()
 
   expect(paths.compaction_file == root / "config" / "ava" / "compaction.json", "compaction config path follows XDG config home");
   auto missing = ava::session::load_compaction_config(paths);
-  expect(missing && missing->model_id == "gpt-5.5" && missing->auto_threshold_tokens == 0, "missing compaction config uses safe defaults");
+  expect(missing && missing->model_id == "gpt-5.5" && !missing->model_explicit && missing->provider_id.empty() && !missing->provider_explicit &&
+             missing->auto_threshold_tokens == 0 && missing->auto_threshold_percent == 80 && missing->keep_recent_turns == 2 &&
+             missing->keep_recent_tokens == 20'000,
+         "missing compaction config keeps a direct-API compatibility model while runtime resolution remains active-model based");
   auto const fallback_threshold = ava::session::effective_auto_threshold_tokens(*missing, std::nullopt);
   expect(fallback_threshold > 0, "missing compaction config uses a nonzero effective auto-compaction threshold without model metadata");
 
@@ -3598,6 +3672,65 @@ void test_compaction_config_and_thresholds()
   config.auto_threshold_tokens_explicit = true;
   auto explicitly_disabled = ava::session::should_auto_compact(fallback_entries, config, std::nullopt);
   expect(explicitly_disabled && !explicitly_disabled->should_compact, "explicit auto_threshold_tokens zero remains disabled without model metadata");
+
+  auto percent = ava::session::parse_compaction_config(R"({"auto_threshold_percent":75,"keep_recent_turns":3,"model":"summary-model"})");
+  expect(percent && percent->auto_threshold_percent_explicit && percent->auto_threshold_percent == 75 && percent->keep_recent_turns_explicit &&
+             percent->keep_recent_turns == 3 && percent->model_explicit && percent->model_id == "summary-model" &&
+             ava::session::effective_auto_threshold_tokens(*percent, 200'000) == 150'000,
+         "compaction config parses percentage, turn, and same-provider model selection");
+  auto cross_provider = ava::session::parse_compaction_config(R"({"provider":"anthropic","model":"claude-sonnet-4-5"})");
+  expect(cross_provider && cross_provider->provider_explicit && cross_provider->model_explicit && cross_provider->provider_id == "anthropic",
+         "compaction config parses explicit cross-provider selection");
+
+  std::vector<std::string> const invalid_configs = {R"({"model":7})",
+                                                    R"({"provider":false})",
+                                                    R"({"provider":"openai"})",
+                                                    R"({"auto_threshold_tokens":"80000"})",
+                                                    R"({"auto_threshold_percent":0})",
+                                                    R"({"auto_threshold_percent":96})",
+                                                    R"({"auto_threshold_tokens":1,"auto_threshold_percent":80})",
+                                                    R"({"keep_recent_tokens":true})",
+                                                    R"({"keep_recent_turns":"2"})",
+                                                    R"({"keep_recent_messages":[]})",
+                                                    R"({"keep_recent_turns":2,"keep_recent_messages":6})",
+                                                    R"({"max_summary_bytes":"16384"})",
+                                                    R"({"max_summary_bytes":1048577})"};
+  expect(std::ranges::all_of(invalid_configs, [](auto const& content) { return !ava::session::parse_compaction_config(content); }),
+         "compaction config rejects wrong known-field types, invalid ranges, and ambiguous selectors");
+
+  std::vector<std::string_view> const numeric_fields = {"auto_threshold_tokens", "auto_threshold_percent", "keep_recent_tokens",
+                                                        "keep_recent_turns",     "keep_recent_messages",   "max_summary_bytes"};
+  bool strict_numeric_tokens = true;
+  for (auto const field : numeric_fields)
+  {
+    strict_numeric_tokens = strict_numeric_tokens && !ava::session::parse_compaction_config("{\"" + std::string(field) + "\":80.9}") &&
+                            !ava::session::parse_compaction_config("{\"" + std::string(field) + "\":1e5}");
+  }
+  for (std::string_view value : {"\"80\"", "true", "false", "null", "-1", "184467440737095516160"})
+    strict_numeric_tokens = strict_numeric_tokens && !ava::session::parse_compaction_config("{\"auto_threshold_tokens\":" + std::string(value) + "}");
+  expect(strict_numeric_tokens,
+         "all compaction numeric fields require complete non-negative integer tokens and reject fractions, exponents, other JSON types, and overflow");
+
+  std::vector<ava::session::SessionEntry> const compacted_entries = {ava::session::SessionEntry{.id = "old",
+                                                                                                .parent_id = "",
+                                                                                                .type = ava::session::EntryType::UserMessage,
+                                                                                                .timestamp = "2026-04-27T00:00:00Z",
+                                                                                                .data_json = "{\"text\":\"OLD_PHYSICAL_HISTORY\"}"},
+                                                                     ava::session::SessionEntry{.id = "boundary",
+                                                                                                .parent_id = "",
+                                                                                                .type = ava::session::EntryType::Compaction,
+                                                                                                .timestamp = "2026-04-27T00:00:01Z",
+                                                                                                .data_json = "{\"summary\":\"ACTIVE_SUMMARY\"}"},
+                                                                     ava::session::SessionEntry{.id = "new",
+                                                                                                .parent_id = "",
+                                                                                                .type = ava::session::EntryType::UserMessage,
+                                                                                                .timestamp = "2026-04-27T00:00:02Z",
+                                                                                                .data_json = "{\"text\":\"NEW_ACTIVE_HISTORY\"}"}};
+  auto active = ava::session::project_active_compaction_context(compacted_entries);
+  auto active_tokens = ava::session::estimate_active_context_tokens(compacted_entries);
+  expect(active && active->size() == 2 && active->front().id == "boundary" && active->back().id == "new" && active_tokens &&
+             *active_tokens < ava::session::estimate_session_tokens(compacted_entries).value_or(0),
+         "active compaction projection excludes physical history replaced by the latest valid boundary");
 }
 
 void test_compaction_context_reconstruction()

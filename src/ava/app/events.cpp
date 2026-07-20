@@ -182,8 +182,9 @@ std::string generic_payload_json_for_runtime_event(runtime::Event const& event)
   std::string out = "{";
   bool has_field = false;
   if (event.type == runtime::EventType::SessionStart)
-  {
     append_payload_string_field(out, has_field, "mode", ava::agent::to_string(event.mode));
+  if (event.type == runtime::EventType::SessionStart || event.type == runtime::EventType::CompactionStart || event.type == runtime::EventType::CompactionEnd)
+  {
     append_payload_string_field(out, has_field, "provider", event.provider_id);
     append_payload_string_field(out, has_field, "model", event.model_id);
   }
@@ -222,6 +223,8 @@ std::string generic_payload_json_for_runtime_event(runtime::Event const& event)
   append_payload_number_field(out, has_field, "remaining_ms", event.remaining_ms);
   append_payload_number_field(out, has_field, "estimated_tokens", event.estimated_tokens);
   append_payload_number_field(out, has_field, "threshold_tokens", event.threshold_tokens);
+  append_payload_number_field(out, has_field, "retained_tokens", event.retained_tokens);
+  append_payload_number_field(out, has_field, "post_compaction_tokens", event.post_compaction_tokens);
   append_payload_number_field(out, has_field, "summary_bytes", event.summary_bytes);
   append_payload_number_field(out, has_field, "snapshot_entries", event.snapshot_entries);
   append_payload_number_field(out, has_field, "current_entries", event.current_entries);
@@ -285,10 +288,11 @@ void append_payload_aliases(std::string& out, std::string_view payload_json)
       append_required_string_field(out, key, *value);
     }
   }
-  for (std::string_view key : {"provider_iterations", "tool_calls",       "attempt",         "max_attempts",     "delay_ms",        "remaining_ms",
-                               "estimated_tokens",    "threshold_tokens", "summary_bytes",   "snapshot_entries", "current_entries", "output_bytes",
-                               "total_bytes",         "output_lines",     "total_lines",     "start_line",       "end_line",        "next_offset_line",
-                               "omitted_bytes",       "omitted_lines",    "visible_matches", "total_matches"})
+  for (std::string_view key : {"provider_iterations", "tool_calls",       "attempt",          "max_attempts",    "delay_ms",
+                               "remaining_ms",        "estimated_tokens", "threshold_tokens", "retained_tokens", "post_compaction_tokens",
+                               "summary_bytes",       "snapshot_entries", "current_entries",  "output_bytes",    "total_bytes",
+                               "output_lines",        "total_lines",      "start_line",       "end_line",        "next_offset_line",
+                               "omitted_bytes",       "omitted_lines",    "visible_matches",  "total_matches"})
   {
     if (auto value = ava::core::json::integer_field(payload_json, key); value && *value > 0)
     {
@@ -661,6 +665,8 @@ std::string serialize_event_json(runtime::Event const& event)
   append_number_field(out, "remaining_ms", event.remaining_ms);
   append_number_field(out, "estimated_tokens", event.estimated_tokens);
   append_number_field(out, "threshold_tokens", event.threshold_tokens);
+  append_number_field(out, "retained_tokens", event.retained_tokens);
+  append_number_field(out, "post_compaction_tokens", event.post_compaction_tokens);
   append_number_field(out, "summary_bytes", event.summary_bytes);
   append_number_field(out, "snapshot_entries", event.snapshot_entries);
   append_number_field(out, "current_entries", event.current_entries);

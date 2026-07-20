@@ -3,7 +3,6 @@
 #include "ava/app/command_registry.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/app/rpc/input.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/prompt_worker.h"
@@ -15,6 +14,7 @@
 #include "ava/app/rpc/session_commands.h"
 #include "ava/app/rpc/session_operators.h"
 #include "ava/app/rpc_mode.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/session/attachments.h"
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/provider_utils.h"
@@ -250,12 +250,52 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
 
     ava::config::XdgPaths paths;
     std::string provider_id;
+    bool session_offline = false;
     ava::core::Result<rpc::ProviderHandle> selected_provider = std::unexpected(rpc::invalid_rpc("compact provider was not selected"));
+    ava::core::VoidResult config_valid = {};
     {
       std::lock_guard lock(options.session_mutex);
       paths = options.session.paths;
-      provider_id = options.session.model.provider_id;
-      selected_provider = rpc::provider_for_session_model(options.session, options.injected_provider_id, options.injected_provider);
+      session_offline = options.session.offline;
+      auto loaded_config = ava::session::load_compaction_config(paths);
+      if (!loaded_config)
+      {
+        config_valid = std::unexpected(std::move(loaded_config.error()));
+      }
+      else
+      {
+        auto config = resolve_compaction_config(options.session, std::move(*loaded_config));
+        if (!config)
+        {
+          config_valid = std::unexpected(std::move(config.error()));
+        }
+        else
+        {
+          provider_id = config->provider_id;
+          if (provider_id == options.session.model.provider_id)
+          {
+            selected_provider = rpc::provider_for_session_model(options.session, options.injected_provider_id, options.injected_provider);
+          }
+          else
+          {
+            auto provider = ava::provider::builtin_provider_registry().create(provider_id);
+            if (!provider)
+              selected_provider = std::unexpected(std::move(provider.error()));
+            else
+              selected_provider = rpc::ProviderHandle{.provider = nullptr, .owned = std::move(*provider)};
+          }
+        }
+      }
+    }
+    if (!config_valid)
+    {
+      finish(std::unexpected(std::move(config_valid.error())));
+      return;
+    }
+    if (session_offline)
+    {
+      finish(std::unexpected(offline_provider_error("compact")));
+      return;
     }
     if (!selected_provider)
     {
@@ -335,8 +375,8 @@ ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptio
   {
     runtime_options.permission_resolver = build_headless_permission_resolver(HeadlessPermissionPolicyOptions{});
   }
-  runtime_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(session),
-                                                                                                    std::move(runtime_options.permission_resolver));
+  runtime_options.permission_resolver =
+      ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(session), std::move(runtime_options.permission_resolver));
   std::string const injected_provider_id = session.model.provider_id;
 
   auto reap_finished_prompt = [&] {

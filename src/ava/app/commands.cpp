@@ -957,14 +957,22 @@ ReloadReportRow reload_trust_settings(runtime::Session& session)
 
 ReloadReportRow reload_compaction_settings(runtime::Session& session)
 {
-  auto config = ava::session::load_compaction_config(session.paths);
+  auto loaded_config = ava::session::load_compaction_config(session.paths);
+  if (!loaded_config)
+    return reload_error_row("compaction", loaded_config.error());
+  auto config = resolve_compaction_config(session, std::move(*loaded_config));
   if (!config)
     return reload_error_row("compaction", config.error());
   ReloadReportRow row{.name = "compaction", .status = "validated", .details = {}};
   append_reload_detail(row, "config", session.paths.compaction_file.string());
+  append_reload_detail(row, "provider", config->provider_id);
   append_reload_detail(row, "model", config->model_id);
   append_reload_detail(row, "auto_threshold_tokens", std::to_string(config->auto_threshold_tokens));
+  append_reload_detail(row, "auto_threshold_percent", std::to_string(config->auto_threshold_percent));
+  append_reload_detail(row, "effective_threshold_tokens",
+                       std::to_string(ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens)));
   append_reload_detail(row, "keep_recent_tokens", std::to_string(config->keep_recent_tokens));
+  append_reload_detail(row, "keep_recent_turns", std::to_string(config->keep_recent_turns));
   append_reload_detail(row, "keep_recent_messages", std::to_string(config->keep_recent_messages));
   append_reload_detail(row, "max_summary_bytes", std::to_string(config->max_summary_bytes));
   return row;

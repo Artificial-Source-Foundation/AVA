@@ -242,7 +242,7 @@ Runtime events:
 - Session/message: `session_start`, `user_message`, `message_update`, `message_end`, `assistant_message`. `session_start` has `payload_type:"session"`; its payload contains string `mode`, `provider`, and `model` (plus any additive common fields emitted by a future runtime).
 - Provider/reasoning: `provider_event`, `reasoning_start`, `reasoning_delta`, `reasoning_end`. `provider_event` has `payload_type:"provider"`; its currently populated generic payload fields may include string `text`, `status`, `trigger`, `reason`, error metadata, and retry/counter metadata. Clients must accept an empty payload and additive provider-specific fields.
 - Tools: `tool_start`, `tool_progress`, `tool_result`.
-- Compaction/retry: `compaction_start`, `compaction_end`, `retry`, `retry_tick`.
+- Compaction/retry: `compaction_start`, `compaction_end`, `retry`, `retry_tick`. Compaction payloads add privacy-safe `trigger` plus normalized `reason` (`manual`, `automatic`, or `overflow`), selected `provider`/`model`, active `estimated_tokens`, effective `threshold_tokens`, `retained_tokens`, and `post_compaction_tokens` when known. Overflow retry remains bounded to one replay. The immutable checkpoint marks that replay as `scheduled`; the subsequent terminal runtime event reports whether the retried run completed or failed, rather than rewriting the checkpoint. Raw provider payloads and private reasoning metadata are never included.
 - Terminal: `canceled`, `error`, `done`.
 
 RPC control/resolver events:

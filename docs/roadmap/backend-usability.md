@@ -21,7 +21,7 @@ External projects are behavior references only. AVA may adopt useful product beh
 | 1 | Normal coding-command permissions and execution | Direction approved 2026-07-19; recorded below | Implemented and validated 2026-07-19 |
 | 2 | Foreground/background subagent execution and job controls | Direction approved 2026-07-20; recorded below | Implemented and validated 2026-07-20 |
 | 3 | Privacy-safe diagnostics and support bundles | Direction approved 2026-07-20; recorded below | Implemented and validated 2026-07-20 |
-| 4 | Context-compaction correctness and configuration | Awaiting focused research and discussion | Not started |
+| 4 | Context-compaction correctness and configuration | Direction approved 2026-07-20; recorded below | Implemented and validated 2026-07-20 |
 | 5 | Automatic session titles | Awaiting focused research and discussion | Not started |
 
 ---
@@ -600,3 +600,103 @@ Validation used no paid live-provider calls.
 - Active provider, MCP, plugin, LSP, or command probes in the passive doctor path.
 - Treating regex redaction as permission to serialize arbitrary free-form content.
 - Changing compaction behavior or the concurrently implemented Workstream 4 contract.
+
+---
+
+# Workstream 4: Context-Compaction Correctness And Configuration
+
+## Approved Product Direction
+
+AVA retains append-only checkpoint compaction: it summarizes the active provider-visible conversation, persists a compaction boundary plus a bounded recent tail, and reconstructs future context from that checkpoint without rewriting or deleting physical session history.
+
+Manual `/compact`, automatic threshold compaction, and one context-overflow recovery attempt use one shared active-context selection, summarization, retained-tail, metadata, cancellation, and append-authority path. They must not repeatedly summarize raw material already replaced by the latest valid compaction boundary. Failure or cancellation appends no checkpoint and leaves the current context unchanged.
+
+### User Configuration
+
+The existing owner-controlled `$XDG_CONFIG_HOME/ava/compaction.json` remains the configuration surface and becomes type-strict and semantically validated. The default automatic threshold is 80 percent of the active conversation model's context window. Users may choose either an integer `auto_threshold_percent` or the existing absolute `auto_threshold_tokens`; specifying both is invalid. Percentage thresholds are bounded below 100 percent so AVA retains response headroom. An explicit absolute threshold of zero continues to disable automatic compaction. When model context metadata is unavailable, percentage calculation uses a documented conservative fallback window rather than silently changing to unrelated behavior.
+
+Compaction uses the active provider and model by default. Users may explicitly configure a different summary model. A model-only override uses the active provider; a provider plus model selects that exact configured provider/model, including a different provider. Explicit selections must resolve through AVA's provider/model registry and normal credential path, remain visible in compaction metadata/events, and fail actionably when unavailable or incompatible. AVA never silently falls back to another provider/model.
+
+Known fields reject wrong JSON types, invalid ranges, ambiguous threshold/retention combinations, unknown provider/model selections, and incompatible configuration. `/reload compaction` reports the same semantic diagnostics used by actual compaction instead of declaring a malformed file valid.
+
+### Retained Recent Context
+
+The default recent tail keeps the latest two complete user turns up to 20,000 estimated tokens. Users may configure both the turn and token bounds. Existing `keep_recent_messages` configuration remains readable as a legacy alternative, but ambiguous simultaneous legacy/new retention selectors fail validation rather than receiving hidden precedence.
+
+Cut points preserve complete record groups and provider semantics. AVA never retains a tool result without its call, splits an in-flight tool lifecycle, or character-splits JSON/tool payloads. If one completed turn exceeds the tail budget, AVA follows the useful Pi/OpenCode behavior shape: summarize the completed prefix and retain the newest structurally safe suffix, with explicit omission metadata. The persisted recent tail remains a bounded sanitized continuation projection; physical session-v4 records and exact tool-result bindings remain intact in the append-only session.
+
+### Threshold, Retry, And Safety Behavior
+
+- Automatic compaction evaluates the active context after the latest compaction boundary, not full physical history.
+- Manual and overflow compaction use that same active context for summary input, pre-compaction estimates, recent-tail selection, and persisted metadata.
+- A provider context-overflow result may trigger one successful compaction and one replay of the original request. A second overflow is terminal and actionable; compaction never loops.
+- Cancellation before summary completion or before the guarded append produces no compaction entry.
+- Current lease-bound `SessionReadAuthority`, controller-owned append routing, stale-snapshot detection, bounded retry, offline guard, and safe turn-boundary behavior remain mandatory.
+- Existing session history is never pruned, rewritten, or destructively compacted. Context projection may omit replaced material without mutating the audit record.
+
+### Diagnostics And Visibility
+
+Compaction lifecycle data identifies the reason (`manual`, `automatic`, or `overflow`), selected provider/model, active pre-compaction estimate, retained-tail estimate, configured/effective threshold, and overflow retry outcome. Fields are additive and privacy-safe; public events, sessions, RPC, and exports do not include raw provider payloads or private reasoning data.
+
+## Verified Reference Behavior
+
+Pi uses automatic and manual compaction, an active-model summary call, bounded recent retention, structurally safe cut points, split-turn handling for oversized turns, cancellation without a successful checkpoint, and a single bounded overflow recovery path. OpenCode similarly keeps recent turns, supports manual/automatic summaries and overflow replay, and emits compaction lifecycle state; its mutable old-tool-output pruning and experimental hooks are not suitable for AVA's append-only audit model.
+
+AVA adopts the useful behavior shape, not either project's architecture, source, history rewriting, extension hooks, or hidden provider-selection behavior.
+
+## Approved Implementation Sequence
+
+1. Make compaction config parsing strict; add percentage thresholds, turn retention, active-by-default provider/model selection, explicit cross-provider selection, and reload/runtime compatibility validation.
+2. Introduce one active-context projection and token-accounting path shared by manual, automatic, and overflow compaction.
+3. Persist the configured recent tail for every compaction mode using complete turn/tool boundaries and safe oversized-turn handling.
+4. Add bounded additive compaction reason/model/threshold/pre/post/retry metadata to session/runtime/RPC surfaces.
+5. Update `docs/CONFIG.md`, `docs/USAGE.md`, protocol notes where fields are public, and focused deterministic tests.
+
+## Acceptance Criteria
+
+- Default automatic compaction triggers at 80 percent of the active model context window; a valid user percentage or absolute-token threshold is respected exactly, and zero absolute tokens disables it.
+- Malformed, ambiguous, unknown, or incompatible configuration fails with actionable diagnostics and cannot silently default or disable compaction.
+- The active model is used by default; an explicit valid same-provider or cross-provider summary model is honored without silent fallback.
+- Manual, automatic, and overflow compaction summarize only active context and persist equivalent bounded recent-tail semantics.
+- Recent retention keeps complete turn/tool groups, defaults to two turns/20,000 tokens, and safely handles one oversized turn.
+- Token metadata describes the active pre/post-compaction context rather than full physical history.
+- Context overflow can cause at most one compaction-assisted retry.
+- Cancellation, summary failure, stale snapshots beyond the existing bound, or append failure never produce a partial/false successful checkpoint.
+- Session-v4 physical ordering, tool-result identity, read/append authority, replay, export privacy, and strict validation remain intact.
+- Deterministic fake-provider tests, focused CTest, the full default suite, sanitizer coverage for touched ownership paths, and `git diff --check` pass without paid live-provider calls.
+
+## Explicit Non-Goals
+
+- Completing the master plan's full M7 canonical prompt/tool-schema artifact and cache-prefix provenance system in this usability slice.
+- Rewriting or deleting old session records or copying OpenCode's mutable output-pruning behavior.
+- Automatic provider-generated branch summaries.
+- Silent provider/model fallback, hidden cross-provider calls, repeated overflow retries, or extension hooks that rewrite compaction input/results.
+
+## Implementation Record — 2026-07-20
+
+Implementation in the current working tree now provides:
+
+- strict compaction JSON field typing, bounded integer percentage thresholds, legacy absolute-token/disable behavior, and explicit conflict diagnostics;
+- active provider/model summary selection by default plus validated same-provider and explicit cross-provider model selection through normal credentials, with no silent fallback;
+- one ordered public active-context projection for summaries/accounting and one physical post-checkpoint projection for exact session-v4 retained-tail reconstruction;
+- default two-turn/20,000-token retention, legacy message-count compatibility, atomic tool call/result handling, UTF-8-safe plain-text truncation, and a recognizable latest-user anchor for oversized turns;
+- equivalent manual, automatic, and overflow checkpoint data, including reason, selected model, configured/effective threshold, active pre/post estimates, retained estimate, and bounded overflow-retry state;
+- additive legacy-readable session validation and privacy-safe event/RPC serialization; and
+- focused regression coverage for strict numeric parsing, threshold percentages, cross-provider selection, repeated compaction boundaries, manual recent context, physical session-v4 ordering/bindings, oversized-turn behavior, atomic tool groups, cancellation, overflow retry, runtime, and RPC paths.
+
+Material review findings and disposition:
+
+| ID | Disposition | Evidence |
+|---|---|---|
+| COMP-1 | Fixed | Legacy v0-v4 and direct default compaction entries remain replay-valid; new additive fields are optional but strict when present. |
+| COMP-2 | Fixed | Retained context rebuilds from physical post-checkpoint records while summaries/accounting use the ordered public projection. |
+| COMP-3 | Fixed | Structured tool groups are atomic; oversized turns retain a bounded user anchor without character-truncating tool payloads. |
+| COMP-4 | Fixed | Fractional, exponent, typed, negative, and overflowing numeric config values are rejected. |
+
+Validation run without paid provider calls:
+
+- `scripts/build.sh --build-dir build` — passed; no work remained after the focused build.
+- `scripts/run-tests.sh --build-dir build --output-on-failure` — 97/97 registered tests completed successfully: 80 passed and 17 expected optional/live/tmux/image smokes skipped.
+- `scripts/build.sh --build-dir build-sanitize --jobs 2` — passed.
+- `scripts/run-tests.sh --build-dir build-sanitize --jobs 2 -R '^ava_tests\\.(session|app_compaction|app_runtime|agent_loop|app_rpc)$' --output-on-failure` — 5/5 focused sanitizer tests passed.
+- `git --no-pager diff --check` — passed.

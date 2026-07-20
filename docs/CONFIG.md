@@ -269,17 +269,20 @@ Optional compaction config file: `$XDG_CONFIG_HOME/ava/compaction.json`.
 
 ```json
 {
-  "model": "gpt-5.5",
-  "auto_threshold_tokens": 0,
-  "keep_recent_tokens": 2048,
-  "keep_recent_messages": 6,
+  "auto_threshold_percent": 80,
+  "keep_recent_turns": 2,
+  "keep_recent_tokens": 20000,
   "max_summary_bytes": 16384
 }
 ```
 
-`/compact` generates a provider-backed summary and records a compaction boundary in the session. Automatic compaction runs before a provider request when the active context estimate reaches the effective threshold. If `auto_threshold_tokens` is omitted, AVA uses about 80% of the configured model context window, or an 80,000-token fallback when the model window is unknown. If `auto_threshold_tokens` is present with value `0`, automatic compaction is explicitly disabled.
+`/compact` generates a provider-backed summary and records an append-only compaction boundary. Manual, automatic, and context-overflow compaction summarize only the active context at and after the latest valid boundary, then retain the same bounded recent-turn projection. Physical session history is not rewritten.
 
-`keep_recent_messages` and `keep_recent_tokens` bound the recent transcript tail stored with a compaction entry. The tail is best-effort continuation context and may be truncated with a marker. `max_summary_bytes` rejects unexpectedly large provider summaries before they are appended to the session.
+The summary call uses the active provider and model by default. A `model` override selects that model on the active provider. A `provider` plus `model` selects that exact configured pair, including a cross-provider pair, through the normal registry and credential path. `provider` without `model` is invalid. Explicit selections are revalidated for every compaction and by `/reload compaction`; AVA does not silently fall back.
+
+Automatic compaction defaults to `auto_threshold_percent: 80`, applied to the active conversation model's context window. When that window is unknown, AVA uses a conservative 100,000-token effective window (80,000 tokens at the default percentage). Percent values must be integers from 1 through 95. The legacy absolute `auto_threshold_tokens` remains supported; explicit `0` disables automatic compaction. The percent and token forms cannot appear together.
+
+`keep_recent_turns` defaults to two complete newest user turns and `keep_recent_tokens` defaults to 20,000 estimated tokens. Tool call/result groups and committed session-v4 groups remain structurally complete. An oversized completed turn uses a UTF-8-safe, structurally safe suffix and records explicit omission metadata. The legacy `keep_recent_messages` selector remains supported as an alternative, but it cannot be combined with `keep_recent_turns`. `max_summary_bytes` must be an integer from 1 through 1,048,576. All known fields reject wrong JSON types; unknown fields remain tolerated for forward compatibility.
 
 ## Prompts
 

@@ -31,6 +31,7 @@ add_library(ava_app
   "connect_oauth_callback.cpp"
   "connect_openai.cpp"
   "display_settings.cpp"
+  "doctor_support.cpp"
   "events.cpp"
   "headless_policy.cpp"
   "interactive_run_queue.cpp"

@@ -434,6 +434,14 @@ if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
 endif()
 if(Python3_Interpreter_FOUND)
   add_test(
+    NAME ava_cli.doctor_support
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/doctor_support_cli_test.py
+            --ava $<TARGET_FILE:ava>
+            --root ${CMAKE_BINARY_DIR}/doctor-support-cli)
+  set_tests_properties(ava_cli.doctor_support PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
     NAME ava_build.parallel_test_runner
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/parallel_test_runner_test.py

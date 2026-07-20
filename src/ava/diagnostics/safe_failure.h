@@ -13,6 +13,12 @@ enum class ComponentClass
 {
   Mcp,
   Plugin,
+  App,
+  Storage,
+  Configuration,
+  Provider,
+  Session,
+  Runtime,
 };
 
 enum class FailureCategory

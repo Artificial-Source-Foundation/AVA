@@ -19,6 +19,18 @@ std::string_view component_label(ComponentClass component) noexcept
       return "MCP";
     case ComponentClass::Plugin:
       return "Plugin";
+    case ComponentClass::App:
+      return "Application";
+    case ComponentClass::Storage:
+      return "Storage";
+    case ComponentClass::Configuration:
+      return "Configuration";
+    case ComponentClass::Provider:
+      return "Provider";
+    case ComponentClass::Session:
+      return "Session";
+    case ComponentClass::Runtime:
+      return "Runtime";
   }
   return "Integration";
 }
@@ -55,6 +67,18 @@ std::string_view to_string(ComponentClass component) noexcept
       return "mcp";
     case ComponentClass::Plugin:
       return "plugin";
+    case ComponentClass::App:
+      return "app";
+    case ComponentClass::Storage:
+      return "storage";
+    case ComponentClass::Configuration:
+      return "configuration";
+    case ComponentClass::Provider:
+      return "provider";
+    case ComponentClass::Session:
+      return "session";
+    case ComponentClass::Runtime:
+      return "runtime";
   }
   return "plugin";
 }

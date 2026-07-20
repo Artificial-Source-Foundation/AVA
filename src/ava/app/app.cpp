@@ -2,6 +2,7 @@
 #include "ava/app/acp_mode.h"
 #include "ava/app/app.h"
 #include "ava/app/connect_openai.h"
+#include "ava/app/doctor_support.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/line_shell.h"
 #include "ava/app/print_mode.h"
@@ -38,6 +39,8 @@ void print_help()
   std::cout << "  ava auth login [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
   std::cout << "  ava connect [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
   std::cout << "  ava connect <provider> --api-key-stdin|--api-key-env <env>\n";
+  std::cout << "  ava doctor [--json]\n";
+  std::cout << "  ava support export\n";
   std::cout << "  ava packages <list|install|remove|update|config>  # deferred\n";
   std::cout << "  ava --version\n";
   std::cout << "  ava --mode build|plan|text|json|rpc\n";
@@ -205,6 +208,36 @@ namespace ava::app {
 
 int run(int argc, char** argv)
 {
+  if (argc >= 2 && std::string_view(argv[1]) == "doctor")
+  {
+    bool json = false;
+    if (argc == 3 && std::string_view(argv[2]) == "--json")
+      json = true;
+    else if (argc != 2)
+    {
+      std::cerr << "Usage: ava doctor [--json]\n";
+      return 2;
+    }
+    std::error_code workspace_error;
+    auto workspace = std::filesystem::current_path(workspace_error);
+    if (workspace_error)
+      workspace.clear();
+    return run_doctor(ava::config::xdg_paths(), workspace, json, std::cout, std::cerr);
+  }
+  if (argc >= 2 && std::string_view(argv[1]) == "support")
+  {
+    if (argc != 3 || std::string_view(argv[2]) != "export")
+    {
+      std::cerr << "Usage: ava support export\n";
+      return 2;
+    }
+    std::error_code workspace_error;
+    auto workspace = std::filesystem::current_path(workspace_error);
+    if (workspace_error)
+      workspace.clear();
+    return run_support_export(ava::config::xdg_paths(), workspace, std::cout, std::cerr);
+  }
+
   bool acp_requested = false;
   for (int index = 1; index < argc; ++index) acp_requested = acp_requested || std::string_view(argv[index]) == "--acp";
   if (acp_requested)

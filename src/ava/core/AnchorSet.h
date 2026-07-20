@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <vector>
+#include "debug.h"
 
 namespace ava::core {
 
@@ -100,7 +101,10 @@ class AnchorSet
     }
 
    public:
-    AnchorRef(Anchor const& best, std::filesystem::path const& relative) : anchor_(best), relative_(normalize_relative(relative)) { }
+    AnchorRef(Anchor const& best, std::filesystem::path const& relative) : anchor_(best), relative_(normalize_relative(relative))
+    {
+      DoutEntering(dc::core, "AnchorRef::AnchorRef(" << best << ", " << relative << ")");
+    }
 
     Anchor const& anchor() const { return anchor_; }
     std::filesystem::path const& relative() const { return relative_; }

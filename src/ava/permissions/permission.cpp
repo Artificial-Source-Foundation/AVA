@@ -564,6 +564,10 @@ PermissionDecision classify_command(std::string_view command)
   {
     return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
   }
+  if (executable == "printenv" && argv.size() == 2 && (argv[1] == "pwd" || argv[1] == "path" || argv[1] == "home"))
+  {
+    return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
+  }
 
   return decision(PermissionAction::Ask, "command risk is unknown", PermissionRisk::Medium);
 }

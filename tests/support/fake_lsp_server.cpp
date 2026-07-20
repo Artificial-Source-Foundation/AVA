@@ -1,4 +1,5 @@
 #include "ava/core/json.h"
+#include "ava/core/path.h"      // ava::core::logical_cwd
 
 #include <algorithm>
 #include <cctype>
@@ -227,11 +228,10 @@ void write_cwd_marker(std::string const& path)
 {
   if (path.empty())
     return;
-  char buffer[4096]{};
-  if (getcwd(buffer, sizeof(buffer)) == nullptr)
-    return;
+  // Prefer $PWD (logical path preserved by the shell) over getcwd() (physical path).
+  auto cwd = ava::core::logical_cwd();
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
-  file << buffer << '\n';
+  file << cwd.string() << '\n';
 }
 
 void respond_initialize(long long id)
@@ -245,10 +245,8 @@ void respond_initialize(long long id)
 
 std::string workspace_main_uri()
 {
-  char buffer[4096]{};
-  if (getcwd(buffer, sizeof(buffer)) == nullptr)
-    return "file:///workspace/main.cpp";
-  return "file://" + std::string(buffer) + "/main.cpp";
+  auto cwd = ava::core::logical_cwd();
+  return "file://" + cwd.string() + "/main.cpp";
 }
 
 std::string request_uri(std::string_view message)

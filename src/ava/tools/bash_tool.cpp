@@ -355,6 +355,8 @@ bool is_canceled(ToolContext const& context)
 
 ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_view command, BashOptions options)
 {
+  DoutEntering(dc::notice, "run_bash(" << context << ", " << command << ", " << options << ")");
+
   if (command.empty())
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "command must not be empty");
@@ -521,6 +523,13 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     dup2(write_fd.get(), STDERR_FILENO);
     close(write_fd.get());
     if (chdir(workspace_text.c_str()) != 0)
+    {
+      _exit(127);
+    }
+    // Set PWD to the logical path so that shells and child processes
+    // preserve symlinked path components instead of the physical path
+    // that getcwd() would return.
+    if (setenv("PWD", workspace_text.c_str(), 1) != 0)
     {
       _exit(127);
     }

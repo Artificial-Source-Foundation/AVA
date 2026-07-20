@@ -217,7 +217,7 @@ ava::core::VoidResult McpStdioClient::launch()
       if (separator == std::string_view::npos || separator == 0)
         continue;
       auto const name = variable.substr(0, separator);
-      if (name == "PATH" || std::ranges::any_of(server_.env, [&](auto const& override) { return override.first == name; }) ||
+      if (name == "PATH" || name == "PWD" || std::ranges::any_of(server_.env, [&](auto const& override) { return override.first == name; }) ||
           std::ranges::find(inherited_names, name) != inherited_names.end())
         continue;
       inherited_names.emplace_back(name);
@@ -257,6 +257,14 @@ ava::core::VoidResult McpStdioClient::launch()
   }
 
   auto const cwd = child_working_dir(server_, options_).string();
+  // Set PWD to the logical cwd so that child processes preserve symlinked
+  // path components instead of the physical path that getcwd() would return.
+  environment_strings.emplace_back(std::string("PWD=") + cwd);
+  // Rebuild environment pointers to include PWD.
+  environment.clear();
+  environment.reserve(environment_strings.size() + 1);
+  for (auto& value : environment_strings) environment.push_back(value.data());
+  environment.push_back(nullptr);
   pid_t const pid = fork();
   if (pid < 0)
     return std::unexpected(errno_error("failed to fork MCP server process", server_));

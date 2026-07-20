@@ -29,6 +29,7 @@
 #include "ava/core/atomic_file.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 #include "ava/core/process_args.h"
 
 #include <algorithm>
@@ -130,7 +131,7 @@ void test_process_arg_workspace_relative_detection()
   auto const global_config_dir = root / "config";
   std::filesystem::create_directories(workspace / ".ava");
   std::filesystem::create_directories(global_config_dir);
-  expect(ava::core::safe_global_process_cwd(global_config_dir / "mcp.json", workspace) == std::filesystem::weakly_canonical(global_config_dir),
+  expect(ava::core::safe_global_process_cwd(global_config_dir / "mcp.json", workspace) == ava::core::normalized_absolute_path(global_config_dir),
          "global process cwd uses the config directory when it is outside the workspace");
   expect(ava::core::safe_global_process_cwd(workspace / "global-lsp.json", workspace) == std::filesystem::path{"/"},
          "global process cwd falls back outside the workspace when the config source is workspace-contained");

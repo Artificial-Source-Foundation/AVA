@@ -151,7 +151,7 @@ int open_trace_directory(std::filesystem::path const& path)
       if (name == "..")
         throw std::runtime_error("trace path may not contain parent traversal");
       bool created = false;
-      int next = openat(fd, name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+      int next = openat(fd, name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
       if (next < 0 && errno == ENOENT)
       {
         if (mkdirat(fd, name.c_str(), S_IRWXU) == 0)
@@ -168,7 +168,7 @@ int open_trace_directory(std::filesystem::path const& path)
         {
           throw std::system_error(errno, std::generic_category(), "create trace directory");
         }
-        next = openat(fd, name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        next = openat(fd, name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
       }
       if (next < 0)
         throw std::system_error(errno, std::generic_category(), "open trace directory component");

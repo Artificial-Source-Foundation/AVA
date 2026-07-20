@@ -6,6 +6,7 @@
 #include "ava/tools/secure_workspace.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/error.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -462,11 +463,11 @@ void test_secure_workspace_search_tools()
   std::error_code symlink_error;
   std::filesystem::create_directory_symlink(outside, workspace / "linked-parent", symlink_error);
 
-  auto secure = ava::tools::SecureWorkspace::open(std::filesystem::canonical(workspace));
+  auto secure = ava::tools::SecureWorkspace::open(ava::core::normalized_absolute_path(workspace));
   expect(secure.has_value(), "secure search workspace anchors a canonical root descriptor");
   if (!secure)
     return;
-  ava::tools::ToolContext context{.workspace_dir = std::filesystem::canonical(workspace), .mode = ava::agent::Mode::Build, .secure_workspace = *secure};
+  ava::tools::ToolContext context{.workspace_dir = ava::core::normalized_absolute_path(workspace), .mode = ava::agent::Mode::Build, .secure_workspace = *secure};
   auto list_link = ava::tools::list_directory(context, workspace / "linked-parent");
   auto glob = ava::tools::glob_files(context, "**/*.txt");
   auto grep = ava::tools::grep_files(context, "searchable", "**/*.txt");

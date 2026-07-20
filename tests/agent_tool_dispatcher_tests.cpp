@@ -33,6 +33,7 @@
 #include "ava/lsp/lsp_client.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <atomic>
@@ -461,12 +462,12 @@ void test_tool_dispatcher()
       dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_patched_read", .name = "read_file", .arguments_json = "{\"path\":\"note.txt\"}"});
   expect(patched_read && patched_read->result_text.find("hello patch") != std::string::npos, "apply_patch updates file content through file tools");
 
-  auto remote_workspace = ava::tools::SecureWorkspace::open(std::filesystem::canonical(workspace));
+  auto remote_workspace = ava::tools::SecureWorkspace::open(ava::core::normalized_absolute_path(workspace));
   auto remote_files = std::make_shared<DispatcherExactFileAccess>();
-  auto const remote_patch_path = std::filesystem::canonical(workspace) / "remote-patch.txt";
+  auto const remote_patch_path = ava::core::normalized_absolute_path(workspace) / "remote-patch.txt";
   remote_files->files[remote_patch_path] = "remote old stale";
   ava::agent::ToolDispatcher const remote_patch_dispatcher(ava::tools::ToolContext{
-      .workspace_dir = std::filesystem::canonical(workspace),
+      .workspace_dir = ava::core::normalized_absolute_path(workspace),
       .mode = ava::agent::Mode::Build,
       .secure_workspace = remote_workspace ? *remote_workspace : nullptr,
       .exact_file_access = remote_files,
@@ -481,14 +482,14 @@ void test_tool_dispatcher()
          "apply_patch supports multiple exact-file adapter edits to one distinct target");
 
   auto multi_remote_files = std::make_shared<DispatcherExactFileAccess>();
-  auto const multi_remote_a = std::filesystem::canonical(workspace) / "remote-multi-a.txt";
-  auto const multi_remote_b = std::filesystem::canonical(workspace) / "remote-multi-b.txt";
+  auto const multi_remote_a = ava::core::normalized_absolute_path(workspace) / "remote-multi-a.txt";
+  auto const multi_remote_b = ava::core::normalized_absolute_path(workspace) / "remote-multi-b.txt";
   multi_remote_files->files[multi_remote_a] = "remote alpha old";
   multi_remote_files->files[multi_remote_b] = "remote beta old";
   auto multi_remote_started = std::make_shared<std::atomic_bool>(false);
   int multi_remote_progress = 0;
   ava::agent::ToolDispatcher const multi_remote_dispatcher(ava::tools::ToolContext{
-      .workspace_dir = std::filesystem::canonical(workspace),
+      .workspace_dir = ava::core::normalized_absolute_path(workspace),
       .mode = ava::agent::Mode::Build,
       .progress_sink = [&multi_remote_progress](ava::tools::ToolProgressEvent const&) -> ava::core::VoidResult {
         ++multi_remote_progress;
@@ -516,7 +517,7 @@ void test_tool_dispatcher()
   int partial_patch_permissions = 0;
   int partial_patch_progress = 0;
   ava::agent::ToolDispatcher const partial_patch_dispatcher(ava::tools::ToolContext{
-      .workspace_dir = std::filesystem::canonical(workspace),
+      .workspace_dir = ava::core::normalized_absolute_path(workspace),
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++partial_patch_permissions;
@@ -888,11 +889,11 @@ void test_tool_dispatcher()
     auto const secure_staged_long = workspace / (secure_long_patch_name + ".txt");
     auto secure_long_setup =
         ava::tools::write_file(ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build}, secure_staged_long, "secure beta old");
-    auto secure_patch_workspace = ava::tools::SecureWorkspace::open(std::filesystem::canonical(workspace));
+    auto secure_patch_workspace = ava::tools::SecureWorkspace::open(ava::core::normalized_absolute_path(workspace));
     if (secure_long_setup && secure_patch_workspace)
     {
       ava::agent::ToolDispatcher const secure_patch_dispatcher(ava::tools::ToolContext{
-          .workspace_dir = std::filesystem::canonical(workspace),
+          .workspace_dir = ava::core::normalized_absolute_path(workspace),
           .mode = ava::agent::Mode::Build,
           .secure_workspace = *secure_patch_workspace,
       });
@@ -966,7 +967,7 @@ void test_tool_dispatcher()
     std::ofstream file(secure_patch_cancel_path, std::ios::binary | std::ios::trunc);
     file << "secure stage cancel old";
   }
-  auto secure_cancel_workspace = ava::tools::SecureWorkspace::open(std::filesystem::canonical(workspace));
+  auto secure_cancel_workspace = ava::tools::SecureWorkspace::open(ava::core::normalized_absolute_path(workspace));
   expect(secure_cancel_workspace.has_value(), "descriptor-secure cancellation test anchors its workspace");
   if (secure_cancel_workspace)
   {
@@ -993,7 +994,7 @@ void test_tool_dispatcher()
       return true;
     };
     ava::agent::ToolDispatcher const secure_patch_cancel_dispatcher(ava::tools::ToolContext{
-        .workspace_dir = std::filesystem::canonical(workspace),
+        .workspace_dir = ava::core::normalized_absolute_path(workspace),
         .mode = ava::agent::Mode::Build,
         .cancel_requested = cancel_at_secure_precommit_boundary,
         .secure_workspace = *secure_cancel_workspace,

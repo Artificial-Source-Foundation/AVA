@@ -8,6 +8,7 @@
 #include "ava/permissions/permission.h"
 #include "ava/provider/provider.h"
 #include "ava/core/error.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -130,15 +131,17 @@ void test_bash_tool()
 
   ava::tools::ToolContext const context{.workspace_dir = root, .mode = ava::agent::Mode::Build};
 
-  auto pwd = ava::tools::run_bash(context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+  auto pwd = ava::tools::run_bash(context, "printenv PWD", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   expect(pwd.has_value(), "run_bash allows safe command");
   if (pwd)
   {
     expect(pwd->exit_code == 0, "run_bash records exit code");
     expect(pwd->output.find(root.string()) != std::string::npos, "run_bash uses workspace directory");
   }
+  else
+    Dout(dc::warning, "run_bash returned error: " << pwd.error());
 
-  auto capped_output = ava::tools::run_bash(context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_bytes = 4});
+  auto capped_output = ava::tools::run_bash(context, "printenv PWD", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_bytes = 4});
   expect(capped_output && capped_output->exit_code == 0 && capped_output->truncated && capped_output->byte_limited && capped_output->totals_known &&
              capped_output->output.size() == 4 && capped_output->output_bytes == capped_output->output.size() &&
              capped_output->total_bytes > capped_output->output.size(),
@@ -199,7 +202,7 @@ void test_bash_tool()
              std::filesystem::file_size(capped_spill->spill_path) == ava::tools::kMaxSpillFileBytes,
          "run_bash caps individual spill files and reports spill truncation");
 
-  auto const hijack_path = root / "pwd";
+  auto const hijack_path = root / "printenv";
   {
     std::ofstream hijack(hijack_path, std::ios::binary | std::ios::trunc);
     hijack << "#!/bin/sh\nprintf hijacked-path\n";
@@ -207,7 +210,7 @@ void test_bash_tool()
   expect(chmod(hijack_path.c_str(), 0700) == 0, "test can create executable PATH hijack fixture");
   {
     ScopedEnvVar const path_guard("PATH", root.string() + ":.:relative");
-    auto sanitized_pwd = ava::tools::run_bash(context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+    auto sanitized_pwd = ava::tools::run_bash(context, "printenv PWD", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
     expect(sanitized_pwd && sanitized_pwd->exit_code == 0 && sanitized_pwd->output.find("hijacked-path") == std::string::npos &&
                sanitized_pwd->output.find(root.string()) != std::string::npos,
            "run_bash does not inherit unsafe PATH entries for auto-allowed commands");
@@ -351,7 +354,7 @@ void test_injected_command_executor()
   auto result =
       ava::tools::run_bash(context, "printf 'one two'", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(900), .max_bytes = 8, .max_lines = 2});
   expect(result && prompts == 1 && executor->requests.size() == 1 && executor->requests.front().argv == std::vector<std::string>({"printf", "one two"}) &&
-             executor->requests.front().cwd == std::filesystem::canonical(workspace) && executor->requests.front().timeout == std::chrono::milliseconds(900) &&
+             executor->requests.front().cwd == ava::core::normalized_absolute_path(workspace) && executor->requests.front().timeout == std::chrono::milliseconds(900) &&
              executor->requests.front().output_byte_limit == 8 && result->line_limited && result->totals_known && result->total_lines == 3 &&
              result->total_bytes == executor->result.output.size() && result->output == "three\n",
          "non-truncated injected command execution receives parsed argv and canonical cwd while local bounds retain exact totals");

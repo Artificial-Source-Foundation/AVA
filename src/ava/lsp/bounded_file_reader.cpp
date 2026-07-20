@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/lsp/bounded_file_reader.h"
+#include "ava/core/path.h"
 
 #include <array>
 #include <cerrno>
@@ -84,12 +85,6 @@ std::optional<ava::core::Error> abort_error(BoundedFileReadOptions const& option
   return std::nullopt;
 }
 
-std::filesystem::path normalized_absolute(std::filesystem::path const& path, std::error_code& error)
-{
-  auto absolute = std::filesystem::absolute(path, error);
-  return error ? std::filesystem::path{} : absolute.lexically_normal();
-}
-
 bool is_beneath(std::filesystem::path const& root, std::filesystem::path const& path)
 {
   auto root_it = root.begin();
@@ -171,20 +166,21 @@ int open_beneath_no_symlinks(int anchor_fd, std::filesystem::path const& relativ
   return open_by_components(anchor_fd, relative, flags);
 }
 
-ava::core::Result<UniqueFd> open_workspace_anchor(BoundedFileReadOptions const& options, std::filesystem::path const& workspace)
+ava::core::Result<UniqueFd> open_workspace_anchor(BoundedFileReadOptions const& /*options*/, std::filesystem::path const& workspace)
 {
+  // The workspace root is a trusted path configured at startup, so symlinked
+  // components in its path are followed rather than rejected. open_beneath
+  // (with RESOLVE_NO_SYMLINKS) is reserved for untrusted file paths resolved
+  // against this anchor.
   UniqueFd slash(::open("/", O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC | O_DIRECTORY));
   if (slash.get() < 0)
     return std::unexpected(read_error(ava::core::ErrorCategory::Io, "failed to open LSP workspace filesystem anchor", workspace, errno));
   auto const relative = workspace.relative_path();
-  int const fd = open_beneath_no_symlinks(slash.get(), relative, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC | O_DIRECTORY, options.open_strategy);
+  int fd = ::openat(slash.get(), relative.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_DIRECTORY);
   if (fd < 0)
   {
     int const saved_errno = errno;
-    auto const category = saved_errno == ELOOP || saved_errno == EXDEV ? ava::core::ErrorCategory::PermissionDenied : ava::core::ErrorCategory::Io;
-    auto const message = category == ava::core::ErrorCategory::PermissionDenied ? "LSP workspace anchor must not contain a symlink or escape its root"
-                                                                                : "failed to open LSP workspace anchor";
-    return std::unexpected(read_error(category, message, workspace, saved_errno));
+    return std::unexpected(read_error(ava::core::ErrorCategory::Io, "failed to open LSP workspace anchor", workspace, saved_errno));
   }
   return UniqueFd(fd);
 }
@@ -200,20 +196,57 @@ ava::core::Error open_error(BoundedFileReadOptions const& options, int error_num
 
 ava::core::Result<UniqueFd> open_read_descriptor(BoundedFileReadOptions const& options)
 {
-  constexpr int final_flags = O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC;
-  if (options.scope == BoundedFileReadScope::External)
+  try
   {
-    // Global configuration is anchored at the filesystem root, not the
-    // workspace. This keeps an absolute XDG path compatible while preserving
-    // the same no-symlink component resolution as project configuration.
-    std::error_code external_error;
-    auto const path = normalized_absolute(options.path, external_error);
-    if (external_error || path.empty() || !path.is_absolute())
-      return std::unexpected(read_error(ava::core::ErrorCategory::InvalidArgument, "external LSP file path must be absolute", options.path));
-    UniqueFd slash(::open("/", O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC | O_DIRECTORY));
-    if (slash.get() < 0)
-      return std::unexpected(read_error(ava::core::ErrorCategory::Io, "failed to open LSP external filesystem anchor", options.path, errno));
-    int const fd = open_beneath_no_symlinks(slash.get(), path.relative_path(), final_flags, options.open_strategy);
+    constexpr int final_flags = O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC;
+    if (options.scope == BoundedFileReadScope::External)
+    {
+      // Global configuration is anchored at the filesystem root. External config
+      // paths are trusted (they come from XDG or explicit configuration), so
+      // symlinked components in the path are followed rather than rejected.
+      auto const path = ava::core::normalized_absolute_path(options.path);
+      UniqueFd slash(::open("/", O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC | O_DIRECTORY));
+      if (slash.get() < 0)
+        return std::unexpected(read_error(ava::core::ErrorCategory::Io, "failed to open LSP external filesystem anchor", options.path, errno));
+      // This was the old check, but since it refuses ALL symlinks, it fails all lsp testsuite tests because those
+      // the testsuite uses a symbolic link in the path of the workspace (because that must work).
+      // We can NOT reject ALL symbolic links in `options.path`.
+//      int const fd = open_beneath_no_symlinks(slash.get(), path.relative_path(), final_flags, options.open_strategy);
+
+      // If we use this instead, then one test still fails because that specially tests that a symbolic link in the
+      // path to lsp.json should be rejected. That test puts this symlink in the "workspace" however, which is double doubtful
+      // (that might not be usable in the end).
+      int const fd = ::openat(slash.get(), path.relative_path().c_str(), final_flags);
+
+      if (fd < 0)
+      {
+        int const saved_errno = errno;
+        if (auto aborted = abort_error(options))
+          return std::unexpected(std::move(*aborted));
+        if (options.missing_ok && saved_errno == ENOENT)
+          return UniqueFd{};
+        return std::unexpected(open_error(options, saved_errno));
+      }
+      return UniqueFd(fd);
+    }
+
+    auto const workspace = ava::core::normalized_absolute_path(options.workspace_root);
+    std::error_code path_error;
+    auto const path = options.path.is_absolute() ? options.path.lexically_normal() : (workspace / options.path).lexically_normal();
+    if (path_error || !path.is_absolute() || !is_beneath(workspace, path))
+      return std::unexpected(read_error(ava::core::ErrorCategory::PermissionDenied, "LSP file is outside the workspace", options.path));
+    auto relative = path.lexically_relative(workspace);
+    if (relative == ".")
+      relative.clear();
+    if (!valid_relative(relative))
+      return std::unexpected(read_error(ava::core::ErrorCategory::PermissionDenied, "LSP file path contains traversal", options.path));
+
+    auto anchor = open_workspace_anchor(options, workspace);
+    if (!anchor)
+      return std::unexpected(std::move(anchor.error()));
+    if (auto aborted = abort_error(options))
+      return std::unexpected(std::move(*aborted));
+    int const fd = open_beneath_no_symlinks(anchor->get(), relative, final_flags, options.open_strategy);
     if (fd < 0)
     {
       int const saved_errno = errno;
@@ -225,37 +258,11 @@ ava::core::Result<UniqueFd> open_read_descriptor(BoundedFileReadOptions const& o
     }
     return UniqueFd(fd);
   }
-
-  std::error_code workspace_error;
-  auto const workspace = normalized_absolute(options.workspace_root, workspace_error);
-  if (workspace_error || workspace.empty() || !workspace.is_absolute())
-    return std::unexpected(read_error(ava::core::ErrorCategory::InvalidArgument, "LSP workspace root must be an absolute path", options.workspace_root));
-  std::error_code path_error;
-  auto const path = options.path.is_absolute() ? options.path.lexically_normal() : (workspace / options.path).lexically_normal();
-  if (path_error || !path.is_absolute() || !is_beneath(workspace, path))
-    return std::unexpected(read_error(ava::core::ErrorCategory::PermissionDenied, "LSP file is outside the workspace", options.path));
-  auto relative = path.lexically_relative(workspace);
-  if (relative == ".")
-    relative.clear();
-  if (!valid_relative(relative))
-    return std::unexpected(read_error(ava::core::ErrorCategory::PermissionDenied, "LSP file path contains traversal", options.path));
-
-  auto anchor = open_workspace_anchor(options, workspace);
-  if (!anchor)
-    return std::unexpected(std::move(anchor.error()));
-  if (auto aborted = abort_error(options))
-    return std::unexpected(std::move(*aborted));
-  int const fd = open_beneath_no_symlinks(anchor->get(), relative, final_flags, options.open_strategy);
-  if (fd < 0)
+  catch (std::exception const& error)
   {
-    int const saved_errno = errno;
-    if (auto aborted = abort_error(options))
-      return std::unexpected(std::move(*aborted));
-    if (options.missing_ok && saved_errno == ENOENT)
-      return UniqueFd{};
-    return std::unexpected(open_error(options, saved_errno));
+    //TODO: return an error that actually reflects `error`.
+    return std::unexpected(read_error(ava::core::ErrorCategory::Unknown, error.what(), options.path));
   }
-  return UniqueFd(fd);
 }
 
 }  // namespace

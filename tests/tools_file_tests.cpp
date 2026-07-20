@@ -12,6 +12,7 @@
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <array>
@@ -828,7 +829,7 @@ void test_secure_workspace_staged_write_contracts()
 
   auto workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  auto secure = ava::tools::SecureWorkspace::open(std::filesystem::canonical(workspace));
+  auto secure = ava::tools::SecureWorkspace::open(ava::core::normalized_absolute_path(workspace));
   expect(secure.has_value(), "staged write contract test anchors a canonical workspace");
   if (!secure)
     return;
@@ -1011,23 +1012,23 @@ void test_injected_exact_file_access()
   auto const outside = root / "outside";
   std::filesystem::create_directories(workspace);
   std::filesystem::create_directories(outside);
-  auto secure = ava::tools::SecureWorkspace::open(std::filesystem::canonical(workspace));
+  auto secure = ava::tools::SecureWorkspace::open(ava::core::normalized_absolute_path(workspace));
   expect(secure.has_value(), "injected exact file test anchors its workspace");
   if (!secure)
     return;
 
   auto adapter = std::make_shared<MemoryExactFileAccess>();
-  auto const remote_path = std::filesystem::canonical(workspace) / "remote.txt";
+  auto const remote_path = ava::core::normalized_absolute_path(workspace) / "remote.txt";
   adapter->files[remote_path] = "one\ntwo\nthree\n";
   ava::tools::ToolContext context{
-      .workspace_dir = std::filesystem::canonical(workspace), .mode = ava::agent::Mode::Build, .secure_workspace = *secure, .exact_file_access = adapter};
+      .workspace_dir = ava::core::normalized_absolute_path(workspace), .mode = ava::agent::Mode::Build, .secure_workspace = *secure, .exact_file_access = adapter};
 
   auto read = ava::tools::read_file(context, remote_path, ava::tools::ReadOptions{.max_bytes = 1024, .offset_line = 2, .max_lines = 1});
   auto write = ava::tools::write_file(context, workspace / "created.txt", "created remotely");
   auto edit = ava::tools::edit_file(context, remote_path, "two", "changed");
   expect(read && read->content == "two\n" && read->line_limited && !read->totals_known && read->total_bytes == 0 && read->total_lines == 0 && write && edit &&
              adapter->files[remote_path] == "one\nchanged\nthree\n" &&
-             adapter->files[std::filesystem::canonical(workspace) / "created.txt"] == "created remotely" && !std::filesystem::exists(workspace / "created.txt"),
+             adapter->files[ava::core::normalized_absolute_path(workspace) / "created.txt"] == "created remotely" && !std::filesystem::exists(workspace / "created.txt"),
          "injected exact access keeps bounded window totals unknown while coherently handling writes and edits without local I/O");
 
   auto const local_only = workspace / "local-only.txt";
@@ -1076,11 +1077,11 @@ void test_secure_workspace_file_tools()
     std::ofstream file(outside / "secret.txt", std::ios::binary | std::ios::trunc);
     file << "outside secret";
   }
-  auto secure = ava::tools::SecureWorkspace::open(std::filesystem::canonical(workspace));
+  auto secure = ava::tools::SecureWorkspace::open(ava::core::normalized_absolute_path(workspace));
   expect(secure.has_value(), "secure workspace anchors a canonical root descriptor");
   if (!secure)
     return;
-  ava::tools::ToolContext secure_context{.workspace_dir = std::filesystem::canonical(workspace), .mode = ava::agent::Mode::Build, .secure_workspace = *secure};
+  ava::tools::ToolContext secure_context{.workspace_dir = ava::core::normalized_absolute_path(workspace), .mode = ava::agent::Mode::Build, .secure_workspace = *secure};
 
   auto nested_write = ava::tools::write_file(secure_context, workspace / "nested" / "deeper" / "note.txt", "alpha beta");
   auto nested_edit = ava::tools::edit_file(secure_context, workspace / "nested" / "deeper" / "note.txt", "beta", "gamma");
@@ -1110,7 +1111,7 @@ void test_secure_workspace_file_tools()
   }
   int permission_requests = 0;
   ava::tools::ToolContext race_context{
-      .workspace_dir = std::filesystem::canonical(workspace),
+      .workspace_dir = ava::core::normalized_absolute_path(workspace),
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++permission_requests;
@@ -1566,7 +1567,6 @@ void test_anchor_open()
   // Helper to create symbolic link -> target.
   auto create_link = [&files, &dirlinks](fs::path const& link, fs::path const& target, ava::core::AnchorSet::Anchor const* writable_anchor, bool crosses_boundary) {
     std::error_code link_error;
-    //Dout(dc::notice, "Calling fs::create_symlink(" << target.lexically_relative(link.parent_path()) << ", " << link << ", link_error)");
     fs::create_symlink(target.lexically_relative(link.parent_path()), link, link_error);
     expect(!link_error, "anchor-open test creates a symlink");
     if (!link_error)
@@ -1674,7 +1674,6 @@ void test_anchor_open()
       external = true;
     }
 
-    //Dout(dc::notice, "Calling open_readable(anchor_set, " << info.path << ", O_RDONLY | O_CLOEXEC)");
     auto readable = ava::core::open_readable(anchor_set, info.path, O_RDONLY | O_CLOEXEC);
     expect(readable.has_value() != info.crosses_boundary, "open_readable (existing): only opens files that do not cross anchor boundaries");
     if (readable.has_value() == info.crosses_boundary)
@@ -1720,7 +1719,6 @@ void test_anchor_open()
 
       bool const crosses_boundary = info.crosses_boundary || (file_n / 2) != (dir_n / 2);
 
-      //Dout(dc::notice, "Calling open_writable(anchor_set, " << fp << ", O_RDONLY | O_CLOEXEC)");
       auto writable = ava::core::open_writable(anchor_set, fp, O_RDONLY | O_CLOEXEC);
       if (writable)
       {
@@ -1740,7 +1738,6 @@ void test_anchor_open()
               (crosses_boundary ? "that it would be denied with PermissionDenied!" : "that we would be able to open it!"));
       }
 
-      //Dout(dc::notice, "Calling open_readable(anchor_set, " << fp << ", O_RDONLY | O_CLOEXEC)");
       auto readable = ava::core::open_readable(anchor_set, fp, O_RDONLY | O_CLOEXEC);
       expect(readable.has_value() != crosses_boundary, "open_readable (dirlink): only opens files that do not cross anchor boundaries");
       if (readable.has_value() == crosses_boundary)
@@ -1793,7 +1790,6 @@ void test_anchor_open()
     // still contains the creation: a contained symlink creates its target inside
     // the anchor; an escaping symlink is rejected with EXDEV before any file is
     // created.
-    //Dout(dc::notice, "Calling open_writable(anchor_set, " << info.path << ", O_WRONLY | O_CREAT | O_CLOEXEC, 0600)");
     auto created = ava::core::open_writable(anchor_set, info.path, O_WRONLY | O_CREAT | O_CLOEXEC, 0600);
     if (created)
     {

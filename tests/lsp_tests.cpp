@@ -7,6 +7,7 @@
 #include "ava/lsp/configured_provider.h"
 #include "ava/lsp/lsp_client.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -25,6 +26,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "debug.h"
 
 namespace {
 
@@ -288,23 +290,59 @@ void test_lsp_manager_fake_server_symbols_and_definition()
     return;
 
   auto document_symbols = (*client)->document_symbols(workspace / "main.cpp");
-  expect(document_symbols && document_symbols->size() == 2 && (*document_symbols)[0].name == "main" && (*document_symbols)[0].path == workspace / "main.cpp" &&
-             (*document_symbols)[1].container == "main",
-         "LSP manager requests and parses document symbols");
+  bool document_symbols_success = document_symbols && document_symbols->size() == 2 && (*document_symbols)[0].name == "main" &&
+    (*document_symbols)[0].path == workspace / "main.cpp" && (*document_symbols)[1].container == "main";
+  expect(document_symbols_success, "LSP manager requests and parses document symbols");
+#ifdef CWDEBUG
+  if (!document_symbols_success)
+  {
+    if (document_symbols)
+      Dout(dc::warning, "document_symbols = " << *document_symbols);
+    else
+      Dout(dc::warning, "document_symbols returned error: " << document_symbols.error());
+  }
+#endif
 
   auto workspace_symbols = (*client)->workspace_symbols("main");
-  expect(workspace_symbols && workspace_symbols->size() == 1 && (*workspace_symbols)[0].name == "main" && (*workspace_symbols)[0].container == "global" &&
-             (*workspace_symbols)[0].path == workspace / "main.cpp",
-         "LSP manager requests and parses workspace symbols");
+  bool workspace_symbols_success = workspace_symbols && workspace_symbols->size() == 1 && (*workspace_symbols)[0].name == "main" &&
+    (*workspace_symbols)[0].container == "global" && (*workspace_symbols)[0].path == workspace / "main.cpp";
+  expect(workspace_symbols_success, "LSP manager requests and parses workspace symbols");
+#ifdef CWDEBUG
+  if (!workspace_symbols_success)
+  {
+    if (workspace_symbols)
+      Dout(dc::warning, "workspace_symbols = " << *workspace_symbols);
+    else
+      Dout(dc::warning, "workspace_symbols returned error: " << workspace_symbols.error());
+  }
+#endif
 
   auto definitions = (*client)->definitions(workspace / "main.cpp", 0, 4);
-  expect(definitions && definitions->size() == 1 && (*definitions)[0].path == workspace / "main.cpp" && (*definitions)[0].range.start_line == 0 &&
-             (*definitions)[0].range.start_column == 4,
-         "LSP manager requests and parses definitions");
+  bool definitions_success = definitions && definitions->size() == 1 && (*definitions)[0].path == workspace / "main.cpp" &&
+    (*definitions)[0].range.start_line == 0 && (*definitions)[0].range.start_column == 4;
+  expect(definitions_success, "LSP manager requests and parses definitions");
+#ifdef CWDEBUG
+  if (!definitions_success)
+  {
+    if (definitions)
+      Dout(dc::warning, "definitions = " << *definitions);
+    else
+      Dout(dc::warning, "definitions returned error: " << definitions.error());
+  }
+#endif
 
   auto references = (*client)->references(workspace / "main.cpp", 0, 4);
-  expect(references && references->size() == 2 && (*references)[0].path == workspace / "main.cpp" && (*references)[1].range.start_column == 13,
-         "LSP manager sends didOpen before references and parses locations");
+  bool references_success = references && references->size() == 2 && (*references)[0].path == workspace / "main.cpp" && (*references)[1].range.start_column == 13;
+  expect(references_success, "LSP manager sends didOpen before references and parses locations");
+#ifdef CWDEBUG
+  if (!references_success)
+  {
+    if (references)
+      Dout(dc::warning, "references = " << *references);
+    else
+      Dout(dc::warning, "references returned error: " << references.error());
+  }
+#endif
 }
 
 void test_lsp_manager_rejects_ancestor_symlinks()
@@ -485,14 +523,24 @@ void test_lsp_configured_provider_rejects_unsafe_config_files()
   global_ancestor_config << "{\"version\":1,\"servers\":[]}";
   global_ancestor_config.close();
   auto const global_ancestor = workspace / "global-ancestor";
+  Dout(dc::notice, "Calling std::filesystem::create_directory_symlink(" << global_real_directory << ", " << global_ancestor << ")");
   std::filesystem::create_directory_symlink(global_real_directory, global_ancestor);
   auto global_ancestor_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
       .global_config_file = global_ancestor / "lsp.json",
       .project_config_file = {},
       .workspace_root = workspace,
   });
-  expect(!global_ancestor_provider && global_ancestor_provider.error().format().find("symlink") != std::string::npos,
-         "configured LSP provider rejects an ancestor symlink for an absolute external global config path");
+  bool global_ancestor_provider_success = !global_ancestor_provider && global_ancestor_provider.error().format().find("symlink") != std::string::npos;
+  expect(global_ancestor_provider_success, "configured LSP provider rejects an ancestor symlink for an absolute external global config path");
+#ifdef CWDEBUG
+  if (!global_ancestor_provider_success)
+  {
+    if (global_ancestor_provider)
+      Dout(dc::warning, "global_ancestor_provider = " << *global_ancestor_provider);
+    else
+      Dout(dc::warning, "global_ancestor_provider returned error: " << global_ancestor_provider.error());
+  }
+#endif
 
   std::filesystem::create_directories(workspace / ".ava");
   auto const project_config = workspace / ".ava" / "lsp.json";
@@ -1205,7 +1253,7 @@ void test_lsp_configured_provider_loads_global_config_from_safe_cwd()
       dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_global_cwd", .name = "lsp_diagnostics", .arguments_json = "{\"path\":\"main.cpp\"}"});
   expect(diagnostics && diagnostics->success,
          diagnostics ? "configured global LSP server returns diagnostics from safe cwd" : "configured global LSP server returns diagnostics from safe cwd");
-  expect(read_text_file_for_test(marker_path) == std::filesystem::weakly_canonical(global_config_dir).string(),
+  expect(read_text_file_for_test(marker_path) == ava::core::normalized_absolute_path(global_config_dir).string(),
          "configured global LSP server process cwd is the global config directory, not the workspace");
 }
 

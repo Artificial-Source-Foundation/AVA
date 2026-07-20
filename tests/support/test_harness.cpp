@@ -132,10 +132,20 @@ std::filesystem::path temp_root()
 
 std::filesystem::path create_empty_root(std::filesystem::path root_name)
 {
-  auto const root = temp_root() / root_name;
+  auto const base = temp_root();
+
+  // Create a directory <base>/physical/<root_name> and a symbolic link
+  // <base>/logical -> <base>/physical so that the returned path
+  // <base>/logical/<root_name> resolves to <base>/physical/<root_name>.
+  auto const real_root = base / "physical" / root_name;
   std::error_code cleanup;
-  std::filesystem::remove_all(root, cleanup);
-  return root;
+  std::filesystem::remove_all(real_root, cleanup);
+  std::filesystem::create_directories(real_root, cleanup);
+  auto const link = base / "logical";
+  std::error_code link_error;
+  std::filesystem::remove(link, link_error);
+  std::filesystem::create_symlink("physical", link, link_error);
+  return link / root_name;
 }
 
 ScopedEnvVar::ScopedEnvVar(std::string name, std::string value) : name_(std::move(name))

@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/core/AnchorSet.h"
+#include "ava/core/path.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -127,10 +128,9 @@ ava::core::Result<std::shared_ptr<AnchorSet>> AnchorSet::open(std::vector<std::f
   {
     if (root.empty())
       continue;
-    std::error_code absolute_error;
-    auto absolute = std::filesystem::absolute(root, absolute_error).lexically_normal();
-    if (absolute_error || !absolute.is_absolute())
-      return std::unexpected(anchor_error("failed to resolve anchor root path", root, absolute_error.value()));
+    auto const absolute = normalized_absolute_path(root);
+    if (!absolute.is_absolute())
+      return std::unexpected(anchor_error("failed to resolve anchor root path", root, 0));
     int fd = open_anchor_fd(absolute);
     if (fd < 0)
     {
@@ -151,6 +151,11 @@ ava::core::Result<std::shared_ptr<AnchorSet>> AnchorSet::open(std::vector<std::f
 
 ava::core::Result<AnchorSet::AnchorRef> AnchorSet::find_anchor(std::filesystem::path const& candidate) const
 {
+  DoutEntering(dc::core, "AnchorSet::find_anchor(" << candidate << ")");
+
+//  if (std::ranges::find(candidate, "physical") != candidate.end())
+//    Debug(attach_gdb());
+
   if (candidate.empty())
     return std::unexpected(anchor_error("candidate path is empty", candidate));
 

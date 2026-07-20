@@ -24,6 +24,7 @@
 #include "ava/provider/registry.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <atomic>
@@ -836,7 +837,7 @@ void test_acp_service_mutating_request_terminal_commits()
 
   AgentServiceOptions options;
   options.agent_version = "1";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
   std::set<std::int64_t> canceled_ids{1, 2, 4, 6};
   AgentService service(options);
@@ -910,7 +911,7 @@ void test_acp_session_request_schema_defaults_and_invalid_item_skipping()
 
   AgentServiceOptions options;
   options.agent_version = "1";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
   AgentService service(options);
   static_cast<void>(service.handle_request(initialize_request(), {}));
@@ -963,7 +964,7 @@ void test_acp_session_capacity_is_reserved_before_persistence()
 
   AgentServiceOptions options;
   options.agent_version = "1";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
   AgentService service(options);
   static_cast<void>(service.handle_request(initialize_request(), {}));
@@ -1008,7 +1009,7 @@ void test_acp_startup_model_is_pinned_across_config_mutation()
   auto base_factory = recording_bundle_factory(&request_body);
   AgentServiceOptions options;
   options.agent_version = "1";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
   options.provider_bundle_factory = [&observed_models, base_factory](ava::app::runtime::Session const& session, ava::app::runtime::RunOptions run_options,
                                                                      std::string_view label) mutable {
@@ -1061,7 +1062,7 @@ void test_acp_startup_model_is_pinned_across_config_mutation()
   ava::tests::write_app_test_file(invalid_paths.models_file, R"({"default_provider":"missing","default_model":"missing"})");
   AgentServiceOptions invalid_options;
   invalid_options.agent_version = "1";
-  invalid_options.launch_root = std::filesystem::canonical(invalid_root / "workspace");
+  invalid_options.launch_root = ava::core::normalized_absolute_path(invalid_root / "workspace");
   invalid_options.paths = invalid_paths;
   AgentService invalid_service(invalid_options);
   auto unresolved = invalid_service.handle_request(initialize_request(), {});
@@ -1106,7 +1107,7 @@ void test_acp_resume_validates_history_against_pinned_startup_model()
   std::string image_body;
   AgentServiceOptions image_options;
   image_options.agent_version = "1";
-  image_options.launch_root = std::filesystem::canonical(workspace);
+  image_options.launch_root = ava::core::normalized_absolute_path(workspace);
   image_options.paths = paths;
   image_options.provider_bundle_factory = recording_bundle_factory(&image_body);
   AgentService image_service(image_options);
@@ -1192,7 +1193,7 @@ void test_acp_session_lifecycle_real_prompt_and_provider_ownership()
 
   AgentServiceOptions options;
   options.agent_version = "1.0.0";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
   options.provider_bundle_factory = std::move(factory);
   AgentService service(std::move(options));
@@ -1258,7 +1259,7 @@ void test_acp_exact_identity_persisted_cwd_and_restart()
 
   AgentServiceOptions options;
   options.agent_version = "1";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
   AgentService first(options);
   expect(first.handle_request(initialize_request(), {}).has_value(), "ACP cwd test initializes first host");
@@ -1398,7 +1399,7 @@ void test_acp_list_pagination_cancel_race_stop_reasons_and_file_safety()
   std::string request_body;
   AgentServiceOptions options;
   options.agent_version = "1";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
   options.provider_bundle_factory = recording_bundle_factory(&request_body);
   AgentService service(options);
@@ -1529,7 +1530,7 @@ void test_acp_cancel_terminal_arbitration_and_provider_setup_paths()
 
     AgentServiceOptions options;
     options.agent_version = "1";
-    options.launch_root = std::filesystem::canonical(workspace);
+    options.launch_root = ava::core::normalized_absolute_path(workspace);
     options.paths = paths;
     options.run_options.on_phase = [barrier](ava::app::RunPhase observed) { return barrier->observe(observed); };
     options.provider_bundle_factory = sequence_bundle_factory(transport_state, {acp_text_response("terminal success")});
@@ -1620,7 +1621,7 @@ void test_acp_cancel_terminal_arbitration_and_provider_setup_paths()
 
     AgentServiceOptions options;
     options.agent_version = "1";
-    options.launch_root = std::filesystem::canonical(workspace);
+    options.launch_root = ava::core::normalized_absolute_path(workspace);
     options.paths = paths;
     options.provider_bundle_factory = [gate, transport_state, fail_setup, failure_category](
                                           ava::app::runtime::Session const&, ava::app::runtime::RunOptions run_options,
@@ -1707,7 +1708,7 @@ void test_acp_session_mcp_requires_persistent_operator_authorization()
 
   AgentServiceOptions options;
   options.agent_version = "1";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
   options.provider_bundle_factory = sequence_bundle_factory(provider_state, {acp_text_response("must not run")});
   AgentService service(options);
@@ -1776,7 +1777,7 @@ void test_acp_strict_session_mcp_registry_and_error_propagation()
 
   AgentServiceOptions options;
   options.agent_version = "1";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
   options.provider_bundle_factory = sequence_bundle_factory(transport_state, std::move(responses));
   AgentService service(options);
@@ -1809,7 +1810,7 @@ void test_acp_strict_session_mcp_registry_and_error_propagation()
                                               .enabled = true,
                                               .scope = ava::mcp::McpServerScope::Project,
                                               .source_path = {}};
-  auto const demo_launch_identity = ava::mcp::session_mcp_launch_identity(demo_server, std::filesystem::canonical(nested));
+  auto const demo_launch_identity = ava::mcp::session_mcp_launch_identity(demo_server, ava::core::normalized_absolute_path(nested));
   auto const demo_tool_name = ava::mcp::mcp_model_tool_name("demo", "echo");
   bool valid_rules = install_mcp_allow(ava::permissions::Operation::McpServerLaunch, demo_launch_identity, "mcp_discovery");
   valid_rules = install_mcp_allow(ava::permissions::Operation::McpServerConnect, "demo", "mcp_discovery") && valid_rules;
@@ -1844,7 +1845,7 @@ void test_acp_strict_session_mcp_registry_and_error_propagation()
                bodies.front().find("\"name\":\"question\"") == std::string::npos && bodies.front().find("\"name\":\"task\"") == std::string::npos &&
                bodies.front().find("\"name\":\"bash\"") == std::string::npos && bodies.front().find("\"name\":\"webfetch\"") == std::string::npos &&
                bodies.front().find("\"name\":\"lsp_") == std::string::npos && bodies.front().find("\"name\":\"plugin_") == std::string::npos &&
-               bodies.back().find("MCP call ok") != std::string::npos && read_acp_test_file(cwd_marker) == std::filesystem::canonical(nested).string(),
+               bodies.back().find("MCP call ok") != std::string::npos && read_acp_test_file(cwd_marker) == ava::core::normalized_absolute_path(nested).string(),
            valid_detail);
   }
   service.shutdown();
@@ -1892,7 +1893,7 @@ void test_acp_strict_session_mcp_registry_and_error_propagation()
     auto error_state = std::make_shared<CapturingSequenceState>();
     AgentServiceOptions error_options;
     error_options.agent_version = "1";
-    error_options.launch_root = std::filesystem::canonical(workspace);
+    error_options.launch_root = ava::core::normalized_absolute_path(workspace);
     error_options.paths = paths;
     error_options.provider_bundle_factory = sequence_bundle_factory(error_state, {acp_text_response()});
     AgentService error_service(error_options);
@@ -1931,7 +1932,7 @@ void test_acp_strict_session_mcp_registry_and_error_propagation()
                                                    .enabled = true,
                                                    .scope = ava::mcp::McpServerScope::Project,
                                                    .source_path = {}};
-  auto const collision_launch_identity = ava::mcp::session_mcp_launch_identity(collision_server, std::filesystem::canonical(nested));
+  auto const collision_launch_identity = ava::mcp::session_mcp_launch_identity(collision_server, ava::core::normalized_absolute_path(nested));
   run_error_case("[{\"name\":\"demo-one\",\"command\":\"" + fake_command + "\",\"args\":[],\"env\":[]},{\"name\":\"demo_one\",\"command\":\"" + fake_command +
                      "\",\"args\":[],\"env\":[]}]",
                  "duplicate model tool name",
@@ -1943,7 +1944,7 @@ void test_acp_strict_session_mcp_registry_and_error_propagation()
   missing_server.id = "missing";
   missing_server.name = "missing";
   missing_server.command = missing_command;
-  auto const missing_launch_identity = ava::mcp::session_mcp_launch_identity(missing_server, std::filesystem::canonical(nested));
+  auto const missing_launch_identity = ava::mcp::session_mcp_launch_identity(missing_server, ava::core::normalized_absolute_path(nested));
   run_error_case("[{\"name\":\"missing\",\"command\":\"" + ava::core::json::escape(missing_command) + "\",\"args\":[],\"env\":[]}]", "mcp_server: missing",
                  {{ava::permissions::Operation::McpServerLaunch, missing_launch_identity}, {ava::permissions::Operation::McpServerConnect, "missing"}});
 
@@ -1984,7 +1985,7 @@ void test_acp_negotiated_client_filesystem_and_terminal_routing()
     auto provider_state = std::make_shared<CapturingSequenceState>();
     AgentServiceOptions options;
     options.agent_version = "1";
-    options.launch_root = std::filesystem::canonical(workspace);
+    options.launch_root = ava::core::normalized_absolute_path(workspace);
     options.paths = paths;
     options.provider_bundle_factory = sequence_bundle_factory(provider_state, {read_tool_response, acp_text_response("file complete")});
     AgentService service(options);
@@ -1995,7 +1996,7 @@ void test_acp_negotiated_client_filesystem_and_terminal_routing()
           methods.push_back(method);
           if (method == "session/request_permission")
             return ready("permission", CallResult(std::string(R"({"outcome":{"outcome":"selected","optionId":"allow_once"}})")));
-          expect(method == "fs/read_text_file" && params && params->find(std::filesystem::canonical(note).string()) != std::string::npos &&
+          expect(method == "fs/read_text_file" && params && params->find(ava::core::normalized_absolute_path(note).string()) != std::string::npos &&
                      policy == OutboundCallPolicy::Normal,
                  "negotiated ACP read uses the canonical absolute path DTO with normal delivery policy");
           if (fail_remote)
@@ -2056,7 +2057,7 @@ void test_acp_negotiated_client_filesystem_and_terminal_routing()
     auto provider_state = std::make_shared<CapturingSequenceState>();
     AgentServiceOptions options;
     options.agent_version = "1";
-    options.launch_root = std::filesystem::canonical(workspace);
+    options.launch_root = ava::core::normalized_absolute_path(workspace);
     options.paths = paths;
     options.provider_bundle_factory = sequence_bundle_factory(provider_state, {write_tool_response, acp_text_response("write complete")});
     AgentService service(options);
@@ -2117,7 +2118,7 @@ void test_acp_negotiated_client_filesystem_and_terminal_routing()
               ava::core::json::escape(bash_args) + R"("}}]},"finish_reason":"tool_calls"}]})"};
   AgentServiceOptions terminal_options;
   terminal_options.agent_version = "1";
-  terminal_options.launch_root = std::filesystem::canonical(workspace);
+  terminal_options.launch_root = ava::core::normalized_absolute_path(workspace);
   terminal_options.paths = paths;
   terminal_options.provider_bundle_factory = sequence_bundle_factory(terminal_state, {bash_tool_response, acp_text_response("terminal complete")});
   AgentService terminal_service(terminal_options);
@@ -2183,7 +2184,7 @@ void test_acp_builtin_permission_gateway_one_shot_mutations_and_updates()
 
   AgentServiceOptions options;
   options.agent_version = "1";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
   options.provider_bundle_factory = sequence_bundle_factory(state, {std::move(tool_response), acp_text_response("permission complete")});
   AgentService service(options);
@@ -2285,7 +2286,7 @@ void test_acp_session_grant_cannot_follow_retargeted_parent_symlink()
   std::atomic_int bundle_number = 0;
   AgentServiceOptions options;
   options.agent_version = "1";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
   options.provider_bundle_factory = [&, provider_state](ava::app::runtime::Session const& session, ava::app::runtime::RunOptions run_options,
                                                         std::string_view label) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
@@ -2352,7 +2353,7 @@ void test_acp_permission_once_always_reject_cancel_invalid_and_hard_policy_matri
                            R"("}},{"id":"matrix_2","function":{"name":"write_file","arguments":")" + args + R"("}}]},"finish_reason":"tool_calls"}]})";
     AgentServiceOptions options;
     options.agent_version = "1";
-    options.launch_root = std::filesystem::canonical(workspace);
+    options.launch_root = ava::core::normalized_absolute_path(workspace);
     options.paths = paths;
     options.provider_bundle_factory = sequence_bundle_factory(
         provider_state, {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = tool_body}, acp_text_response("matrix complete")});
@@ -2416,7 +2417,7 @@ void test_acp_close_timeout_is_internal_error_with_eventual_cleanup()
   std::atomic_bool release = false;
   AgentServiceOptions options;
   options.agent_version = "1";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = ava::tests::app_test_paths(root);
   options.provider_bundle_factory = recording_bundle_factory(&body, &entered, &release);
   options.close_grace = 5ms;
@@ -2466,7 +2467,7 @@ void test_acp_peer_prompt_terminal_commit_arbitration()
 
     AgentServiceOptions options;
     options.agent_version = "1";
-    options.launch_root = std::filesystem::canonical(workspace);
+    options.launch_root = ava::core::normalized_absolute_path(workspace);
     options.paths = ava::tests::app_test_paths(root);
     options.run_options.on_phase = [barrier](ava::app::RunPhase phase) { return barrier->observe(phase); };
     options.provider_bundle_factory = sequence_bundle_factory(provider_state, {acp_text_response("peer terminal success")});
@@ -2693,7 +2694,7 @@ void test_acp_client_tool_dtos_lifecycle_and_cancellation()
   std::filesystem::create_directories(truncated_workspace);
   std::vector<ava::tools::ToolProgressEvent> truncated_progress;
   ava::tools::ToolContext truncated_context{
-      .workspace_dir = std::filesystem::canonical(truncated_workspace),
+      .workspace_dir = ava::core::normalized_absolute_path(truncated_workspace),
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
@@ -2831,7 +2832,7 @@ void test_acp_client_tool_dtos_lifecycle_and_cancellation()
   auto const window_root = std::filesystem::temp_directory_path() / ava::core::make_id("acp-windowed-read");
   auto const window_workspace = window_root / "workspace";
   std::filesystem::create_directories(window_workspace);
-  auto window_secure = ava::tools::SecureWorkspace::open(std::filesystem::canonical(window_workspace));
+  auto window_secure = ava::tools::SecureWorkspace::open(ava::core::normalized_absolute_path(window_workspace));
   auto window_gateway = std::make_shared<ClientRequestGateway>();
   std::vector<std::pair<std::size_t, std::size_t>> observed_windows;
   window_gateway->bind(
@@ -2857,7 +2858,7 @@ void test_acp_client_tool_dtos_lifecycle_and_cancellation()
       },
       [](JsonRpcId const&, std::string) { return true; });
   auto window_files = make_client_exact_file_access("session-window", window_gateway, true, false);
-  ava::tools::ToolContext window_context{.workspace_dir = std::filesystem::canonical(window_workspace),
+  ava::tools::ToolContext window_context{.workspace_dir = ava::core::normalized_absolute_path(window_workspace),
                                          .mode = ava::agent::Mode::Build,
                                          .secure_workspace = window_secure ? *window_secure : nullptr,
                                          .exact_file_access = window_files};
@@ -2894,7 +2895,7 @@ void test_acp_client_tool_dtos_lifecycle_and_cancellation()
   auto const full_read_root = std::filesystem::temp_directory_path() / ava::core::make_id("acp-full-edit-read");
   auto const full_read_workspace = full_read_root / "workspace";
   std::filesystem::create_directories(full_read_workspace);
-  auto full_read_secure = ava::tools::SecureWorkspace::open(std::filesystem::canonical(full_read_workspace));
+  auto full_read_secure = ava::tools::SecureWorkspace::open(ava::core::normalized_absolute_path(full_read_workspace));
   auto full_read_gateway = std::make_shared<ClientRequestGateway>();
   std::string full_read_content = "alpha old stale\n";
   std::vector<std::string> full_read_params;
@@ -2914,7 +2915,7 @@ void test_acp_client_tool_dtos_lifecycle_and_cancellation()
       },
       [](JsonRpcId const&, std::string) { return true; });
   auto full_read_files = make_client_exact_file_access("session-full-read", full_read_gateway, true, true);
-  ava::tools::ToolContext full_read_context{.workspace_dir = std::filesystem::canonical(full_read_workspace),
+  ava::tools::ToolContext full_read_context{.workspace_dir = ava::core::normalized_absolute_path(full_read_workspace),
                                             .mode = ava::agent::Mode::Build,
                                             .secure_workspace = full_read_secure ? *full_read_secure : nullptr,
                                             .exact_file_access = full_read_files};
@@ -3276,7 +3277,7 @@ void test_acp_peer_lifecycle_request_commit_linearization()
 
   AgentServiceOptions options;
   options.agent_version = "1";
-  options.launch_root = std::filesystem::canonical(workspace);
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = ava::tests::app_test_paths(root);
   AgentService service(options);
   auto state = std::make_shared<MemoryTransportState>();
@@ -3738,7 +3739,7 @@ void test_acp_prompt_admission_rollback_and_control_cancel_saturation()
     std::string body;
     AgentServiceOptions options;
     options.agent_version = "1";
-    options.launch_root = std::filesystem::canonical(workspace);
+    options.launch_root = ava::core::normalized_absolute_path(workspace);
     options.paths = ava::tests::app_test_paths(root);
     options.provider_bundle_factory = recording_bundle_factory(&body);
     AgentService service(options);

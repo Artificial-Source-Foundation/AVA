@@ -703,6 +703,13 @@ ava::core::VoidResult SubprocessLspClient::launch()
   std::vector<char*> environment;
   environment.reserve(environment_strings.size() + 1);
   for (auto& value : environment_strings) environment.push_back(value.data());
+  // Set PWD to the logical cwd so that child processes preserve symlinked
+  // path components instead of the physical path that getcwd() would return.
+  environment_strings.emplace_back(std::string("PWD=") + child_cwd);
+  // Rebuild environment pointers to include PWD.
+  environment.clear();
+  environment.reserve(environment_strings.size() + 1);
+  for (auto& value : environment_strings) environment.push_back(value.data());
   environment.push_back(nullptr);
   std::vector<char*> argv;
   argv.reserve(config_.argv.size() + 1);

@@ -34,6 +34,7 @@
 #include "ava/context/skill_loader.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <chrono>
@@ -154,9 +155,9 @@ void test_context_loader()
     expect(loaded->size() == 3, "context loader finds root-to-current workspace contexts");
     if (loaded->size() == 3)
     {
-      expect((*loaded)[0].path == std::filesystem::weakly_canonical(root_agents), "root AGENTS.md loads first");
-      expect((*loaded)[1].path == std::filesystem::weakly_canonical(src_agents), "intermediate AGENTS.md loads second");
-      expect((*loaded)[2].path == std::filesystem::weakly_canonical(nested_agents), "nested AGENTS.md loads third");
+      expect((*loaded)[0].path == ava::core::normalized_absolute_path(root_agents), "root AGENTS.md loads first");
+      expect((*loaded)[1].path == ava::core::normalized_absolute_path(src_agents), "intermediate AGENTS.md loads second");
+      expect((*loaded)[2].path == ava::core::normalized_absolute_path(nested_agents), "nested AGENTS.md loads third");
       expect((*loaded)[0].source_type == ava::context::ContextSourceType::Workspace, "workspace context records workspace source type");
     }
   }
@@ -170,7 +171,7 @@ void test_context_loader()
   expect(outside_loaded.has_value(), "context loader handles current_dir outside workspace");
   if (outside_loaded)
   {
-    expect(outside_loaded->size() == 1 && (*outside_loaded)[0].path == std::filesystem::weakly_canonical(root_agents),
+    expect(outside_loaded->size() == 1 && (*outside_loaded)[0].path == ava::core::normalized_absolute_path(root_agents),
            "outside current_dir only loads workspace root AGENTS.md");
   }
 
@@ -186,14 +187,14 @@ void test_context_loader()
     expect(with_global->size() == 4, "global AGENTS.md is appended to workspace contexts");
     if (with_global->size() == 4)
     {
-      expect((*with_global)[3].path == std::filesystem::weakly_canonical(global_agents), "global AGENTS.md path is recorded");
+      expect((*with_global)[3].path == ava::core::normalized_absolute_path(global_agents), "global AGENTS.md path is recorded");
       expect((*with_global)[3].source_type == ava::context::ContextSourceType::Global, "global AGENTS.md records global source type");
 
       auto const formatted = ava::context::format_context_for_prompt(*with_global);
       expect(formatted.find("# Loaded Project Instructions") != std::string::npos, "formatted context includes a section title");
-      expect(formatted.find("## workspace: " + std::filesystem::weakly_canonical(root_agents).string()) != std::string::npos,
+      expect(formatted.find("## workspace: " + ava::core::normalized_absolute_path(root_agents).string()) != std::string::npos,
              "formatted context includes workspace source/path header");
-      expect(formatted.find("## global: " + std::filesystem::weakly_canonical(global_agents).string()) != std::string::npos,
+      expect(formatted.find("## global: " + ava::core::normalized_absolute_path(global_agents).string()) != std::string::npos,
              "formatted context includes global source/path header");
       expect(formatted.find("root instructions") != std::string::npos && formatted.find("global instructions") != std::string::npos,
              "formatted context includes loaded content");
@@ -234,10 +235,10 @@ void test_context_loader()
   expect(claude_loaded.has_value(), "context loader accepts Pi-compatible CLAUDE.md context aliases");
   if (claude_loaded && claude_loaded->size() == 3)
   {
-    expect((*claude_loaded)[0].path == std::filesystem::weakly_canonical(root_claude), "root CLAUDE.md loads as workspace context");
-    expect((*claude_loaded)[1].path == std::filesystem::weakly_canonical(nested_agents_priority),
+    expect((*claude_loaded)[0].path == ava::core::normalized_absolute_path(root_claude), "root CLAUDE.md loads as workspace context");
+    expect((*claude_loaded)[1].path == ava::core::normalized_absolute_path(nested_agents_priority),
            "AGENTS.MD takes priority over CLAUDE.md in the same directory");
-    expect((*claude_loaded)[2].path == std::filesystem::weakly_canonical(global_claude), "global CLAUDE.MD loads as a fallback context file");
+    expect((*claude_loaded)[2].path == ava::core::normalized_absolute_path(global_claude), "global CLAUDE.MD loads as a fallback context file");
   }
   else
   {

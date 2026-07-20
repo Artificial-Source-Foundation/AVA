@@ -14,6 +14,7 @@
 #include "ava/permissions/permission.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/json.h"
+#include "ava/core/path.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -181,7 +182,7 @@ void test_session_mcp_launch_identity_is_canonical_and_exact()
 
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  auto const canonical_cwd = std::filesystem::canonical(workspace);
+  auto const canonical_cwd = ava::core::normalized_absolute_path(workspace);
 
   ava::mcp::McpServerConfig authorized{.id = "demo",
                                        .name = "Demo",
@@ -349,7 +350,7 @@ void test_mcp_stdio_client_lists_and_calls_tools()
                                                           : "MCP global server initializes from safe config cwd: " + global_cwd_client.error().format());
   if (global_cwd_client)
   {
-    expect(read_text(global_cwd_file) == std::filesystem::weakly_canonical(global_config_dir).string(),
+    expect(read_text(global_cwd_file) == ava::core::normalized_absolute_path(global_config_dir).string(),
            "MCP global server process cwd is the global config directory, not the workspace");
     auto global_shutdown = (*global_cwd_client)->shutdown(std::chrono::milliseconds(500));
     expect(global_shutdown.has_value(), "MCP global cwd test server shuts down cleanly");
@@ -972,7 +973,7 @@ void test_mcp_strict_session_registry_failures_and_nested_cwd()
     }
   }
   expect(strict && strict_tool_count == 1 && strict_has_mcp && !strict_has_plugin && !strict_has_builtin &&
-             read_text(cwd_marker) == std::filesystem::canonical(nested).string(),
+             read_text(cwd_marker) == ava::core::normalized_absolute_path(nested).string(),
          strict ? "strict session registry exposes only valid session MCP tools from persisted current_dir"
                 : "session MCP nested-cwd registry build failed: " + strict.error().format());
 

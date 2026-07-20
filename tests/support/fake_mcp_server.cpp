@@ -70,11 +70,20 @@ void write_cwd_marker(std::string const& path)
 {
   if (path.empty())
     return;
-  char buffer[4096]{};
-  if (getcwd(buffer, sizeof(buffer)) == nullptr)
-    return;
+  // Prefer $PWD (logical path preserved by the shell) over getcwd() (physical path).
+  char const* pwd = std::getenv("PWD");
+  std::string cwd;
+  if (pwd != nullptr && pwd[0] == '/')
+    cwd = pwd;
+  else
+  {
+    char buffer[4096]{};
+    if (getcwd(buffer, sizeof(buffer)) == nullptr)
+      return;
+    cwd = buffer;
+  }
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
-  file << buffer << '\n';
+  file << cwd << '\n';
 }
 
 }  // namespace

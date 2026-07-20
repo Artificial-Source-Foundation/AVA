@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -273,6 +274,18 @@ class PrivateTraceObserver final : public ava::observability::RunObserver
 
 }  // namespace
 
+TraceWriterHealth trace_writer_health_from_counters(ava::observability::QueuedJsonlObserverCounters const& counters) noexcept
+{
+  auto const maximum = std::numeric_limits<std::uint64_t>::max();
+  auto const events_dropped = counters.queue_dropped > maximum - counters.dropped ? maximum : counters.dropped + counters.queue_dropped;
+  auto const bytes_written = counters.bytes_written > static_cast<std::size_t>(maximum) ? maximum : static_cast<std::uint64_t>(counters.bytes_written);
+  return {.complete = true,
+          .events_written = counters.written,
+          .events_dropped = events_dropped,
+          .writer_failures = counters.failures,
+          .bytes_written = bytes_written};
+}
+
 struct RuntimeDiagnostics::State
 {
   std::filesystem::path trace_path;
@@ -386,17 +399,19 @@ void RuntimeDiagnostics::close() noexcept
     Dout(dc::runtime, "operation=trace_close state=start");
     state_->observer->close();
     auto const writer = state_->observer->writer_counters();
+    auto const writer_health = trace_writer_health_from_counters(writer);
     TraceCounterSnapshot const snapshot{.captured_at = now_seconds(),
                                         .runtime_starts = state_->counters->runtime_starts.load(std::memory_order_relaxed),
                                         .provider_requests = state_->counters->provider_requests.load(std::memory_order_relaxed),
                                         .provider_failures = state_->counters->provider_failures.load(std::memory_order_relaxed),
                                         .session_failures = state_->counters->session_failures.load(std::memory_order_relaxed),
                                         .plugin_failures = state_->counters->plugin_failures.load(std::memory_order_relaxed),
-                                        .mcp_failures = state_->counters->mcp_failures.load(std::memory_order_relaxed)};
+                                        .mcp_failures = state_->counters->mcp_failures.load(std::memory_order_relaxed),
+                                        .writer_health = writer_health};
     auto const status = write_trace_counter_snapshot(paths_, snapshot);
-    Dout(dc::runtime, "operation=trace_close state=done status=" << to_string(status) << " written=" << writer.written
-                                                                 << " dropped=" << writer.dropped + writer.queue_dropped
-                                                                 << " failures=" << writer.failures + writer.queue_failures);
+    Dout(dc::runtime, "operation=trace_close state=done status=" << to_string(status) << " written=" << writer_health.events_written
+                                                                 << " dropped=" << writer_health.events_dropped << " failures=" << writer_health.writer_failures
+                                                                 << " queue_failure_observations=" << writer.queue_failures);
     static_cast<void>(writer);
     static_cast<void>(status);
   });

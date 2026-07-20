@@ -75,6 +75,16 @@ struct LastFailureRecord
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct TraceWriterHealth
+{
+  bool complete = false;
+  std::uint64_t events_written = 0;
+  std::uint64_t events_dropped = 0;
+  std::uint64_t writer_failures = 0;
+  std::uint64_t bytes_written = 0;
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct TraceCounterSnapshot
 {
   int schema_version = kDiagnosticSchemaVersion;
@@ -85,6 +95,7 @@ struct TraceCounterSnapshot
   std::uint64_t session_failures = 0;
   std::uint64_t plugin_failures = 0;
   std::uint64_t mcp_failures = 0;
+  TraceWriterHealth writer_health;
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 

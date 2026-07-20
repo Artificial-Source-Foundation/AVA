@@ -161,8 +161,10 @@ void test_private_trace_sanitization_limits_and_counters()
 
   auto const snapshot = ava::diagnostics::read_trace_counter_snapshot(paths);
   expect(snapshot.state == ava::diagnostics::StoredRecordState::Present && snapshot.record && snapshot.record->runtime_starts == 10'005 &&
-             snapshot.record->provider_requests == 3 && snapshot.record->provider_failures == 1,
-         "trace close drains first and persists one typed class/outcome counter snapshot");
+             snapshot.record->provider_requests == 3 && snapshot.record->provider_failures == 1 && snapshot.record->writer_health.complete &&
+             snapshot.record->writer_health.events_written == records.size() && snapshot.record->writer_health.events_dropped == 10'008 - records.size() &&
+             snapshot.record->writer_health.writer_failures == 0 && snapshot.record->writer_health.bytes_written == trace.size(),
+         "trace close persists outcome counters and complete drained writer health under queue pressure");
   struct stat trace_metadata{};
   expect(::stat(trace_path.c_str(), &trace_metadata) == 0 && S_ISREG(trace_metadata.st_mode) && (trace_metadata.st_mode & 07777) == 0600 &&
              trace_metadata.st_nlink == 1 && trace_metadata.st_uid == ::geteuid(),
@@ -170,7 +172,7 @@ void test_private_trace_sanitization_limits_and_counters()
   std::filesystem::remove_all(root);
 }
 
-void test_concurrent_traces_are_distinct()
+void test_concurrent_traces_are_distinct_and_counters_are_cumulative()
 {
   auto const root = diagnostics_root("runtime-diagnostics-concurrent");
   auto const paths = private_paths(root);
@@ -190,10 +192,47 @@ void test_concurrent_traces_are_distinct()
   auto first = diagnostics[0] ? diagnostics[0]->trace_path() : std::nullopt;
   auto second = diagnostics[1] ? diagnostics[1]->trace_path() : std::nullopt;
   expect(succeeded[0] && succeeded[1] && first && second && *first != *second, "concurrent traced runtimes receive independent opaque files");
-  for (auto& item : diagnostics)
-    if (item)
-      item->close();
+  if (!diagnostics[0] || !diagnostics[1] || !first || !second)
+  {
+    std::filesystem::remove_all(root);
+    return;
+  }
+
+  ava::observability::TraceContext context;
+  diagnostics[0]->observation()->emit(ava::observability::TraceEventType::AgentRunStart, context);
+  diagnostics[0]->observation()->emit(ava::observability::TraceEventType::TransportRequestResult, context,
+                                      [](auto& event) { event.outcome = ava::observability::TraceOutcome::Success; });
+  diagnostics[1]->observation()->emit(ava::observability::TraceEventType::AgentRunStart, context);
+  diagnostics[1]->observation()->emit(ava::observability::TraceEventType::AgentRunStart, context);
+  diagnostics[1]->observation()->emit(ava::observability::TraceEventType::TransportRequestResult, context,
+                                      [](auto& event) { event.outcome = ava::observability::TraceOutcome::Error; });
+  threads.clear();
+  for (auto& item : diagnostics) threads.emplace_back([item] { item->close(); });
+  for (auto& thread : threads) thread.join();
+
+  auto const first_trace = read_all(*first);
+  auto const second_trace = read_all(*second);
+  auto const snapshot = ava::diagnostics::read_trace_counter_snapshot(paths);
+  expect(lines(first_trace).size() == 2 && lines(second_trace).size() == 3 && snapshot.record && snapshot.record->runtime_starts == 3 &&
+             snapshot.record->provider_requests == 2 && snapshot.record->provider_failures == 1 && snapshot.record->writer_health.complete &&
+             snapshot.record->writer_health.events_written == 5 && snapshot.record->writer_health.events_dropped == 0 &&
+             snapshot.record->writer_health.writer_failures == 0 && snapshot.record->writer_health.bytes_written == first_trace.size() + second_trace.size(),
+         "concurrent runtime closes retain distinct traces and cumulatively preserve both different contributions");
   std::filesystem::remove_all(root);
+}
+
+void test_writer_health_conversion_does_not_double_count_failures()
+{
+  ava::observability::QueuedJsonlObserverCounters counters;
+  counters.written = 2;
+  counters.dropped = 3;
+  counters.failures = 1;
+  counters.bytes_written = 40;
+  counters.queue_dropped = 4;
+  counters.queue_failures = 1;
+  auto const health = ava::diagnostics::trace_writer_health_from_counters(counters);
+  expect(health.complete && health.events_written == 2 && health.events_dropped == 7 && health.writer_failures == 1 && health.bytes_written == 40,
+         "one failed queued record maps to one persisted writer failure rather than writer and queue observations being summed");
 }
 
 void test_trace_initialization_rejects_unsafe_paths_nonblocking()
@@ -385,7 +424,8 @@ void run_runtime_diagnostics_tests()
 {
   test_disabled_runtime_diagnostics_is_artifact_free();
   test_private_trace_sanitization_limits_and_counters();
-  test_concurrent_traces_are_distinct();
+  test_concurrent_traces_are_distinct_and_counters_are_cumulative();
+  test_writer_health_conversion_does_not_double_count_failures();
   test_trace_initialization_rejects_unsafe_paths_nonblocking();
   test_last_failure_is_typed_and_message_free();
   test_runtime_failure_boundaries_and_observation_precedence();

@@ -2,6 +2,7 @@
 #include "ava/diagnostics/artifact_store.h"
 #include "ava/core/strict_json.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -9,11 +10,13 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <fcntl.h>
+#include <sys/file.h>
 #include <sys/random.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -67,6 +70,12 @@ enum class OpenState
 };
 
 struct OpenDirectory
+{
+  OpenState state = OpenState::Unavailable;
+  ScopedFd fd = ScopedFd{};
+};
+
+struct OpenFile
 {
   OpenState state = OpenState::Unavailable;
   ScopedFd fd = ScopedFd{};
@@ -321,6 +330,41 @@ std::optional<std::string> read_private_file(int directory_fd, std::string_view 
   return body;
 }
 
+OpenFile open_trace_counter_lock(int directory_fd) noexcept
+{
+  constexpr char name[] = "trace-counters-v1.lock";
+  int const fd = ::openat(directory_fd, name, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, kPrivateFileMode);
+  if (fd < 0)
+  {
+    struct stat existing{};
+    if (errno == ELOOP || errno == EISDIR || ::fstatat(directory_fd, name, &existing, AT_SYMLINK_NOFOLLOW) == 0)
+      return {.state = OpenState::Unsafe};
+    return {.state = OpenState::Unavailable};
+  }
+  ScopedFd opened(fd);
+  struct stat metadata{};
+  struct stat published{};
+  if (::fstat(opened.get(), &metadata) != 0 || ::fstatat(directory_fd, name, &published, AT_SYMLINK_NOFOLLOW) != 0)
+    return {.state = OpenState::Unavailable};
+  if (!private_file_metadata(metadata) || !private_file_metadata(published) || metadata.st_dev != published.st_dev || metadata.st_ino != published.st_ino)
+    return {.state = OpenState::Unsafe};
+  return {.state = OpenState::Ready, .fd = std::move(opened)};
+}
+
+bool lock_trace_counter_file(int directory_fd, int lock_fd) noexcept
+{
+  while (::flock(lock_fd, LOCK_EX) != 0)
+  {
+    if (errno == EINTR)
+      continue;
+    return false;
+  }
+  struct stat metadata{};
+  struct stat published{};
+  return ::fstat(lock_fd, &metadata) == 0 && ::fstatat(directory_fd, "trace-counters-v1.lock", &published, AT_SYMLINK_NOFOLLOW) == 0 &&
+         private_file_metadata(metadata) && private_file_metadata(published) && metadata.st_dev == published.st_dev && metadata.st_ino == published.st_ino;
+}
+
 bool write_all(int fd, std::string_view body) noexcept
 {
   std::size_t offset = 0;
@@ -511,6 +555,28 @@ TraceArtifactPreparation create_trace_artifact(int directory_fd, ava::config::Xd
   return {.status = ArtifactWriteStatus::IoFailure, .path = {}};
 }
 
+std::uint64_t saturating_add(std::uint64_t left, std::uint64_t right) noexcept
+{
+  auto const maximum = std::numeric_limits<std::uint64_t>::max();
+  return right > maximum - left ? maximum : left + right;
+}
+
+TraceCounterSnapshot merge_trace_counter_snapshots(TraceCounterSnapshot const& aggregate, TraceCounterSnapshot const& contribution) noexcept
+{
+  return {.captured_at = std::max(aggregate.captured_at, contribution.captured_at),
+          .runtime_starts = saturating_add(aggregate.runtime_starts, contribution.runtime_starts),
+          .provider_requests = saturating_add(aggregate.provider_requests, contribution.provider_requests),
+          .provider_failures = saturating_add(aggregate.provider_failures, contribution.provider_failures),
+          .session_failures = saturating_add(aggregate.session_failures, contribution.session_failures),
+          .plugin_failures = saturating_add(aggregate.plugin_failures, contribution.plugin_failures),
+          .mcp_failures = saturating_add(aggregate.mcp_failures, contribution.mcp_failures),
+          .writer_health = {.complete = aggregate.writer_health.complete && contribution.writer_health.complete,
+                            .events_written = saturating_add(aggregate.writer_health.events_written, contribution.writer_health.events_written),
+                            .events_dropped = saturating_add(aggregate.writer_health.events_dropped, contribution.writer_health.events_dropped),
+                            .writer_failures = saturating_add(aggregate.writer_health.writer_failures, contribution.writer_health.writer_failures),
+                            .bytes_written = saturating_add(aggregate.writer_health.bytes_written, contribution.writer_health.bytes_written)}};
+}
+
 template <typename Record, typename Parser>
 StoredRecord<Record> read_record(ava::config::XdgPaths const& paths, std::string_view filename, Parser parser) noexcept
 {
@@ -588,14 +654,40 @@ ArtifactWriteStatus write_trace_counter_snapshot(ava::config::XdgPaths const& pa
 {
   try
   {
-    if (snapshot.schema_version != kDiagnosticSchemaVersion)
-      return ArtifactWriteStatus::InvalidRecord;
-    auto const body = serialize_trace_counter_snapshot(snapshot);
-    if (!parse_trace_counter_snapshot(body))
+    if (snapshot.schema_version != kDiagnosticSchemaVersion || !parse_trace_counter_snapshot(serialize_trace_counter_snapshot(snapshot)))
       return ArtifactWriteStatus::InvalidRecord;
     auto directory = open_artifact_directory(paths, "diagnostics", true);
     if (directory.state != OpenState::Ready)
       return write_state(directory.state);
+    auto lock = open_trace_counter_lock(directory.fd.get());
+    if (lock.state != OpenState::Ready)
+      return write_state(lock.state);
+    if (!lock_trace_counter_file(directory.fd.get(), lock.fd.get()))
+      return ArtifactWriteStatus::UnsafeStorage;
+
+    TraceCounterSnapshot aggregate{.writer_health = {.complete = true}};
+    StoredRecordState existing_state = StoredRecordState::Unavailable;
+    auto existing_body = read_private_file(directory.fd.get(), "trace-counters-v1.json", existing_state);
+    if (existing_body)
+    {
+      auto existing = parse_trace_counter_snapshot(*existing_body);
+      if (!existing)
+        return ArtifactWriteStatus::InvalidRecord;
+      aggregate = std::move(*existing);
+    }
+    else if (existing_state != StoredRecordState::Absent)
+    {
+      if (existing_state == StoredRecordState::Unsafe)
+        return ArtifactWriteStatus::UnsafeStorage;
+      if (existing_state == StoredRecordState::Malformed)
+        return ArtifactWriteStatus::InvalidRecord;
+      return ArtifactWriteStatus::StorageUnavailable;
+    }
+
+    auto const merged = merge_trace_counter_snapshots(aggregate, snapshot);
+    auto const body = serialize_trace_counter_snapshot(merged);
+    if (!parse_trace_counter_snapshot(body))
+      return ArtifactWriteStatus::InvalidRecord;
     return atomic_replace(directory.fd.get(), "trace-counters-v1.json", body);
   }
   catch (...)

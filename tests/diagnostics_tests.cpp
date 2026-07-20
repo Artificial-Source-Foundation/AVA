@@ -11,12 +11,15 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include "debug.h"
 
@@ -219,11 +222,42 @@ void test_phase2_typed_serialization_and_strict_parsing()
   expect(!ava::diagnostics::parse_last_failure_record(duplicate_failure), "last-failure record rejects duplicate keys");
   expect(!ava::diagnostics::parse_last_failure_record(std::string(65 * 1024, 'x')), "last-failure parser rejects oversized input");
 
+  constexpr std::string_view legacy_counters =
+      "{\"schema_version\":1,\"captured_at\":84,\"runtime_starts\":2,\"provider_requests\":4,\"provider_failures\":1,"
+      "\"session_failures\":3,\"plugin_failures\":5,\"mcp_failures\":6}";
+  auto legacy_parsed = ava::diagnostics::parse_trace_counter_snapshot(legacy_counters);
+  auto const upgraded_counters = legacy_parsed ? ava::diagnostics::serialize_trace_counter_snapshot(*legacy_parsed) : std::string{};
+  auto upgraded_parsed = ava::diagnostics::parse_trace_counter_snapshot(upgraded_counters);
+  expect(legacy_parsed && !legacy_parsed->writer_health.complete && legacy_parsed->writer_health.events_written == 0 && upgraded_parsed &&
+             upgraded_counters.find("\"writer_health\"") != std::string::npos && !upgraded_parsed->writer_health.complete,
+         "exact legacy v1 trace counters parse with incomplete zero health and round-trip to the new strict form");
+
   ava::diagnostics::TraceCounterSnapshot const counters{
-      .captured_at = 84, .runtime_starts = 2, .provider_requests = 4, .provider_failures = 1, .session_failures = 3, .plugin_failures = 5, .mcp_failures = 6};
+      .captured_at = 84,
+      .runtime_starts = 2,
+      .provider_requests = 4,
+      .provider_failures = 1,
+      .session_failures = 3,
+      .plugin_failures = 5,
+      .mcp_failures = 6,
+      .writer_health = {.complete = true, .events_written = 7, .events_dropped = 8, .writer_failures = 9, .bytes_written = 10}};
   auto parsed_counters = ava::diagnostics::parse_trace_counter_snapshot(ava::diagnostics::serialize_trace_counter_snapshot(counters));
-  expect(parsed_counters && parsed_counters->provider_requests == 4 && parsed_counters->mcp_failures == 6,
+  expect(parsed_counters && parsed_counters->provider_requests == 4 && parsed_counters->mcp_failures == 6 && parsed_counters->writer_health.complete &&
+             parsed_counters->writer_health.events_dropped == 8,
          "trace-counter snapshot has a strict typed round trip");
+  expect(!ava::diagnostics::parse_trace_counter_snapshot(
+             "{\"schema_version\":1,\"captured_at\":1,\"runtime_starts\":1,\"provider_requests\":1,\"provider_failures\":1,"
+             "\"session_failures\":1,\"plugin_failures\":1,\"mcp_failures\":1,\"writer_health\":{"
+             "\"complete\":true,\"events_written\":1,\"events_dropped\":1,\"writer_failures\":1,\"bytes_written\":1,\"extra\":1}}") &&
+             !ava::diagnostics::parse_trace_counter_snapshot(
+                 "{\"schema_version\":1,\"captured_at\":1,\"runtime_starts\":1,\"provider_requests\":1,\"provider_failures\":1,"
+                 "\"session_failures\":1,\"plugin_failures\":1,\"mcp_failures\":1,\"writer_health\":{"
+                 "\"complete\":true,\"complete\":false,\"events_written\":1,\"events_dropped\":1,\"writer_failures\":1,\"bytes_written\":1}}") &&
+             !ava::diagnostics::parse_trace_counter_snapshot(
+                 "{\"schema_version\":1,\"captured_at\":1,\"runtime_starts\":1,\"provider_requests\":1,\"provider_failures\":1,"
+                 "\"session_failures\":1,\"plugin_failures\":1,\"mcp_failures\":1,\"writer_health\":{"
+                 "\"complete\":1,\"events_written\":1,\"events_dropped\":1,\"writer_failures\":1,\"bytes_written\":1}}"),
+         "trace-counter parser rejects extra, duplicate, and malformed writer-health fields");
 
   ava::diagnostics::SupportArtifact const support{.generated_at = 100,
                                                   .doctor = report,
@@ -250,7 +284,7 @@ void test_private_artifact_storage_and_atomic_replacement()
   auto const read = ava::diagnostics::read_last_failure_record(paths);
   expect(read.state == ava::diagnostics::StoredRecordState::Present && read.record && read.record->recorded_at == 2 && read.record->occurrences == 2,
          "last-failure reader observes the complete replacement");
-  ava::diagnostics::TraceCounterSnapshot const counters{.captured_at = 3, .runtime_starts = 4, .provider_requests = 5};
+  ava::diagnostics::TraceCounterSnapshot const counters{.captured_at = 3, .runtime_starts = 4, .provider_requests = 5, .writer_health = {}};
   expect(ava::diagnostics::write_trace_counter_snapshot(paths, counters) == ava::diagnostics::ArtifactWriteStatus::Success,
          "trace counters use the private typed storage boundary");
   auto const counters_read = ava::diagnostics::read_trace_counter_snapshot(paths);
@@ -260,18 +294,178 @@ void test_private_artifact_storage_and_atomic_replacement()
 
   struct stat directory_metadata{};
   struct stat file_metadata{};
+  struct stat lock_metadata{};
   auto const diagnostics_dir = paths.ava_state_dir / "diagnostics";
   auto const record_file = diagnostics_dir / "last-failure-v1.json";
+  auto const lock_file = diagnostics_dir / "trace-counters-v1.lock";
   expect(::stat(diagnostics_dir.c_str(), &directory_metadata) == 0 && (directory_metadata.st_mode & 0777) == 0700,
          "diagnostic directories are exact mode 0700");
   expect(::stat(record_file.c_str(), &file_metadata) == 0 && (file_metadata.st_mode & 0777) == 0600 && file_metadata.st_nlink == 1 &&
              file_metadata.st_uid == ::geteuid() && file_metadata.st_gid == ::getegid(),
          "diagnostic files are owner-owned, exact mode 0600, and singly linked");
+  expect(::stat(lock_file.c_str(), &lock_metadata) == 0 && S_ISREG(lock_metadata.st_mode) && (lock_metadata.st_mode & 0777) == 0600 &&
+             lock_metadata.st_nlink == 1 && lock_metadata.st_uid == ::geteuid() && lock_metadata.st_gid == ::getegid(),
+         "trace-counter lock is a fixed owner-only singly-linked regular file");
   bool temporary_found = false;
   for (auto const& entry : std::filesystem::directory_iterator(diagnostics_dir))
     temporary_found = temporary_found || entry.path().filename().string().starts_with(".diagnostic-tmp-");
   expect(!temporary_found, "successful atomic replacement leaves no temporary artifact");
   std::filesystem::remove_all(root);
+}
+
+void test_trace_counter_writes_aggregate_sequentially_concurrently_and_saturate()
+{
+  auto const sequential_root = unique_diagnostic_root("diagnostic_counter_aggregate");
+  auto const sequential_paths = diagnostic_paths(sequential_root);
+  ava::diagnostics::TraceCounterSnapshot const first{
+      .captured_at = 10,
+      .runtime_starts = 1,
+      .provider_requests = 2,
+      .provider_failures = 3,
+      .session_failures = 4,
+      .plugin_failures = 5,
+      .mcp_failures = 6,
+      .writer_health = {.complete = true, .events_written = 7, .events_dropped = 8, .writer_failures = 9, .bytes_written = 10}};
+  ava::diagnostics::TraceCounterSnapshot const second{
+      .captured_at = 20,
+      .runtime_starts = 10,
+      .provider_requests = 20,
+      .provider_failures = 30,
+      .session_failures = 40,
+      .plugin_failures = 50,
+      .mcp_failures = 60,
+      .writer_health = {.complete = true, .events_written = 70, .events_dropped = 80, .writer_failures = 90, .bytes_written = 100}};
+  expect(ava::diagnostics::write_trace_counter_snapshot(sequential_paths, first) == ava::diagnostics::ArtifactWriteStatus::Success &&
+             ava::diagnostics::write_trace_counter_snapshot(sequential_paths, second) == ava::diagnostics::ArtifactWriteStatus::Success,
+         "sequential trace-counter contributions merge successfully");
+  auto sequential = ava::diagnostics::read_trace_counter_snapshot(sequential_paths);
+  expect(sequential.record && sequential.record->captured_at == 20 && sequential.record->runtime_starts == 11 && sequential.record->provider_requests == 22 &&
+             sequential.record->provider_failures == 33 && sequential.record->session_failures == 44 && sequential.record->plugin_failures == 55 &&
+             sequential.record->mcp_failures == 66 && sequential.record->writer_health.complete && sequential.record->writer_health.events_written == 77 &&
+             sequential.record->writer_health.events_dropped == 88 && sequential.record->writer_health.writer_failures == 99 &&
+             sequential.record->writer_health.bytes_written == 110,
+         "sequential aggregation sums every outcome and health counter and keeps the latest timestamp");
+
+  auto const maximum = std::numeric_limits<std::uint64_t>::max();
+  ava::diagnostics::TraceCounterSnapshot const saturating{
+      .captured_at = 15,
+      .runtime_starts = maximum,
+      .provider_requests = maximum,
+      .provider_failures = maximum,
+      .session_failures = maximum,
+      .plugin_failures = maximum,
+      .mcp_failures = maximum,
+      .writer_health = {.complete = true, .events_written = maximum, .events_dropped = maximum, .writer_failures = maximum, .bytes_written = maximum}};
+  expect(ava::diagnostics::write_trace_counter_snapshot(sequential_paths, saturating) == ava::diagnostics::ArtifactWriteStatus::Success,
+         "trace-counter saturation contribution is accepted");
+  auto saturated = ava::diagnostics::read_trace_counter_snapshot(sequential_paths);
+  expect(saturated.record && saturated.record->captured_at == 20 && saturated.record->runtime_starts == maximum &&
+             saturated.record->provider_requests == maximum && saturated.record->provider_failures == maximum &&
+             saturated.record->session_failures == maximum && saturated.record->plugin_failures == maximum && saturated.record->mcp_failures == maximum &&
+             saturated.record->writer_health.complete && saturated.record->writer_health.events_written == maximum &&
+             saturated.record->writer_health.events_dropped == maximum && saturated.record->writer_health.writer_failures == maximum &&
+             saturated.record->writer_health.bytes_written == maximum,
+         "all aggregate numeric fields saturate and timestamps never move backward");
+  ava::diagnostics::TraceCounterSnapshot const incomplete{.captured_at = 21, .writer_health = {}};
+  expect(ava::diagnostics::write_trace_counter_snapshot(sequential_paths, incomplete) == ava::diagnostics::ArtifactWriteStatus::Success &&
+             ava::diagnostics::read_trace_counter_snapshot(sequential_paths).record &&
+             !ava::diagnostics::read_trace_counter_snapshot(sequential_paths).record->writer_health.complete,
+         "aggregate writer completeness uses logical AND");
+  std::filesystem::remove_all(sequential_root);
+
+  auto const concurrent_root = unique_diagnostic_root("diagnostic_counter_concurrent");
+  auto const concurrent_paths = diagnostic_paths(concurrent_root);
+  constexpr unsigned kProcesses = 8;
+  std::array<pid_t, kProcesses> children{};
+  for (unsigned index = 0; index < kProcesses; ++index)
+  {
+    auto const child = ::fork();
+    expect(child >= 0, "concurrent trace-counter child starts");
+    if (child == 0)
+    {
+      auto const value = static_cast<std::uint64_t>(index + 1);
+      ava::diagnostics::TraceCounterSnapshot const contribution{
+          .captured_at = static_cast<std::int64_t>(value),
+          .runtime_starts = value,
+          .provider_requests = 2 * value,
+          .provider_failures = 3 * value,
+          .session_failures = 4 * value,
+          .plugin_failures = 5 * value,
+          .mcp_failures = 6 * value,
+          .writer_health = {
+              .complete = true, .events_written = 7 * value, .events_dropped = 8 * value, .writer_failures = 9 * value, .bytes_written = 10 * value}};
+      auto const status = ava::diagnostics::write_trace_counter_snapshot(concurrent_paths, contribution);
+      ::_exit(status == ava::diagnostics::ArtifactWriteStatus::Success ? 0 : 1);
+    }
+    children[index] = child;
+  }
+  bool children_succeeded = true;
+  for (auto const child : children)
+  {
+    int status = 0;
+    children_succeeded = children_succeeded && ::waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  }
+  auto concurrent = ava::diagnostics::read_trace_counter_snapshot(concurrent_paths);
+  expect(children_succeeded && concurrent.record && concurrent.record->captured_at == 8 && concurrent.record->runtime_starts == 36 &&
+             concurrent.record->provider_requests == 72 && concurrent.record->provider_failures == 108 && concurrent.record->session_failures == 144 &&
+             concurrent.record->plugin_failures == 180 && concurrent.record->mcp_failures == 216 && concurrent.record->writer_health.complete &&
+             concurrent.record->writer_health.events_written == 252 && concurrent.record->writer_health.events_dropped == 288 &&
+             concurrent.record->writer_health.writer_failures == 324 && concurrent.record->writer_health.bytes_written == 360,
+         "blocking interprocess lock preserves every concurrent process contribution exactly once");
+  std::filesystem::remove_all(concurrent_root);
+}
+
+void test_trace_counter_lock_rejects_unsafe_targets_without_erasing_evidence()
+{
+  for (std::string const fixture : {"symlink", "fifo", "hardlink", "mode"})
+  {
+    auto const root = unique_diagnostic_root("diagnostic_counter_lock_" + fixture);
+    auto const paths = diagnostic_paths(root);
+    ava::diagnostics::TraceCounterSnapshot const baseline{
+        .captured_at = 1,
+        .runtime_starts = 1,
+        .writer_health = {.complete = true, .events_written = 1, .events_dropped = 0, .writer_failures = 0, .bytes_written = 10}};
+    expect(ava::diagnostics::write_trace_counter_snapshot(paths, baseline) == ava::diagnostics::ArtifactWriteStatus::Success,
+           "unsafe-lock fixture begins with counter evidence");
+    auto const diagnostics = paths.ava_state_dir / "diagnostics";
+    auto const lock = diagnostics / "trace-counters-v1.lock";
+    auto const evidence = diagnostics / "trace-counters-v1.json";
+    auto const original = [&] {
+      std::ifstream input(evidence, std::ios::binary);
+      return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    }();
+    std::filesystem::remove(lock);
+    if (fixture == "symlink")
+    {
+      write_test_file(diagnostics / "lock-target", "lock");
+      std::filesystem::create_symlink("lock-target", lock);
+    }
+    else if (fixture == "fifo")
+    {
+      expect(::mkfifo(lock.c_str(), 0600) == 0, "unsafe counter-lock FIFO fixture is created");
+    }
+    else if (fixture == "hardlink")
+    {
+      write_test_file(diagnostics / "lock-target", "lock");
+      std::filesystem::create_hard_link(diagnostics / "lock-target", lock);
+    }
+    else
+    {
+      write_test_file(lock, "lock");
+      static_cast<void>(::chmod(lock.c_str(), 0644));
+    }
+    auto const started = std::chrono::steady_clock::now();
+    auto const status = ava::diagnostics::write_trace_counter_snapshot(paths, baseline);
+    auto const elapsed = std::chrono::steady_clock::now() - started;
+    std::ifstream input(evidence, std::ios::binary);
+    std::string const after((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    bool temporary_found = false;
+    for (auto const& entry : std::filesystem::directory_iterator(diagnostics))
+      temporary_found = temporary_found || entry.path().filename().string().starts_with(".diagnostic-tmp-");
+    expect(status == ava::diagnostics::ArtifactWriteStatus::UnsafeStorage && elapsed < std::chrono::seconds(1) && after == original && !temporary_found,
+           "unsafe counter-lock " + fixture + " fails nonblockingly without erasing evidence or leaving a partial temporary");
+    std::filesystem::remove_all(root);
+  }
 }
 
 void test_private_artifact_reader_rejects_unsafe_and_malformed_files()
@@ -370,7 +564,7 @@ void test_private_artifact_storage_rejects_unsafe_ancestors()
   std::filesystem::create_directories(root / "replacement");
   static_cast<void>(::chmod((root / "replacement").c_str(), 0700));
   std::filesystem::create_directory_symlink(root / "replacement", paths.ava_state_dir);
-  ava::diagnostics::TraceCounterSnapshot const snapshot{.captured_at = 1};
+  ava::diagnostics::TraceCounterSnapshot const snapshot{.captured_at = 1, .writer_health = {}};
   expect(ava::diagnostics::write_trace_counter_snapshot(paths, snapshot) == ava::diagnostics::ArtifactWriteStatus::UnsafeStorage,
          "artifact writer rejects a symlinked AVA state root");
   std::filesystem::remove(paths.ava_state_dir);
@@ -391,6 +585,8 @@ void run_diagnostics_tests()
   test_historical_external_failure_projection_is_safe();
   test_phase2_typed_serialization_and_strict_parsing();
   test_private_artifact_storage_and_atomic_replacement();
+  test_trace_counter_writes_aggregate_sequentially_concurrently_and_saturate();
+  test_trace_counter_lock_rejects_unsafe_targets_without_erasing_evidence();
   test_private_artifact_reader_rejects_unsafe_and_malformed_files();
   test_support_publication_is_unique_private_and_concurrent();
   test_private_artifact_storage_rejects_unsafe_ancestors();

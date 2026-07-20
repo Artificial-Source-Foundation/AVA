@@ -407,10 +407,13 @@ std::optional<LastFailureRecord> parse_last_failure_record(std::string_view json
 
 std::string serialize_trace_counter_snapshot(TraceCounterSnapshot const& snapshot)
 {
+  auto const& health = snapshot.writer_health;
   return "{\"schema_version\":1,\"captured_at\":" + std::to_string(snapshot.captured_at) + ",\"runtime_starts\":" + std::to_string(snapshot.runtime_starts) +
          ",\"provider_requests\":" + std::to_string(snapshot.provider_requests) + ",\"provider_failures\":" + std::to_string(snapshot.provider_failures) +
          ",\"session_failures\":" + std::to_string(snapshot.session_failures) + ",\"plugin_failures\":" + std::to_string(snapshot.plugin_failures) +
-         ",\"mcp_failures\":" + std::to_string(snapshot.mcp_failures) + '}';
+         ",\"mcp_failures\":" + std::to_string(snapshot.mcp_failures) + ",\"writer_health\":{\"complete\":" + (health.complete ? "true" : "false") +
+         ",\"events_written\":" + std::to_string(health.events_written) + ",\"events_dropped\":" + std::to_string(health.events_dropped) +
+         ",\"writer_failures\":" + std::to_string(health.writer_failures) + ",\"bytes_written\":" + std::to_string(health.bytes_written) + "}}";
 }
 
 std::optional<TraceCounterSnapshot> parse_trace_counter_snapshot(std::string_view json) noexcept
@@ -418,10 +421,13 @@ std::optional<TraceCounterSnapshot> parse_trace_counter_snapshot(std::string_vie
   try
   {
     auto parsed = parse_strict(json);
-    if (!parsed ||
-        !exact_keys(*parsed, {"schema_version", "captured_at", "runtime_starts", "provider_requests", "provider_failures", "session_failures",
-                              "plugin_failures", "mcp_failures"}) ||
-        !(*parsed)["schema_version"].is_number_integer() || (*parsed)["schema_version"].get<int>() != kDiagnosticSchemaVersion)
+    if (!parsed || !(*parsed)["schema_version"].is_number_integer() || (*parsed)["schema_version"].get<int>() != kDiagnosticSchemaVersion)
+      return std::nullopt;
+    bool const legacy = exact_keys(*parsed, {"schema_version", "captured_at", "runtime_starts", "provider_requests", "provider_failures", "session_failures",
+                                             "plugin_failures", "mcp_failures"});
+    bool const current = exact_keys(*parsed, {"schema_version", "captured_at", "runtime_starts", "provider_requests", "provider_failures", "session_failures",
+                                              "plugin_failures", "mcp_failures", "writer_health"});
+    if (!legacy && !current)
       return std::nullopt;
     auto captured_at = timestamp_value((*parsed)["captured_at"]);
     auto runtime_starts = unsigned_value((*parsed)["runtime_starts"]);
@@ -432,13 +438,32 @@ std::optional<TraceCounterSnapshot> parse_trace_counter_snapshot(std::string_vie
     auto mcp_failures = unsigned_value((*parsed)["mcp_failures"]);
     if (!captured_at || !runtime_starts || !provider_requests || !provider_failures || !session_failures || !plugin_failures || !mcp_failures)
       return std::nullopt;
+    TraceWriterHealth health;
+    if (current)
+    {
+      auto const& value = (*parsed)["writer_health"];
+      if (!exact_keys(value, {"complete", "events_written", "events_dropped", "writer_failures", "bytes_written"}) || !value["complete"].is_boolean())
+        return std::nullopt;
+      auto events_written = unsigned_value(value["events_written"]);
+      auto events_dropped = unsigned_value(value["events_dropped"]);
+      auto writer_failures = unsigned_value(value["writer_failures"]);
+      auto bytes_written = unsigned_value(value["bytes_written"]);
+      if (!events_written || !events_dropped || !writer_failures || !bytes_written)
+        return std::nullopt;
+      health = {.complete = value["complete"].get<bool>(),
+                .events_written = *events_written,
+                .events_dropped = *events_dropped,
+                .writer_failures = *writer_failures,
+                .bytes_written = *bytes_written};
+    }
     return TraceCounterSnapshot{.captured_at = *captured_at,
                                 .runtime_starts = *runtime_starts,
                                 .provider_requests = *provider_requests,
                                 .provider_failures = *provider_failures,
                                 .session_failures = *session_failures,
                                 .plugin_failures = *plugin_failures,
-                                .mcp_failures = *mcp_failures};
+                                .mcp_failures = *mcp_failures,
+                                .writer_health = health};
   }
   catch (...)
   {

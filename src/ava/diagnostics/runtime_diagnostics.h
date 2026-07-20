@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/diagnostics/records.h"
 #include "ava/observability/run_observer.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/core/error.h"
@@ -19,6 +20,8 @@ enum class RuntimeFailureClass
   Tool,
   Runtime,
 };
+
+[[nodiscard]] TraceWriterHealth trace_writer_health_from_counters(ava::observability::QueuedJsonlObserverCounters const& counters) noexcept;
 
 // Application-lifetime owner for private production tracing and best-effort
 // last-failure persistence. The ordinary constructor is tracing-disabled and

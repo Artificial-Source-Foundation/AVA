@@ -435,7 +435,7 @@ ava::core::Result<runtime::Session> open_owned_runtime_session(runtime::OpenOpti
   return construct_runtime_session(options, store, lease, created, true, false, false);
 }
 
-ava::core::VoidResult replace_runtime_session(runtime::Session& destination, runtime::Session replacement)
+ava::core::VoidResult replace_runtime_session(runtime::Session& destination, runtime::Session&& replacement)
 {
   // Owner append routes retain controller state plus a Store reference. Stop
   // and join every old worker before retiring that state, then it is safe to

@@ -172,7 +172,7 @@ ava::core::Result<std::string_view> acp_stop_reason(ava::core::RuntimeTerminalOu
   return std::unexpected(std::move(error));
 }
 
-AcpSessionHost::AcpSessionHost(runtime::Session session, AcpSessionOptions options)
+AcpSessionHost::AcpSessionHost(runtime::Session&& session, AcpSessionOptions options)
     : session_(std::move(session)), options_(std::move(options)), session_id_(session_.store.session_id())
 {
   options_.run_options.exact_file_access.reset();
@@ -694,7 +694,7 @@ void AcpSessionRegistry::release_insertion() noexcept
     --pending_insertions_;
 }
 
-ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::insert_reserved(runtime::Session session)
+ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::insert_reserved(runtime::Session&& session)
 {
   auto id = session.store.session_id();
   auto host = std::make_shared<AcpSessionHost>(std::move(session), options_);

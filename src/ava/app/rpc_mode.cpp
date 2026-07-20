@@ -307,12 +307,15 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
 
 }  // namespace
 
-ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
                                    ava::provider::Transport& transport, ava::provider::Transport& auth_transport, runtime::RunOptions runtime_options,
                                    rpc::RpcLineReader& input, std::ostream& out)
 {
   // This function is called first-thing after creating a thread.
   Debug(NAMESPACE_DEBUG::init_thread("run_rpc_loop"));
+
+  runtime::session_ts::wat session_w(unlocked_session);
+  runtime::Session& session(*session_w);
 
   DoutEntering(dc::rpc, "run_rpc_loop(session_id=" << session.store.session_id() << ", provider_id=" << session.model.provider_id
                                                    << ", model_id=" << session.model.model_id << ", input=" << static_cast<void*>(&input)
@@ -1019,7 +1022,7 @@ ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptio
   return {};
 }
 
-ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
                                    ava::provider::Transport& transport, ava::provider::Transport& auth_transport, runtime::RunOptions runtime_options,
                                    std::istream& in, std::ostream& out, rpc::RpcInputWake wake)
 {
@@ -1027,21 +1030,21 @@ ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptio
   return run_rpc_loop(session, open_options, provider, transport, auth_transport, std::move(runtime_options), input, out);
 }
 
-ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
                                    ava::provider::Transport& transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out,
                                    rpc::RpcInputWake wake)
 {
   return run_rpc_loop(session, open_options, provider, transport, transport, std::move(runtime_options), in, out, std::move(wake));
 }
 
-ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
                                    ava::provider::Transport& transport, ava::provider::Transport& auth_transport, runtime::RunOptions runtime_options,
                                    std::istream& in, std::ostream& out)
 {
   return run_rpc_loop(session, open_options, provider, transport, auth_transport, std::move(runtime_options), in, out, rpc::RpcInputWake{});
 }
 
-ava::core::VoidResult run_rpc_loop(runtime::Session& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider,
                                    ava::provider::Transport& transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out)
 {
   return run_rpc_loop(session, open_options, provider, transport, transport, std::move(runtime_options), in, out, rpc::RpcInputWake{});
@@ -1078,6 +1081,7 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
     err << provider.error().format() << '\n';
     return 1;
   }
+  runtime::session_ts unlocked_session(std::move(*session));
   ava::provider::CurlCliTransport transport;
   ava::core::VoidResult result;
   if (&in == &std::cin)
@@ -1088,11 +1092,11 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
       err << input.error().format() << '\n';
       return 1;
     }
-    result = run_rpc_loop(*session, options.open_options, **provider, transport, transport, std::move(runtime_options), **input, out);
+    result = run_rpc_loop(unlocked_session, options.open_options, **provider, transport, transport, std::move(runtime_options), **input, out);
   }
   else
   {
-    result = run_rpc_loop(*session, options.open_options, **provider, transport, transport, std::move(runtime_options), in, out, std::move(wake));
+    result = run_rpc_loop(unlocked_session, options.open_options, **provider, transport, transport, std::move(runtime_options), in, out, std::move(wake));
   }
   if (!result)
   {

@@ -404,8 +404,9 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
+  ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read outside\"}\n");
   bool const completed = output_buffer.wait_contains("after policy allow", std::chrono::seconds(2));
@@ -456,8 +457,9 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
     ThreadSafeStringBuf output_buffer;
     std::ostream out(&output_buffer);
     ava::core::VoidResult result;
+    ava::app::runtime::session_ts unlocked_session(std::move(*session));
     std::jthread rpc_thread([&] {
-      result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+      result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
     });
 
     input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read note\"}\n");
@@ -481,7 +483,7 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
     {
       expect(jsonl.find("\"reason\":\"not approved for this run\"") != std::string::npos,
              "RPC permission deny reply preserves the client resolution reason in the event stream");
-      auto entries = session->store.load();
+      auto entries = ava::app::runtime::session_ts::rat(unlocked_session)->store.load();
       auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
       expect(audits.size() >= 2 && ava::core::json::string_field(audits.back().data_json, "resolution") == "deny" &&
                  ava::core::json::string_field(audits.back().data_json, "resolution_source") == "resolver" &&
@@ -524,8 +526,9 @@ void test_app_rpc_permission_reply_session_grant_flow()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
+  ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read outside once\"}\n");
   bool const requested = output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
@@ -545,11 +548,11 @@ void test_app_rpc_permission_reply_session_grant_flow()
   expect(result.has_value() && first_completed && grant_listed && second_completed, "RPC permission session grant loop exits successfully");
   expect(count_substrings(jsonl, "\"name\":\"permission_requested\"") == 1 && jsonl.find("\"payload_type\":\"permission\"") != std::string::npos &&
              jsonl.find("\"decision\":\"allow_session\"") != std::string::npos && jsonl.find("\"id\":\"grants\"") != std::string::npos &&
-             jsonl.find("\"session_id\":\"" + session->store.session_id() + "\"") != std::string::npos &&
+             jsonl.find("\"session_id\":\"" + ava::app::runtime::session_ts::rat(unlocked_session)->store.session_id() + "\"") != std::string::npos &&
              jsonl.find("\"operation\":\"read\"") != std::string::npos && jsonl.find("\"target_path\":\"" + outside_path.string() + "\"") != std::string::npos,
          "RPC session grants are serialized with their exact session and suppress only repeated matching prompts");
 
-  auto entries = session->store.load();
+  auto entries = ava::app::runtime::session_ts::rat(unlocked_session)->store.load();
   auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
   expect(audits.size() == 4 && ava::core::json::string_field(audits[3].data_json, "resolution_source") == "session_grant" &&
              ava::core::json::string_field(audits[3].data_json, "resolution") == "allow",
@@ -697,8 +700,9 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
+  ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"write outside\"}\n");
   bool const requested = output_buffer.wait_contains("\"diff_preview\"", std::chrono::seconds(2));
@@ -756,8 +760,9 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
+  ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
   auto const rpc_timeout = std::chrono::seconds(30);
 
   input_buffer.push(
@@ -783,7 +788,7 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   rpc_thread.join();
 
   auto const jsonl = output_buffer.str();
-  auto entries = session->store.load();
+  auto entries = ava::app::runtime::session_ts::rat(unlocked_session)->store.load();
   auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
   bool persistent_audited = false;
   for (auto const& audit : audits)
@@ -834,8 +839,9 @@ void test_app_rpc_question_reply_flow()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
+  ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"ask question\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));
@@ -881,8 +887,9 @@ void test_app_rpc_question_reply_selected_option_flow()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
+  ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"ask question\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));
@@ -933,8 +940,9 @@ void test_app_rpc_question_reply_selected_options_flow()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
+  ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"ask multi question\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));

@@ -72,7 +72,7 @@ struct AcpSessionOptions
 class AcpSessionHost
 {
  public:
-  AcpSessionHost(runtime::Session session, AcpSessionOptions options);
+  AcpSessionHost(runtime::Session&& session, AcpSessionOptions options);
   AcpSessionHost(AcpSessionHost const&) = delete;
   AcpSessionHost& operator=(AcpSessionHost const&) = delete;
   ~AcpSessionHost();
@@ -159,7 +159,7 @@ class AcpSessionRegistry
  private:
   [[nodiscard]] ava::core::VoidResult reserve_insertion(std::optional<std::string_view> session_id = std::nullopt);
   void release_insertion() noexcept;
-  [[nodiscard]] ava::core::Result<std::shared_ptr<AcpSessionHost>> insert_reserved(runtime::Session session);
+  [[nodiscard]] ava::core::Result<std::shared_ptr<AcpSessionHost>> insert_reserved(runtime::Session&& session);
 
   struct ListRecord
   {

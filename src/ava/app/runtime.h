@@ -54,7 +54,7 @@ void apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState 
 [[nodiscard]] ava::core::Result<bool> set_runtime_reasoning(runtime::Session& session, std::optional<runtime::ReasoningSelection> selection);
 
 // Stop background work and replace an attached session without memberwise move assignment.
-[[nodiscard]] ava::core::VoidResult replace_runtime_session(runtime::Session& destination, runtime::Session replacement);
+[[nodiscard]] ava::core::VoidResult replace_runtime_session(runtime::Session& destination, runtime::Session&& replacement);
 
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message,
                                                                         ava::provider::Provider const& provider, ava::provider::Transport& transport,

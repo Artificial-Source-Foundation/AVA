@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/diagnostics/safe_failure.h"
 #include "ava/mcp/config.h"
 #include "ava/mcp/stdio_client.h"
 #include "ava/mcp/stdio_client_support.h"
@@ -30,24 +31,6 @@ struct McpResourceBinding
   std::string model_tool_name;
 };
 
-std::string json_bool(bool value)
-{
-  return value ? "true" : "false";
-}
-
-std::string error_json(std::string_view tool, ava::core::Error const& error)
-{
-  return "{\"tool\":\"" + ava::core::json::escape(tool) + "\",\"ok\":false,\"error\":{\"category\":\"" +
-         ava::core::json::escape(ava::core::to_string(error.category())) + "\",\"message\":\"" + ava::core::json::escape(error.message()) +
-         "\",\"details\":\"" + ava::core::json::escape(error.format()) + "\"}}";
-}
-
-std::string public_error_json(std::string_view tool, ava::core::Error const& error)
-{
-  return "{\"tool\":\"" + ava::core::json::escape(tool) + "\",\"ok\":false,\"error\":{\"category\":\"" +
-         ava::core::json::escape(ava::core::to_string(error.category())) + "\",\"message\":\"" + ava::core::json::escape(error.message()) + "\"}}";
-}
-
 bool is_canceled_error(ava::core::Error const& error)
 {
   for (auto const& context : error.context())
@@ -63,29 +46,31 @@ bool is_canceled(ava::tools::ToolContext const& context)
   return context.cancel_requested && context.cancel_requested();
 }
 
-ava::agent::ToolDispatchResult tool_error_result(ava::agent::ProviderToolCall const& call, ava::core::Error const& error)
+ava::agent::ToolDispatchResult safe_tool_failure_result(ava::agent::ProviderToolCall const& call, ava::diagnostics::SafeFailure const& failure, bool canceled)
 {
-  return ava::agent::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = error_json(call.name, error), .payload = [&] {
-                                          ava::agent::ToolResultPayload payload;
-                                          if (is_canceled_error(error))
-                                          {
-                                            payload.status = ava::agent::ToolResultStatus::Canceled;
-                                          }
-                                          return payload;
-                                        }()};
+  auto const json = ava::diagnostics::serialize_safe_failure_json(failure);
+  auto const message = ava::diagnostics::serialize_safe_failure_human(failure);
+  ava::agent::ToolResultPayload payload;
+  payload.status = canceled ? ava::agent::ToolResultStatus::Canceled : ava::agent::ToolResultStatus::Error;
+  payload.content = json;
+  payload.content_type = "application/json";
+  payload.error_category = std::string(ava::diagnostics::to_string(failure.category));
+  payload.error_code = std::string(ava::diagnostics::to_string(failure.code));
+  payload.error_message = message;
+  return ava::agent::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = json, .payload = std::move(payload)};
 }
 
-ava::agent::ToolDispatchResult public_tool_error_result(ava::agent::ProviderToolCall const& call, ava::core::Error const& error)
+ava::agent::ToolDispatchResult tool_error_result(ava::agent::ProviderToolCall const& call, ava::core::Error const& error)
 {
-  return ava::agent::ToolDispatchResult{
-      .call_id = call.id, .name = call.name, .success = false, .result_text = public_error_json(call.name, error), .payload = [&] {
-        ava::agent::ToolResultPayload payload;
-        if (is_canceled_error(error))
-        {
-          payload.status = ava::agent::ToolResultStatus::Canceled;
-        }
-        return payload;
-      }()};
+  bool const canceled = is_canceled_error(error);
+  auto const failure = canceled ? ava::diagnostics::canceled_failure(ava::diagnostics::ComponentClass::Mcp)
+                                : ava::diagnostics::safe_failure_from_error(ava::diagnostics::ComponentClass::Mcp, error);
+  return safe_tool_failure_result(call, failure, canceled);
+}
+
+ava::agent::ToolDispatchResult remote_tool_error_result(ava::agent::ProviderToolCall const& call)
+{
+  return safe_tool_failure_result(call, ava::diagnostics::external_failure(ava::diagnostics::ComponentClass::Mcp), false);
 }
 
 ava::core::Error mcp_tool_error(ava::core::ErrorCategory category, std::string message, McpToolBinding const& binding)
@@ -191,16 +176,8 @@ McpStdioClientOptions client_options_for_context(ava::tools::ToolContext const& 
 
 std::string result_json(ava::agent::ProviderToolCall const& call, McpToolBinding const& binding, McpToolCallResult const& result)
 {
-  std::string text = "{\"tool\":\"" + ava::core::json::escape(call.name) + "\",\"ok\":" + json_bool(!result.is_error) + ",\"server\":\"" +
-                     ava::core::json::escape(binding.server.id) + "\",\"mcp_tool\":\"" + ava::core::json::escape(binding.tool.name) + "\",\"content\":\"" +
-                     ava::core::json::escape(result.content) + "\"";
-  if (result.is_error)
-  {
-    text += ",\"error\":{\"category\":\"tool\",\"message\":\"" + ava::core::json::escape(result.content.empty() ? "MCP tool returned error" : result.content) +
-            "\"}";
-  }
-  text += '}';
-  return text;
+  return "{\"tool\":\"" + ava::core::json::escape(call.name) + "\",\"ok\":true,\"server\":\"" + ava::core::json::escape(binding.server.id) +
+         "\",\"mcp_tool\":\"" + ava::core::json::escape(binding.tool.name) + "\",\"content\":\"" + ava::core::json::escape(result.content) + "\"}";
 }
 
 std::string resource_result_json(ava::agent::ProviderToolCall const& call, McpResourceBinding const& binding, McpResourceReadResult const& result)
@@ -212,17 +189,12 @@ std::string resource_result_json(ava::agent::ProviderToolCall const& call, McpRe
          ava::core::json::escape(result.content) + "\"}";
 }
 
-ava::agent::ToolResultPayload result_payload(McpToolCallResult const& result, std::string const& text)
+ava::agent::ToolResultPayload result_payload(std::string const& text)
 {
   ava::agent::ToolResultPayload payload;
-  payload.status = result.is_error ? ava::agent::ToolResultStatus::Error : ava::agent::ToolResultStatus::Success;
+  payload.status = ava::agent::ToolResultStatus::Success;
   payload.content_type = "application/json";
   payload.content = text;
-  if (result.is_error)
-  {
-    payload.error_category = "tool";
-    payload.error_message = result.content.empty() ? "MCP tool returned error" : result.content;
-  }
   return payload;
 }
 
@@ -310,9 +282,10 @@ ava::agent::ToolDispatchResult dispatch_mcp_tool(ava::tools::ToolContext const& 
   if (!shutdown)
     return tool_error_result(call, shutdown.error());
 
+  if (result->is_error)
+    return remote_tool_error_result(call);
   auto text = result_json(call, binding, *result);
-  return ava::agent::ToolDispatchResult{
-      .call_id = call.id, .name = call.name, .success = !result->is_error, .result_text = text, .payload = result_payload(*result, text)};
+  return ava::agent::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text, .payload = result_payload(text)};
 }
 
 ava::agent::ToolDispatchResult dispatch_mcp_resource(ava::tools::ToolContext const& context, ava::agent::ProviderToolCall const& call,
@@ -320,12 +293,12 @@ ava::agent::ToolDispatchResult dispatch_mcp_resource(ava::tools::ToolContext con
 {
   if (is_canceled(context))
   {
-    return public_tool_error_result(call, mcp_resource_canceled_error(binding));
+    return tool_error_result(call, mcp_resource_canceled_error(binding));
   }
   if (!ava::core::json::is_valid_object(call.arguments_json) || !json_object_has_no_fields(call.arguments_json))
   {
     auto error = mcp_resource_error(ava::core::ErrorCategory::InvalidArgument, "MCP resource read arguments must be an empty JSON object", binding);
-    return public_tool_error_result(call, error);
+    return tool_error_result(call, error);
   }
 
   auto tool_context = context;
@@ -334,35 +307,35 @@ ava::agent::ToolDispatchResult dispatch_mcp_resource(ava::tools::ToolContext con
   tool_context.current_call_id = call.id;
   if (auto permission = ensure_mcp_server_permission(tool_context, binding.server, call.name); !permission)
   {
-    return public_tool_error_result(call, permission.error());
+    return tool_error_result(call, permission.error());
   }
   if (is_canceled(tool_context))
   {
-    return public_tool_error_result(call, mcp_resource_canceled_error(binding));
+    return tool_error_result(call, mcp_resource_canceled_error(binding));
   }
   auto const command = binding.server.id + ":" + binding.resource.uri;
   if (auto permission = ava::tools::ensure_permission(tool_context, ava::permissions::Operation::McpResourceRead, binding.server.source_path, command,
                                                       call.name, "MCP resource read requires permission");
       !permission)
   {
-    return public_tool_error_result(call, permission.error());
+    return tool_error_result(call, permission.error());
   }
   if (is_canceled(tool_context))
   {
-    return public_tool_error_result(call, mcp_resource_canceled_error(binding));
+    return tool_error_result(call, mcp_resource_canceled_error(binding));
   }
   if (auto started = ava::tools::announce_tool_execution_start(tool_context); !started)
-    return public_tool_error_result(call, started.error());
+    return tool_error_result(call, started.error());
 
   auto client = McpStdioClient::start(binding.server, client_options_for_context(context), context.cancel_requested);
   if (!client)
-    return public_tool_error_result(call, client.error());
+    return tool_error_result(call, client.error());
   auto result = (*client)->read_resource(binding.resource.uri, context.cancel_requested);
   auto shutdown = (*client)->shutdown();
   if (!result)
-    return public_tool_error_result(call, result.error());
+    return tool_error_result(call, result.error());
   if (!shutdown)
-    return public_tool_error_result(call, shutdown.error());
+    return tool_error_result(call, shutdown.error());
 
   auto text = resource_result_json(call, binding, *result);
   return ava::agent::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text, .payload = resource_result_payload(text)};

@@ -56,6 +56,7 @@ set(AVA_TESTS_SOURCES
   "command_tests.cpp"
   "core_tests.cpp"
   "core_mode_json_permissions_tests.cpp"
+  "diagnostics_tests.cpp"
   "events_tests.cpp"
   "job_journal_tests.cpp"
   "lsp_tests.cpp"
@@ -101,6 +102,7 @@ ava_apply_sanitizers(ava_tests)
 
 set(AVA_TEST_SUITES
   core_mode
+  diagnostics
   acp
   session
   session_run_controller

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/diagnostics/safe_failure.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/provider_output_validation.h"
 #include "ava/session/assistant_output.h"
@@ -135,11 +136,15 @@ std::string compaction_context_text(ava::session::SessionEntry const& entry)
   return text;
 }
 
+std::optional<std::string> safe_external_failure_content(ava::session::SessionEntry const& entry);
+
 std::string tool_context_text(ava::session::SessionEntry const& entry)
 {
   auto const call_id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
   auto const name = ava::core::json::string_field(entry.data_json, "name").value_or("");
   auto const result = [&] {
+    if (auto const safe = safe_external_failure_content(entry))
+      return *safe;
     auto const structured = ava::core::json::object_field(entry.data_json, "structured_result");
     if (structured)
     {
@@ -181,6 +186,21 @@ std::optional<bool> bool_field(std::string_view object, std::string_view key)
   if (object.substr(*start, 5) == "false" && has_json_value_terminator(object, *start + 5))
     return false;
   return std::nullopt;
+}
+
+std::optional<std::string> safe_external_failure_content(ava::session::SessionEntry const& entry)
+{
+  auto const name = ava::core::json::string_field(entry.data_json, "name").value_or("");
+  auto const component = ava::diagnostics::external_tool_component(name);
+  if (!component)
+    return std::nullopt;
+  auto const status = ava::core::json::string_field(entry.data_json, "status").value_or("");
+  auto const success = bool_field(entry.data_json, "success");
+  bool const failed = !success || !*success || status == "error" || status == "canceled";
+  if (!failed)
+    return std::nullopt;
+  auto const failure = status == "canceled" ? ava::diagnostics::canceled_failure(*component) : ava::diagnostics::external_failure(*component);
+  return ava::diagnostics::serialize_safe_failure_json(failure);
 }
 
 bool is_utf8_continuation(unsigned char ch)
@@ -274,6 +294,8 @@ std::vector<ava::provider::ContentPart> tool_result_content_parts(ava::session::
   if (!validate_provider_tool_call_id(call_id))
     return {};
   auto result = [&] {
+    if (auto const safe = safe_external_failure_content(entry))
+      return *safe;
     auto const structured = ava::core::json::object_field(entry.data_json, "structured_result");
     if (structured)
     {

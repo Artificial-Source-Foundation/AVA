@@ -7,6 +7,7 @@
 #include "debug.h"
 
 void run_core_mode_tests();
+void run_diagnostics_tests();
 void run_acp_tests();
 void run_session_tests();
 void run_session_run_controller_tests();
@@ -56,6 +57,7 @@ struct TestSuite
 
 constexpr std::array kTestSuites{
     TestSuite{"core_mode", run_core_mode_tests},
+    TestSuite{"diagnostics", run_diagnostics_tests},
     TestSuite{"acp", run_acp_tests},
     TestSuite{"session", run_session_tests},
     TestSuite{"session_run_controller", run_session_run_controller_tests},

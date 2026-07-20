@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/diagnostics/safe_failure.h"
 #include "ava/plugin/runner_protocol.h"
 #include "ava/core/json.h"
 
@@ -9,6 +10,11 @@
 
 namespace ava::plugin {
 namespace {
+
+std::string safe_plugin_failure_json()
+{
+  return ava::diagnostics::serialize_safe_failure_json(ava::diagnostics::external_failure(ava::diagnostics::ComponentClass::Plugin));
+}
 
 constexpr int kMaxPluginJsonDepth = 128;
 
@@ -188,8 +194,10 @@ std::optional<PluginToolCallResult> parse_tool_result_response(std::string_view 
   auto content = ava::core::json::string_field(record, "content");
   if (!id || *id != request_id || !type || *type != "tool.result" || !ok || !content)
     return std::nullopt;
+  if (!*ok)
+    return PluginToolCallResult{.ok = false, .content = safe_plugin_failure_json(), .metadata_json = {}, .raw_json = {}};
   auto metadata = ava::core::json::object_field(record, "metadata");
-  return PluginToolCallResult{.ok = *ok, .content = std::move(*content), .metadata_json = metadata.value_or(std::string{}), .raw_json = std::string(record)};
+  return PluginToolCallResult{.ok = true, .content = std::move(*content), .metadata_json = metadata.value_or(std::string{}), .raw_json = std::string(record)};
 }
 
 std::optional<PluginCommandCallResult> parse_command_result_response(std::string_view record, std::string_view request_id)
@@ -204,8 +212,11 @@ std::optional<PluginCommandCallResult> parse_command_result_response(std::string
   auto content = ava::core::json::string_field(record, "content");
   if (!id || *id != request_id || !type || *type != "command.result" || !ok || !content)
     return std::nullopt;
+  if (!*ok)
+    return PluginCommandCallResult{.ok = false, .content = safe_plugin_failure_json(), .metadata_json = {}, .raw_json = {}};
   auto metadata = ava::core::json::object_field(record, "metadata");
-  return PluginCommandCallResult{.ok = *ok, .content = std::move(*content), .metadata_json = metadata.value_or(std::string{}), .raw_json = std::string(record)};
+  return PluginCommandCallResult{
+      .ok = true, .content = std::move(*content), .metadata_json = metadata.value_or(std::string{}), .raw_json = std::string(record)};
 }
 
 std::optional<PluginEventObserveResult> parse_event_observed_response(std::string_view record, std::string_view request_id)
@@ -219,9 +230,12 @@ std::optional<PluginEventObserveResult> parse_event_observed_response(std::strin
   auto ok = bool_field(record, "ok");
   if (!id || *id != request_id || !type || *type != "event.observed" || !ok)
     return std::nullopt;
+  if (!*ok)
+    return PluginEventObserveResult{.ok = false, .content = safe_plugin_failure_json(), .metadata_json = {}, .raw_json = {}};
   auto content = ava::core::json::string_field(record, "content").value_or("");
   auto metadata = ava::core::json::object_field(record, "metadata");
-  return PluginEventObserveResult{.ok = *ok, .content = std::move(content), .metadata_json = metadata.value_or(std::string{}), .raw_json = std::string(record)};
+  return PluginEventObserveResult{
+      .ok = true, .content = std::move(content), .metadata_json = metadata.value_or(std::string{}), .raw_json = std::string(record)};
 }
 
 std::optional<PluginDynamicResourceListResult> parse_resource_list_result_response(std::string_view record, std::string_view request_id,
@@ -247,8 +261,7 @@ std::optional<PluginDynamicResourceListResult> parse_resource_list_result_respon
     auto content = ava::core::json::string_field(record, "content");
     if (!content || content->size() > kPluginResourceContentMaxBytes)
       return std::nullopt;
-    return PluginDynamicResourceListResult{
-        .ok = false, .resources = {}, .content = std::move(*content), .metadata_json = metadata.value_or(std::string{}), .raw_json = std::string(record)};
+    return PluginDynamicResourceListResult{.ok = false, .resources = {}, .content = safe_plugin_failure_json(), .metadata_json = {}, .raw_json = {}};
   }
 
   auto resource_objects = object_array_field(record, "resources");
@@ -294,9 +307,11 @@ std::optional<PluginDynamicResourceReadResult> parse_resource_read_result_respon
   {
     return std::nullopt;
   }
+  if (!*ok)
+    return PluginDynamicResourceReadResult{.ok = false, .content = safe_plugin_failure_json(), .metadata_json = {}, .raw_json = {}};
   auto metadata = ava::core::json::object_field(record, "metadata");
   return PluginDynamicResourceReadResult{
-      .ok = *ok, .content = std::move(*content), .metadata_json = metadata.value_or(std::string{}), .raw_json = std::string(record)};
+      .ok = true, .content = std::move(*content), .metadata_json = metadata.value_or(std::string{}), .raw_json = std::string(record)};
 }
 
 std::optional<PluginProxyRequest> parse_proxy_request(std::string_view record)

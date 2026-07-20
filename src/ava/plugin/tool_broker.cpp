@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/diagnostics/safe_failure.h"
 #include "ava/tools/search_tools.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/discovery.h"
@@ -27,18 +28,6 @@ struct PluginToolBinding
   PluginToolContribution contribution;
   std::string model_tool_name;
 };
-
-std::string json_bool(bool value)
-{
-  return value ? "true" : "false";
-}
-
-std::string error_json(std::string_view tool, ava::core::Error const& error)
-{
-  return "{\"tool\":\"" + ava::core::json::escape(tool) + "\",\"ok\":false,\"error\":{\"category\":\"" +
-         ava::core::json::escape(ava::core::to_string(error.category())) + "\",\"message\":\"" + ava::core::json::escape(error.message()) +
-         "\",\"details\":\"" + ava::core::json::escape(error.format()) + "\"}}";
-}
 
 bool is_canceled_error(ava::core::Error const& error)
 {
@@ -354,49 +343,50 @@ std::string session_status_proxy_content_json(ava::tools::ToolContext const& con
          "\"}";
 }
 
+ava::agent::ToolDispatchResult safe_tool_failure_result(ava::agent::ProviderToolCall const& call, ava::diagnostics::SafeFailure const& failure, bool canceled)
+{
+  auto const json = ava::diagnostics::serialize_safe_failure_json(failure);
+  auto const message = ava::diagnostics::serialize_safe_failure_human(failure);
+  ava::agent::ToolResultPayload payload;
+  payload.status = canceled ? ava::agent::ToolResultStatus::Canceled : ava::agent::ToolResultStatus::Error;
+  payload.content = json;
+  payload.content_type = "application/json";
+  payload.error_category = std::string(ava::diagnostics::to_string(failure.category));
+  payload.error_code = std::string(ava::diagnostics::to_string(failure.code));
+  payload.error_message = message;
+  return ava::agent::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = json, .payload = std::move(payload)};
+}
+
 ava::agent::ToolDispatchResult tool_error_result(ava::agent::ProviderToolCall const& call, ava::core::Error const& error)
 {
-  return ava::agent::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = error_json(call.name, error), .payload = [&] {
-                                          ava::agent::ToolResultPayload payload;
-                                          if (is_canceled_error(error))
-                                          {
-                                            payload.status = ava::agent::ToolResultStatus::Canceled;
-                                          }
-                                          return payload;
-                                        }()};
+  bool const canceled = is_canceled_error(error);
+  auto const failure = canceled ? ava::diagnostics::canceled_failure(ava::diagnostics::ComponentClass::Plugin)
+                                : ava::diagnostics::safe_failure_from_error(ava::diagnostics::ComponentClass::Plugin, error);
+  return safe_tool_failure_result(call, failure, canceled);
+}
+
+ava::agent::ToolDispatchResult remote_tool_error_result(ava::agent::ProviderToolCall const& call)
+{
+  return safe_tool_failure_result(call, ava::diagnostics::external_failure(ava::diagnostics::ComponentClass::Plugin), false);
 }
 
 std::string result_json(ava::agent::ProviderToolCall const& call, PluginToolBinding const& binding, PluginToolCallResult const& result)
 {
-  std::string text = "{\"tool\":\"" + ava::core::json::escape(call.name) + "\",\"ok\":" + json_bool(result.ok) + ",\"plugin\":\"" +
-                     ava::core::json::escape(binding.manifest.id) + "\",\"plugin_tool\":\"" + ava::core::json::escape(binding.contribution.name) +
-                     "\",\"content\":\"" + ava::core::json::escape(result.content) + "\"";
+  std::string text = "{\"tool\":\"" + ava::core::json::escape(call.name) + "\",\"ok\":true,\"plugin\":\"" + ava::core::json::escape(binding.manifest.id) +
+                     "\",\"plugin_tool\":\"" + ava::core::json::escape(binding.contribution.name) + "\",\"content\":\"" +
+                     ava::core::json::escape(result.content) + "\"";
   if (!result.metadata_json.empty())
     text += ",\"metadata\":" + result.metadata_json;
-  if (!result.ok)
-  {
-    text += ",\"error\":{\"category\":\"tool\",\"message\":\"" +
-            ava::core::json::escape(result.content.empty() ? "plugin tool returned error" : result.content) + "\"";
-    if (!result.metadata_json.empty())
-      text += ",\"details\":\"" + ava::core::json::escape(result.metadata_json) + "\"";
-    text += '}';
-  }
   text += '}';
   return text;
 }
 
-ava::agent::ToolResultPayload result_payload(PluginToolCallResult const& result, std::string const& text)
+ava::agent::ToolResultPayload result_payload(std::string const& text)
 {
   ava::agent::ToolResultPayload payload;
-  payload.status = result.ok ? ava::agent::ToolResultStatus::Success : ava::agent::ToolResultStatus::Error;
+  payload.status = ava::agent::ToolResultStatus::Success;
   payload.content_type = "application/json";
   payload.content = text;
-  if (!result.ok)
-  {
-    payload.error_category = "tool";
-    payload.error_message = result.content.empty() ? "plugin tool returned error" : result.content;
-    payload.error_details = result.metadata_json;
-  }
   return payload;
 }
 
@@ -624,9 +614,10 @@ ava::agent::ToolDispatchResult dispatch_plugin_tool(ava::tools::ToolContext cons
   if (!shutdown)
     return tool_error_result(call, shutdown.error());
 
+  if (!result->ok)
+    return remote_tool_error_result(call);
   auto text = result_json(call, binding, *result);
-  return ava::agent::ToolDispatchResult{
-      .call_id = call.id, .name = call.name, .success = result->ok, .result_text = text, .payload = result_payload(*result, text)};
+  return ava::agent::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text, .payload = result_payload(text)};
 }
 
 std::string schema_json(std::string_view model_tool_name, PluginToolContribution const& contribution)

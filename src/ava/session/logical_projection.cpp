@@ -122,47 +122,6 @@ std::string logical_tool_call_data_json(AssistantOutputFunctionCall const& funct
          ",\"arguments\":" + json_string(function.arguments_json) + "}";
 }
 
-std::string sanitized_tool_result_data_json(SessionEntry const& entry, bool preserve_output_binding)
-{
-  // Rebuild from known session fields. Portable archives retain the exact v4
-  // binding; public projections deliberately omit it.
-  auto const call_id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
-  auto const name = ava::core::json::string_field(entry.data_json, "name").value_or("");
-  auto const binding = ava::core::json::string_field(entry.data_json, "assistant_output_entry_id");
-  auto const status = ava::core::json::string_field(entry.data_json, "status");
-  auto const result = ava::core::json::string_field(entry.data_json, "result");
-  auto const structured_result = ava::core::json::object_field(entry.data_json, "structured_result");
-
-  std::string data = "{";
-  bool first = true;
-  auto append = [&](std::string_view key, std::string_view value) {
-    if (!first)
-      data += ',';
-    first = false;
-    data += json_string(key) + ":" + json_string(value);
-  };
-  append("call_id", call_id);
-  append("name", name);
-  if (preserve_output_binding && binding && !binding->empty())
-    append("assistant_output_entry_id", *binding);
-  if (!first)
-    data += ',';
-  first = false;
-  data += "\"success\":" + std::string(bool_field_is_true(entry.data_json, "success") ? "true" : "false");
-  if (status)
-    append("status", *status);
-  if (result)
-    append("result", *result);
-  if (structured_result && ava::core::json::is_valid_object(*structured_result))
-  {
-    if (!first)
-      data += ',';
-    data += "\"structured_result\":" + *structured_result;
-  }
-  data += '}';
-  return data;
-}
-
 SessionEntry portable_output_item_entry(SessionEntry const& entry, AssistantOutputItem const& item)
 {
   auto portable = item;

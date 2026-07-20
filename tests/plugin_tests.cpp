@@ -7,6 +7,7 @@
 #include "ava/app/session_run_controller.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/file_tools.h"
+#include "ava/plugin/diagnostics.h"
 #include "ava/plugin/discovery.h"
 #include "ava/plugin/enablement.h"
 #include "ava/plugin/manifest.h"
@@ -539,9 +540,14 @@ void test_plugin_runner_protocol_parsing()
       ava::plugin::parse_tool_result_response("{\"id\":\"ava_tool_other\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"done\"}", "ava_tool_call_1");
   expect(!mismatched_tool_result, "plugin runner protocol rejects mismatched response IDs");
 
-  auto command_result =
-      ava::plugin::parse_command_result_response("{\"id\":\"ava_command_1\",\"type\":\"command.result\",\"ok\":false,\"content\":\"failed\"}", "ava_command_1");
-  expect(command_result && !command_result->ok && command_result->content == "failed", "plugin runner protocol parses command failures as structured results");
+  constexpr std::string_view failure_canary = "CANARY_PLUGIN_FAILURE_CONTENT_3e7a";
+  auto command_result = ava::plugin::parse_command_result_response(
+      "{\"id\":\"ava_command_1\",\"type\":\"command.result\",\"ok\":false,\"content\":\"CANARY_PLUGIN_FAILURE_CONTENT_3e7a\","
+      "\"metadata\":{\"secret\":\"CANARY_PLUGIN_FAILURE_METADATA_80b2\"}}",
+      "ava_command_1");
+  expect(command_result && !command_result->ok && command_result->content.find("external_failure") != std::string::npos &&
+             command_result->content.find(failure_canary) == std::string::npos && command_result->metadata_json.empty() && command_result->raw_json.empty(),
+         "plugin runner protocol replaces failed content, metadata, and raw JSON with SafeFailure");
 
   auto event_result = ava::plugin::parse_event_observed_response("{\"id\":\"ava_event_1\",\"type\":\"event.observed\",\"ok\":true}", "ava_event_1");
   expect(event_result && event_result->ok && event_result->content.empty(), "plugin runner protocol treats missing event content as empty text");
@@ -866,13 +872,14 @@ void test_plugin_runner_contained_failures()
   auto const exited_dir = root / "plugins" / "com.example.exited";
   write_text(exited_dir / "plugin.sh",
              "read line\n"
-             "printf '%s\\n' 'plugin exited during initialize' >&2\n"
+             "printf '%s\\n' 'CANARY_PLUGIN_STDERR_INIT_2f91' >&2\n"
              "exit 7\n");
   auto exited_options = runner_options(workspace, std::chrono::milliseconds(500));
   auto exited = ava::plugin::PluginProcess::start(runner_manifest(exited_dir, "com.example.exited", "plugin.sh"), exited_options);
   auto const exited_format = exited ? std::string{} : exited.error().format();
-  expect(!exited && exited_format.find("exit 7") != std::string::npos && exited_format.find("plugin exited during initialize") != std::string::npos,
-         "plugin runner reports early process exit status and stderr diagnostics: " + exited_format);
+  expect(!exited && exited_format.find("exit 7") != std::string::npos && exited_format.find("CANARY_PLUGIN_STDERR_INIT_2f91") == std::string::npos &&
+             exited_format.find("stderr_bytes") != std::string::npos,
+         "plugin runner reports early process exit status and safe stderr metadata: " + exited_format);
 
   auto const oversized_dir = root / "plugins" / "com.example.oversized";
   write_text(oversized_dir / "plugin.sh", "read line\nprintf '%s\\n' '" + std::string(200, 'x') + "'\n");
@@ -936,14 +943,17 @@ void test_plugin_runner_tool_calls()
              "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
              "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
              "read line\n"
-             "printf '%s\\n' '{\"id\":\"ava_tool_bad\",\"type\":\"tool.result\",\"ok\":true}'\n");
+             "printf '%s\\n' '{\"id\":\"ava_tool_bad\",\"type\":\"tool.result\",\"ok\":true,"
+             "\"content\":{\"secret\":\"CANARY_PLUGIN_MALFORMED_RESPONSE_d8f5\"}}'\n");
   auto malformed = ava::plugin::PluginProcess::start(runner_manifest(malformed_dir, "com.example.toolmalformed", "plugin.sh"),
                                                      runner_options(workspace, std::chrono::milliseconds(500)));
   expect(malformed.has_value(), "plugin runner starts malformed-result fake plugin");
   if (malformed)
   {
     auto result = (*malformed)->call_tool("todo_add", "{}", "bad");
-    expect(!result && result.error().message().find("malformed") != std::string::npos, "plugin runner rejects malformed tool results");
+    expect(!result && result.error().message().find("malformed") != std::string::npos &&
+               result.error().format().find("CANARY_PLUGIN_MALFORMED_RESPONSE_d8f5") == std::string::npos,
+           "plugin runner rejects malformed tool results without retaining raw response data");
   }
 
   auto const timeout_dir = root / "plugins" / "com.example.tooltimeout";
@@ -990,7 +1000,7 @@ void test_plugin_runner_tool_calls()
              "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
              "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
              "read line\n"
-             "printf '%s\\n' 'plugin exited during tool call' >&2\n"
+             "printf '%s\\n' 'CANARY_PLUGIN_STDERR_TOOL_61c8' >&2\n"
              "exit 9\n");
   auto crashed = ava::plugin::PluginProcess::start(runner_manifest(crashed_dir, "com.example.toolcrash", "plugin.sh"),
                                                    runner_options(workspace, std::chrono::milliseconds(500)));
@@ -999,8 +1009,9 @@ void test_plugin_runner_tool_calls()
   {
     auto result = (*crashed)->call_tool("todo_add", "{}", "crash");
     auto const result_format = result ? std::string{} : result.error().format();
-    expect(!result && result_format.find("exit 9") != std::string::npos && result_format.find("plugin exited during tool call") != std::string::npos,
-           "plugin runner reports tool-time process exits with stderr diagnostics: " + result_format);
+    expect(!result && result_format.find("exit 9") != std::string::npos && result_format.find("CANARY_PLUGIN_STDERR_TOOL_61c8") == std::string::npos &&
+               result_format.find("stderr_bytes") != std::string::npos,
+           "plugin runner reports tool-time process exits with safe stderr metadata: " + result_format);
   }
 }
 
@@ -1350,10 +1361,10 @@ void test_plugin_reported_dynamic_resource_errors_surface_text()
       session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamicerrors dyn-error", .permission_resolver = allow});
   auto const list_output = command_output_text(list);
   auto const read_output = command_output_text(read);
-  expect(list && list->handled && list_output.find("list boom") != std::string::npos && list_output.find("malformed") == std::string::npos,
-         "plugin-reported dynamic resource list errors surface plugin text: " + list_output);
-  expect(read && read->handled && read_output.find("read boom") != std::string::npos && read_output.find("malformed") == std::string::npos,
-         "plugin-reported dynamic resource read errors surface plugin text: " + read_output);
+  expect(list && list->handled && list_output.find("list boom") == std::string::npos && list_output.find("external_failure") != std::string::npos,
+         "plugin-reported dynamic resource list errors use SafeFailure: " + list_output);
+  expect(read && read->handled && read_output.find("read boom") == std::string::npos && read_output.find("external_failure") != std::string::npos,
+         "plugin-reported dynamic resource read errors use SafeFailure: " + read_output);
 }
 
 void test_dynamic_resource_commands_respect_prelaunch_cancellation()
@@ -1427,8 +1438,8 @@ void test_malformed_dynamic_resource_result_fails_safely()
       session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.malformedresource broken", .permission_resolver = allow});
   auto const output = command_output_text(read);
   expect(read && read->handled && output.find("plugin dynamic resource read result is malformed") != std::string::npos &&
-             output.find("com.example.malformedresource") != std::string::npos && output.find("broken") != std::string::npos,
-         "malformed dynamic resource read results fail safely with plugin/kind/name context: " + output);
+             output.find("response_bytes") != std::string::npos,
+         "malformed dynamic resource read results fail with bounded metadata: " + output);
 }
 
 void test_static_plugin_resources_remain_manifest_only()
@@ -1597,7 +1608,7 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
     expect(failures[0].event_name == "tool.result", "hook failure sink receives contributed hook event name");
     expect(failures[0].category == ava::core::ErrorCategory::Tool, "hook failure sink receives error category");
     expect(failures[0].message.find("plugin event response is malformed") != std::string::npos, "hook failure sink receives error message");
-    expect(failures[0].details.find("tool.result") != std::string::npos, "hook failure sink receives formatted error details");
+    expect(failures[0].details.find("response_bytes") != std::string::npos, "hook failure sink receives bounded formatted error metadata");
   }
 }
 
@@ -1687,11 +1698,29 @@ void test_plugin_tool_dispatcher()
   expect(request.find("\"type\":\"tool.call\"") != std::string::npos && request.find("\"tool\":\"todo_add\"") != std::string::npos,
          "dispatcher broker sends plugin protocol tool call");
 
+  write_text(plugin_dir / "plugin.sh",
+             "read line\n"
+             "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
+             "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
+             "read line\n"
+             "printf '%s\\n' '{\"id\":\"ava_tool_call_plugin_failure\",\"type\":\"tool.result\",\"ok\":false,"
+             "\"content\":\"CANARY_PLUGIN_BROKER_CONTENT_70d3\",\"metadata\":{\"secret\":\"CANARY_PLUGIN_BROKER_METADATA_f410\"}}'\n"
+             "while read line; do :; done\n");
+  auto remote_failure =
+      dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_plugin_failure", .name = model_tool_name, .arguments_json = "{\"text\":\"fail\"}"});
+  expect(remote_failure && !remote_failure->success && remote_failure->result_text.find("external_failure") != std::string::npos &&
+             remote_failure->result_text.find("CANARY_PLUGIN_BROKER_CONTENT_70d3") == std::string::npos &&
+             remote_failure->payload.content.find("CANARY_PLUGIN_BROKER_METADATA_f410") == std::string::npos &&
+             remote_failure->payload.error_code == "external_failure",
+         "plugin broker replaces failed remote content and metadata with SafeFailure");
+
   auto invalid_args = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_invalid", .name = model_tool_name, .arguments_json = "[]"});
-  expect(invalid_args && !invalid_args->success && invalid_args->result_text.find("JSON object") != std::string::npos,
-         "plugin tool dispatcher rejects non-object arguments before execution");
-  expect(invalid_args && invalid_args->payload.status == ava::agent::ToolResultStatus::Error && invalid_args->payload.error_category == "invalid_argument",
-         "plugin tool dispatcher attaches structured semantic error payloads");
+  expect(invalid_args && !invalid_args->success && invalid_args->result_text.find("JSON object") == std::string::npos &&
+             invalid_args->result_text.find("invalid_request") != std::string::npos,
+         "plugin tool dispatcher rejects non-object arguments with SafeFailure");
+  expect(invalid_args && invalid_args->payload.status == ava::agent::ToolResultStatus::Error && invalid_args->payload.error_category == "configuration" &&
+             invalid_args->payload.error_code == "invalid_request",
+         "plugin tool dispatcher attaches support-safe structured semantic errors");
 
   std::vector<ava::permissions::PermissionPrompt> denied_prompts;
   auto denied_context = context;
@@ -1702,8 +1731,9 @@ void test_plugin_tool_dispatcher()
   };
   ava::agent::ToolDispatcher denied_dispatcher(denied_context);
   auto denied = denied_dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_denied", .name = model_tool_name, .arguments_json = "{}"});
-  expect(denied && !denied->success && denied->result_text.find("plugin process launch requires permission") != std::string::npos && denied_prompts.size() == 1,
-         "plugin tool dispatcher respects permission denial before process execution");
+  expect(denied && !denied->success && denied->result_text.find("plugin process launch requires permission") == std::string::npos &&
+             denied->result_text.find("permission_denied") != std::string::npos && denied_prompts.size() == 1,
+         "plugin tool dispatcher reports permission denial with SafeFailure before process execution");
   expect(!denied_prompts.empty() && !denied_prompts.front().permission_request_id.empty(), "plugin permission denial prompt carries a request id");
   if (!denied_prompts.empty())
   {
@@ -2107,8 +2137,32 @@ void test_plugin_tool_dispatcher_rejects_invalid_result()
   auto const model_tool_name = ava::plugin::plugin_model_tool_name("com.example.invalid", "todo_add");
   ava::agent::ToolDispatcher dispatcher(context);
   auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_bad", .name = model_tool_name, .arguments_json = "{}"});
-  expect(dispatched && !dispatched->success && dispatched->result_text.find("malformed") != std::string::npos,
-         "dispatcher reports malformed plugin tool results as tool errors");
+  expect(dispatched && !dispatched->success && dispatched->result_text.find("malformed") == std::string::npos &&
+             dispatched->result_text.find("external_failure") != std::string::npos,
+         "dispatcher reports malformed plugin tool results with SafeFailure");
+}
+
+void test_plugin_failure_diagnostics_are_support_safe()
+{
+  constexpr std::string_view canary = "CANARY_PLUGIN_DISCOVERY_DIAGNOSTIC_5a2c";
+  auto const root = temp_root() / "plugin-safe-diagnostics";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  auto const plugin_dir = root / "workspace" / ".ava" / "plugins" / std::string(canary);
+  write_text(plugin_dir / "plugin.json", "{\"schema_version\":1,\"id\":\"CANARY_PLUGIN_DISCOVERY_DIAGNOSTIC_5a2c\"}");
+
+  auto const diagnostics = ava::plugin::collect_plugin_diagnostics(
+      ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = root / "global", .project_plugins_dir = root / "workspace" / ".ava" / "plugins"},
+      root / "state" / "plugin-enablement.json", root / "workspace");
+  expect(diagnostics.failures.size() == 1, "invalid plugin discovery produces one typed failure");
+  if (!diagnostics.failures.empty())
+  {
+    auto const json = ava::diagnostics::serialize_safe_failure_json(diagnostics.failures.front().failure);
+    auto const human = ava::diagnostics::serialize_safe_failure_human(diagnostics.failures.front().failure);
+    expect(json.find(canary) == std::string::npos && human.find(canary) == std::string::npos &&
+               diagnostics.failures.front().message.find(canary) == std::string::npos && diagnostics.failures.front().details.find(canary) == std::string::npos,
+           "stored and rendered PluginFailure diagnostics exclude plugin ids, paths, and raw Error text");
+  }
 }
 
 void test_plugin_tool_registry_skips_name_collisions()
@@ -2170,5 +2224,6 @@ void run_plugin_tests()
   test_plugin_tool_dispatcher();
   test_plugin_core_service_proxy_read_search_slice();
   test_plugin_tool_dispatcher_rejects_invalid_result();
+  test_plugin_failure_diagnostics_are_support_safe();
   test_plugin_tool_registry_skips_name_collisions();
 }

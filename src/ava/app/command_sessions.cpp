@@ -633,6 +633,8 @@ ava::core::Result<runtime::Session> reopen_session(runtime::Session const& curre
   options.mode = current.mode;
   options.tool_visibility = current.tool_visibility;
   options.paths = current.paths;
+  options.subagent_coordinator = current.subagent_coordinator;
+  options.subagent_delivery_manager = current.subagent_delivery_manager;
   return open_runtime_session(options);
 }
 
@@ -646,6 +648,8 @@ ava::core::Result<runtime::Session> create_fresh_session(runtime::Session const&
   options.mode = current.mode;
   options.tool_visibility = current.tool_visibility;
   options.paths = current.paths;
+  options.subagent_coordinator = current.subagent_coordinator;
+  options.subagent_delivery_manager = current.subagent_delivery_manager;
   return open_runtime_session(options);
 }
 
@@ -659,6 +663,8 @@ runtime::OpenOptions owned_replacement_options(runtime::Session const& current)
   options.paths = current.paths;
   options.prompt_overrides = current.prompt_overrides;
   options.offline = current.offline;
+  options.subagent_coordinator = current.subagent_coordinator;
+  options.subagent_delivery_manager = current.subagent_delivery_manager;
   return options;
 }
 
@@ -1196,7 +1202,8 @@ ava::core::Result<CommandResult> run_mode_command(runtime::Session& session)
   {
     return std::unexpected(std::move(appended.error()));
   }
-  apply_runtime_prompt_state(session, std::move(*prompt_state));
+  if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
+    return std::unexpected(std::move(refreshed.error()));
   add_output(result, "mode switched to " + ava::agent::to_string(session.mode));
   return result;
 }

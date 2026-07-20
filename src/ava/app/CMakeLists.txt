@@ -18,6 +18,7 @@ add_library(ava_app
   "command_connect.cpp"
   "command_format.cpp"
   "command_help.cpp"
+  "command_jobs.cpp"
   "command_mcp.cpp"
   "command_models.cpp"
   "command_permissions.cpp"
@@ -63,6 +64,7 @@ add_library(ava_app
   "runtime_retry.cpp"
   "runtime_sessions.cpp"
   "session_run_controller.cpp"
+  "subagent_delivery_manager.cpp"
   "runtime_session.cpp"
 )
 

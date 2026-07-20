@@ -752,6 +752,21 @@ void validate_message_entry(SessionReplayValidation& validation, std::size_t ind
     add_error(validation, SessionReplayIssueKind::InvalidMessageEntry, index, entry, "", "message entry data has duplicate keys");
     return;
   }
+  if (ava::core::json::field_value_start(entry.data_json, "provenance"))
+  {
+    if (entry.type != EntryType::UserMessage)
+    {
+      add_error(validation, SessionReplayIssueKind::InvalidMessageEntry, index, entry, "", "synthetic delivery provenance is only supported on user messages");
+      return;
+    }
+    auto provenance = parse_synthetic_delivery_provenance(entry);
+    if (!provenance || !*provenance)
+    {
+      add_error(validation, SessionReplayIssueKind::InvalidMessageEntry, index, entry, "",
+                "synthetic delivery provenance is malformed, unsupported, or unbounded");
+      return;
+    }
+  }
   auto const attachments_start = ava::core::json::field_value_start(entry.data_json, "attachments");
   if (!attachments_start)
     return;

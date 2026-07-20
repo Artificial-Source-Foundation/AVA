@@ -39,8 +39,8 @@ runtime::OpenOptions lifecycle_options(runtime::OpenOptions options, std::filesy
 ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session)
 {
   return ava::permissions::PermissionRuleStore{.global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-                                              .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-                                              .workspace_dir = session.workspace_dir};
+                                               .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
+                                               .workspace_dir = session.workspace_dir};
 }
 
 std::vector<std::filesystem::path> command_authority_roots_for_session(runtime::Session const& session)
@@ -55,13 +55,13 @@ std::vector<std::filesystem::path> command_authority_roots_for_session(runtime::
 }
 
 ava::core::Result<runtime::Session> create_runtime_session_at(runtime::OpenOptions base_options, std::filesystem::path const& workspace_root,
-                                                            std::filesystem::path const& current_dir)
+                                                              std::filesystem::path const& current_dir)
 {
   return open_runtime_session(lifecycle_options(std::move(base_options), workspace_root, current_dir));
 }
 
 ava::core::Result<runtime::Session> open_runtime_session_at(runtime::OpenOptions base_options, std::filesystem::path const& workspace_root,
-                                                          std::filesystem::path const& current_dir, std::string_view requested_session_id)
+                                                            std::filesystem::path const& current_dir, std::string_view requested_session_id)
 {
   auto options = lifecycle_options(std::move(base_options), workspace_root, current_dir);
   options.requested_session_id = std::string(requested_session_id);
@@ -73,15 +73,19 @@ ava::core::Result<runtime::Session> create_runtime_session_like(runtime::Session
   auto options = base_options;
   options.mode = current.mode;
   options.paths = current.paths;
+  options.subagent_coordinator = current.subagent_coordinator;
+  options.subagent_delivery_manager = current.subagent_delivery_manager;
   return create_runtime_session_at(std::move(options), current.workspace_dir, current.current_dir);
 }
 
 ava::core::Result<runtime::Session> open_runtime_session_like(runtime::Session const& current, runtime::OpenOptions const& base_options,
-                                                            std::string_view requested_session_id)
+                                                              std::string_view requested_session_id)
 {
   auto options = base_options;
   options.mode = current.mode;
   options.paths = current.paths;
+  options.subagent_coordinator = current.subagent_coordinator;
+  options.subagent_delivery_manager = current.subagent_delivery_manager;
   return open_runtime_session_at(std::move(options), current.workspace_dir, current.current_dir, requested_session_id);
 }
 

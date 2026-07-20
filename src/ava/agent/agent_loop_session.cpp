@@ -77,11 +77,17 @@ std::string image_attachments_json(std::vector<ava::session::ImageAttachmentRef>
   return json;
 }
 
-std::string user_message_data_json(std::string const& text, std::vector<ava::session::ImageAttachmentRef> const& attachments)
+std::string user_message_data_json(std::string const& text, std::vector<ava::session::ImageAttachmentRef> const& attachments,
+                                   std::optional<ava::session::SyntheticDeliveryProvenance> const& provenance = std::nullopt)
 {
   std::string json = "{\"text\":\"" + ava::core::json::escape(text) + "\"";
   if (!attachments.empty())
     json += ",\"attachments\":" + image_attachments_json(attachments);
+  if (provenance)
+  {
+    json += ",\"provenance\":{\"source\":\"" + ava::core::json::escape(provenance->source) + "\",\"delivery_id\":\"" +
+            ava::core::json::escape(provenance->delivery_id) + "\",\"prompt_fingerprint\":\"" + ava::core::json::escape(provenance->prompt_fingerprint) + "\"}";
+  }
   json += '}';
   return json;
 }
@@ -202,7 +208,8 @@ ava::core::Result<PersistedAssistantTurn> append_assistant_turn_impl(SessionAppe
                                         .usage_json = usage_json(usage, cost_usd)});
   if (!commit_data)
     return std::unexpected(std::move(commit_data.error()));
-  entries.push_back(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  persisted.committed_turn_id = ava::core::make_id("entry");
+  entries.push_back(ava::session::SessionEntry{.id = persisted.committed_turn_id,
                                                .parent_id = "",
                                                .type = ava::session::EntryType::AssistantTurnCommit,
                                                .timestamp = ava::session::now_timestamp(),
@@ -262,10 +269,11 @@ ava::core::Result<std::string> append_user_message(ava::session::SessionStore& s
 }
 
 ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text,
-                                                   std::vector<ava::session::ImageAttachmentRef> const& attachments)
+                                                   std::vector<ava::session::ImageAttachmentRef> const& attachments,
+                                                   std::optional<ava::session::SyntheticDeliveryProvenance> const& provenance)
 {
   auto id = ava::core::make_id("entry");
-  auto appended = append_entry_with_id(store, ava::session::EntryType::UserMessage, id, user_message_data_json(text, attachments));
+  auto appended = append_entry_with_id(store, ava::session::EntryType::UserMessage, id, user_message_data_json(text, attachments, provenance));
   if (!appended)
     return std::unexpected(std::move(appended.error()));
   return id;
@@ -332,10 +340,11 @@ ava::core::VoidResult append_cancel(ava::session::SessionStore& store, std::stri
 }
 
 ava::core::Result<std::string> append_user_message(SessionAppendSink const& sink, std::string const& text,
-                                                   std::vector<ava::session::ImageAttachmentRef> const& attachments)
+                                                   std::vector<ava::session::ImageAttachmentRef> const& attachments,
+                                                   std::optional<ava::session::SyntheticDeliveryProvenance> const& provenance)
 {
   auto id = ava::core::make_id("entry");
-  auto appended = append_entry(sink, ava::session::EntryType::UserMessage, id, user_message_data_json(text, attachments));
+  auto appended = append_entry(sink, ava::session::EntryType::UserMessage, id, user_message_data_json(text, attachments, provenance));
   if (!appended)
     return std::unexpected(std::move(appended.error()));
   return id;

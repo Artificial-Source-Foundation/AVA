@@ -620,6 +620,14 @@ void test_app_rpc_parsing_and_response_serialization()
   expect(!non_object_plugin_command_args && non_object_plugin_command_args.error().message() == "RPC arguments must be an object",
          "RPC parser rejects non-object plugin command arguments instead of silently defaulting");
 
+  auto wait_job = ava::app::parse_rpc_command_line(R"JSON({"id":"wait-job","type":"wait_job","job_id":"job_123","timeout_ms":45000})JSON");
+  expect(wait_job && wait_job->job_id == "job_123" && wait_job->timeout_ms == 45000, "RPC parser preserves strict job wait fields for handler clamping");
+  auto invalid_job_id = ava::app::parse_rpc_command_line(R"JSON({"id":"job","type":"get_job","job_id":42})JSON");
+  expect(!invalid_job_id && invalid_job_id.error().message() == "RPC job_id must be a string", "RPC parser rejects wrong-typed job identifiers");
+  auto invalid_job_timeout = ava::app::parse_rpc_command_line(R"JSON({"id":"job","type":"wait_job","job_id":"job_123","timeout_ms":"1"})JSON");
+  expect(!invalid_job_timeout && invalid_job_timeout.error().message() == "RPC timeout_ms must be an integer",
+         "RPC parser rejects wrong-typed job wait timeouts");
+
   auto direct_run_command = ava::app::parse_rpc_command_line(R"JSON({"id":"cmd","type":"run_command","command":"printf rpc-direct"})JSON");
   expect(direct_run_command && direct_run_command->command && *direct_run_command->command == "printf rpc-direct",
          "RPC parser preserves direct command execution payloads");
@@ -1240,6 +1248,130 @@ void test_app_rpc_state_list_sessions_and_open_session()
              jsonl.find("\"id\":\"open\"") != std::string::npos,
          "RPC state, list_sessions, and open_session return session metadata");
   expect(second->store.session_id() == first_id, "RPC open_session switches the active runtime session");
+}
+
+void test_app_rpc_job_controls_are_active_safe_and_redacted()
+{
+  auto const root = temp_root() / "app-rpc-job-controls";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC job fixture opens runtime session");
+  if (!session || !session->subagent_coordinator)
+    return;
+
+  struct WorkerState
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool started = false;
+    bool release = false;
+    ava::agent::BackgroundJobCompletion run(ava::agent::BackgroundJobContext const& context)
+    {
+      std::stop_callback wake(context.stop_token, [&] { changed.notify_all(); });
+      std::unique_lock lock(mutex);
+      started = true;
+      changed.notify_all();
+      changed.wait(lock, [&] { return release || context.stop_token.stop_requested(); });
+      if (context.stop_token.stop_requested())
+        return {.state = ava::agent::BackgroundJobState::Canceled,
+                .final_text = {},
+                .stop_reason = "canceled",
+                .error = std::nullopt,
+                .provider_iterations = 0,
+                .tool_calls = 0,
+                .tool_iterations = 0};
+      return {.state = ava::agent::BackgroundJobState::Completed,
+              .final_text = "bounded RPC result",
+              .stop_reason = "completed",
+              .error = std::nullopt,
+              .provider_iterations = 0,
+              .tool_calls = 0,
+              .tool_iterations = 0};
+    }
+    bool wait_started()
+    {
+      std::unique_lock lock(mutex);
+      return changed.wait_for(lock, std::chrono::seconds(1), [&] { return started; });
+    }
+    void finish()
+    {
+      std::lock_guard lock(mutex);
+      release = true;
+      changed.notify_all();
+    }
+  };
+
+  auto coordinator = session->subagent_coordinator;
+  auto const owner = session->store.session_id();
+  auto promoted_state = std::make_shared<WorkerState>();
+  auto canceled_state = std::make_shared<WorkerState>();
+  auto promotable = coordinator->start(owner, ava::agent::SubagentJobMode::Foreground, {.child_session_id = "rpc_promotable"},
+                                       [promoted_state](auto const& context) { return promoted_state->run(context); });
+  auto cancelable = coordinator->start(owner, ava::agent::SubagentJobMode::Foreground, {.child_session_id = "rpc_cancelable"},
+                                       [canceled_state](auto const& context) { return canceled_state->run(context); });
+  auto failed = coordinator->start(owner, ava::agent::SubagentJobMode::Foreground, {.child_session_id = "rpc_failed"}, [](auto const&) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "credential=rpc-secret raw provider body");
+    error.with_context("command", "curl --token rpc-secret");
+    return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Failed,
+                                               .final_text = {},
+                                               .stop_reason = "failed",
+                                               .error = std::move(error),
+                                               .provider_iterations = 0,
+                                               .tool_calls = 0,
+                                               .tool_iterations = 0};
+  });
+  expect(promotable && cancelable && failed && promoted_state->wait_started() && canceled_state->wait_started(), "RPC job fixture starts controlled jobs");
+  if (!promotable || !cancelable || !failed)
+    return;
+  static_cast<void>(coordinator->wait(owner, failed->job.identity.job_id, std::chrono::seconds(1)));
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  BlockingResponseTransport transport(sse_response(final_text_sse("parent terminal")));
+  ava::app::runtime::RunOptions runtime_options;
+  runtime_options.access_token = "token";
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult rpc_result;
+  std::jthread rpc_thread([&] {
+    rpc_result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
+  input_buffer.push("{\"id\":\"prompt\",\"type\":\"prompt\",\"message\":\"keep active\"}\n");
+  expect(transport.wait_for_request(std::chrono::seconds(2)), "RPC job fixture has an active parent prompt");
+  auto const promotable_id = promotable->job.identity.job_id;
+  auto const cancelable_id = cancelable->job.identity.job_id;
+  auto const failed_id = failed->job.identity.job_id;
+  input_buffer.push("{\"id\":\"jobs\",\"type\":\"list_jobs\"}\n");
+  input_buffer.push("{\"id\":\"status\",\"type\":\"get_job\",\"job_id\":\"" + promotable_id + "\"}\n");
+  input_buffer.push("{\"id\":\"wait\",\"type\":\"wait_job\",\"job_id\":\"" + promotable_id + "\",\"timeout_ms\":1}\n");
+  input_buffer.push("{\"id\":\"not-ready\",\"type\":\"get_job_result\",\"job_id\":\"" + promotable_id + "\"}\n");
+  input_buffer.push("{\"id\":\"promote\",\"type\":\"promote_job\",\"job_id\":\"" + promotable_id + "\"}\n");
+  input_buffer.push("{\"id\":\"cancel-job\",\"type\":\"cancel_job\",\"job_id\":\"" + cancelable_id + "\"}\n");
+  input_buffer.push("{\"id\":\"failed-result\",\"type\":\"get_job_result\",\"job_id\":\"" + failed_id + "\"}\n");
+  bool const controls_completed = output_buffer.wait_contains("\"id\":\"failed-result\"", std::chrono::seconds(2));
+  auto active_output = output_buffer.str();
+  expect(controls_completed && active_output.find("\"id\":\"promote\"") != std::string::npos &&
+             active_output.find("\"was_promoted\":true") != std::string::npos && active_output.find("\"id\":\"cancel-job\"") != std::string::npos &&
+             active_output.find("\"timed_out\":true") != std::string::npos && active_output.find("\"code\":\"job_not_ready\"") != std::string::npos &&
+             active_output.find("\"message\":\"subagent job failed\"") != std::string::npos && active_output.find("rpc-secret") == std::string::npos &&
+             active_output.find("raw provider body") == std::string::npos && active_output.find("\"code\":\"active_run\"") == std::string::npos,
+         "RPC job status, wait, result, cancel, and promote remain active-safe and redact provider/error context");
+
+  promoted_state->finish();
+  static_cast<void>(coordinator->wait(owner, promotable_id, std::chrono::seconds(1)));
+  transport.release();
+  input_buffer.close();
+  rpc_thread.join();
+  expect(rpc_result.has_value(), "RPC job active-safe loop shuts down cleanly");
 }
 
 void test_app_rpc_current_session_reads_reject_path_replacement()
@@ -2015,9 +2147,9 @@ void test_app_rpc_protocol_version_and_session_commands()
              jsonl.find("\"supported_protocol_versions\":[1]") != std::string::npos &&
              jsonl.find("\"session_entry_version\":" + std::to_string(ava::session::kCurrentSessionEntryVersion)) != std::string::npos &&
              jsonl.find("\"supported_session_entry_versions\":[0,1,2,3,4]") != std::string::npos &&
-             jsonl.find("\"capabilities\":[\"direct_bash_rpc\"]") != std::string::npos &&
-             jsonl.find("\"direct_command_types\":[\"run_bash\",\"run_command\"]") != std::string::npos,
-         "RPC get_protocol reports supported protocol, session entry versions, and direct bash capabilities");
+             jsonl.find("\"capabilities\":[\"direct_bash_rpc\",\"job_controls\"]") != std::string::npos &&
+             jsonl.find("\"direct_command_types\":[\"run_bash\",\"run_command\",\"list_jobs\"") != std::string::npos,
+         "RPC get_protocol reports supported protocol, session entry versions, and direct job capabilities");
   expect(jsonl.find("\"id\":\"messages\"") != std::string::npos && jsonl.find("\"messages\"") != std::string::npos &&
              jsonl.find(current_entry_version) != std::string::npos && jsonl.find("hello") != std::string::npos && jsonl.find("answer") != std::string::npos &&
              jsonl.find("visible reasoning") != std::string::npos && jsonl.find("hidden redacted rpc reasoning") == std::string::npos &&
@@ -2058,6 +2190,7 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
   std::filesystem::remove_all(root, remove_error);
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
+  std::filesystem::permissions(root, std::filesystem::perms::owner_all);
 
   auto open_session = [&](std::string_view name) {
     ava::app::runtime::OpenOptions options;
@@ -3336,6 +3469,7 @@ void run_app_rpc_tests()
   test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request();
   test_app_rpc_malformed_line_recovery_and_unknown_command();
   test_app_rpc_state_list_sessions_and_open_session();
+  test_app_rpc_job_controls_are_active_safe_and_redacted();
   test_app_rpc_current_session_reads_reject_path_replacement();
   test_app_rpc_session_metadata_name_and_labels();
   test_app_rpc_session_tree_command_and_switch_navigation();

@@ -19,7 +19,7 @@ External projects are behavior references only. AVA may adopt useful product beh
 | # | Workstream | Status | Implementation |
 | --- | --- | --- | --- |
 | 1 | Normal coding-command permissions and execution | Direction approved 2026-07-19; recorded below | Implemented and validated 2026-07-19 |
-| 2 | Background subagent job controls | Awaiting focused research and discussion | Not started |
+| 2 | Foreground/background subagent execution and job controls | Direction approved 2026-07-20; recorded below | Implemented and validated 2026-07-20 |
 | 3 | Privacy-safe diagnostics and support bundles | Awaiting focused research and discussion | Not started |
 | 4 | Context-compaction correctness and configuration | Awaiting focused research and discussion | Not started |
 | 5 | Automatic session titles | Awaiting focused research and discussion | Not started |
@@ -464,3 +464,64 @@ The final implementation retains these responsibilities across `src/ava/command/
 - Letting checked-in project files, plugins, MCP servers, or model output grant command authority.
 - Adding model-authored regex/glob permission patterns.
 - Claiming sandbox, cgroup, network, or descendant containment without verified evidence.
+
+---
+
+# Workstream 2: Foreground And Background Subagents
+
+## Implementation Record
+
+Implemented on `develop` on 2026-07-20. AVA now runs the same configured specialized workers in explicit foreground and background modes. Foreground tasks synchronously return their bounded summary; background tasks return immediately and continue concurrently. A running foreground task can be promoted without restarting it or changing its job, task, child-session, provider-call, or usage identity.
+
+An application-scoped coordinator owns live workers across in-process session navigation. Per-parent owner locks prevent a second AVA process from recovering a live job, while lazy activation and idle detach release avoid locking unrelated or historical parent sessions. Execution remains process-local: shutdown requests cooperative cancellation, restart marks unmatched work interrupted, and child-session history remains durable without resurrecting side effects.
+
+A strict, owner-only journal records bounded job transitions and automatic-delivery state. Background terminal summaries are delivered to the parent after the current committed turn boundary through isolated, zero-tool provider runs. Structured synthetic provenance, stable delivery identities, bounded retries, and commit acknowledgement make delivery replay-safe and prevent ordinary user text from forging completion. Retained parent capsules preserve exact session append/read authority and refresh model, reasoning, mode, trust, prompt, and credential state before delivery.
+
+The model-visible `job` tool supports owner-scoped list, status, wait, result, and cancel. `/jobs` and RPC expose the same controls plus out-of-band promotion; TUI `/jobs` controls remain usable during an active run. Rich child-chat tabs/navigation and a dedicated promotion keybinding remain frontend follow-up work over the implemented backend contract.
+
+## Validation Record
+
+Validation used no paid live-provider calls.
+
+- The normal configured CTest suite passed all 80 executed checks out of 97 registered checks in 79.24 seconds. The 17 skips were the credential-gated provider check, optional official ACP SDK check, 13 opt-in tmux scenarios, and Kitty-image/OSC-8 terminal smokes.
+- The sanitizer CTest suite passed the same 80 executed checks with zero failures in 210.27 seconds under the intentional two-job cap.
+- All 13 opt-in tmux TUI scenarios executed concurrently and passed in 12.85 seconds.
+- Focused journal, coordinator, delivery-manager, AgentLoop, task/job-tool, runtime/session, RPC, command-registry, and TUI tests passed. Coverage includes foreground completion, direct background execution, promotion without restart, cancellation races, crash interruption, delivery retry/acknowledgement, structured provenance, owner isolation, per-parent process locks, unrelated-parent independence, active-safe controls, stale configuration/credential refresh, and navigation while work remains active.
+- The integrated security/correctness review identified six material findings. The focused re-review verified W2-002 through W2-006; its remaining W2-001 unrelated-parent admission race was fixed with per-parent start accounting and a deterministic cross-process regression test. No known material finding remains open.
+- Changed C++ was formatted and `git diff --check` passed.
+
+## Approved Product Direction
+
+AVA exposes the same configured specialized workers through two explicit execution modes.
+
+A foreground subagent is synchronous: the parent agent waits for the child, the current conversation is blocked until the child finishes or is promoted, and permission/question interaction may use the active foreground UI. Its final bounded summary returns directly as the `task` tool result.
+
+A background subagent is asynchronous: launch returns immediately, the parent conversation remains usable, and the child runs concurrently under delegated authority without interrupting the main conversation with modal prompts. A task may start in background mode or a running foreground task may be promoted to background by a future frontend action. Promotion does not restart the child or consume a second task identity.
+
+Background work continues while the user navigates among the parent and child conversations in the same AVA process. Explicit cancellation or AVA process shutdown stops it; execution is not resurrected after restart. The child session remains durable and inspectable after completion, cancellation, or interruption.
+
+When either mode finishes, the parent agent receives the child's bounded final summary. Foreground delivery is the synchronous tool result. Background delivery is automatic: if the parent is idle, delivery starts promptly; if the parent has an active turn, AVA queues the completion and delivers it at the next safe committed turn boundary rather than interleaving records into an active assistant transaction. Completion delivery must be durable, deduplicable by stable identity, and replay-safe.
+
+The backend provides owner-bound list, status, wait, result, cancel, and promotion operations. Model-facing job controls expose list, status, wait, result, and cancel; owner-safe promotion remains an out-of-band backend, RPC, and `/jobs` operation because a blocked parent model cannot invoke it. These surfaces use the same authority and state machine. Rich child-chat navigation, tabs, and a promotion keyboard shortcut remain frontend follow-up work, but the backend contract required by that UI belongs to this workstream.
+
+## Approved Boundaries
+
+- Foreground and background are execution modes, not duplicate agent-definition formats.
+- Parent, child task, and live job identities remain explicit and stable; live execution state is not confused with durable child-session history.
+- Background children do not display permission or question modals over the main conversation. Operations lacking delegated or automatic authority stop with an actionable child outcome until richer child-chat interaction is designed.
+- Background completion summaries are bounded; the child session is the source of truth for full history.
+- Navigation within the process does not cancel jobs. Process shutdown requests cooperative cancellation and persists the resulting terminal/interrupted state without claiming worker resurrection.
+- Completion notification is additive to status/result lookup and must not be the only way to recover a finished result.
+- Recursive unbounded background task graphs remain disabled, and existing running/retention/token/output limits remain enforced.
+- Pi and OpenCode are behavior references only. Pi core intentionally omits subagents; OpenCode's experimental background-task notification behavior informs AVA's product flow without defining its architecture.
+
+## Final-Review Finding Ledger
+
+| ID | Status |
+| --- | --- |
+| W2-001 | Fixed and validated 2026-07-20 |
+| W2-002 | Fixed and validated 2026-07-20 |
+| W2-003 | Fixed and validated 2026-07-20 |
+| W2-004 | Fixed and validated 2026-07-20 |
+| W2-005 | Fixed and validated 2026-07-20 |
+| W2-006 | Fixed and validated 2026-07-20 |

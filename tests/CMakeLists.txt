@@ -57,6 +57,7 @@ set(AVA_TESTS_SOURCES
   "core_tests.cpp"
   "core_mode_json_permissions_tests.cpp"
   "events_tests.cpp"
+  "job_journal_tests.cpp"
   "lsp_tests.cpp"
   "mcp_tests.cpp"
   "permission_rules_tests.cpp"
@@ -67,6 +68,8 @@ set(AVA_TESTS_SOURCES
   "provider_openai_tests.cpp"
   "session_tests.cpp"
   "session_run_controller_tests.cpp"
+  "subagent_coordinator_tests.cpp"
+  "subagent_delivery_manager_tests.cpp"
   "tool_scheduler_tests.cpp"
   "tools_file_tests.cpp"
   "tools_process_network_tests.cpp"
@@ -101,6 +104,8 @@ set(AVA_TEST_SUITES
   acp
   session
   session_run_controller
+  subagent_coordinator
+  subagent_delivery_manager
   core_json_permission
   app_command_classification
   app_command_registry
@@ -123,6 +128,7 @@ set(AVA_TEST_SUITES
   agent_loop
   agent_tool_dispatcher
   tool_scheduler
+  job_journal
   lsp
   plugin
   mcp

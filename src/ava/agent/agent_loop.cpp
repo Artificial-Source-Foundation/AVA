@@ -2,6 +2,7 @@
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/assistant_turn.h"
+#include "ava/agent/job_control.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/provider_output_validation.h"
 #include "ava/agent/stream_bridge.h"
@@ -14,12 +15,14 @@
 #include "ava/agent/usage_accounting.h"
 #include "ava/session/assistant_output.h"
 #include "ava/session/attachments.h"
+#include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -279,6 +282,7 @@ void add_excluded_tool(ToolVisibilityOptions& visibility, std::string_view name)
 ToolVisibilityOptions subagent_tool_visibility(ToolVisibilityOptions parent, SubagentToolPreset tool_preset)
 {
   add_excluded_tool(parent, "task");
+  add_excluded_tool(parent, "job");
   if (tool_preset != SubagentToolPreset::ReadOnly)
     return parent;
 
@@ -480,21 +484,18 @@ ava::observability::TraceOutcome terminal_outcome(ava::core::Error const& error)
   }
 }
 
-void append_background_error_best_effort(SessionAppendSink const& append_sink, ava::core::Error const& error)
+void append_subagent_error_best_effort(SessionAppendSink const& append_sink, ava::core::Error const& error)
 {
-  if (append_sink)
-    static_cast<void>(append_error(append_sink, error));
+  if (!append_sink)
+    return;
+  auto safe = ava::core::Error(error.category(), safe_subagent_error_message(error));
+  static_cast<void>(append_error(append_sink, safe));
 }
 
-void append_background_parent_error_best_effort(SessionAppendSink const& parent_append, std::string const& task_id, std::string const& subagent_type,
-                                                ava::core::Error error)
+bool subagent_terminal(SubagentExecutionState state) noexcept
 {
-  // Parent notifications are owner-routed. A completed/stale parent route
-  // deliberately rejects rather than writing around its append authority.
-  error.with_context("background_task_id", task_id);
-  error.with_context("subagent_type", subagent_type);
-  if (parent_append)
-    static_cast<void>(append_error(parent_append, error));
+  return state == SubagentExecutionState::Completed || state == SubagentExecutionState::Failed || state == SubagentExecutionState::Canceled ||
+         state == SubagentExecutionState::Interrupted;
 }
 
 BackgroundJobCompletion background_failure_completion(BackgroundJobContext const& context, ava::core::Error const& error)
@@ -620,9 +621,11 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     if (options_.session_mutex)
     {
       std::lock_guard lock(*options_.session_mutex);
-      return options_.append_entry ? append_user_message(options_.append_entry, text, attachments) : append_user_message(store, text, attachments);
+      return options_.append_entry ? append_user_message(options_.append_entry, text, attachments, options_.synthetic_user_message_provenance)
+                                   : append_user_message(store, text, attachments, options_.synthetic_user_message_provenance);
     }
-    return options_.append_entry ? append_user_message(options_.append_entry, text, attachments) : append_user_message(store, text, attachments);
+    return options_.append_entry ? append_user_message(options_.append_entry, text, attachments, options_.synthetic_user_message_provenance)
+                                 : append_user_message(store, text, attachments, options_.synthetic_user_message_provenance);
   };
   auto build_messages_locked = [&]() -> ava::core::Result<BuiltProviderMessages> {
     if (options_.session_mutex)
@@ -813,9 +816,19 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       error.with_context("task_id", *request.task_id);
       return std::unexpected(std::move(error));
     }
-    if (request.background && (!options_.background_provider_factory || !options_.background_transport_factory || !options_.background_jobs))
+    bool const has_provider_factory = static_cast<bool>(options_.background_provider_factory);
+    bool const has_transport_factory = static_cast<bool>(options_.background_transport_factory);
+    bool const has_coordinator = static_cast<bool>(options_.subagent_coordinator);
+    if (request.background && (!has_provider_factory || !has_transport_factory || (!has_coordinator && !options_.background_jobs)))
     {
       auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "background task subagents are unavailable");
+      error.with_context("subagent_type", request.subagent_type);
+      return std::unexpected(std::move(error));
+    }
+    bool const use_coordinator = has_coordinator && has_provider_factory && has_transport_factory;
+    if (!request.background && (has_coordinator || has_provider_factory || has_transport_factory) && !use_coordinator)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "coordinated foreground task subagents are unavailable");
       error.with_context("subagent_type", request.subagent_type);
       return std::unexpected(std::move(error));
     }
@@ -871,7 +884,6 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     // and outlive the parent.
     child_options.append_entry = nullptr;
     child_options.append_batch = nullptr;
-    child_options.parent_notification_sink = nullptr;
     child_options.on_phase = nullptr;
     child_options.on_tool_event = nullptr;
     child_options.on_tool_progress = nullptr;
@@ -880,6 +892,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     child_options.compact_context = nullptr;
     child_options.background_provider_factory = nullptr;
     child_options.background_transport_factory = nullptr;
+    child_options.subagent_coordinator = nullptr;
     child_options.background_jobs = nullptr;
     // A child owns a fresh lifecycle/session identity. Parent IDs are typed
     // correlation metadata only and never become child lifecycle IDs.
@@ -891,59 +904,76 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
                                    .parent_turn_id = trace_context.turn_id,
                                    .parent_session_id = store.session_id()};
 
-    if (request.background)
+    if (request.background || use_coordinator)
     {
       auto const task_id = child_store.session_id();
       auto const session_path = child_store.session_path();
-      auto background_provider = options_.background_provider_factory();
-      if (!background_provider)
-        return std::unexpected(std::move(background_provider.error()));
-      auto background_transport = options_.background_transport_factory();
-      if (!background_transport)
-        return std::unexpected(std::move(background_transport.error()));
-      auto provider_instance = std::move(*background_provider);
-      auto transport_instance = std::move(*background_transport);
-      auto parent_append = options_.parent_notification_sink;
-      child_options.permission_resolver = nullptr;
-      child_options.question_resolver = nullptr;
+      auto child_provider = options_.background_provider_factory();
+      if (!child_provider)
+      {
+        auto error = std::move(child_provider.error());
+        if (!request.task_id)
+          ava::session::rollback_created_session_with_context(child_store, child_lease, error);
+        return std::unexpected(std::move(error));
+      }
+      auto child_transport = options_.background_transport_factory();
+      if (!child_transport)
+      {
+        auto error = std::move(child_transport.error());
+        if (!request.task_id)
+          ava::session::rollback_created_session_with_context(child_store, child_lease, error);
+        return std::unexpected(std::move(error));
+      }
+      auto interaction_gate = SubagentInteractionGate::create(request.background ? SubagentJobMode::Background : SubagentJobMode::Foreground,
+                                                              options_.permission_resolver, options_.question_resolver);
+      child_options.permission_resolver = interaction_gate->permission_resolver();
+      child_options.question_resolver = interaction_gate->question_resolver();
       child_options.session_mutex = nullptr;
       child_options.lsp_diagnostics_provider = nullptr;
-      struct BackgroundTaskRunState
+      struct CoordinatedTaskResultState
+      {
+        std::mutex mutex;
+        std::optional<AgentLoopResult> terminal_result = std::nullopt;
+      };
+      struct CoordinatedTaskRunState
       {
         ava::session::SessionStore child_store;
         ava::session::SessionLease child_lease;
         AgentLoopOptions child_options;
         SessionAppendSink child_append;
         std::string prompt;
-        SessionAppendSink parent_append;
-        std::string task_id;
-        std::string subagent_type;
+        std::shared_ptr<CoordinatedTaskResultState> result_state;
         std::unique_ptr<ava::provider::Provider> provider_instance;
         std::unique_ptr<ava::provider::Transport> transport_instance;
+        std::shared_ptr<SubagentInteractionGate> interaction_gate;
       };
-      auto run_state = std::make_shared<BackgroundTaskRunState>(BackgroundTaskRunState{.child_store = std::move(child_store),
-                                                                                       .child_lease = std::move(child_lease),
-                                                                                       .child_options = std::move(child_options),
-                                                                                       .child_append = {},
-                                                                                       .prompt = request.prompt,
-                                                                                       .parent_append = std::move(parent_append),
-                                                                                       .task_id = task_id,
-                                                                                       .subagent_type = request.subagent_type,
-                                                                                       .provider_instance = std::move(provider_instance),
-                                                                                       .transport_instance = std::move(transport_instance)});
-      // The run state now owns the child store and its original lease. Create
-      // the duplicate append target only after that ownership is stable; the
-      // sink captures the target, never the run state, so no cycle is formed.
+      auto run_state = std::make_shared<CoordinatedTaskRunState>(CoordinatedTaskRunState{.child_store = std::move(child_store),
+                                                                                         .child_lease = std::move(child_lease),
+                                                                                         .child_options = std::move(child_options),
+                                                                                         .child_append = {},
+                                                                                         .prompt = request.prompt,
+                                                                                         .result_state = std::make_shared<CoordinatedTaskResultState>(),
+                                                                                         .provider_instance = std::move(*child_provider),
+                                                                                         .transport_instance = std::move(*child_transport),
+                                                                                         .interaction_gate = interaction_gate});
       auto child_target =
           ava::session::SessionAppendTarget::create_persistent(run_state->child_store, run_state->child_lease, run_state->child_options.session_read_limits);
       if (!child_target)
-        return std::unexpected(std::move(child_target.error()));
+      {
+        auto error = std::move(child_target.error());
+        if (!request.task_id)
+          ava::session::rollback_created_session_with_context(run_state->child_store, run_state->child_lease, error);
+        return std::unexpected(std::move(error));
+      }
       if (auto reconciled = reconcile_unresolved_committed_function_calls(
               *run_state->child_options.session_read_authority, [target = *child_target](ava::session::SessionEntry entry) { return target->append(entry); },
               run_state->child_options.session_read_limits);
           !reconciled)
       {
-        return std::unexpected(std::move(reconciled.error()));
+        auto error = std::move(reconciled.error());
+        if (!request.task_id)
+          ava::session::rollback_created_session_with_context(run_state->child_store, run_state->child_lease, error);
+        return std::unexpected(std::move(error));
       }
       auto child_append_target = *child_target;
       run_state->child_options.append_entry = [target = child_append_target](ava::session::SessionEntry entry) { return target->append(entry); };
@@ -951,42 +981,137 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
         return target->append_batch(std::move(entries));
       };
       run_state->child_append = run_state->child_options.append_entry;
-      auto job = options_.background_jobs->start(
-          BackgroundJobStartOptions{.title = request.description,
-                                    .description = request.prompt,
-                                    .subagent_type = request.subagent_type,
-                                    .child_session_id = task_id,
-                                    .child_session_path = session_path},
-          [run_state = std::move(run_state)](BackgroundJobContext const& context) mutable {
-            run_state->child_options.cancel_requested = [stop_token = context.stop_token] { return stop_token.stop_requested(); };
-            AgentLoop child_loop(std::move(run_state->child_options));
-            auto child_result = child_loop.run_turn(run_state->prompt, run_state->child_store, *run_state->provider_instance, *run_state->transport_instance);
-            if (!child_result)
-            {
-              auto error = child_result.error();
-              if (!context.stop_token.stop_requested())
-              {
-                append_background_error_best_effort(run_state->child_append, error);
-                append_background_parent_error_best_effort(run_state->parent_append, run_state->task_id, run_state->subagent_type, error);
-              }
-              return background_failure_completion(context, error);
-            }
-            return BackgroundJobCompletion{.state = BackgroundJobState::Completed,
-                                           .final_text = child_result->final_text,
-                                           .stop_reason = std::string(ava::core::to_string(child_result->outcome))};
-          });
-      if (!job)
-        return std::unexpected(std::move(job.error()));
-      return ava::tools::TaskSubagentResult{.task_id = task_id,
-                                            .job_id = job->job_id,
-                                            .session_path = session_path,
-                                            .subagent_type = request.subagent_type,
-                                            .state = to_string(job->state),
-                                            .final_text = "",
-                                            .stop_reason = "background",
-                                            .provider_iterations = 0,
-                                            .tool_calls = 0,
-                                            .tool_iterations = 0};
+      BackgroundJobStartOptions start_options{.title = request.description,
+                                              .description = request.prompt,
+                                              .subagent_type = request.subagent_type,
+                                              .child_session_id = task_id,
+                                              .child_session_path = session_path};
+      BackgroundJobWorker worker = [run_state](BackgroundJobContext const& context) mutable {
+        struct FinishInteractionGate final
+        {
+          std::shared_ptr<SubagentInteractionGate> gate;
+          ~FinishInteractionGate() { gate->finish(); }
+        } finish_gate{run_state->interaction_gate};
+        run_state->child_options.cancel_requested = [stop_token = context.stop_token] { return stop_token.stop_requested(); };
+        AgentLoop child_loop(std::move(run_state->child_options));
+        auto child_result = child_loop.run_turn(run_state->prompt, run_state->child_store, *run_state->provider_instance, *run_state->transport_instance);
+        if (!child_result)
+        {
+          auto error = child_result.error();
+          if (!context.stop_token.stop_requested())
+            append_subagent_error_best_effort(run_state->child_append, error);
+          return background_failure_completion(context, error);
+        }
+        auto completion = BackgroundJobCompletion{.state = BackgroundJobState::Completed,
+                                                  .final_text = child_result->final_text,
+                                                  .stop_reason = std::string(ava::core::to_string(child_result->outcome)),
+                                                  .provider_iterations = child_result->provider_iterations,
+                                                  .tool_calls = child_result->tool_calls,
+                                                  .tool_iterations = child_result->tool_iterations};
+        {
+          std::lock_guard lock(run_state->result_state->mutex);
+          run_state->result_state->terminal_result = *child_result;
+        }
+        return completion;
+      };
+
+      ava::core::Result<SubagentCoordinatorJobSnapshot> coordinated =
+          std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "coordinator was not selected"));
+      std::string job_id;
+      std::string job_state;
+      if (use_coordinator)
+      {
+        coordinated = options_.subagent_coordinator->start(store.session_id(), request.background ? SubagentJobMode::Background : SubagentJobMode::Foreground,
+                                                           std::move(start_options), std::move(worker), interaction_gate);
+        if (!coordinated)
+        {
+          auto error = std::move(coordinated.error());
+          if (!request.task_id && subagent_publication_commit_state(error) == SubagentPublicationCommitState::ProvenUnpublished)
+            ava::session::rollback_created_session_with_context(run_state->child_store, run_state->child_lease, error);
+          return std::unexpected(std::move(error));
+        }
+        job_id = coordinated->job.identity.job_id;
+        job_state = std::string(to_string(coordinated->job.execution));
+      }
+      else
+      {
+        auto job = options_.background_jobs->start(std::move(start_options), std::move(worker));
+        if (!job)
+        {
+          auto error = std::move(job.error());
+          if (!request.task_id)
+            ava::session::rollback_created_session_with_context(run_state->child_store, run_state->child_lease, error);
+          return std::unexpected(std::move(error));
+        }
+        job_id = job->job_id;
+        job_state = to_string(job->state);
+      }
+
+      if (request.background)
+      {
+        return ava::tools::TaskSubagentResult{.task_id = task_id,
+                                              .job_id = std::move(job_id),
+                                              .session_path = session_path,
+                                              .subagent_type = request.subagent_type,
+                                              .state = std::move(job_state),
+                                              .final_text = "",
+                                              .stop_reason = "background",
+                                              .provider_iterations = 0,
+                                              .tool_calls = 0,
+                                              .tool_iterations = 0};
+      }
+
+      for (;;)
+      {
+        auto waited = options_.subagent_coordinator->wait(store.session_id(), job_id, std::chrono::milliseconds(50), SubagentWaitMode::TerminalOrPromotion);
+        if (!waited)
+          return std::unexpected(std::move(waited.error()));
+        if (waited->job.was_promoted && !subagent_terminal(waited->job.execution))
+        {
+          return ava::tools::TaskSubagentResult{.task_id = task_id,
+                                                .job_id = job_id,
+                                                .session_path = session_path,
+                                                .subagent_type = request.subagent_type,
+                                                .state = std::string(to_string(waited->job.execution)),
+                                                .final_text = "",
+                                                .stop_reason = "promoted",
+                                                .provider_iterations = 0,
+                                                .tool_calls = 0,
+                                                .tool_iterations = 0};
+        }
+        if (subagent_terminal(waited->job.execution))
+        {
+          if (waited->timed_out)
+            continue;
+          if (waited->job.execution != SubagentExecutionState::Completed)
+          {
+            auto error =
+                ava::core::Error(ava::core::ErrorCategory::Tool,
+                                 waited->job.execution == SubagentExecutionState::Canceled ? "foreground subagent was canceled" : "foreground subagent failed");
+            error.with_context("job_id", job_id);
+            if (waited->job.error)
+              error.with_context("cause", *waited->job.error);
+            if (waited->job.stop_reason)
+              error.with_context("stop_reason", *waited->job.stop_reason);
+            return std::unexpected(std::move(error));
+          }
+          std::lock_guard result_lock(run_state->result_state->mutex);
+          if (!run_state->result_state->terminal_result)
+            return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "foreground subagent terminal result is unavailable"));
+          return ava::tools::TaskSubagentResult{.task_id = task_id,
+                                                .job_id = job_id,
+                                                .session_path = session_path,
+                                                .subagent_type = request.subagent_type,
+                                                .state = std::string(to_string(waited->job.execution)),
+                                                .final_text = run_state->result_state->terminal_result->final_text,
+                                                .stop_reason = std::string(ava::core::to_string(run_state->result_state->terminal_result->outcome)),
+                                                .provider_iterations = run_state->result_state->terminal_result->provider_iterations,
+                                                .tool_calls = run_state->result_state->terminal_result->tool_calls,
+                                                .tool_iterations = run_state->result_state->terminal_result->tool_iterations};
+        }
+        if (options_.cancel_requested && options_.cancel_requested())
+          static_cast<void>(options_.subagent_coordinator->cancel(store.session_id(), job_id));
+      }
     }
 
     auto child_target = ava::session::SessionAppendTarget::create_persistent(child_store, child_lease, child_options.session_read_limits);
@@ -1018,42 +1143,44 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
                                           .tool_calls = child_result->tool_calls,
                                           .tool_iterations = child_result->tool_iterations};
   };
-  ava::tools::ToolContext tool_context{.workspace_dir = options_.workspace_dir,
-                                       .spill_dir = store.session_path().parent_path() / "spill",
-                                       .mode = options_.mode,
-                                       .permission_resolver = options_.permission_resolver,
-                                       .command_deny_preflight = options_.command_deny_preflight,
-                                       .permission_audit_sink = append_permission_decision_locked,
-                                       .progress_sink = [this](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
-                                         return publish_tool_progress(
-                                             options_,
-                                             ToolProgressEntry{.call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
-                                       },
-                                       .announce_execution_after_permission = options_.announce_execution_after_permission,
-                                       .cancel_requested = options_.cancel_requested,
-                                       .question_resolver = options_.question_resolver,
-                                       .task_subagent_runner = run_task_subagent,
-                                       .subagents = subagents,
-                                       .redact_permission_audit_arguments = options_.redact_permission_audit_arguments,
-                                       .require_explicit_file_permissions = options_.require_explicit_file_permissions,
-                                       .ava_authority_roots = options_.ava_authority_roots,
-                                       .exact_file_access = options_.exact_file_access,
-                                       .command_executor = options_.command_executor,
-                                       .lsp_diagnostics_provider = options_.lsp_diagnostics_provider,
-                                       .plugin_global_plugins_dir = options_.plugin_global_plugins_dir,
-                                       .plugin_project_plugins_dir = options_.plugin_project_plugins_dir,
-                                       .plugin_enablement_file = options_.plugin_enablement_file,
-                                       .include_project_plugins = options_.include_project_resources,
-                                       .include_project_mcp_config = options_.include_project_resources,
-                                       .session_mcp_config = options_.session_mcp_config,
-                                       .exact_builtin_tool_names = options_.exact_builtin_tool_names,
-                                       .require_descriptor_secure_workspace = options_.require_descriptor_secure_workspace,
-                                       .include_project_skills = options_.include_project_resources,
-                                       .session_id = store.session_id(),
-                                       .provider_id = options_.provider_id,
-                                       .model_id = options_.model_id,
-                                       .current_dir = options_.current_dir.empty() ? options_.workspace_dir : options_.current_dir,
-                                       .tool_visibility = options_.tool_visibility};
+  ava::tools::ToolContext tool_context{
+      .workspace_dir = options_.workspace_dir,
+      .spill_dir = store.session_path().parent_path() / "spill",
+      .mode = options_.mode,
+      .permission_resolver = options_.permission_resolver,
+      .command_deny_preflight = options_.command_deny_preflight,
+      .permission_audit_sink = append_permission_decision_locked,
+      .progress_sink = [this](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
+        return publish_tool_progress(options_,
+                                     ToolProgressEntry{.call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
+      },
+      .announce_execution_after_permission = options_.announce_execution_after_permission,
+      .cancel_requested = options_.cancel_requested,
+      .question_resolver = options_.question_resolver,
+      .task_subagent_runner =
+          options_.trace_context.parent_session_id.empty() ? ava::tools::TaskSubagentRunner(run_task_subagent) : ava::tools::TaskSubagentRunner{},
+      .subagent_coordinator = options_.subagent_coordinator,
+      .subagents = subagents,
+      .redact_permission_audit_arguments = options_.redact_permission_audit_arguments,
+      .require_explicit_file_permissions = options_.require_explicit_file_permissions,
+      .ava_authority_roots = options_.ava_authority_roots,
+      .exact_file_access = options_.exact_file_access,
+      .command_executor = options_.command_executor,
+      .lsp_diagnostics_provider = options_.lsp_diagnostics_provider,
+      .plugin_global_plugins_dir = options_.plugin_global_plugins_dir,
+      .plugin_project_plugins_dir = options_.plugin_project_plugins_dir,
+      .plugin_enablement_file = options_.plugin_enablement_file,
+      .include_project_plugins = options_.include_project_resources,
+      .include_project_mcp_config = options_.include_project_resources,
+      .session_mcp_config = options_.session_mcp_config,
+      .exact_builtin_tool_names = options_.exact_builtin_tool_names,
+      .require_descriptor_secure_workspace = options_.require_descriptor_secure_workspace,
+      .include_project_skills = options_.include_project_resources,
+      .session_id = store.session_id(),
+      .provider_id = options_.provider_id,
+      .model_id = options_.model_id,
+      .current_dir = options_.current_dir.empty() ? options_.workspace_dir : options_.current_dir,
+      .tool_visibility = options_.tool_visibility};
   if (options_.observation && options_.observation->enabled())
   {
     try
@@ -1618,6 +1745,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     {
       return std::unexpected(std::move(persisted_turn.error()));
     }
+    result.committed_turn_id = persisted_turn->committed_turn_id;
 
     std::vector<PendingCommittedToolResult> pending_tool_results;
     try

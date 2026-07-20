@@ -10,6 +10,8 @@ void run_core_mode_tests();
 void run_acp_tests();
 void run_session_tests();
 void run_session_run_controller_tests();
+void run_subagent_coordinator_tests();
+void run_subagent_delivery_manager_tests();
 void run_core_json_permission_tests();
 void run_app_command_classification_tests();
 void run_app_command_registry_tests();
@@ -32,6 +34,7 @@ void run_agent_loop_resilience_tests();
 void run_agent_loop_tests();
 void run_agent_tool_dispatcher_tests();
 void run_tool_scheduler_tests();
+void run_job_journal_tests();
 void run_lsp_tests();
 void run_plugin_tests();
 void run_mcp_tests();
@@ -56,6 +59,8 @@ constexpr std::array kTestSuites{
     TestSuite{"acp", run_acp_tests},
     TestSuite{"session", run_session_tests},
     TestSuite{"session_run_controller", run_session_run_controller_tests},
+    TestSuite{"subagent_coordinator", run_subagent_coordinator_tests},
+    TestSuite{"subagent_delivery_manager", run_subagent_delivery_manager_tests},
     TestSuite{"core_json_permission", run_core_json_permission_tests},
     TestSuite{"app_command_classification", run_app_command_classification_tests},
     TestSuite{"app_command_registry", run_app_command_registry_tests},
@@ -78,6 +83,7 @@ constexpr std::array kTestSuites{
     TestSuite{"agent_loop", run_agent_loop_tests},
     TestSuite{"agent_tool_dispatcher", run_agent_tool_dispatcher_tests},
     TestSuite{"tool_scheduler", run_tool_scheduler_tests},
+    TestSuite{"job_journal", run_job_journal_tests},
     TestSuite{"lsp", run_lsp_tests},
     TestSuite{"plugin", run_plugin_tests},
     TestSuite{"mcp", run_mcp_tests},

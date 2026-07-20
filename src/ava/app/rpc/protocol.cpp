@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "protocol.h"
+#include "ava/agent/job_control.h"
 #include "ava/session/session_store.h"
 #include "ava/core/json.h"
 #include "ava/core/strict_json.h"
@@ -641,7 +642,8 @@ std::string rpc_protocol_result_json()
          ",\"supported_event_schema_versions\":[" + std::to_string(kRpcProtocolVersions.event_schema) +
          "],\"session_entry_version\":" + std::to_string(ava::session::kCurrentSessionEntryVersion) +
          ",\"supported_session_entry_versions\":" + supported_session_entry_versions_json() +
-         ",\"capabilities\":[\"direct_bash_rpc\"],\"direct_command_types\":[\"run_bash\",\"run_command\"]}";
+         ",\"capabilities\":[\"direct_bash_rpc\",\"job_controls\"],\"direct_command_types\":[\"run_bash\",\"run_command\",\"list_jobs\","
+         "\"get_job\",\"wait_job\",\"get_job_result\",\"cancel_job\",\"promote_job\"]}";
 }
 
 std::string parse_error_response_id(std::string_view line)
@@ -1047,6 +1049,34 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
     }
   }
 
+  auto job_id = std::optional<std::string>{};
+  auto timeout_ms = std::optional<long long>{};
+  if (rpc::command_type_is(*type, {"list_jobs", "get_job", "wait_job", "get_job_result", "cancel_job", "promote_job"}))
+  {
+    auto parsed_job_id = rpc::exact_optional_string_field(line, "job_id");
+    if (!parsed_job_id)
+      return std::unexpected(std::move(parsed_job_id.error()));
+    job_id = std::move(*parsed_job_id);
+    if (job_id)
+    {
+      if (job_id->empty())
+        return std::unexpected(rpc::invalid_rpc("RPC job_id must be non-empty when provided"));
+      if (job_id->size() > ava::agent::kMaxPublicJobIdBytes)
+        return std::unexpected(rpc::invalid_rpc("RPC job_id is too long"));
+      if (auto valid = rpc::validate_optional_rpc_identifier(job_id, "job_id"); !valid)
+        return std::unexpected(std::move(valid.error()));
+    }
+    if (*type == "wait_job")
+    {
+      auto parsed_timeout = rpc::exact_optional_integer_field(line, "timeout_ms");
+      if (!parsed_timeout)
+        return std::unexpected(std::move(parsed_timeout.error()));
+      timeout_ms = std::move(*parsed_timeout);
+      if (timeout_ms && *timeout_ms <= 0)
+        return std::unexpected(rpc::invalid_rpc("RPC timeout_ms must be a positive integer"));
+    }
+  }
+
   auto session_id = ava::core::json::string_field(line, "session_id");
   if (rpc::command_type_is(*type, {"fork_session", "clone_session", "summarize_branch", "open_session", "switch_session"}))
   {
@@ -1140,6 +1170,8 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
                     .protocol_version = std::move(*protocol_version),
                     .message = std::move(*message),
                     .session_id = std::move(session_id),
+                    .job_id = std::move(job_id),
+                    .timeout_ms = std::move(timeout_ms),
                     .provider = std::move(*provider),
                     .model = std::move(*model),
                     .instructions = std::move(*instructions),

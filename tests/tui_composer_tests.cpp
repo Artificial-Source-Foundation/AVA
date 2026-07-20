@@ -560,19 +560,20 @@ void test_tui_composer_rendering_and_input()
                                                           ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, false, false);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
          "permission prompt ignores remembered-rule shortcut when rule storage is unavailable");
-  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, false, true, true);
+  prompt_input =
+      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, false, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::DenyRemember,
          "permission prompt cycles to remembered deny when rule storage is available");
-  prompt_input =
-      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::DenyRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, false, true, true);
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::DenyRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter},
+                                                          false, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveDenyRemember, "permission prompt enter confirms remembered deny");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
                                                           ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, true, true);
   expect(
       prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowRemember,
       "permission prompt R toggles the selected allow choice into a remembered allow");
-  prompt_input =
-      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, false, true, true);
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter},
+                                                          false, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveAllowRemember, "permission prompt enter confirms remembered allow");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Deny,
                                                           ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, false, true);
@@ -584,18 +585,22 @@ void test_tui_composer_rendering_and_input()
          "permission prompt does not expose remembered allow when the backend only permits one-shot approval");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
                                                           ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'S'}, true, true, true);
-  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveAllowSession && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowSession,
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveAllowSession &&
+             prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowSession,
          "permission prompt S resolves allow session when session grant is available");
-  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true, true, true);
+  prompt_input =
+      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowSession,
          "permission prompt tab advances from allow to allow session when available");
-  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowSession, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true, true, true);
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowSession, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true,
+                                                          true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::DenyRemember,
          "permission prompt tab advances from allow session to remembered deny when available");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowSession,
                                                           ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, true, true, true);
-  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowRemember,
-         "permission prompt R toggles allow session into remembered allow");
+  expect(
+      prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowRemember,
+      "permission prompt R toggles allow session into remembered allow");
   ava::permissions::CommandPermissionMetadata one_shot_metadata;
   one_shot_metadata.level = ava::command::CommandLevel::Critical;
   one_shot_metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
@@ -7060,10 +7065,10 @@ void test_tui_session_grant_registry()
     std::string session_id;
   };
   std::vector<SessionTransition> const transitions = {{"/new", "session_new"},
-                                                        {"/resume session_resume", "session_resume"},
-                                                        {"/fork", "session_fork"},
-                                                        {"/clone", "session_clone"},
-                                                        {"/import --confirm", "session_import"}};
+                                                      {"/resume session_resume", "session_resume"},
+                                                      {"/fork", "session_fork"},
+                                                      {"/clone", "session_clone"},
+                                                      {"/import --confirm", "session_import"}};
   bool all_submit_transitions_clear = true;
   for (auto const& transition : transitions)
   {
@@ -7073,36 +7078,36 @@ void test_tui_session_grant_registry()
     post_submit_state.session_id = transition.session_id;
     ava::tui::TuiSubmitResult completed_submit;
     completed_submit.state_snapshot = std::move(post_submit_state);
-    bool const cleared = completed_submit.state_snapshot &&
-                         transition_registry.clear_for_session_transition("session_a", completed_submit.state_snapshot->session_id);
-    all_submit_transitions_clear = all_submit_transitions_clear && cleared && transition_registry.size() == 0 &&
-                                   !transition_registry.matches(transition.session_id, prompt);
+    bool const cleared =
+        completed_submit.state_snapshot && transition_registry.clear_for_session_transition("session_a", completed_submit.state_snapshot->session_id);
+    all_submit_transitions_clear =
+        all_submit_transitions_clear && cleared && transition_registry.size() == 0 && !transition_registry.matches(transition.session_id, prompt);
   }
   expect(all_submit_transitions_clear,
          "post-submit runtime snapshots clear TUI session grants for /new, /resume, /fork, /clone, and confirmed import transitions");
 
-  auto const session_only_permission_modal = ava::tui::render_composer(
-      ava::tui::ComposerSnapshot{.mode = "build",
-                                 .provider = "openai",
-                                 .model = "gpt-5.5",
-                                 .session_id = "session_a",
-                                 .input = "",
-                                 .status = "permission required",
-                                 .transcript = {},
-                                 .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "bash",
-                                                                                     .operation = "bash",
-                                                                                     .target = "",
-                                                                                     .command = "ctest --test-dir build",
-                                                                                     .reason = "",
-                                                                                     .risk = "medium",
-                                                                                     .allow_session_available = true},
-                                 .width = 120,
-                                 .height = 10});
-  expect(std::ranges::any_of(session_only_permission_modal,
-                             [](std::string const& line) { return strip_sgr(line).find("S allow session") != std::string::npos; }) &&
-             std::ranges::none_of(session_only_permission_modal,
-                                  [](std::string const& line) { return strip_sgr(line).find("R remember") != std::string::npos; }),
-         "TUI permission key help does not advertise R when only an in-memory session grant is available");
+  auto const session_only_permission_modal =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_a",
+                                                           .input = "",
+                                                           .status = "permission required",
+                                                           .transcript = {},
+                                                           .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "bash",
+                                                                                                               .operation = "bash",
+                                                                                                               .target = "",
+                                                                                                               .command = "ctest --test-dir build",
+                                                                                                               .reason = "",
+                                                                                                               .risk = "medium",
+                                                                                                               .allow_session_available = true},
+                                                           .width = 120,
+                                                           .height = 10});
+  expect(
+      std::ranges::any_of(session_only_permission_modal,
+                          [](std::string const& line) { return strip_sgr(line).find("S allow session") != std::string::npos; }) &&
+          std::ranges::none_of(session_only_permission_modal, [](std::string const& line) { return strip_sgr(line).find("R remember") != std::string::npos; }),
+      "TUI permission key help does not advertise R when only an in-memory session grant is available");
 }
 
 void test_tui_text_model_conversions()
@@ -8554,6 +8559,24 @@ void test_tui_transcript_tail_renderer_matches_full_visible_window()
   }
 }
 
+void test_tui_active_nonblocking_command_lane()
+{
+  ava::tui::TuiActiveRunQueues queues;
+  std::size_t calls = 0;
+  queues.run_nonblocking_command = [&calls](std::string const& submitted) -> std::optional<std::vector<std::string>> {
+    if (!submitted.starts_with("/jobs"))
+      return std::nullopt;
+    ++calls;
+    return std::vector<std::string>{"promoted without modal"};
+  };
+  auto promoted = ava::tui::dispatch_tui_active_nonblocking_command(queues, "/jobs promote job_1");
+  auto unrelated = ava::tui::dispatch_tui_active_nonblocking_command(queues, "/models");
+  ava::tui::TuiActiveRunQueues unavailable;
+  auto missing = ava::tui::dispatch_tui_active_nonblocking_command(unavailable, "/jobs");
+  expect(promoted && *promoted == std::vector<std::string>{"promoted without modal"} && !unrelated && !missing && calls == 1,
+         "tui active command lane dispatches eligible /jobs output in place without modal state and leaves unrelated commands queued between turns");
+}
+
 void test_tui_very_long_transcript_performance_budget()
 {
   std::vector<ava::tui::TranscriptItem> transcript;
@@ -8637,5 +8660,6 @@ void run_tui_composer_tests()
   test_tui_large_render_performance_budget();
   test_tui_large_tool_output_preview_is_bounded();
   test_tui_transcript_tail_renderer_matches_full_visible_window();
+  test_tui_active_nonblocking_command_lane();
   test_tui_very_long_transcript_performance_budget();
 }

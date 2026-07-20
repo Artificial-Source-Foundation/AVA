@@ -33,7 +33,7 @@ A request may contain integer `protocol_version:1`. Omission means legacy v1 and
 `get_protocol` returns:
 
 ```json
-{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":4,"supported_session_entry_versions":[0,1,2,3,4],"capabilities":["direct_bash_rpc"],"direct_command_types":["run_bash","run_command"]}
+{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":4,"supported_session_entry_versions":[0,1,2,3,4],"capabilities":["direct_bash_rpc","job_controls"],"direct_command_types":["run_bash","run_command","list_jobs","get_job","wait_job","get_job_result","cancel_job","promote_job"]}
 ```
 
 Protocol, event-envelope, and session-entry versions are independent. The supported session-version array is generated from the reader's accepted contiguous range `0..kCurrentSessionEntryVersion`; clients must use that field rather than hard-code a historical list. Unknown additive object fields and unknown future event names must be ignored. A client must not infer support for another protocol version from an event or session version.
@@ -68,7 +68,7 @@ Every stdout record is either a response (`type:"response"`) or an event (`schem
 
 `error.code` is the stable machine branch. `category` remains the AVA error category, `message` is short human text, and `details` is diagnostic and may grow context lines. Do not branch on `message` or `details`.
 
-Stable v1 codes are `invalid_request`, `active_run`, `canceled`, `follow_up_skipped`, `io_error`, `not_found`, `permission_denied`, `provider_error`, `session_error`, `tool_error`, and `internal_error`. More codes may be added. A client must preserve an unknown code and fall back to `category`/generic handling.
+Stable v1 codes are `invalid_request`, `active_run`, `canceled`, `follow_up_skipped`, `job_not_ready`, `io_error`, `not_found`, `permission_denied`, `provider_error`, `session_error`, `tool_error`, and `internal_error`. More codes may be added. A client must preserve an unknown code and fall back to `category`/generic handling.
 
 Malformed records without a valid parseable ID use `id:""`. Unsupported commands are `invalid_request`. Request-level errors are recoverable; the process continues unless stdin/stdout itself fails.
 
@@ -90,6 +90,7 @@ Client request IDs and resolver `request_id`/`correlation_id` values are non-emp
 - Resolver `payload.resolver_request_id`: AVA-owned ephemeral resolver ID used in `permission_reply`/`question_reply`.
 - Permission `payload.permission_request_id`: durable audit identity; it is not the resolver ID.
 - Session-grant `grant_id`: a new process-local revocation handle generated when `allow_session` is accepted. It is neither the resolver ID nor the durable `permission_request_id`; the grant object carries that originating `permission_request_id` as a separate field.
+- Automatic subagent delivery uses an AVA-owned `automatic_delivery_...` run request identity distinct from both the journal `delivery_attempt_...` identity and every client prompt request ID.
 - `event_id`, `session_id`, `run_id`, `turn_id`, `message_id`, and tool `call_id` are AVA-owned.
 
 Prompt success contains `session_id`, `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, and optional `tool_timeline`. Command-dispatch success contains `handled`, `quit`, `output`, `text`, and optional `tool_timeline`. State results contain protocol/session/workspace/mode/model/cancel/reasoning/context metadata. Lists and session/model results are bounded and additive.
@@ -99,6 +100,12 @@ Prompt success contains `session_id`, `final_text`, `stop_reason`, `provider_ite
 ### Tool timeline/event entry
 
 Tool records use `status` (`running`, `success`, `error`, or `canceled` as applicable), `call_id`, `tool`, optional safe summaries, optional object `args`/`result` (or `args_json`/`result_json` fallback), and optional `structured_result`. Additive fields include `content_type`, error metadata, `diff`, `changed_paths`, `permission_request_ids`, truncation/spill flags and paths, byte/line/match counters. `structured_result` v1 has `schema_version:1`, identity, status, `ok`, content type/content, optional error, and related metadata.
+
+### Subagent job snapshot
+
+All model-tool, slash-command, and RPC job controls use the same bounded `schema_version:1` snapshot. It exposes `job_id`, `task_id`, `parent_session_id`, `child_session_id`, `delivery_id`, mode, execution/delivery states, start/update and optional terminal/promotion/cancel/delivery timestamps, cancellation/promotion flags, delivery attempt/accounting counters, and truncation metadata. Wait responses add `timed_out`; list responses add bounded list truncation/count fields.
+
+List and status omit terminal `summary`, `error`, and `message`. Result requests include a bounded completed `summary`; failed results include only stable `status`, sanitized `message`, and `error_category`; canceled/interrupted results include only stable status and a sanitized message. Snapshots never expose filesystem paths, coordinator state/errors, provider bodies, commands/arguments, credentials, or formatted error context. An unfinished result returns stable `job_not_ready`.
 
 ### Permission request/reply
 
@@ -174,6 +181,12 @@ The payload column defines recognized fields. Unless marked required, listed fie
 | `get_session_stats` | No payload. Returns bounded entry/usage/cost/type statistics. |
 | `validate_session` | No payload. Returns replay validation issues and counts. |
 | `list_sessions` | No payload. Lists workspace sessions. |
+| `list_jobs` | No payload. Returns owner-scoped bounded public job snapshots without terminal content. |
+| `get_job` | Required string `job_id`. Returns one owner-scoped public status snapshot without terminal content. |
+| `wait_job` | Required string `job_id`; optional positive integer `timeout_ms`, capped at 30000 (default 1000). Returns a snapshot with `timed_out:true` when still running. |
+| `get_job_result` | Required string `job_id`. Returns bounded safe terminal content, or stable `job_not_ready`. |
+| `cancel_job` | Required string `job_id`. Requests cooperative cancellation and returns status. |
+| `promote_job` | Required string `job_id`. Promotes a running foreground child and returns status. |
 | `session_tree` | No payload. Returns roots, leaves, current path, and session nodes. |
 | `session_metadata` | No payload. Returns current append-only metadata view. |
 | `set_session_name` | Required string `session_name` (max 256 bytes). Appends metadata. |
@@ -218,7 +231,7 @@ The payload column defines recognized fields. Unless marked required, listed fie
 
 ### Active-safe commands
 
-While a run is active, `get_protocol`, `get_state`, `list_models`, `list_sessions`, `session_tree`, `session_metadata`, `permission_grants`, `permission_grant_revoke`, and `permission_grants_clear` remain available. The grant revoke/clear exceptions are genuinely concurrent-safe: they mutate only the separately mutex-protected process-local grant collection and do not mutate the active session/run controller. Persistent permission-rule commands are not active-safe. Other materializing/mutating commands are rejected. Resolver replies and `cancel` remain available because they settle active work.
+While a run is active, `get_protocol`, `get_state`, `list_models`, `list_sessions`, `list_jobs`, `get_job`, `wait_job`, `get_job_result`, `cancel_job`, `promote_job`, `session_tree`, `session_metadata`, `permission_grants`, `permission_grant_revoke`, and `permission_grants_clear` remain available. The grant revoke/clear exceptions are genuinely concurrent-safe: they mutate only the separately mutex-protected process-local grant collection and do not mutate the active session/run controller. Persistent permission-rule commands are not active-safe. Other materializing/mutating commands are rejected. Resolver replies and `cancel` remain available because they settle active work.
 
 ## Event Catalog
 
@@ -247,7 +260,7 @@ Protocol discovery:
 
 ```text
 > {"id":"protocol","type":"get_protocol","protocol_version":1}\n
-< {"id":"protocol","type":"response","success":true,"result":{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":4,"supported_session_entry_versions":[0,1,2,3,4],"capabilities":["direct_bash_rpc"],"direct_command_types":["run_bash","run_command"]}}\n
+< {"id":"protocol","type":"response","success":true,"result":{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":4,"supported_session_entry_versions":[0,1,2,3,4],"capabilities":["direct_bash_rpc","job_controls"],"direct_command_types":["run_bash","run_command","list_jobs","get_job","wait_job","get_job_result","cancel_job","promote_job"]}}\n
 ```
 
 Prompt success with tool summary/timeline (events for this run may appear before the response):

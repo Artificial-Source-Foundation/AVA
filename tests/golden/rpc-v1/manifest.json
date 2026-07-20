@@ -5,7 +5,9 @@
     "get_protocol", "get_state", "prompt", "steer", "follow_up", "cancel",
     "permission_reply", "question_reply", "permission_grants", "permission_grant_revoke", "permission_grants_clear",
     "permission_rules", "permission_rule_add", "permission_rule_remove",
-    "get_messages", "get_session_stats", "validate_session", "list_sessions", "session_tree", "session_metadata",
+    "get_messages", "get_session_stats", "validate_session", "list_sessions",
+    "list_jobs", "get_job", "wait_job", "get_job_result", "cancel_job", "promote_job",
+    "session_tree", "session_metadata",
     "set_session_name", "set_session_labels", "new_session", "open_session", "switch_session", "fork_session", "clone_session", "summarize_branch",
     "list_models", "set_model", "cycle_model", "set_reasoning", "clear_reasoning",
     "run_bash", "run_command", "compact", "export", "export_html", "context", "list_commands", "invoke_command",
@@ -23,7 +25,7 @@
     "steer_queued", "steer_applied", "steer_skipped", "follow_up_queued", "follow_up_started", "follow_up_skipped"
   ],
   "stable_error_codes": [
-    "invalid_request", "active_run", "canceled", "follow_up_skipped", "io_error", "not_found",
+    "invalid_request", "active_run", "canceled", "follow_up_skipped", "job_not_ready", "io_error", "not_found",
     "permission_denied", "provider_error", "session_error", "tool_error", "internal_error"
   ],
   "fixtures": ["envelopes.jsonl", "command-families.jsonl", "errors.jsonl", "framing.json", "interleavings.jsonl", "wire.jsonl"]

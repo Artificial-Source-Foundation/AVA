@@ -36,7 +36,11 @@ using CompactionSummaryGenerator =
 
 [[nodiscard]] ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::Session const& session, ava::agent::Mode mode);
 
-void apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state);
+[[nodiscard]] ava::core::VoidResult apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state);
+
+// Publishes callback-free mutable runtime configuration into an existing
+// retained parent capsule without changing its safe policy snapshot.
+[[nodiscard]] ava::core::VoidResult refresh_runtime_parent_configuration(runtime::Session const& session);
 
 // Append session metadata through the runtime owner's serialized route.
 [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(runtime::Session& session,

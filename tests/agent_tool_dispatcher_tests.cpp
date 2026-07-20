@@ -38,11 +38,13 @@
 #include <atomic>
 #include <chrono>
 #include <climits>
+#include <condition_variable>
 #include <cstdlib>
 #include <cwchar>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -1165,6 +1167,10 @@ void test_tool_dispatcher()
   auto const configured_schemas = ava::agent::ToolDispatcher::tool_schemas_json(lsp_schema_context);
   auto const& schemas = configured_schemas;
   auto const metadata = ava::agent::ToolDispatcher::tool_metadata();
+  auto const job_schema = std::ranges::find_if(default_schemas, [](std::string const& schema) { return schema.find(R"("name":"job")") != std::string::npos; });
+  expect(job_schema != default_schemas.end() && job_schema->find(R"("enum":["list","status","wait","result","cancel"])") != std::string::npos &&
+             job_schema->find("promote") == std::string::npos,
+         "model-visible job schema omits backend-only promotion");
   auto const& registry = ava::agent::builtin_tool_registry();
   auto const* registered_read_tool = registry.find("read_file");
   expect(registry.entries().size() == metadata.size(), "built-in tool registry covers all static tool metadata");
@@ -1253,6 +1259,167 @@ void test_tool_dispatcher()
   expect(question_has_allow_multiple, "question tool schema exposes the allow_multiple alias");
 }
 
+void test_task_mode_and_job_tool_controls()
+{
+  auto const root = temp_root() / "dispatcher-job-controls";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+
+  bool captured_background = false;
+  std::size_t task_runs = 0;
+  ava::tools::ToolContext task_context{.workspace_dir = workspace,
+                                       .permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+                                         return ava::permissions::PermissionResolution::Allow;
+                                       },
+                                       .task_subagent_runner =
+                                           [&](ava::tools::TaskSubagentRequest const& request) {
+                                             ++task_runs;
+                                             captured_background = request.background;
+                                             return ava::tools::TaskSubagentResult{.task_id = "task_mode",
+                                                                                   .job_id = {},
+                                                                                   .session_path = {},
+                                                                                   .subagent_type = request.subagent_type,
+                                                                                   .state = "completed",
+                                                                                   .final_text = {},
+                                                                                   .stop_reason = {},
+                                                                                   .provider_iterations = 0,
+                                                                                   .tool_calls = 0,
+                                                                                   .tool_iterations = 0};
+                                           }};
+  ava::agent::ToolDispatcher task_dispatcher(task_context);
+  auto preferred = task_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "task_mode", .name = "task", .arguments_json = R"({"description":"mode","prompt":"run","subagent_type":"general","mode":"background"})"});
+  expect(preferred && preferred->success && captured_background, "task prefers explicit background mode while preserving the runner contract");
+  auto legacy = task_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "task_legacy", .name = "task", .arguments_json = R"({"description":"legacy","prompt":"run","subagent_type":"general","background":false})"});
+  expect(legacy && legacy->success && !captured_background, "task preserves the legacy background boolean");
+  auto conflict = task_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "task_conflict",
+      .name = "task",
+      .arguments_json = R"({"description":"conflict","prompt":"run","subagent_type":"general","mode":"foreground","background":true})"});
+  expect(conflict && !conflict->success && conflict->result_text.find("conflicts") != std::string::npos && task_runs == 2,
+         "task rejects conflicting preferred and legacy mode fields before dispatch");
+
+  std::filesystem::permissions(root, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = root / "state"});
+  expect(coordinator_result.has_value(), "job dispatcher fixture creates coordinator");
+  if (!coordinator_result)
+    return;
+  auto coordinator = *coordinator_result;
+  struct WorkerState
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool started = false;
+    bool release = false;
+    ava::agent::BackgroundJobCompletion run(ava::agent::BackgroundJobContext const& context)
+    {
+      std::stop_callback wake(context.stop_token, [&] { changed.notify_all(); });
+      std::unique_lock lock(mutex);
+      started = true;
+      changed.notify_all();
+      changed.wait(lock, [&] { return release || context.stop_token.stop_requested(); });
+      if (context.stop_token.stop_requested())
+        return {.state = ava::agent::BackgroundJobState::Canceled,
+                .final_text = {},
+                .stop_reason = "canceled",
+                .error = std::nullopt,
+                .provider_iterations = 0,
+                .tool_calls = 0,
+                .tool_iterations = 0};
+      return {.state = ava::agent::BackgroundJobState::Completed,
+              .final_text = "safe terminal summary",
+              .stop_reason = "completed",
+              .error = std::nullopt,
+              .provider_iterations = 0,
+              .tool_calls = 0,
+              .tool_iterations = 0};
+    }
+  };
+  auto state = std::make_shared<WorkerState>();
+  auto started = coordinator->start_background("owner", {.child_session_id = "child_job_tool"}, [state](auto const& context) { return state->run(context); });
+  expect(started.has_value(), "job dispatcher fixture starts owned job");
+  if (!started)
+    return;
+  {
+    std::unique_lock lock(state->mutex);
+    expect(state->changed.wait_for(lock, std::chrono::seconds(1), [&] { return state->started; }), "job dispatcher worker reaches running state");
+  }
+  auto const job_id = started->job.identity.job_id;
+  ava::agent::ToolDispatcher job_dispatcher(ava::tools::ToolContext{.workspace_dir = workspace, .subagent_coordinator = coordinator, .session_id = "owner"});
+  auto list = job_dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "job_list", .name = "job", .arguments_json = R"({"action":"list"})"});
+  auto status = job_dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "job_status", .name = "job", .arguments_json = "{\"action\":\"status\",\"job_id\":\"" + job_id + "\"}"});
+  auto timed = job_dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "job_wait", .name = "job", .arguments_json = "{\"action\":\"wait\",\"job_id\":\"" + job_id + "\",\"timeout_ms\":1}"});
+  auto not_ready = job_dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "job_result", .name = "job", .arguments_json = "{\"action\":\"result\",\"job_id\":\"" + job_id + "\"}"});
+  auto duplicate =
+      job_dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "job_duplicate", .name = "job", .arguments_json = R"({"action":"list","action":"status"})"});
+  expect(list && list->success && list->result_text.find(job_id) != std::string::npos && list->result_text.find("safe terminal summary") == std::string::npos &&
+             status && status->success && status->result_text.find("\"state\":\"running\"") != std::string::npos && timed && timed->success &&
+             timed->result_text.find("\"timed_out\":true") != std::string::npos && not_ready && !not_ready->success &&
+             not_ready->result_text.find("\"code\":\"job_not_ready\"") != std::string::npos && duplicate && !duplicate->success,
+         "job tool shares bounded snapshots, strict parsing, timeout snapshots, and stable not-ready status");
+
+  ava::agent::ToolDispatcher other_owner(ava::tools::ToolContext{.workspace_dir = workspace, .subagent_coordinator = coordinator, .session_id = "other"});
+  auto hidden = other_owner.dispatch(
+      ava::agent::ProviderToolCall{.id = "job_hidden", .name = "job", .arguments_json = "{\"action\":\"status\",\"job_id\":\"" + job_id + "\"}"});
+  expect(hidden && !hidden->success && hidden->result_text.find("not_found") != std::string::npos, "job tool maps owner mismatch to NotFound");
+
+  {
+    std::lock_guard lock(state->mutex);
+    state->release = true;
+    state->changed.notify_all();
+  }
+  auto completed = coordinator->wait("owner", job_id, std::chrono::seconds(1));
+  auto terminal_result = job_dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "job_terminal", .name = "job", .arguments_json = "{\"action\":\"result\",\"job_id\":\"" + job_id + "\"}"});
+  expect(completed && terminal_result && terminal_result->success && terminal_result->result_text.find("safe terminal summary") != std::string::npos,
+         "job result includes a completed bounded summary only after terminal completion");
+
+  auto promoted_state = std::make_shared<WorkerState>();
+  auto foreground = coordinator->start("owner", ava::agent::SubagentJobMode::Foreground, {.child_session_id = "child_job_promote"},
+                                       [promoted_state](auto const& context) { return promoted_state->run(context); });
+  if (foreground)
+  {
+    {
+      std::unique_lock lock(promoted_state->mutex);
+      expect(promoted_state->changed.wait_for(lock, std::chrono::seconds(1), [&] { return promoted_state->started; }),
+             "job promotion fixture reaches running state");
+    }
+    auto promoted = job_dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "job_promote", .name = "job", .arguments_json = "{\"action\":\"promote\",\"job_id\":\"" + foreground->job.identity.job_id + "\"}"});
+    expect(promoted && !promoted->success && promoted->result_text.find("unsupported") != std::string::npos,
+           "model-visible job tool rejects unreachable promotion while backend promotion remains out-of-band");
+    {
+      std::lock_guard lock(promoted_state->mutex);
+      promoted_state->release = true;
+      promoted_state->changed.notify_all();
+    }
+    static_cast<void>(coordinator->wait("owner", foreground->job.identity.job_id, std::chrono::seconds(1)));
+  }
+
+  auto canceled_state = std::make_shared<WorkerState>();
+  auto cancel_started = coordinator->start_background("owner", {.child_session_id = "child_job_cancel"},
+                                                      [canceled_state](auto const& context) { return canceled_state->run(context); });
+  if (cancel_started)
+  {
+    {
+      std::unique_lock lock(canceled_state->mutex);
+      expect(canceled_state->changed.wait_for(lock, std::chrono::seconds(1), [&] { return canceled_state->started; }),
+             "job cancellation fixture reaches running state");
+    }
+    auto canceled = job_dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "job_cancel", .name = "job", .arguments_json = "{\"action\":\"cancel\",\"job_id\":\"" + cancel_started->job.identity.job_id + "\"}"});
+    auto canceled_terminal = coordinator->wait("owner", cancel_started->job.identity.job_id, std::chrono::seconds(1));
+    expect(canceled && canceled->success && canceled_terminal && canceled_terminal->job.execution == ava::agent::SubagentExecutionState::Canceled,
+           "job tool durably requests cancellation for one owned job");
+  }
+}
+
 void test_tool_dispatcher_plan_mode_denies_mutation()
 {
   auto const root = temp_root() / "dispatcher-plan";
@@ -1279,5 +1446,6 @@ void test_tool_dispatcher_plan_mode_denies_mutation()
 void run_agent_tool_dispatcher_tests()
 {
   test_tool_dispatcher();
+  test_task_mode_and_job_tool_controls();
   test_tool_dispatcher_plan_mode_denies_mutation();
 }

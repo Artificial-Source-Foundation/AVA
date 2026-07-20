@@ -1,12 +1,13 @@
 #include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/command_jobs.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/commands.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
-#include "ava/permissions/permission.h"
 #include "ava/session/session_store.h"
+#include "ava/permissions/permission.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -200,14 +201,12 @@ void test_builtin_session_alias_registers_as_current_stats_command()
   std::filesystem::create_directories(workspace);
 
   auto session = open_test_session(root, workspace);
-  auto registry = ava::app::load_command_registry(session, ava::app::CommandRegistryOptions{.include_prompt_commands = false,
-                                                                                            .include_skills = false,
-                                                                                            .include_plugin_commands = false,
-                                                                                            .include_mcp_prompts = false});
+  auto registry = ava::app::load_command_registry(
+      session, ava::app::CommandRegistryOptions{
+                   .include_prompt_commands = false, .include_skills = false, .include_plugin_commands = false, .include_mcp_prompts = false});
   auto const* entry = find_entry(registry, "/session");
   expect(entry != nullptr && entry->command == "/stats" && entry->source == ava::app::UnifiedCommandSource::Builtin &&
-             entry->kind == ava::app::UnifiedCommandKind::Backend &&
-             std::ranges::find(entry->aliases, "/session") != entry->aliases.end(),
+             entry->kind == ava::app::UnifiedCommandKind::Backend && std::ranges::find(entry->aliases, "/session") != entry->aliases.end(),
          "command registry exposes /session as the built-in current-session /stats alias");
 
   expect(ava::app::is_backend_command("/session"), "command catalog classifies /session as a backend slash command");
@@ -224,6 +223,24 @@ void test_builtin_session_alias_registers_as_current_stats_command()
   expect(stats && session_alias && stats->handled && session_alias->handled && !stats->output.empty() && !session_alias->output.empty() &&
              session_alias->output[0] == stats->output[0] && session_alias->output[0].find("tokens: input=12 output=7 total=19") != std::string::npos,
          "command dispatcher runs /session with no arguments through the current-session /stats surface");
+
+  auto jobs = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs"});
+  auto missing = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs show job_missing"});
+  auto invalid_wait = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs wait job_missing nope"});
+  auto active_wait = ava::app::run_jobs_command(session.subagent_coordinator, session.store.session_id(), "wait job_missing 10", true);
+  auto active_result = ava::app::run_jobs_command(session.subagent_coordinator, session.store.session_id(), "result job_missing", true);
+  auto active_list_arguments = ava::app::active_jobs_command_arguments(" /jobs ");
+  auto active_promote_arguments = ava::app::active_jobs_command_arguments("/jobs promote job_1");
+  auto unrelated_active_command = ava::app::active_jobs_command_arguments("/jobs-extra promote job_1");
+  auto const help = ava::app::command_help_text();
+  expect(ava::app::is_backend_command("/jobs") && jobs && jobs->handled && !jobs->output.empty() && jobs->output[0].find("\"jobs\":[]") != std::string::npos &&
+             missing && !missing->output.empty() && missing->output[0] == "jobs: subagent job not found" && invalid_wait && !invalid_wait->output.empty() &&
+             invalid_wait->output[0].find("positive integer") != std::string::npos && active_wait && !active_wait->output.empty() &&
+             active_wait->output[0].find("may block") != std::string::npos && active_wait->output[0].find("/jobs show") != std::string::npos && active_result &&
+             !active_result->output.empty() && active_result->output[0].find("may block") != std::string::npos && active_list_arguments &&
+             active_list_arguments->empty() && active_promote_arguments && *active_promote_arguments == "promote job_1" && !unrelated_active_command &&
+             help.find("/jobs") != std::string::npos,
+         "slash job controls keep nonblocking active-run actions and reject wait/result with actionable text");
 }
 
 void test_project_trust_gates_project_resource_commands()

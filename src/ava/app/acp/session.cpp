@@ -4,6 +4,7 @@
 #include "ava/app/runtime_credentials.h"
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_sessions.h"
+#include "ava/app/subagent_delivery_manager.h"
 #include "ava/session/attachments.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/ids.h"
@@ -681,6 +682,26 @@ ava::core::VoidResult AcpSessionHost::close()
 
 AcpSessionRegistry::AcpSessionRegistry(AcpSessionOptions options) : options_(std::move(options))
 {
+  if (options_.open_options.subagent_delivery_manager)
+  {
+    options_.open_options.subagent_coordinator = options_.open_options.subagent_delivery_manager->coordinator();
+    return;
+  }
+  auto coordinator = options_.open_options.subagent_coordinator
+                         ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options_.open_options.subagent_coordinator)
+                         : ava::agent::SubagentCoordinator::create({.ava_state_dir = options_.paths.ava_state_dir});
+  if (!coordinator)
+  {
+    coordinator_startup_error_ = std::move(coordinator.error());
+    return;
+  }
+  options_.open_options.subagent_coordinator = std::move(*coordinator);
+  auto manager =
+      SubagentDeliveryManager::create({.coordinator = options_.open_options.subagent_coordinator, .provider_bundle_factory = options_.provider_bundle_factory});
+  if (manager)
+    options_.open_options.subagent_delivery_manager = std::move(*manager);
+  else
+    coordinator_startup_error_ = std::move(manager.error());
 }
 
 AcpSessionRegistry::~AcpSessionRegistry()
@@ -729,6 +750,8 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::insert_re
 ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::create(std::filesystem::path const& cwd,
                                                                               std::shared_ptr<ava::mcp::McpConfig const> mcp_config)
 {
+  if (coordinator_startup_error_)
+    return std::unexpected(*coordinator_startup_error_);
   if (auto reserved = reserve_insertion(); !reserved)
     return std::unexpected(std::move(reserved.error()));
   bool release_reservation = true;
@@ -752,6 +775,8 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::create(st
 ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::load(std::string_view session_id, std::filesystem::path const& cwd,
                                                                             std::shared_ptr<ava::mcp::McpConfig const> mcp_config)
 {
+  if (coordinator_startup_error_)
+    return std::unexpected(*coordinator_startup_error_);
   if (auto reserved = reserve_insertion(session_id); !reserved)
     return std::unexpected(std::move(reserved.error()));
   bool release_reservation = true;
@@ -933,6 +958,10 @@ void AcpSessionRegistry::shutdown() noexcept
   }
   for (auto const& host : hosts) host->cancel();
   for (auto const& host : hosts) static_cast<void>(host->close());
+  if (options_.open_options.subagent_delivery_manager)
+    options_.open_options.subagent_delivery_manager->shutdown();
+  else if (options_.open_options.subagent_coordinator)
+    options_.open_options.subagent_coordinator->shutdown();
 }
 
 std::filesystem::path const& AcpSessionRegistry::launch_root() const noexcept

@@ -36,6 +36,9 @@ struct RunOptions
   bool enable_transport_retries = false;
   std::optional<std::vector<std::string>> exact_builtin_tool_names = std::nullopt;
   bool isolate_project_resources = false;
+  // Integration-only runs may explicitly suppress even a session-local
+  // immutable MCP composition; ordinary ACP isolation retains its approved MCP.
+  bool disable_session_mcp = false;
   bool require_descriptor_secure_workspace = false;
   bool announce_execution_after_permission = false;
   bool redact_permission_audit_arguments = false;
@@ -59,6 +62,10 @@ struct RunOptions
   std::function<ava::core::VoidResult(ava::agent::RunPhase)> on_phase = nullptr;
   bool offline = false;
   bool expand_prompt_file_references = true;
+  // Internal application marker: automatic parent delivery must not refresh
+  // or recursively retain its own detached capsule.
+  bool synthetic_subagent_delivery = false;
+  std::optional<ava::session::SyntheticDeliveryProvenance> synthetic_user_message_provenance = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

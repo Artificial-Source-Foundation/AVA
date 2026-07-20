@@ -2009,8 +2009,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
 
     auto resolve_choice = [&](PermissionPromptChoice selected) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-      auto const allow = selected == PermissionPromptChoice::Allow || selected == PermissionPromptChoice::AllowSession ||
-                         selected == PermissionPromptChoice::AllowRemember;
+      auto const allow =
+          selected == PermissionPromptChoice::Allow || selected == PermissionPromptChoice::AllowSession || selected == PermissionPromptChoice::AllowRemember;
       auto const remember = selected == PermissionPromptChoice::AllowRemember || selected == PermissionPromptChoice::DenyRemember;
       std::string remembered_rule_id;
       if (remember)
@@ -2169,12 +2169,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
         return resolve_choice(PermissionPromptChoice::Deny);
       }
 
-      auto input_result =
-          snapshot.permission_prompt ? handle_permission_prompt_input(snapshot.permission_prompt->selected_choice, choice_input.event,
-                                                                        snapshot.permission_prompt->allow_session_available,
-                                                                        snapshot.permission_prompt->allow_remember_available,
-                                                                        snapshot.permission_prompt->deny_remember_available)
-                                   : PermissionPromptInputResult{};
+      auto input_result = snapshot.permission_prompt
+                              ? handle_permission_prompt_input(
+                                    snapshot.permission_prompt->selected_choice, choice_input.event, snapshot.permission_prompt->allow_session_available,
+                                    snapshot.permission_prompt->allow_remember_available, snapshot.permission_prompt->deny_remember_available)
+                              : PermissionPromptInputResult{};
       if (input_result.action == PermissionPromptInputAction::ResolveAllow)
       {
         return resolve_choice(PermissionPromptChoice::Allow);
@@ -2208,14 +2207,13 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-        bool const has_extended = snapshot.permission_prompt &&
-                                    (snapshot.permission_prompt->allow_session_available || snapshot.permission_prompt->allow_remember_available ||
-                                     snapshot.permission_prompt->deny_remember_available);
-        snapshot.status = has_extended
-                              ? permission_prompt_status(snapshot.permission_prompt->allow_session_available,
-                                                         snapshot.permission_prompt->allow_remember_available,
-                                                         snapshot.permission_prompt->deny_remember_available)
-                              : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
+        bool const has_extended =
+            snapshot.permission_prompt && (snapshot.permission_prompt->allow_session_available || snapshot.permission_prompt->allow_remember_available ||
+                                           snapshot.permission_prompt->deny_remember_available);
+        snapshot.status =
+            has_extended ? permission_prompt_status(snapshot.permission_prompt->allow_session_available, snapshot.permission_prompt->allow_remember_available,
+                                                    snapshot.permission_prompt->deny_remember_available)
+                         : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
       }
       if (!render())
       {
@@ -3588,6 +3586,30 @@ int run_interactive_composer(TuiRuntimeOptions options)
             snapshot.status = restored->steering ? "steering restored" : "follow-up restored";
             return render();
           };
+          auto run_active_command = [&]() -> std::optional<bool> {
+            if (!active_queues || !active_queues->run_nonblocking_command || draft.text.empty())
+              return std::nullopt;
+            auto const submitted_command = expanded_composer_draft_text(draft);
+            auto command_output = dispatch_tui_active_nonblocking_command(*active_queues, submitted_command);
+            if (!command_output)
+              return std::nullopt;
+            push_history(input_history, submitted_command);
+            push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted_command});
+            for (auto const& output : *command_output)
+              push_transcript(snapshot, TranscriptItem{.label = "ava", .text = output, .meta = assistant_meta_for_snapshot(snapshot)});
+            clear_draft_selection();
+            reset_composer_draft(draft);
+            jump_mode = ComposerJumpMode::None;
+            draft_scroll_offset = 0;
+            transcript_scroll_offset = 0;
+            history_index.reset();
+            draft_input.clear();
+            selected_slash_command_index = 0;
+            slash_palette_suppressed = false;
+            path_completion_force_active = false;
+            snapshot.status = command_output->empty() ? "job command complete" : command_output->back();
+            return render();
+          };
           auto queue_active_draft = [&](bool follow_up_only) {
             if (draft.text.empty())
             {
@@ -3839,6 +3861,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
           {
             if (active_event.key == Key::Enter && convert_backslash_enter_to_newline())
               return render();
+            if (auto handled = run_active_command())
+              return *handled;
             return queue_active_draft(false);
           }
           bool const active_delete_forward = active_is_action(TuiAction::DeleteForward) && (active_event.key != Key::CtrlD || active_ctrl_d_delete_forward);
@@ -5747,6 +5771,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
   }
 
   return terminal_signal_received() ? 130 : (terminal_write_failed ? 1 : 0);
+}
+
+std::optional<std::vector<std::string>> dispatch_tui_active_nonblocking_command(TuiActiveRunQueues const& queues, std::string const& submitted)
+{
+  return queues.run_nonblocking_command ? queues.run_nonblocking_command(submitted) : std::nullopt;
 }
 
 }  // namespace ava::tui

@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/app/clipboard_image.h"
+#include "ava/app/command_jobs.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/commands.h"
 #include "ava/app/display_settings.h"
@@ -1100,8 +1101,9 @@ int run_tui(ShellState state)
       .reasoning_status_provider = [&state]() { return ava::app::reasoning_status_for_session(state.session); },
       .create_active_run_queues =
           [&state](ava::app::EventEnvelopeSink event_sink) {
-            auto queue =
-                std::make_shared<ava::app::InteractiveRunQueue>(state.session.store.session_id(), ava::core::make_id("request"), std::move(event_sink));
+            auto const active_job_coordinator = state.session.subagent_coordinator;
+            auto const active_job_owner = state.session.store.session_id();
+            auto queue = std::make_shared<ava::app::InteractiveRunQueue>(active_job_owner, ava::core::make_id("request"), std::move(event_sink));
             return ava::tui::TuiActiveRunQueues{
                 .active_request_id = queue->active_request_id(),
                 .queue_steering = [queue](std::string message) { return queue->queue_steering(std::move(message)); },
@@ -1124,6 +1126,15 @@ int run_tui(ShellState state)
                   if (!restored)
                     return std::unexpected(std::move(restored.error()));
                   return ava::tui::TuiRestoredQueuedMessage{.message = restored->message, .steering = restored->steering};
+                },
+                .run_nonblocking_command = [active_job_coordinator, active_job_owner](std::string const& submitted) -> std::optional<std::vector<std::string>> {
+                  auto arguments = ava::app::active_jobs_command_arguments(submitted);
+                  if (!arguments)
+                    return std::nullopt;
+                  auto command = ava::app::run_jobs_command(active_job_coordinator, active_job_owner, *arguments, true);
+                  if (!command)
+                    return std::vector<std::string>{command.error().format()};
+                  return std::move(command->output);
                 },
                 .finish = [queue](bool canceled) { return queue->finish(canceled); }};
           },

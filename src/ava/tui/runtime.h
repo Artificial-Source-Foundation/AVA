@@ -49,6 +49,9 @@ struct TuiActiveRunQueues
   std::function<std::optional<TuiQueuedFollowUp>()> take_next_follow_up;
   std::function<ava::core::VoidResult(TuiQueuedFollowUp const&)> mark_follow_up_started;
   std::function<ava::core::Result<TuiRestoredQueuedMessage>()> restore_latest;
+  // Bound to the exact active session before its submit worker starts. A
+  // disengaged result leaves ordinary active-run queue behavior unchanged.
+  std::function<std::optional<std::vector<std::string>>(std::string const&)> run_nonblocking_command;
   std::function<ava::core::VoidResult(bool)> finish;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
@@ -170,6 +173,7 @@ struct TuiRuntimeOptions
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+[[nodiscard]] std::optional<std::vector<std::string>> dispatch_tui_active_nonblocking_command(TuiActiveRunQueues const& queues, std::string const& submitted);
 [[nodiscard]] int run_interactive_composer(TuiRuntimeOptions options);
 [[nodiscard]] SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::string footer_hint = {});
 [[nodiscard]] SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, TuiKeyBindings const& bindings, std::string footer_hint = {});

@@ -245,8 +245,8 @@ ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths con
   expect(store.has_value(), store ? "plugin command test session store opens" : "plugin command test session store opens: " + store.error().format());
   auto target = store ? ava::session::SessionAppendTarget::create_ephemeral(*store)
                       : ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>>(std::unexpected(store.error()));
-  expect(target.has_value(), target ? "plugin command test session append target opens"
-                                   : "plugin command test session append target opens: " + target.error().format());
+  expect(target.has_value(),
+         target ? "plugin command test session append target opens" : "plugin command test session append target opens: " + target.error().format());
   ava::config::ModelInfo model;
   model.provider_id = "openai";
   model.model_id = "gpt-test";
@@ -255,26 +255,26 @@ ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths con
   trust.trust_file = paths.ava_state_dir / "trusted-projects.json";
   trust.decision = ava::app::ProjectTrustDecision::Trusted;
   return ava::app::runtime::Session{.store = std::move(*store),
-                                  .lease = {},
-                                  .mode = ava::agent::Mode::Build,
-                                  .model = std::move(model),
-                                  .base_prompt = {},
-                                  .paths = paths,
-                                  .workspace_dir = workspace,
-                                  .current_dir = workspace,
-                                  .project_trust = std::move(trust),
-                                  .prompt_overrides = {},
-                                  .tool_visibility = {},
-                                  .context_sources = {},
-                                  .freshness_sources = {},
-                                  .system_prompt = {},
-                                  .reasoning = std::nullopt,
-                                  .scoped_model_cycle = std::nullopt,
-                                  .created = false,
-                                  .sessionless = false,
-                                  .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr),
-                                  .background_jobs = nullptr,
-                                  .offline = false};
+                                    .lease = {},
+                                    .mode = ava::agent::Mode::Build,
+                                    .model = std::move(model),
+                                    .base_prompt = {},
+                                    .paths = paths,
+                                    .workspace_dir = workspace,
+                                    .current_dir = workspace,
+                                    .project_trust = std::move(trust),
+                                    .prompt_overrides = {},
+                                    .tool_visibility = {},
+                                    .context_sources = {},
+                                    .freshness_sources = {},
+                                    .system_prompt = {},
+                                    .reasoning = std::nullopt,
+                                    .scoped_model_cycle = std::nullopt,
+                                    .created = false,
+                                    .sessionless = false,
+                                    .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr),
+                                    .subagent_coordinator = nullptr,
+                                    .offline = false};
 }
 
 std::string command_output_text(ava::core::Result<ava::app::CommandResult> const& command)

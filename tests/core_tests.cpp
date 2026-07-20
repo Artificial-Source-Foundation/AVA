@@ -1,8 +1,11 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "ava/core/path.h"
 
 #include <array>
+#include <cstdlib>
 #include <iostream>
+#include <unistd.h>
 #include <string_view>
 #include "debug.h"
 
@@ -123,6 +126,20 @@ int main(int argc, char** argv)
   {
     std::cerr << "usage: ava_tests [suite]\n";
     return 2;
+  }
+
+  // CTest may change the working directory without updating $PWD, which
+  // would cause logical_cwd() to throw. Verify and fix $PWD to match the
+  // actual working directory (falling back to the physical path).
+  try
+  {
+    ava::core::logical_cwd();
+  }
+  catch (...)
+  {
+    char buffer[4096];
+    if (::getcwd(buffer, sizeof(buffer)) != nullptr)
+      ::setenv("PWD", buffer, 1);
   }
 
   if (argc == 2)

@@ -190,6 +190,7 @@ doc_sources=(
   docs/USAGE.md
   docs/CONFIG.md
   docs/TESTING.md
+  docs/diagnostics.md
   docs/headless-protocol.md
   docs/rpc-protocol.md
   docs/acp.md

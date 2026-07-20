@@ -20,7 +20,7 @@ External projects are behavior references only. AVA may adopt useful product beh
 | --- | --- | --- | --- |
 | 1 | Normal coding-command permissions and execution | Direction approved 2026-07-19; recorded below | Implemented and validated 2026-07-19 |
 | 2 | Foreground/background subagent execution and job controls | Direction approved 2026-07-20; recorded below | Implemented and validated 2026-07-20 |
-| 3 | Privacy-safe diagnostics and support bundles | Awaiting focused research and discussion | Not started |
+| 3 | Privacy-safe diagnostics and support bundles | Direction approved 2026-07-20; recorded below | Implemented and validated 2026-07-20 |
 | 4 | Context-compaction correctness and configuration | Awaiting focused research and discussion | Not started |
 | 5 | Automatic session titles | Awaiting focused research and discussion | Not started |
 
@@ -525,3 +525,78 @@ The backend provides owner-bound list, status, wait, result, cancel, and promoti
 | W2-004 | Fixed and validated 2026-07-20 |
 | W2-005 | Fixed and validated 2026-07-20 |
 | W2-006 | Fixed and validated 2026-07-20 |
+
+---
+
+# Workstream 3: Privacy-Safe Diagnostics And Support
+
+## Approved Product Direction
+
+AVA will separate rich local developer debugging from safe user-facing diagnostics. Carlo Wood's existing libcwd integration and subsystem channels remain the deep, developer-only debug layer. `ava doctor`, last-failure records, metadata traces, and support exports remain libcwd-independent, available in ordinary release builds, and safe to share by construction.
+
+The support-facing boundary uses closed typed categories, stable codes, retryability, counts, and fixed recovery hints. It never serializes raw formatted errors or caller-controlled diagnostic strings. Provider/model/plugin/MCP/LSP/network/session/path/command text, credentials, environment values, prompts, reasoning, tool arguments/results, stderr, response bodies, headers, URLs, and configuration contents are excluded from support artifacts. AVA does not upload diagnostics or enable telemetry.
+
+### Failure Privacy
+
+Untrusted MCP/plugin response fragments, remote error messages, stderr, and failure metadata must not flow into model-visible tool results, session records, RPC/events, or portable exports. Those paths receive stable bounded failure projections while successful tool content remains unchanged. Explicit developer-only libcwd diagnostics may record bounded operation/state metadata but do not become support-bundle input.
+
+### Doctor And Local Diagnostics
+
+`ava doctor` is an offline, passive readiness check with a machine-readable `--json` form. It reports fixed statuses and remediation for AVA version/platform, private XDG storage, configuration parse/readiness, provider credential presence and storage safety, plugin/MCP/LSP configuration, and permission-rule readiness. It does not call a provider, refresh credentials, launch an integration or subprocess, access the network, mutate configuration, or create a session. Active probes are deferred unless added later as an explicit separately approved mode.
+
+Metadata-only tracing is disabled by default and enabled explicitly with `--trace`. It reuses AVA's bounded RunObserver architecture, replaces identifying values with process-local opaque aliases, omits content and paths, writes only to owner-private bounded local state, and never changes the observed runtime result. A sanitized owner-only last-failure record stores only timestamp, component class, stable category/code, retryability, and fixed recovery guidance.
+
+### Support Export
+
+`ava support export` writes a unique owner-private local JSON artifact beneath AVA's state directory. It contains only generated version/platform facts, the passive doctor projection, trace schema/counters, and the sanitized last-failure projection. It never includes trace event lines, sessions, exports, prompts, reasoning, commands, paths, configurations, identities, credentials, raw errors, stderr, or provider/plugin/MCP payloads. Publication is bounded, descriptor-safe, no-follow, and no-replace. No automatic upload exists.
+
+## Verified Reference Behavior
+
+Grok Build provides useful structured `inspect --json`, MCP health reports, bounded local crash evidence, and metadata-oriented diagnostics. OpenCode provides strong debug/inspection entry points and typed integration states. Pi offers convenient one-shot local debug capture. AVA adopts those product ideas without copying their broad raw logs, recursive session archives, response-body/header retention, transcript dumps, or automatic diagnostic uploads.
+
+## Approved Implementation Sequence
+
+1. Establish one typed support-safe diagnostic representation and close MCP/plugin failure-data leaks.
+2. Add private bounded diagnostic storage, passive doctor checks, sanitized last-failure persistence, and support export.
+3. Expose privacy-safe RunObserver tracing and add libcwd operation/state instrumentation for local developer debugging.
+4. Add deterministic canary tests, CLI/RPC/ACP framing coverage, documentation, and final normal/sanitizer/terminal validation.
+
+## Implementation Record
+
+Implemented on `develop` on 2026-07-20. AVA now projects MCP and plugin failures through one closed support-safe representation before model-visible results, sessions, RPC, or portable export, while successful integration content remains unchanged. Stable component/category/code/retryability/recovery fields replace raw remote messages, stderr, response fragments, and metadata on those failure paths.
+
+`ava doctor` and `ava doctor --json` provide passive offline readiness checks without provider calls, credential-value reads, token refresh, subprocesses, sessions, mutation, or diagnostic writes. `ava support export` publishes one unique owner-private, no-replace JSON artifact beneath AVA's XDG state root and returns its exact local path; it never uploads. A typed best-effort last-failure record persists only stable failure classes and fixed recovery guidance.
+
+Explicit `--trace` works with TUI, print, RPC, and ACP modes. It uses a bounded asynchronous RunObserver adapter, per-trace opaque aliases, allowlisted numeric/boolean metadata, unique `0600` JSONL files, and a cumulative typed counter/writer-health snapshot merged safely across concurrent processes. Trace events and filenames are never support-export input. Existing libcwd channels remain the richer developer-only layer and receive only bounded operation/state/count messages from this workstream.
+
+All diagnostic state uses descriptor-relative, nonblocking no-follow inspection, owner/private directory and file modes, single-link regular-file validation, atomic or no-replace publication, bounded parsing, and fail-closed unsafe-path handling. Default successful AVA startup remains artifact-free.
+
+Primary implementation areas are `src/ava/diagnostics/`, `src/ava/app/doctor_support.cpp`, application/runtime tracing and failure boundaries, MCP/plugin safe-failure projections, package documentation, and focused diagnostics/runtime/CLI/ACP tests.
+
+## Validation Record
+
+Validation used no paid live-provider calls.
+
+- The normal configured CTest suite passed all 84 executed checks out of 101 registered checks in 80.27 seconds. The 17 expected skips were the credential-gated live-provider check, optional official ACP SDK interop, 13 opt-in tmux scenarios, and the Kitty-image/OSC-8 terminal smokes.
+- The sanitizer suite passed the same 84 executed checks with zero failures in 210.93 seconds under the two-job cap.
+- All 13 opt-in tmux scenarios executed concurrently and passed in 13.14 seconds.
+- Focused diagnostics, runtime diagnostics, RunObserver, ACP, passive doctor/support, trace lifecycle, MCP/plugin RPC privacy, and Linux package tests passed.
+- Tests cover passive/no-write doctor behavior, strict closed schemas, hostile canaries, default artifact-free startup, unique private/no-replace publication, symlink/FIFO/hardlink/mode rejection, trace bounds and aliasing, concurrent traces, cumulative counter locking, legacy v1 counter compatibility, last-failure classification, ACP stdout framing, and safe historical replay/export.
+- One integrated security/correctness review produced three concrete findings. `AVA-WS3-001` (concurrent counter overwrite), `AVA-WS3-002` (legacy v1 counter compatibility), and `AVA-WS3-003` (double-counted writer failures) were fixed; the narrow follow-up verification marked all three fixed with no newly introduced blocker.
+- Changed C++ formatting, package Markdown-link validation, and `git diff --check` passed.
+
+## Review Finding Ledger
+
+| ID | Resolution |
+| --- | --- |
+| AVA-WS3-001 | Fixed and validated 2026-07-20 |
+| AVA-WS3-002 | Fixed and validated 2026-07-20 |
+| AVA-WS3-003 | Fixed and validated 2026-07-20 |
+
+## Explicit Non-Goals
+
+- Automatic telemetry, uploads, or remote support services.
+- Bundling session/transcript/export content or raw debug/libcwd logs.
+- Active provider, MCP, plugin, LSP, or command probes in the passive doctor path.
+- Treating regex redaction as permission to serialize arbitrary free-form content.
+- Changing compaction behavior or the concurrently implemented Workstream 4 contract.

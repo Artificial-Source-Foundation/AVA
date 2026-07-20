@@ -10,6 +10,9 @@ AVA uses XDG paths on Linux.
 | Workspace-keyed permission rules | `$XDG_CONFIG_HOME/ava/workspace-permission-rules/<hash>/permission-rules.json` or `~/.config/ava/workspace-permission-rules/<hash>/permission-rules.json` |
 | Session state | `$XDG_STATE_HOME/ava/sessions` or `~/.local/state/ava/sessions` |
 | Project trust state | `$XDG_STATE_HOME/ava/project-trust.json` or `~/.local/state/ava/project-trust.json` |
+| Private diagnostic state | `$XDG_STATE_HOME/ava/diagnostics` or `~/.local/state/ava/diagnostics` |
+| Private runtime traces | `$XDG_STATE_HOME/ava/diagnostics/traces` or `~/.local/state/ava/diagnostics/traces` |
+| Local support exports | `$XDG_STATE_HOME/ava/support` or `~/.local/state/ava/support` |
 
 ## Settings Architecture And Resource Packages
 
@@ -26,6 +29,10 @@ Pi-style package/resource management (`packages list|install|remove|update|confi
 - trusted project resources: `.ava/commands/`, `.ava/skills/`, `.ava/agents/`, `.ava/plugins/`, `.ava/mcp.json`, `.ava/lsp.json`, `.ava/SYSTEM.md`, and `.ava/APPEND_SYSTEM.md`
 
 `ava packages ...` and `/packages ...` currently report this deferral instead of performing side effects or sending the request to the model. AVA also does not enable analytics/telemetry, version checks, package updates, or self-update behavior. `--offline` disables provider model calls for prompt turns and provider-backed compaction before credential resolution; it is not an OS/network sandbox, so network-capable tools still depend on tool visibility plus permission policy.
+
+## Diagnostics State
+
+`ava doctor` is a read-only offline inspection and writes no state. Explicit `--trace` runs and terminal failures use owner-only state beneath `$XDG_STATE_HOME/ava/diagnostics`; `ava support export` publishes a unique owner-only JSON artifact beneath `$XDG_STATE_HOME/ava/support` and prints its local path. Existing directories must be current-user-owned and private, diagnostic files must be regular single-link mode `0600`, and AVA rejects unsafe symlink, FIFO, hardlink, or group/world-writable replacements rather than following them. Traces are capped at 10,000 events and 10 MiB. No diagnostic setting enables telemetry or automatic upload. See [`diagnostics.md`](diagnostics.md) for the data contract and privacy exclusions.
 
 ## TUI Display
 

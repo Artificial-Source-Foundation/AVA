@@ -27,11 +27,18 @@ ava --thinking high
 ava --print "summarize this repo"
 ava --rpc
 ava --acp
+ava doctor --json
+ava --trace --rpc
+ava support export
 ```
 
 `--continue` resumes the newest session for the current workspace; `--resume` and `-r` are Pi-compatible aliases. `--session` resumes an exact ID or a unique prefix; `--session-id` is a Pi-compatible alias. `--fork` creates a new branch from an exact ID or unique prefix. `--name` sets the startup session display name, and `--session-dir` selects a custom session storage directory for this process. `--no-session` runs with in-memory history and does not create a resumable JSONL session; it cannot be combined with `--continue`/`--resume`, `--session`/`--session-id`, or `--fork`. `--thinking off|<level>` sets the startup reasoning selection for the active model; `off` clears explicit reasoning, while other values must be listed in the active model's reasoning levels. On exit, AVA prints the command needed to resume the current session unless sessionless mode is active.
 
 Choose the interface by contract: the TUI is the interactive terminal UI; print mode is one-shot text/JSON automation; `--rpc` is AVA's proprietary JSONL subprocess API for automation/custom clients; and `--acp` is the separate stable ACP v1 JSON-RPC 2.0 stdio endpoint for specifically configured editor/IDE clients. AVA RPC is not ACP, generic JSON-RPC, or Pi RPC. Pi RPC remains reference behavior for subprocess embedding, custom UI, automation, and testing rather than AVA's editor-interoperability contract. See [`rpc-protocol.md`](rpc-protocol.md) for RPC and [`acp.md`](acp.md) for exact client setup, evidence labels, and limits.
+
+## Diagnostics And Support
+
+Use `ava doctor` for a passive human-readable readiness report or `ava doctor --json` for automation. Doctor does not call providers, read credential values, launch integrations, mutate configuration, create sessions, or write diagnostic state. Add `--trace` to a normal TUI, print, RPC, or ACP invocation to create one private bounded metadata trace; tracing is disabled by default. `ava support export` creates a new sanitized local JSON artifact and prints its exact path. The export contains generated readiness/status facts, typed counters, and a typed last-failure record—not trace lines, sessions, prompts, reasoning, commands, paths, configuration contents, identities, credentials, raw errors, stderr, or remote payloads. AVA never uploads it. See [`diagnostics.md`](diagnostics.md) for storage, limits, privacy guarantees, and libcwd's separate developer-debug role.
 
 ## Modes
 

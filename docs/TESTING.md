@@ -211,7 +211,15 @@ scripts/run-tests.sh -R "ava_tests.tui_composer"
 
 The suite includes the CI-safe ncurses baseline currently available in-tree: configured `ESCDELAY`, escape buffering/discard for CSI/OSC/DCS/bracketed-paste markers, mouse wheel/click mapping at the composer layer, resize stress renders, Unicode/CJK/combining/emoji width and cursor placement, `newterm` smokes for xterm/screen terminfo plus tmux/kitty/wezterm/ssh-like environment variables without a real TTY, and large/very-long transcript performance budgets.
 
-Real terminal coverage exists as prerequisite-gated CTest smokes:
+Real terminal coverage exists as prerequisite-gated CTest smokes. The historical
+pre-F1 F0 semantic inventory, four-row shell observations, artifact policy, and
+future evidence gaps are recorded in `docs/roadmap/frontend-evidence-baseline.md`.
+The current `main_startup_trust_keybinds` scenario generates four F1
+plain-text composer captures below its evidence root: `160x48`
+(`frontend-f1-wide-idle-composer.txt`, input/footer rows 46/47), `120x36`
+(`frontend-f1-ordinary-idle-composer.txt`, rows 34/35), `80x24`
+(`frontend-f1-narrow-idle-composer.txt`, rows 22/23), and `100x12`
+(`frontend-f1-short-idle-composer.txt`, rows 10/11). Rows are zero-based.
 
 ```sh
 AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 13 -R '^ava_tui\.tmux_smoke_'

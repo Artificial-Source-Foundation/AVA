@@ -600,6 +600,81 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     if "\x1b[" in styled_initial:
         raise RuntimeError(f"NO_COLOR=1 TUI frame still captured ANSI style escapes\nscreen:\n{styled_initial}")
 
+    def wait_for_idle_composer_reflow(height: int, label: str) -> tuple[str, list[str]]:
+        input_row = height - 2
+        footer_row = height - 1
+        settled = wait_for(
+            tmux_exe,
+            session,
+            rf"(?m)\A(?:[^\n]*\n){{{input_row}}}│  Type a message\.\.\.[^\n]*\n│  GPT-5\.5 · ctx \d+[^\n]*(?:\n|\Z)",
+            f"{label} target composer/footer rows {input_row}/{footer_row}",
+        )
+        settled_lines = settled.splitlines()
+        if len(settled_lines) <= footer_row:
+            raise RuntimeError(
+                f"{label} did not contain target composer/footer rows {input_row}/{footer_row}\nscreen:\n{settled}"
+            )
+        if not settled_lines[input_row].startswith("│  Type a message..."):
+            raise RuntimeError(
+                f"{label} input row did not start with the quiet composer prefix at row {input_row}\nscreen:\n{settled}"
+            )
+        if not settled_lines[footer_row].startswith("│  "):
+            raise RuntimeError(
+                f"{label} footer did not start with the quiet composer prefix at row {footer_row}\nscreen:\n{settled}"
+            )
+        if "❯" in settled:
+            raise RuntimeError(f"{label} retained the removed composer prompt glyph\nscreen:\n{settled}")
+        return settled, settled_lines
+
+    def capture_idle_shell(width: int, height: int, name: str, sidebar_expected: bool) -> None:
+        previous = capture(tmux_exe, session)
+        tmux(tmux_exe, "resize-window", "-t", session, "-x", str(width), "-y", str(height))
+        wait_for_screen_change(
+            tmux_exe, session, previous, f"{name} resize redraw"
+        )
+        dimensions = tmux(
+            tmux_exe, "display-message", "-p", "-t", session, "#{window_width},#{window_height}"
+        ).stdout.strip()
+        if dimensions != f"{width},{height}":
+            raise RuntimeError(f"{name} dimensions were {dimensions}, expected {width},{height}")
+        settled, settled_lines = wait_for_idle_composer_reflow(height, name)
+        if re.search(r"traceback|assert(?:ion)?|failure", settled, re.IGNORECASE):
+            raise RuntimeError(f"{name} idle frame shows failure text\nscreen:\n{settled}")
+        settled_footer = settled_lines[height - 1][3:]
+        if sidebar_expected:
+            settled_footer = settled_footer.split("│", 1)[0]
+        settled_footer = settled_footer.strip()
+        if not re.fullmatch(r"GPT-5\.5 · ctx \d+", settled_footer):
+            raise RuntimeError(
+                f"{name} footer did not contain only the idle model name and context count\nscreen:\n{settled}"
+            )
+        sidebar_pattern = r"live session|Activity"
+        if sidebar_expected and ("live session" not in settled or "Activity" not in settled):
+            raise RuntimeError(f"{name} did not show the current sidebar\nscreen:\n{settled}")
+        if not sidebar_expected and re.search(sidebar_pattern, settled):
+            raise RuntimeError(f"{name} unexpectedly showed the sidebar\nscreen:\n{settled}")
+        unexpected_controls = [
+            character for character in settled if ord(character) < 32 and character != "\n"
+        ]
+        if unexpected_controls:
+            raise RuntimeError(f"{name} saved frame contains unexpected C0 controls\nscreen:\n{settled}")
+        save_evidence(root, name, settled)
+
+    capture_idle_shell(160, 48, "frontend-f1-wide-idle-composer", sidebar_expected=True)
+    capture_idle_shell(120, 36, "frontend-f1-ordinary-idle-composer", sidebar_expected=True)
+    capture_idle_shell(80, 24, "frontend-f1-narrow-idle-composer", sidebar_expected=False)
+    capture_idle_shell(100, 12, "frontend-f1-short-idle-composer", sidebar_expected=False)
+
+    restore_previous = capture(tmux_exe, session)
+    tmux(tmux_exe, "resize-window", "-t", session, "-x", "120", "-y", "32")
+    wait_for_screen_change(tmux_exe, session, restore_previous, "startup baseline restore redraw")
+    restored_dimensions = tmux(
+        tmux_exe, "display-message", "-p", "-t", session, "#{window_width},#{window_height}"
+    ).stdout.strip()
+    if restored_dimensions != "120,32":
+        raise RuntimeError(f"startup baseline restore dimensions were {restored_dimensions}, expected 120,32")
+    wait_for_idle_composer_reflow(32, "startup baseline restored")
+
     send_literal(tmux_exe, session, "/copy")
     wait_for(tmux_exe, session, r"/copy", "empty copy command draft")
     send_keys(tmux_exe, session, "Enter")
@@ -734,7 +809,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before keybinding reload")
     send_literal(tmux_exe, session, "reload")
     settings_reload_row = wait_for(
-        tmux_exe, session, r"Keybindings reload|/reload keybindings", "settings keybinding reload row"
+        tmux_exe, session, r"Search: reload[^\n]*\n(?:[^\n]*\n)*[^\n]*Keybindings reload", "settings keybinding reload row"
     )
     if "Keybindings reload" not in settings_reload_row or "/reload keybindings" not in settings_reload_row:
         raise RuntimeError(
@@ -858,7 +933,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/context trust-smoke ")
-    wait_for(tmux_exe, session, r"▎\s+❯\s+/context trust-smoke", "trusted context query draft")
+    wait_for(tmux_exe, session, r"│  /context trust-smoke", "trusted context query draft")
     send_keys(tmux_exe, session, "Enter")
     trusted_context = wait_for(
         tmux_exe,
@@ -871,7 +946,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/context APPEND_SYSTEM ")
-    wait_for(tmux_exe, session, r"▎\s+❯\s+/context APPEND_SYSTEM", "trusted append-system context query draft")
+    wait_for(tmux_exe, session, r"│  /context APPEND_SYSTEM", "trusted append-system context query draft")
     send_keys(tmux_exe, session, "Enter")
     trusted_prompt_context = wait_for(
         tmux_exe,
@@ -885,7 +960,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     (ava_config / "keybinds.json").unlink(missing_ok=True)
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/keybindings init")
-    wait_for(tmux_exe, session, r"❯ /keybindings init(?:\s|$)", "keybindings init command draft")
+    wait_for(tmux_exe, session, r"│  /keybindings init(?:\s|$)", "keybindings init command draft")
     wait_for(tmux_exe, session, r"Create \$XDG_CONFIG_HOME/ava/keybinds\.json", "keybindings init completion row")
     send_keys(tmux_exe, session, "Escape")
     wait_for_absent(tmux_exe, session, r"Create \$XDG_CONFIG_HOME/ava/keybinds\.json", "keybindings init palette dismissed")
@@ -901,7 +976,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/keybindings init")
-    wait_for(tmux_exe, session, r"❯ /keybindings init(?:\s|$)", "keybindings existing init command draft")
+    wait_for(tmux_exe, session, r"│  /keybindings init(?:\s|$)", "keybindings existing init command draft")
     wait_for(tmux_exe, session, r"Create \$XDG_CONFIG_HOME/ava/keybinds\.json", "keybindings existing init completion row")
     send_keys(tmux_exe, session, "Escape")
     wait_for_absent(tmux_exe, session, r"Create \$XDG_CONFIG_HOME/ava/keybinds\.json", "keybindings existing init palette dismissed")
@@ -1690,7 +1765,7 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
     if help_row is None:
         raise RuntimeError(f"slash palette did not expose a clickable help row\nscreen:\n{palette}")
     send_literal(tmux_exe, session, f"\x1b[<0;4;{help_row}M")
-    clicked_help = wait_for(tmux_exe, session, r"❯ /help|/help", "raw SGR slash palette mouse click")
+    clicked_help = wait_for(tmux_exe, session, r"│  /help(?:\s|$)", "raw SGR slash palette mouse click")
     if "/help" not in clicked_help:
         raise RuntimeError(f"raw SGR mouse click did not select the slash palette row\nscreen:\n{clicked_help}")
 
@@ -1838,16 +1913,46 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
         raise RuntimeError(f"normal prompt path mouse click did not update the draft\nscreen:\n{clicked_path}")
 
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "inspect ")
-    whitespace_path_palette = wait_for(
-        tmux_exe, session, r"src/main\.cpp|src/", "whitespace new-token path completion palette"
+    send_literal(tmux_exe, session, "ordinary")
+    wait_for(tmux_exe, session, r"ordinary", "ordinary prompt word before trailing Space")
+    cursor_before_space = pane_cursor_position(tmux_exe, session)
+    send_keys(tmux_exe, session, "Space")
+    cursor_after_space = wait_for_cursor_change(
+        tmux_exe, session, cursor_before_space, "ordinary prompt cursor after trailing Space"
     )
-    if "src/main.cpp" not in whitespace_path_palette and "src/" not in whitespace_path_palette:
+    before_column, before_row = (int(value) for value in cursor_before_space.split(",", 1))
+    after_column, after_row = (int(value) for value in cursor_after_space.split(",", 1))
+    if after_row != before_row or after_column != before_column + 1:
         raise RuntimeError(
-            f"whitespace new-token path completion did not show workspace paths\nscreen:\n{whitespace_path_palette}"
+            "ordinary trailing Space did not move the cursor exactly one cell to the right "
+            f"on the same row: before={cursor_before_space}, after={cursor_after_space}"
         )
+    screen = assert_screen_absent_for(
+        tmux_exe,
+        session,
+        r"@?src/main\.cpp|@?src/",
+        "ordinary trailing Space opened a workspace file/path completion palette",
+    )
+    styled_screen = capture_styled(tmux_exe, session)
+    if "ordinary " not in styled_screen:
+        raise RuntimeError(
+            "styled capture did not preserve the visible ordinary draft after trailing Space; "
+            f"cursor before={cursor_before_space}, cursor after={cursor_after_space}\nscreen:\n{styled_screen}"
+        )
+    save_evidence(root, "composer-ordinary-space-no-completion", screen)
 
-    send_keys(tmux_exe, session, "C-u")
+    send_keys(tmux_exe, session, "Tab")
+    forced_whitespace_path_palette = wait_for(
+        tmux_exe, session, r"src/main\.cpp|src/", "forced empty-token path completion after whitespace"
+    )
+    if "src/main.cpp" not in forced_whitespace_path_palette and "src/" not in forced_whitespace_path_palette:
+        raise RuntimeError(
+            "forced empty-token path completion after whitespace did not show workspace paths\n"
+            f"screen:\n{forced_whitespace_path_palette}"
+        )
+    send_keys(tmux_exe, session, "C-c")
+    wait_for_absent(tmux_exe, session, r"ordinary", "ordinary prompt cleared after forced completion")
+
     send_literal(tmux_exe, session, "inspect file=src/")
     equals_path_palette = wait_for(
         tmux_exe, session, r"src/main\.cpp", "equals-delimited normal prompt path completion palette"
@@ -2219,7 +2324,7 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     wait_for(tmux_exe, session, r"session name set: \"TUI smoke\"", "session name command")
     send_keys(tmux_exe, session, "Up")
     arrow_scrollback = wait_for(tmux_exe, session, r"scrollback detached", "idle Up arrow transcript scrolling")
-    if "❯ /name TUI smoke" in arrow_scrollback:
+    if "│  /name TUI smoke" in arrow_scrollback:
         raise RuntimeError(
             "idle Up arrow recalled composer input history instead of only scrolling transcript history\n"
             f"screen:\n{arrow_scrollback}"
@@ -2500,9 +2605,9 @@ def scenario_main_paste_scrollback_attach(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, session, "B")
     wait_for(tmux_exe, session, r"A\[paste #1 \+11 lines\]B", "large paste marker forward delete draft")
     send_keys(tmux_exe, session, "C-a", "Right", "Delete")
-    wait_for(tmux_exe, session, r"❯ AB|^AB$", "large paste marker atomic forward delete")
+    wait_for(tmux_exe, session, r"│  AB|^AB$", "large paste marker atomic forward delete")
     send_keys(tmux_exe, session, "C-c")
-    wait_for_absent(tmux_exe, session, r"A\[paste #1 \+11 lines\]B|❯ AB", "large paste marker forward delete clear")
+    wait_for_absent(tmux_exe, session, r"A\[paste #1 \+11 lines\]B|│  AB", "large paste marker forward delete clear")
 
     send_literal(tmux_exe, session, "X ")
     send_literal(tmux_exe, session, f"\x1b[200~{large_paste}\x1b[201~")
@@ -2548,7 +2653,7 @@ def scenario_main_paste_scrollback_attach(ctx: SmokeContext) -> None:
 
     send_literal(tmux_exe, session, "one two three")
     send_keys(tmux_exe, session, "C-a", "M-f", "M-d")
-    forward_word_delete = wait_for(tmux_exe, session, r"❯ one three|one three", "alt-d forward word deletion")
+    forward_word_delete = wait_for(tmux_exe, session, r"│  one three", "alt-d forward word deletion")
     if "one two three" in forward_word_delete:
         raise RuntimeError(f"Alt+D did not delete the next word\nscreen:\n{forward_word_delete}")
     send_keys(tmux_exe, session, "C-c")
@@ -2603,7 +2708,7 @@ def scenario_main_paste_scrollback_attach(ctx: SmokeContext) -> None:
 
     send_literal(tmux_exe, session, "undo word")
     send_keys(tmux_exe, session, "C-w")
-    wait_for(tmux_exe, session, r"❯ undo|undo", "ctrl-w draft before ctrl-minus undo")
+    wait_for(tmux_exe, session, r"│  undo", "ctrl-w draft before ctrl-minus undo")
     send_literal(tmux_exe, session, "\x1f")
     wait_for(tmux_exe, session, r"undo word", "ctrl-minus undo restores draft")
     send_keys(tmux_exe, session, "C-c")

@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "debug.h"
 
 namespace ava::diagnostics {
 
@@ -53,6 +54,7 @@ struct DoctorCheck
   std::uint64_t items = 0;
   std::uint64_t enabled = 0;
   std::uint64_t errors = 0;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct DoctorReport
@@ -61,6 +63,7 @@ struct DoctorReport
   std::vector<DoctorCheck> checks;
 
   [[nodiscard]] bool has_failures() const noexcept;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct LastFailureRecord
@@ -69,6 +72,7 @@ struct LastFailureRecord
   std::int64_t recorded_at = 0;
   SafeFailure failure;
   std::uint64_t occurrences = 1;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TraceCounterSnapshot
@@ -81,6 +85,7 @@ struct TraceCounterSnapshot
   std::uint64_t session_failures = 0;
   std::uint64_t plugin_failures = 0;
   std::uint64_t mcp_failures = 0;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 enum class StoredRecordState
@@ -97,6 +102,7 @@ struct StoredRecord
 {
   StoredRecordState state = StoredRecordState::Absent;
   std::optional<Record> record = std::nullopt;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct SupportArtifact
@@ -106,6 +112,7 @@ struct SupportArtifact
   DoctorReport doctor;
   StoredRecord<TraceCounterSnapshot> trace;
   StoredRecord<LastFailureRecord> last_failure;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::string_view to_string(DoctorCheckKind kind) noexcept;

@@ -78,6 +78,7 @@ set(AVA_TESTS_SOURCES
   "tools_tests.cpp"
   "tui_composer_tests.cpp"
   "run_observer_tests.cpp"
+  "runtime_diagnostics_tests.cpp"
   "containment_tests.cpp"
 )
 # The debug suite relies on libcwd-backed machinery (ava_debug, CWDEBUG), so it is
@@ -137,6 +138,7 @@ set(AVA_TEST_SUITES
   permission_rules
   tui_composer
   run_observer
+  runtime_diagnostics
   containment
 )
 foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
@@ -440,6 +442,14 @@ if(Python3_Interpreter_FOUND)
             --ava $<TARGET_FILE:ava>
             --root ${CMAKE_BINARY_DIR}/doctor-support-cli)
   set_tests_properties(ava_cli.doctor_support PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_cli.runtime_diagnostics
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/runtime_diagnostics_cli_test.py
+            --ava $<TARGET_FILE:ava>
+            --root ${CMAKE_BINARY_DIR}/runtime-diagnostics-cli)
+  set_tests_properties(ava_cli.runtime_diagnostics PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
     NAME ava_build.parallel_test_runner

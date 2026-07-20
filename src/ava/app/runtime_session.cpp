@@ -292,6 +292,7 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
                            .run_controller = std::make_shared<SessionRunController>(std::move(*append_target)),
                            .subagent_coordinator = delivery_manager->coordinator(),
                            .subagent_delivery_manager = std::move(delivery_manager),
+                           .diagnostics = options.diagnostics,
                            .offline = options.offline};
 
   if (options.initial_reasoning_level)

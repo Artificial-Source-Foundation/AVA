@@ -488,14 +488,15 @@ int run_support_export(ava::config::XdgPaths const& paths, std::filesystem::path
     auto last_failure = ava::diagnostics::read_last_failure_record(paths);
     ava::diagnostics::SupportArtifact artifact{
         .generated_at = now_seconds(), .doctor = std::move(report), .trace = std::move(trace), .last_failure = std::move(last_failure)};
-    auto const status = ava::diagnostics::publish_support_artifact(paths, artifact);
-    Dout(dc::config, "operation=support_export state=result status=" << ava::diagnostics::to_string(status) << " checks=" << artifact.doctor.checks.size());
-    if (status != ava::diagnostics::ArtifactWriteStatus::Success)
+    auto const publication = ava::diagnostics::publish_support_artifact(paths, artifact);
+    Dout(dc::config,
+         "operation=support_export state=result status=" << ava::diagnostics::to_string(publication.status) << " checks=" << artifact.doctor.checks.size());
+    if (publication.status != ava::diagnostics::ArtifactWriteStatus::Success)
     {
-      err << "Support artifact generation failed [" << ava::diagnostics::to_string(status) << "].\n";
+      err << "Support artifact generation failed [" << ava::diagnostics::to_string(publication.status) << "].\n";
       return 1;
     }
-    out << "Support artifact created.\n";
+    out << "Support artifact created: " << publication.path.string() << '\n';
     return 0;
   }
   catch (...)

@@ -71,8 +71,8 @@ std::optional<Enum> parse_fixed(std::string_view value, std::array<Enum, N> cons
 
 std::optional<ComponentClass> parse_component(std::string_view value)
 {
-  constexpr std::array values{ComponentClass::Mcp,           ComponentClass::Plugin,   ComponentClass::App,     ComponentClass::Storage,
-                              ComponentClass::Configuration, ComponentClass::Provider, ComponentClass::Session, ComponentClass::Runtime};
+  constexpr std::array values{ComponentClass::Mcp,      ComponentClass::Plugin,  ComponentClass::App,  ComponentClass::Storage, ComponentClass::Configuration,
+                              ComponentClass::Provider, ComponentClass::Session, ComponentClass::Tool, ComponentClass::Runtime};
   return parse_fixed(value, values);
 }
 

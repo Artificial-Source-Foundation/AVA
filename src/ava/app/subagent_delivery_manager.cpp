@@ -145,6 +145,7 @@ runtime::Session detached_session(runtime::Session const& source, ava::session::
                           .bound_read_authority = std::move(authority),
                           .subagent_coordinator = source.subagent_coordinator,
                           .subagent_delivery_manager = std::move(manager),
+                          .diagnostics = source.diagnostics,
                           .mcp_config = source.mcp_config,
                           .offline = source.offline};
 }

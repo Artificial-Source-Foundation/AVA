@@ -22,6 +22,10 @@
 #include <utility>
 #include <vector>
 
+namespace ava::diagnostics {
+class RuntimeDiagnostics;
+}
+
 namespace ava::app {
 class SubagentDeliveryManager;
 }
@@ -63,6 +67,7 @@ struct Session
   // compatibility seam; production sessions use the delivery manager.
   std::shared_ptr<ava::agent::SubagentCoordinator> subagent_coordinator = nullptr;
   std::shared_ptr<ava::app::SubagentDeliveryManager> subagent_delivery_manager = nullptr;
+  std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
   // Null uses normal global/project discovery; non-null is immutable session-local MCP composition.
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;
   bool offline = false;

@@ -243,11 +243,16 @@ def test_doctor_and_support(ava: Path, root: Path) -> None:
     first = run(ava, ["support", "export"], env, workspace)
     second = run(ava, ["support", "export"], env, workspace)
     assert first.returncode == second.returncode == 0
-    assert first.stdout == second.stdout == "Support artifact created.\n"
+    prefix = "Support artifact created: "
+    assert first.stdout.startswith(prefix) and first.stdout.endswith("\n")
+    assert second.stdout.startswith(prefix) and second.stdout.endswith("\n")
+    assert first.stdout != second.stdout
     assert first.stderr == second.stderr == ""
     assert_clean_output(first)
     support_dir = root / "state" / "ava" / "support"
     artifacts = sorted(support_dir.glob("ava-support-v1-*.json"))
+    reported = {Path(first.stdout[len(prefix):].strip()), Path(second.stdout[len(prefix):].strip())}
+    assert set(artifacts) == reported, "support export did not report its exact unique no-replace files"
     assert len(artifacts) == 2, "support export did not publish unique no-replace files"
     for artifact_path in artifacts:
         metadata = artifact_path.stat()

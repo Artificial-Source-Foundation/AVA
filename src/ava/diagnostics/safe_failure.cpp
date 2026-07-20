@@ -29,6 +29,8 @@ std::string_view component_label(ComponentClass component) noexcept
       return "Provider";
     case ComponentClass::Session:
       return "Session";
+    case ComponentClass::Tool:
+      return "Tool";
     case ComponentClass::Runtime:
       return "Runtime";
   }
@@ -77,6 +79,8 @@ std::string_view to_string(ComponentClass component) noexcept
       return "provider";
     case ComponentClass::Session:
       return "session";
+    case ComponentClass::Tool:
+      return "tool";
     case ComponentClass::Runtime:
       return "runtime";
   }

@@ -14,6 +14,10 @@
 #include <optional>
 #include <string>
 
+namespace ava::diagnostics {
+class RuntimeDiagnostics;
+}
+
 namespace ava::app {
 class SubagentDeliveryManager;
 }
@@ -54,6 +58,9 @@ struct OpenOptions
   // Application-scoped automatic parent-summary delivery. When supplied it
   // also owns the coordinator used by every navigated runtime session.
   std::shared_ptr<ava::app::SubagentDeliveryManager> subagent_delivery_manager = nullptr;
+  // Application-lifetime private diagnostics owner shared by visible,
+  // retained, and protocol-managed runtime sessions.
+  std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

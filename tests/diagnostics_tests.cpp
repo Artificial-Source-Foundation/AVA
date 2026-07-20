@@ -326,7 +326,7 @@ void test_support_publication_is_unique_private_and_concurrent()
   std::vector<std::thread> threads;
   for (std::size_t index = 0; index < publications; ++index)
   {
-    threads.emplace_back([&, index] { statuses[index] = ava::diagnostics::publish_support_artifact(paths, artifact); });
+    threads.emplace_back([&, index] { statuses[index] = ava::diagnostics::publish_support_artifact(paths, artifact).status; });
   }
   for (auto& thread : threads) thread.join();
   expect(std::ranges::all_of(statuses, [](auto status) { return status == ava::diagnostics::ArtifactWriteStatus::Success; }),
@@ -354,7 +354,7 @@ void test_support_publication_is_unique_private_and_concurrent()
   expect(!partial, "support publication never leaves a partial published artifact");
 
   static_cast<void>(::chmod(support_dir.c_str(), 0755));
-  expect(ava::diagnostics::publish_support_artifact(paths, artifact) == ava::diagnostics::ArtifactWriteStatus::UnsafeStorage,
+  expect(ava::diagnostics::publish_support_artifact(paths, artifact).status == ava::diagnostics::ArtifactWriteStatus::UnsafeStorage,
          "support publication rejects an unsafe existing directory");
   std::size_t after_failed_publication = 0;
   for (auto const& entry : std::filesystem::directory_iterator(support_dir))

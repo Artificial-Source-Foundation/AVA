@@ -18,6 +18,7 @@ enum class ComponentClass
   Configuration,
   Provider,
   Session,
+  Tool,
   Runtime,
 };
 

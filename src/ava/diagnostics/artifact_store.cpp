@@ -162,6 +162,45 @@ OpenDirectory open_private_child(int parent_fd, std::string_view name, bool crea
   return {.state = OpenState::Ready, .fd = std::move(opened)};
 }
 
+OpenDirectory open_state_home(std::filesystem::path const& path, bool create)
+{
+  auto const normalized = path.lexically_normal();
+  if (!normalized.is_absolute() || normalized == normalized.root_path() || normalized.filename().empty())
+    return {.state = OpenState::Unsafe};
+  auto parent = open_absolute_directory(normalized.parent_path());
+  if (parent.state != OpenState::Ready)
+    return parent;
+  auto const name = normalized.filename().native();
+  bool created = false;
+  int fd = ::openat(parent.fd.get(), name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NONBLOCK | O_NOFOLLOW);
+  if (fd < 0 && errno == ENOENT && create)
+  {
+    if (::mkdirat(parent.fd.get(), name.c_str(), kPrivateDirectoryMode) == 0)
+      created = true;
+    else if (errno != EEXIST)
+      return {.state = OpenState::Unavailable};
+    fd = ::openat(parent.fd.get(), name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NONBLOCK | O_NOFOLLOW);
+  }
+  if (fd < 0)
+  {
+    if (errno == ENOENT)
+      return {.state = OpenState::Missing};
+    if (errno == ELOOP || errno == ENOTDIR)
+      return {.state = OpenState::Unsafe};
+    return {.state = OpenState::Unavailable};
+  }
+  ScopedFd opened(fd);
+  struct stat metadata{};
+  if (::fstat(opened.get(), &metadata) != 0)
+    return {.state = OpenState::Unavailable};
+  bool const safe = created ? private_directory_metadata(metadata)
+                            : S_ISDIR(metadata.st_mode) && metadata.st_uid == ::geteuid() && metadata.st_gid == ::getegid() &&
+                                  (metadata.st_mode & static_cast<mode_t>(S_IWGRP | S_IWOTH)) == 0;
+  if (!safe)
+    return {.state = OpenState::Unsafe};
+  return {.state = OpenState::Ready, .fd = std::move(opened)};
+}
+
 OpenDirectory open_ava_state(ava::config::XdgPaths const& paths, bool create) noexcept
 {
   try
@@ -170,15 +209,10 @@ OpenDirectory open_ava_state(ava::config::XdgPaths const& paths, bool create) no
     auto const ava_state = paths.ava_state_dir.lexically_normal();
     if (!state_home.is_absolute() || ava_state != (state_home / "ava").lexically_normal())
       return {.state = OpenState::Unsafe};
-    auto parent = open_absolute_directory(state_home);
-    if (parent.state != OpenState::Ready)
-      return parent;
-    struct stat metadata{};
-    if (::fstat(parent.fd.get(), &metadata) != 0)
-      return {.state = OpenState::Unavailable};
-    if (metadata.st_uid != ::geteuid() || metadata.st_gid != ::getegid() || (metadata.st_mode & static_cast<mode_t>(S_IWGRP | S_IWOTH)) != 0)
-      return {.state = OpenState::Unsafe};
-    return open_private_child(parent.fd.get(), "ava", create);
+    auto state = open_state_home(state_home, create);
+    if (state.state != OpenState::Ready)
+      return state;
+    return open_private_child(state.fd.get(), "ava", create);
   }
   catch (...)
   {
@@ -395,33 +429,39 @@ int rename_noreplace(int directory_fd, char const* old_name, char const* new_nam
 #endif
 }
 
-ArtifactWriteStatus publish_unique(int directory_fd, std::string_view body)
+struct UniquePublication
+{
+  ArtifactWriteStatus status = ArtifactWriteStatus::IoFailure;
+  std::string filename;
+};
+
+UniquePublication publish_unique(int directory_fd, std::string_view body)
 {
   if (body.empty() || body.size() > kMaxRecordBytes)
-    return ArtifactWriteStatus::InvalidRecord;
+    return {.status = ArtifactWriteStatus::InvalidRecord, .filename = {}};
   for (int attempt = 0; attempt < 32; ++attempt)
   {
     auto const token = opaque_token();
     auto const temporary = ".support-tmp-" + token;
-    auto const final_name = "ava-support-v1-" + token + ".json";
+    auto final_name = "ava-support-v1-" + token + ".json";
     ScopedFd file(::openat(directory_fd, temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NONBLOCK | O_NOFOLLOW, kPrivateFileMode));
     if (!file)
     {
       if (errno == EEXIST)
         continue;
-      return ArtifactWriteStatus::IoFailure;
+      return {.status = ArtifactWriteStatus::IoFailure, .filename = {}};
     }
     auto rollback_temp = [&] { static_cast<void>(::unlinkat(directory_fd, temporary.c_str(), 0)); };
     if (!write_all(file.get(), body) || ::fsync(file.get()) != 0)
     {
       rollback_temp();
-      return ArtifactWriteStatus::IoFailure;
+      return {.status = ArtifactWriteStatus::IoFailure, .filename = {}};
     }
     struct stat metadata{};
     if (::fstat(file.get(), &metadata) != 0 || !private_file_metadata(metadata))
     {
       rollback_temp();
-      return ArtifactWriteStatus::UnsafeStorage;
+      return {.status = ArtifactWriteStatus::UnsafeStorage, .filename = {}};
     }
     if (rename_noreplace(directory_fd, temporary.c_str(), final_name.c_str()) != 0)
     {
@@ -429,17 +469,46 @@ ArtifactWriteStatus publish_unique(int directory_fd, std::string_view body)
       rollback_temp();
       if (saved == EEXIST)
         continue;
-      return ArtifactWriteStatus::IoFailure;
+      return {.status = ArtifactWriteStatus::IoFailure, .filename = {}};
     }
     if (::fsync(directory_fd) != 0)
     {
       static_cast<void>(::unlinkat(directory_fd, final_name.c_str(), 0));
       static_cast<void>(::fsync(directory_fd));
-      return ArtifactWriteStatus::IoFailure;
+      return {.status = ArtifactWriteStatus::IoFailure, .filename = {}};
     }
-    return ArtifactWriteStatus::Success;
+    return {.status = ArtifactWriteStatus::Success, .filename = std::move(final_name)};
   }
-  return ArtifactWriteStatus::IoFailure;
+  return {.status = ArtifactWriteStatus::IoFailure, .filename = {}};
+}
+
+TraceArtifactPreparation create_trace_artifact(int directory_fd, ava::config::XdgPaths const& paths)
+{
+  for (int attempt = 0; attempt < 32; ++attempt)
+  {
+    auto const filename = "trace-v1-" + opaque_token() + ".jsonl";
+    ScopedFd file(::openat(directory_fd, filename.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NONBLOCK | O_NOFOLLOW, kPrivateFileMode));
+    if (!file)
+    {
+      if (errno == EEXIST)
+        continue;
+      return {.status = ArtifactWriteStatus::IoFailure, .path = {}};
+    }
+    struct stat metadata{};
+    if (::fstat(file.get(), &metadata) != 0 || !private_file_metadata(metadata))
+    {
+      static_cast<void>(::unlinkat(directory_fd, filename.c_str(), 0));
+      return {.status = ArtifactWriteStatus::UnsafeStorage, .path = {}};
+    }
+    if (::fsync(file.get()) != 0 || ::fsync(directory_fd) != 0)
+    {
+      static_cast<void>(::unlinkat(directory_fd, filename.c_str(), 0));
+      static_cast<void>(::fsync(directory_fd));
+      return {.status = ArtifactWriteStatus::IoFailure, .path = {}};
+    }
+    return {.status = ArtifactWriteStatus::Success, .path = paths.ava_state_dir / "diagnostics" / "traces" / filename};
+  }
+  return {.status = ArtifactWriteStatus::IoFailure, .path = {}};
 }
 
 template <typename Record, typename Parser>
@@ -540,35 +609,55 @@ void write_last_failure_record_best_effort(ava::config::XdgPaths const& paths, L
   static_cast<void>(write_last_failure_record(paths, record));
 }
 
-ArtifactWriteStatus publish_support_artifact(ava::config::XdgPaths const& paths, SupportArtifact const& artifact) noexcept
+TraceArtifactPreparation prepare_trace_artifact(ava::config::XdgPaths const& paths) noexcept
+{
+  try
+  {
+    auto diagnostics = open_artifact_directory(paths, "diagnostics", true);
+    if (diagnostics.state != OpenState::Ready)
+      return {.status = write_state(diagnostics.state), .path = {}};
+    auto traces = open_private_child(diagnostics.fd.get(), "traces", true);
+    if (traces.state != OpenState::Ready)
+      return {.status = write_state(traces.state), .path = {}};
+    return create_trace_artifact(traces.fd.get(), paths);
+  }
+  catch (...)
+  {
+    return {.status = ArtifactWriteStatus::IoFailure, .path = {}};
+  }
+}
+
+SupportArtifactPublication publish_support_artifact(ava::config::XdgPaths const& paths, SupportArtifact const& artifact) noexcept
 {
   try
   {
     if (artifact.schema_version != kDiagnosticSchemaVersion || artifact.generated_at < 0 || artifact.doctor.schema_version != kDiagnosticSchemaVersion)
-      return ArtifactWriteStatus::InvalidRecord;
+      return {.status = ArtifactWriteStatus::InvalidRecord, .path = {}};
     if ((artifact.trace.state == StoredRecordState::Present) != artifact.trace.record.has_value() ||
         (artifact.last_failure.state == StoredRecordState::Present) != artifact.last_failure.record.has_value())
-      return ArtifactWriteStatus::InvalidRecord;
+      return {.status = ArtifactWriteStatus::InvalidRecord, .path = {}};
     if (artifact.trace.record && (artifact.trace.record->schema_version != kDiagnosticSchemaVersion ||
                                   !parse_trace_counter_snapshot(serialize_trace_counter_snapshot(*artifact.trace.record))))
-      return ArtifactWriteStatus::InvalidRecord;
+      return {.status = ArtifactWriteStatus::InvalidRecord, .path = {}};
     if (artifact.last_failure.record && (artifact.last_failure.record->schema_version != kDiagnosticSchemaVersion ||
                                          !parse_last_failure_record(serialize_last_failure_record(*artifact.last_failure.record))))
-      return ArtifactWriteStatus::InvalidRecord;
+      return {.status = ArtifactWriteStatus::InvalidRecord, .path = {}};
     auto const doctor_json = serialize_doctor_report_json(artifact.doctor);
     if (!parse_doctor_report_json(doctor_json))
-      return ArtifactWriteStatus::InvalidRecord;
+      return {.status = ArtifactWriteStatus::InvalidRecord, .path = {}};
     auto const body = serialize_support_artifact(artifact);
     if (body.size() > kMaxRecordBytes || ava::core::validate_strict_json(body, 16) != ava::core::StrictJsonStatus::Valid)
-      return ArtifactWriteStatus::InvalidRecord;
+      return {.status = ArtifactWriteStatus::InvalidRecord, .path = {}};
     auto directory = open_artifact_directory(paths, "support", true);
     if (directory.state != OpenState::Ready)
-      return write_state(directory.state);
-    return publish_unique(directory.fd.get(), body);
+      return {.status = write_state(directory.state), .path = {}};
+    auto published = publish_unique(directory.fd.get(), body);
+    return {.status = published.status,
+            .path = published.status == ArtifactWriteStatus::Success ? paths.ava_state_dir / "support" / published.filename : std::filesystem::path{}};
   }
   catch (...)
   {
-    return ArtifactWriteStatus::IoFailure;
+    return {.status = ArtifactWriteStatus::IoFailure, .path = {}};
   }
 }
 

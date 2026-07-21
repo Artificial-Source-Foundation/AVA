@@ -262,7 +262,7 @@ ava::core::Result<UniqueFd> open_read_descriptor(BoundedFileReadOptions const& o
 
 ava::core::Result<std::optional<std::string>> read_bounded_lsp_file(BoundedFileReadOptions const& options)
 {
-  if (options.path.empty() || options.max_bytes == 0)
+  if (options.path.empty() || (!options.metadata_only && options.max_bytes == 0))
     return std::unexpected(read_error(ava::core::ErrorCategory::InvalidArgument, "LSP bounded file reader options are invalid", options.path));
   if (auto aborted = abort_error(options))
     return std::unexpected(std::move(*aborted));
@@ -286,7 +286,11 @@ ava::core::Result<std::optional<std::string>> read_bounded_lsp_file(BoundedFileR
     return std::unexpected(std::move(*aborted));
   if (!S_ISREG(status.st_mode))
     return std::unexpected(read_error(ava::core::ErrorCategory::InvalidArgument, "LSP file is not a regular file", options.path));
-  if (status.st_size < 0 || static_cast<std::uintmax_t>(status.st_size) > options.max_bytes)
+  if (options.require_private_owner && (status.st_uid != ::geteuid() || status.st_nlink != 1 || (status.st_mode & (S_IWGRP | S_IWOTH)) != 0))
+  {
+    return std::unexpected(read_error(ava::core::ErrorCategory::PermissionDenied, "LSP built-in opt-in config is not owner-safe", options.path));
+  }
+  if (!options.metadata_only && (status.st_size < 0 || static_cast<std::uintmax_t>(status.st_size) > options.max_bytes))
   {
     auto error = read_error(ava::core::ErrorCategory::InvalidArgument, "LSP file exceeds maximum size", options.path);
     error.with_context("max_bytes", std::to_string(options.max_bytes));
@@ -300,6 +304,8 @@ ava::core::Result<std::optional<std::string>> read_bounded_lsp_file(BoundedFileR
     options.after_open_for_testing();
   if (auto aborted = abort_error(options))
     return std::unexpected(std::move(*aborted));
+  if (options.metadata_only)
+    return std::optional<std::string>(std::string{});
 
   std::string content;
   content.reserve(static_cast<std::size_t>(status.st_size));

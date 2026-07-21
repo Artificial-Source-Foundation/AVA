@@ -24,6 +24,9 @@ enum class DoctorCheckKind
   PluginConfiguration,
   McpConfiguration,
   LspConfiguration,
+  LspBuiltinClangd,
+  LspBuiltinGopls,
+  LspBuiltinRustAnalyzer,
   PermissionRules,
 };
 

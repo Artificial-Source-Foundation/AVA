@@ -62,7 +62,7 @@ AVA has strong context, skills, plugin, MCP, and LSP foundations, including stat
 | E2. Prompt/template closure | Finish docs/tests for prompt resources, command args, context freshness, and the intentional MVP exclusion of automatic shell-output injection. |
 | E3. Plugin capability closure | Document model exposure decisions for plugin commands/prompts/skills, including static-resource autoload and process-per-call tradeoffs. |
 | E4. MCP prompt/resource closure | Decide and implement or defer MCP prompt exposure as model tools. Keep blob/binary safeguards. |
-| E5. LSP maturity | Add automatic server recipes only if product-approved. Otherwise document explicit config as MVP. |
+| E5. LSP maturity | Product approval is recorded for globally exact-opt-in, installed-only built-in recipes; implementation is complete with safety, routing, protocol, status, and optional real-server coverage. |
 | E6. Trust docs | Make project trust implications visible in `docs/CONFIG.md`, `docs/plugin-system.md`, and product baseline. |
 
 ## Non-Goals Unless Approved
@@ -140,7 +140,7 @@ git --no-pager diff --check
 
 - Plugin capabilities: AVA keeps plugin tools/commands/prompts/skills/events implemented through out-of-process manifests/protocol. Enabled static plugin prompts autoload into runtime context, static plugin skills surface in available skills and load through `/skill:<name>` or the model-visible `skill` tool, and these static paths do not launch plugin entrypoints. Plugin UI render slots, plugin keybindings, plugin themes, custom providers, and provider/request interception remain deferred until isolation, input-conflict, trust, and provider-auth contracts exist.
 - MCP prompts: implemented as command-registry slash/RPC commands, not automatic model-visible tools. MCP resources stay opaque no-argument read-style tools requiring `mcp.resource.read`; binary/blob/template/subscription/sampling/HTTP/OAuth surfaces are deferred.
-- LSP: explicit config remains the MVP path. Automatic server recipes and broader unsaved/incremental sync are deferred; diagnostics, symbols, definitions, references, launch permission, and output bounds remain covered.
+- LSP: explicit config remains supported, and approved built-in `clangd`, `gopls`, and `rust-analyzer` recipes are available only through exact global opt-in and safe installed identity discovery. Project opt-in, downloads/managers, workspace executables, and unsaved/incremental sync remain excluded; pull/publish diagnostics, symbols, definitions, references, per-root routing, launch permission, and output bounds are covered.
 - Project trust: project-local executable/config resources (`.ava/commands`, skills, plugins, MCP/LSP config, `SYSTEM.md`, `APPEND_SYSTEM.md`) remain inactive until `/trust project`. Context instruction files are visible instructions and load without trust.
 - Remote package/marketplace/custom provider packages remain deferred pending provenance, signing, compatibility, rollback, and trust design. Local/offline plugin directory install/remove is implemented only for global plugin directories and leaves installed plugins disabled.
 

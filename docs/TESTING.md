@@ -51,7 +51,7 @@ Recommended coverage:
 - `./build/ava_tests plugin` after plugin authoring changes. The plugin suite validates the checked-in sample under `examples/plugins/todo/` through source-path fixture plumbing instead of duplicating the sample manifest or protocol JSON, and remains the coverage for successful sample entrypoint execution.
 - `./build/ava_tests mcp` after MCP contract changes. The MCP suite uses the local fake MCP server and golden fixtures for representative tool schema, resource read, and audit shapes; MCP resource behavior must stay behind explicit read-style permission coverage.
 
-`lsp_diagnostics` is capability-gated in normal headless runtime. Verify it through `ava_tests` and the fake LSP server unless a local diagnostics provider is configured for a live run.
+`lsp_diagnostics` is capability-gated in normal headless runtime. Verify it through `ava_tests` and the fake LSP server unless a local diagnostics provider is configured for a live run. `ava_tests.lsp` covers default-off/global-only built-in opt-in, installed-executable safety and identity replacement, per-root routing/cache deduplication, launch permission identity, pull/publish diagnostics, bounds, cancellation, environment filtering, and cleanup without downloads or provider calls. `ava_tests.lsp_real_clangd_smoke` is an optional offline real-server smoke: it discovers an already installed safe `clangd`, uses a private finite fixture, proves initialize plus definition and cleanup, and returns CTest skip code 77 when `clangd` is absent. It never installs or downloads clangd.
 
 ## End-To-End AVA Tool Smoke
 

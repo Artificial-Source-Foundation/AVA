@@ -374,6 +374,7 @@ DoctorReport collect_passive_doctor_report(ava::config::XdgPaths const& paths, s
                                                    : inspect_metadata(workspace_dir / ".ava" / "lsp.json", ExpectedType::RegularFile);
     std::uint64_t lsp_items = 0;
     std::uint64_t lsp_errors = 0;
+    std::vector<ava::lsp::BuiltinServerInspection> lsp_builtins;
     if (!optional_path_safe(global_lsp))
       ++lsp_errors;
     if (!optional_path_safe(project_lsp))
@@ -384,7 +385,8 @@ DoctorReport collect_passive_doctor_report(ava::config::XdgPaths const& paths, s
           {.global_config_file = global_lsp.state == MetadataState::Ready ? paths.ava_config_dir / "lsp.json" : std::filesystem::path{},
            .project_config_file = project_lsp.state == MetadataState::Ready ? workspace_dir / ".ava" / "lsp.json" : std::filesystem::path{},
            .workspace_root = workspace_dir});
-      lsp_items = inspection.server_count;
+      for (auto const& config : inspection.configs) lsp_items += config.server_count;
+      lsp_builtins = inspection.builtin_servers;
       lsp_errors += inspection.error_count;
     }
     report.checks.push_back(
@@ -394,6 +396,42 @@ DoctorReport collect_passive_doctor_report(ava::config::XdgPaths const& paths, s
          .items = lsp_items,
          .enabled = lsp_items,
          .errors = lsp_errors});
+
+    if (lsp_builtins.empty())
+      lsp_builtins = ava::lsp::inspect_builtin_servers({}, workspace_dir);
+    auto const builtin_kind = [](std::string_view id) {
+      if (id == "clangd")
+        return DoctorCheckKind::LspBuiltinClangd;
+      if (id == "gopls")
+        return DoctorCheckKind::LspBuiltinGopls;
+      return DoctorCheckKind::LspBuiltinRustAnalyzer;
+    };
+    for (auto const& builtin : lsp_builtins)
+    {
+      DoctorStatus status = DoctorStatus::Pass;
+      DoctorCode code = DoctorCode::BuiltinDefaults;
+      std::uint64_t enabled = 0;
+      std::uint64_t errors = 0;
+      if (builtin.status == ava::lsp::BuiltinServerStatus::Available)
+      {
+        code = DoctorCode::Ready;
+        enabled = 1;
+      }
+      else if (builtin.status == ava::lsp::BuiltinServerStatus::NotFound)
+      {
+        status = DoctorStatus::Warning;
+        code = DoctorCode::MissingOptional;
+        enabled = 1;
+      }
+      else if (builtin.status == ava::lsp::BuiltinServerStatus::Unsafe)
+      {
+        status = DoctorStatus::Warning;
+        code = DoctorCode::UnsafeMetadata;
+        enabled = 1;
+        errors = 1;
+      }
+      report.checks.push_back({.kind = builtin_kind(builtin.id), .status = status, .code = code, .items = 1, .enabled = enabled, .errors = errors});
+    }
 
     ava::permissions::PermissionRuleStore const permission_store{
         .global_rules_file = paths.ava_config_dir / "permission-rules.json",

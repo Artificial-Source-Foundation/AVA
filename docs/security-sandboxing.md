@@ -197,13 +197,23 @@ See [mcp.md](mcp.md).
 
 Configured LSP servers are also local subprocesses. Global LSP config must use
 absolute paths or trusted `PATH` command names; project LSP config is trust
-gated. LSP queries and server launch are permissioned, but the language server
-itself is still local code once launched. AVA launches it with only the documented
+gated. Built-in `clangd`, `gopls`, and `rust-analyzer` recipes remain disabled
+unless the user-owned global config opts into exact ids. Their discovery accepts
+only already-installed canonical executable identities from fixed system or
+narrow owner-safe user directories. It rejects workspace/project executables,
+symlinked or writable chains, script wrappers, and rustup/cargo proxy identities;
+it never downloads, updates, runs a package/toolchain manager, or accesses the
+network. Launch revalidates and executes the captured identity without a fresh
+`PATH` lookup. LSP queries and server launch are permissioned, but the language
+server itself is still local code once launched. AVA launches it with only the documented
 LSP environment allowlist and a fixed trusted `PATH`, not the parent process's
 provider/cloud/API/token/secret or arbitrary `AVA_*` environment. Cancellation,
 timeout, and client teardown signal the verified LSP process group with TERM and
-then KILL when needed. That covers members which remain in the verified group; a
-descendant that calls `setsid` can escape that group and needs an external OS
+then KILL when needed. Capability, message, notification, diagnostic, file, and
+deadline bounds remain in force; stderr and arbitrary protocol failures are not
+reflected into provider-visible errors. Passive status commands never launch a
+server or expose discovered paths/argv. Process-group cleanup covers members
+which remain in the verified group; a descendant that calls `setsid` can escape that group and needs an external OS
 sandbox if it must be contained. AVA does not claim cgroup containment.
 
 ## No Built-In OS Or Container Sandbox Guarantee

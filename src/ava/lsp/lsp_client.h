@@ -3,9 +3,12 @@
 #include "ava/core/result.h"
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -52,13 +55,26 @@ struct Location {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct ExecutableIdentity {
+  std::filesystem::path canonical_path;
+  std::uintmax_t device = 0;
+  std::uintmax_t inode = 0;
+  std::uintmax_t size = 0;
+  std::int64_t changed_seconds = 0;
+  std::int64_t changed_nanoseconds = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct ServerConfig {
   std::vector<std::string> argv;
   std::filesystem::path workspace_root;
+  std::filesystem::path server_root = {};
   std::filesystem::path process_cwd;
   std::chrono::milliseconds startup_timeout{10000};
   std::chrono::milliseconds request_timeout{3000};
   std::string language_id = "plaintext";
+  std::optional<ExecutableIdentity> executable_identity = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -120,6 +136,10 @@ class SubprocessLspClient final : public DiagnosticsProvider {
                                                         std::chrono::steady_clock::time_point deadline,
                                                         std::chrono::milliseconds timeout, std::string_view phase,
                                                         CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::VoidResult respond_to_server_request(std::string_view message, std::int64_t id,
+                                                                std::chrono::steady_clock::time_point deadline,
+                                                                std::chrono::milliseconds timeout, std::string_view phase,
+                                                                CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult send_did_open(std::filesystem::path const& path,
                                                     std::chrono::steady_clock::time_point deadline,
                                                     CancelCallback cancel_requested = nullptr);
@@ -144,6 +164,7 @@ class SubprocessLspClient final : public DiagnosticsProvider {
   void terminate_child() noexcept;
 
   ServerConfig config_;
+  std::mutex operation_mutex_;
   pid_t pid_ = -1;
   // Set only after the parent verifies that this child owns a distinct group.
   pid_t owned_pgid_ = -1;
@@ -152,6 +173,7 @@ class SubprocessLspClient final : public DiagnosticsProvider {
   int next_id_ = 1;
   std::string read_buffer_;
   std::unordered_set<std::string> open_documents_;
+  bool supports_pull_diagnostics_ = false;
 };
 
 }  // namespace ava::lsp

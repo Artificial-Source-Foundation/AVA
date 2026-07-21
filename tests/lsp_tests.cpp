@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -37,6 +38,36 @@ std::vector<std::string> fake_lsp_argv(std::vector<std::string> extra = {})
   std::vector<std::string> argv{AVA_FAKE_LSP_SERVER_PATH};
   argv.insert(argv.end(), extra.begin(), extra.end());
   return argv;
+}
+
+void make_owner_safe_config(std::filesystem::path const& path)
+{
+  std::filesystem::permissions(path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write, std::filesystem::perm_options::replace);
+}
+
+ava::lsp::BuiltinDiscoveryOptions builtin_discovery_for_test(std::filesystem::path directory, bool user_owned = true)
+{
+  ava::lsp::BuiltinDiscoveryOptions options;
+  options.use_default_search_directories = false;
+  if (user_owned)
+    options.user_directories.push_back(std::move(directory));
+  else
+    options.system_directories.push_back(std::move(directory));
+  return options;
+}
+
+void copy_fake_lsp_executable(std::filesystem::path const& destination)
+{
+  std::filesystem::create_directories(destination.parent_path());
+  for (auto directory = destination.parent_path(); !directory.empty() && directory != std::filesystem::temp_directory_path();
+       directory = directory.parent_path())
+  {
+    std::filesystem::permissions(directory, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+  }
+  std::filesystem::copy_file(AVA_FAKE_LSP_SERVER_PATH, destination, std::filesystem::copy_options::overwrite_existing);
+  std::filesystem::permissions(destination, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | std::filesystem::perms::owner_exec |
+                                                std::filesystem::perms::group_read | std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
+                                                std::filesystem::perms::others_exec);
 }
 
 std::filesystem::path make_lsp_workspace(std::string_view name)
@@ -1285,6 +1316,360 @@ void test_lsp_configured_provider_inspection_does_not_launch_servers()
   expect(!std::filesystem::exists(marker_path), "configured LSP inspection does not launch configured servers");
 }
 
+void test_lsp_builtin_config_is_global_exact_and_default_off()
+{
+  auto const workspace = make_lsp_workspace("lsp-builtin-config");
+  auto const global_config = workspace.parent_path() / "lsp-builtin-global.json";
+  std::filesystem::remove(global_config);
+  auto const no_search = builtin_discovery_for_test(workspace.parent_path() / "missing-builtin-bin");
+  auto disabled = ava::lsp::inspect_configured_lsp_provider({
+      .global_config_file = global_config,
+      .project_config_file = {},
+      .workspace_root = workspace,
+      .builtin_discovery = no_search,
+  });
+  expect(disabled.server_count == 0 && disabled.builtin_servers.size() == 3 &&
+             std::ranges::all_of(disabled.builtin_servers, [](auto const& item) { return item.status == ava::lsp::BuiltinServerStatus::Disabled; }),
+         "built-in LSP recipes are disabled when global builtin_servers is absent");
+
+  {
+    std::ofstream config(global_config, std::ios::binary | std::ios::trunc);
+    config << "{\"version\":1,\"servers\":[],\"builtin_servers\":[\"clangd\"]}";
+  }
+  make_owner_safe_config(global_config);
+  auto unavailable = ava::lsp::inspect_configured_lsp_provider({
+      .global_config_file = global_config,
+      .project_config_file = {},
+      .workspace_root = workspace,
+      .builtin_discovery = no_search,
+  });
+  auto const clangd = std::ranges::find_if(unavailable.builtin_servers, [](auto const& item) { return item.id == "clangd"; });
+  expect(unavailable.server_count == 0 && clangd != unavailable.builtin_servers.end() && clangd->status == ava::lsp::BuiltinServerStatus::NotFound &&
+             clangd->reason == "not_found",
+         "exact global built-in opt-in reports an unavailable recipe without exposing a provider");
+
+  std::filesystem::create_directories(workspace / ".ava");
+  auto const project_config = workspace / ".ava" / "lsp.json";
+  {
+    std::ofstream config(project_config, std::ios::binary | std::ios::trunc);
+    config << "{\"version\":1,\"servers\":[],\"builtin_servers\":[\"clangd\"]}";
+  }
+  auto project_builtin = ava::lsp::make_configured_lsp_provider({
+      .global_config_file = {},
+      .project_config_file = project_config,
+      .workspace_root = workspace,
+      .builtin_discovery = no_search,
+  });
+  expect(!project_builtin && project_builtin.error().message().find("must not define builtin_servers") != std::string::npos,
+         "project LSP config cannot opt into built-in recipes");
+
+  auto rejects_global = [&](std::string_view json, std::string_view label) {
+    std::ofstream config(global_config, std::ios::binary | std::ios::trunc);
+    config << json;
+    config.close();
+    make_owner_safe_config(global_config);
+    auto result = ava::lsp::make_configured_lsp_provider({
+        .global_config_file = global_config,
+        .project_config_file = {},
+        .workspace_root = workspace,
+        .builtin_discovery = no_search,
+    });
+    expect(!result, std::string("global builtin_servers rejects ") + std::string(label));
+  };
+  rejects_global("{\"version\":1,\"builtin_servers\":\"clangd\"}", "wrong types");
+  rejects_global("{\"version\":1,\"builtin_servers\":[\"clangd\",\"clangd\"]}", "duplicates");
+  rejects_global("{\"version\":1,\"builtin_servers\":[\"unknown\"]}", "unknown ids");
+  rejects_global("{\"version\":1,\"builtin_servers\":[\"clangd\\u0001\"]}", "control bytes");
+  rejects_global("{\"version\":1,\"builtin_servers\":[\"clangd\",\"gopls\",\"rust-analyzer\",\"clangd\"]}", "bounds");
+}
+
+void test_lsp_builtin_discovery_safety()
+{
+  auto const root = temp_root() / "lsp-builtin-discovery";
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+  auto const workspace = root / "workspace";
+  auto const system_bin = root / "system-bin";
+  auto const user_bin = root / "user-bin";
+  std::filesystem::create_directories(workspace);
+  copy_fake_lsp_executable(system_bin / "clangd");
+  copy_fake_lsp_executable(user_bin / "gopls");
+
+  ava::lsp::BuiltinDiscoveryOptions options;
+  options.use_default_search_directories = false;
+  options.system_directories = {};
+  options.user_directories = {system_bin, user_bin};
+  auto installed = ava::lsp::inspect_builtin_servers({"clangd", "gopls"}, workspace, options);
+  auto const clangd = std::ranges::find_if(installed, [](auto const& item) { return item.id == "clangd"; });
+  auto const gopls = std::ranges::find_if(installed, [](auto const& item) { return item.id == "gopls"; });
+  expect(clangd != installed.end() && clangd->status == ava::lsp::BuiltinServerStatus::Available && clangd->executable &&
+             clangd->executable->canonical_path == std::filesystem::absolute(system_bin / "clangd").lexically_normal() && gopls != installed.end() &&
+             gopls->status == ava::lsp::BuiltinServerStatus::Available,
+         "built-in discovery accepts owner-safe executables from narrow direct user search directories as canonical identities: clangd=" +
+             (clangd == installed.end() ? std::string("missing") : std::string(ava::lsp::to_string(clangd->status))) +
+             " gopls=" + (gopls == installed.end() ? std::string("missing") : std::string(ava::lsp::to_string(gopls->status))));
+
+  ava::lsp::BuiltinDiscoveryOptions untrusted_system_options;
+  untrusted_system_options.use_default_search_directories = false;
+  untrusted_system_options.system_directories = {system_bin};
+  untrusted_system_options.user_directories = {};
+  auto untrusted_system = ava::lsp::inspect_builtin_servers({"clangd"}, workspace, untrusted_system_options);
+  expect(untrusted_system.front().status == ava::lsp::BuiltinServerStatus::Unsafe,
+         "built-in discovery requires root ownership for executables found through system directories");
+
+  auto const unsafe_bin = root / "unsafe-bin";
+  copy_fake_lsp_executable(unsafe_bin / "clangd");
+  std::filesystem::permissions(unsafe_bin, std::filesystem::perms::group_write, std::filesystem::perm_options::add);
+  auto unsafe = ava::lsp::inspect_builtin_servers({"clangd"}, workspace, builtin_discovery_for_test(unsafe_bin));
+  expect(unsafe.front().status == ava::lsp::BuiltinServerStatus::Unsafe && unsafe.front().reason == "unsafe_install",
+         "built-in discovery rejects executables beneath writable directories with a fixed unsafe status");
+
+  auto const symlink_bin = root / "symlink-bin";
+  std::filesystem::create_directories(symlink_bin);
+  std::filesystem::create_symlink(system_bin / "clangd", symlink_bin / "clangd");
+  auto symlinked = ava::lsp::inspect_builtin_servers({"clangd"}, workspace, builtin_discovery_for_test(symlink_bin));
+  expect(symlinked.front().status == ava::lsp::BuiltinServerStatus::Unsafe, "built-in discovery rejects symlinked executables");
+
+  auto const script_bin = root / "script-bin";
+  std::filesystem::create_directories(script_bin);
+  {
+    std::ofstream script(script_bin / "clangd", std::ios::binary | std::ios::trunc);
+    script << "#!/bin/sh\nexit 0\n";
+  }
+  std::filesystem::permissions(script_bin / "clangd", std::filesystem::perms::owner_exec, std::filesystem::perm_options::add);
+  auto script = ava::lsp::inspect_builtin_servers({"clangd"}, workspace, builtin_discovery_for_test(script_bin));
+  expect(script.front().status == ava::lsp::BuiltinServerStatus::Unsafe, "built-in discovery rejects ambiguous script wrappers");
+
+  auto const workspace_bin = workspace / "bin";
+  copy_fake_lsp_executable(workspace_bin / "clangd");
+  auto local = ava::lsp::inspect_builtin_servers({"clangd"}, workspace, builtin_discovery_for_test(workspace_bin));
+  expect(local.front().status == ava::lsp::BuiltinServerStatus::Unsafe, "built-in discovery never grants authority to a workspace-local executable");
+
+  auto const cargo_bin = root / "cargo-bin";
+  copy_fake_lsp_executable(cargo_bin / "rust-analyzer");
+  std::filesystem::create_hard_link(cargo_bin / "rust-analyzer", cargo_bin / "cargo");
+  auto proxy = ava::lsp::inspect_builtin_servers({"rust-analyzer"}, workspace, builtin_discovery_for_test(cargo_bin, true));
+  expect(proxy[2].status == ava::lsp::BuiltinServerStatus::Unsafe, "built-in discovery rejects a rustup/cargo hard-link proxy identity");
+
+  expect(!std::filesystem::exists(root / "downloaded") && !std::filesystem::exists(root / "package-manager-marker"),
+         "passive built-in discovery performs no download or package-manager execution");
+}
+
+void test_lsp_builtin_root_selection()
+{
+  auto const workspace = make_lsp_workspace("lsp-builtin-roots");
+  auto const cpp_root = workspace / "cpp";
+  auto const cpp_nested = cpp_root / "src" / "nested";
+  std::filesystem::create_directories(cpp_nested);
+  std::ofstream(cpp_root / "compile_commands.json") << "[]\n";
+  expect(ava::lsp::select_builtin_server_root("clangd", cpp_nested / "unit.cpp", workspace) == cpp_root,
+         "clangd selects the nearest bounded compilation marker root");
+
+  auto const go_root = workspace / "go";
+  auto const go_module = go_root / "module";
+  std::filesystem::create_directories(go_module / "pkg");
+  std::ofstream(go_root / "go.work") << "go 1.22\n";
+  std::ofstream(go_module / "go.mod") << "module example\n";
+  expect(ava::lsp::select_builtin_server_root("gopls", go_module / "pkg" / "main.go", workspace) == go_root,
+         "gopls prefers the nearest go.work before a nearer module marker");
+
+  auto const rust_root = workspace / "rust";
+  auto const rust_crate = rust_root / "crates" / "one";
+  std::filesystem::create_directories(rust_crate / "src");
+  std::ofstream(rust_root / "Cargo.toml") << "[workspace]\nmembers=[]\n";
+  std::ofstream(rust_crate / "Cargo.toml") << "[package]\nname=\"one\"\n";
+  expect(ava::lsp::select_builtin_server_root("rust-analyzer", rust_crate / "src" / "lib.rs", workspace) == rust_root,
+         "rust-analyzer selects the nearest safely detected Cargo workspace manifest");
+
+  expect(ava::lsp::select_builtin_server_root("clangd", workspace.parent_path() / "outside.cpp", workspace) == workspace,
+         "built-in root routing fails closed to the workspace for paths outside its bounded ancestor walk");
+}
+
+void test_lsp_builtin_launch_identity_roots_and_deduplication()
+{
+  auto const root = temp_root() / "lsp-builtin-launch";
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+  auto const workspace = root / "workspace";
+  auto const bin = root / "bin";
+  auto const state = root / "state";
+  auto const config_path = root / "lsp.json";
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(state);
+  copy_fake_lsp_executable(bin / "clangd");
+  {
+    std::ofstream config(config_path, std::ios::binary | std::ios::trunc);
+    config << "{\"version\":1,\"builtin_servers\":[\"clangd\"]}";
+  }
+  make_owner_safe_config(config_path);
+  for (auto const* module : {"a", "b", "c"})
+  {
+    std::filesystem::create_directories(workspace / module);
+    std::ofstream(workspace / module / "compile_flags.txt") << "-Wall\n";
+    std::ofstream(workspace / module / "one.cpp") << "int one() { return 1; }\n";
+    std::ofstream(workspace / module / "two.cpp") << "int two() { return 2; }\n";
+  }
+  ScopedEnvironmentForTest environment;
+  bool const environment_set = environment.set("XDG_STATE_HOME", state.string());
+  auto denied_provider = ava::lsp::make_configured_lsp_provider({
+      .global_config_file = config_path,
+      .project_config_file = {},
+      .workspace_root = workspace,
+      .builtin_discovery = builtin_discovery_for_test(bin),
+  });
+  auto denied_query = denied_provider && *denied_provider ? (*denied_provider)->diagnostics(workspace / "a" / "one.cpp")
+                                                          : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{};
+  auto const launch_marker = state / "fake-clangd-launches.txt";
+  expect(environment_set && denied_provider && *denied_provider && !denied_query &&
+             denied_query.error().category() == ava::core::ErrorCategory::PermissionDenied && !std::filesystem::exists(launch_marker),
+         "built-in launch fails closed without a high-risk LSP launch permission resolver");
+
+  std::mutex prompt_mutex;
+  std::vector<std::string> commands;
+  auto provider = ava::lsp::make_configured_lsp_provider({
+      .global_config_file = config_path,
+      .project_config_file = {},
+      .workspace_root = workspace,
+      .permission_resolver = [&](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        std::lock_guard<std::mutex> lock(prompt_mutex);
+        commands.push_back(prompt.command);
+        return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Allow, "test allow"};
+      },
+      .builtin_discovery = builtin_discovery_for_test(bin),
+  });
+  expect(environment_set && provider && *provider,
+         provider ? "enabled installed clangd recipe creates a lazy provider without launching"
+                  : "enabled installed clangd recipe creates a lazy provider without launching: " + provider.error().format());
+  expect(!std::filesystem::exists(launch_marker), "built-in provider construction remains process-lazy");
+  if (!provider || !*provider)
+    return;
+
+  auto a_first = (*provider)->diagnostics(workspace / "a" / "one.cpp");
+  auto a_second = (*provider)->diagnostics(workspace / "a" / "two.cpp");
+  auto b_first = (*provider)->diagnostics(workspace / "b" / "one.cpp");
+  bool concurrent_one = false;
+  bool concurrent_two = false;
+  std::thread first([&] { concurrent_one = (*provider)->diagnostics(workspace / "c" / "one.cpp").has_value(); });
+  std::thread second([&] { concurrent_two = (*provider)->diagnostics(workspace / "c" / "two.cpp").has_value(); });
+  first.join();
+  second.join();
+
+  std::istringstream launches(read_text_file_for_test(launch_marker));
+  std::vector<std::string> roots;
+  for (std::string line; std::getline(launches, line);) roots.push_back(line);
+  expect(a_first && a_second && b_first && concurrent_one && concurrent_two && roots.size() == 3 &&
+             std::ranges::count(roots, (workspace / "a").string()) == 1 && std::ranges::count(roots, (workspace / "b").string()) == 1 &&
+             std::ranges::count(roots, (workspace / "c").string()) == 1,
+         "built-in clients are cached per selected root and concurrent first use deduplicates one launch");
+  expect(commands.size() == 3 && std::ranges::all_of(commands,
+                                                     [&](std::string const& command) {
+                                                       return command.find(std::filesystem::absolute(bin / "clangd").string()) != std::string::npos &&
+                                                              command.find("--background-index") != std::string::npos;
+                                                     }),
+         "built-in launch permission binds each root launch to the canonical executable identity and exact recipe argv");
+
+  auto stale_provider = ava::lsp::make_configured_lsp_provider({
+      .global_config_file = config_path,
+      .project_config_file = {},
+      .workspace_root = workspace,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Allow, "test allow"};
+      },
+      .builtin_discovery = builtin_discovery_for_test(bin),
+  });
+  std::filesystem::rename(bin / "clangd", bin / "clangd.old");
+  copy_fake_lsp_executable(bin / "clangd");
+  auto stale =
+      stale_provider && *stale_provider
+          ? (*stale_provider)->diagnostics(workspace / "a" / "one.cpp")
+          : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing stale provider"))};
+  expect(!stale && stale.error().message().find("identity is stale") != std::string::npos,
+         "a replaced built-in executable fails its captured identity check before exec");
+}
+
+void test_lsp_builtin_explicit_precedence()
+{
+  auto const root = temp_root() / "lsp-builtin-explicit-precedence";
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+  auto const workspace = root / "workspace";
+  auto const bin = root / "bin";
+  auto const config_path = root / "lsp.json";
+  std::filesystem::create_directories(workspace);
+  std::ofstream(workspace / "main.cpp") << "int main() { return 0; }\n";
+  copy_fake_lsp_executable(bin / "clangd");
+  {
+    std::ofstream config(config_path, std::ios::binary | std::ios::trunc);
+    config << "{\"version\":1,\"builtin_servers\":[\"clangd\"],\"servers\":[{\"id\":\"clangd\",\"argv\":[\""
+           << ava::core::json::escape(AVA_FAKE_LSP_SERVER_PATH) << "\"],\"file_extensions\":[\".cpp\"]}]}";
+  }
+  make_owner_safe_config(config_path);
+  std::string permission_command;
+  auto provider = ava::lsp::make_configured_lsp_provider({
+      .global_config_file = config_path,
+      .project_config_file = {},
+      .workspace_root = workspace,
+      .permission_resolver = [&](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        permission_command = prompt.command;
+        return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Allow, "test allow"};
+      },
+      .builtin_discovery = builtin_discovery_for_test(bin),
+  });
+  auto diagnostics =
+      provider && *provider
+          ? (*provider)->diagnostics(workspace / "main.cpp")
+          : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing provider"))};
+  expect(diagnostics && permission_command.find(AVA_FAKE_LSP_SERVER_PATH) != std::string::npos &&
+             permission_command.find("--background-index") == std::string::npos,
+         "an explicit configured server is ordered first and suppresses the same built-in id");
+}
+
+void test_lsp_manager_publish_diagnostics_and_capability_bounds()
+{
+  auto const workspace = make_lsp_workspace("lsp-publish-diagnostics");
+  auto publish_client = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--publish-diagnostics"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  auto published =
+      publish_client
+          ? (*publish_client)->diagnostics(workspace / "main.cpp")
+          : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing publish client"))};
+  expect(published && published->size() == 1 && published->front().message == "fake published diagnostic" && published->front().code == "AVA_PUBLISH",
+         "LSP diagnostics falls back to bounded publishDiagnostics after didOpen when pull diagnostics is unsupported");
+
+  auto requesting_client = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--server-configuration-request"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .startup_timeout = std::chrono::milliseconds(1000),
+  });
+  expect(requesting_client.has_value(), "LSP startup answers bounded workspace/configuration server requests without enabling watchers");
+
+  auto malformed_capabilities = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--malformed-capabilities"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .startup_timeout = std::chrono::milliseconds(1000),
+  });
+  expect(!malformed_capabilities && malformed_capabilities.error().message().find("capability is malformed") != std::string::npos,
+         "LSP startup rejects malformed initialize diagnostic capabilities within the bounded response");
+
+  auto malformed_publish_client = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--malformed-publish-diagnostics"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  auto malformed_publish = malformed_publish_client ? (*malformed_publish_client)->diagnostics(workspace / "main.cpp")
+                                                    : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(
+                                                          ava::core::Error(ava::core::ErrorCategory::Tool, "missing malformed publish client"))};
+  expect(!malformed_publish && malformed_publish.error().message().find("notification is malformed") != std::string::npos,
+         "LSP diagnostics rejects malformed publish notifications without reflecting their payload");
+}
+
 void test_lsp_configured_provider_rejects_invalid_config()
 {
   auto const workspace = make_lsp_workspace("lsp-invalid-config");
@@ -1343,6 +1728,37 @@ void test_lsp_configured_provider_rejects_invalid_config()
          !global_relative ? "configured LSP provider rejects workspace-relative argv in global config: " + global_relative.error().format()
                           : "configured LSP provider rejects workspace-relative argv in global config");
 
+  auto const owner_workspace = make_lsp_workspace("lsp-global-builtin-owner");
+  auto const owner_config_path = owner_workspace / "global-lsp.json";
+  {
+    std::ofstream owner_config(owner_config_path, std::ios::binary | std::ios::trunc);
+    owner_config << "{\"version\":1,\"builtin_servers\":[\"clangd\"],\"servers\":[]}";
+  }
+  std::filesystem::permissions(
+      owner_config_path,
+      std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | std::filesystem::perms::group_write | std::filesystem::perms::others_write,
+      std::filesystem::perm_options::replace);
+  auto unsafe_owner = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
+      .global_config_file = owner_config_path,
+      .project_config_file = {},
+      .workspace_root = owner_workspace,
+      .builtin_discovery = ava::lsp::BuiltinDiscoveryOptions{.use_default_search_directories = false, .system_directories = {}, .user_directories = {}},
+  });
+  expect(!unsafe_owner && unsafe_owner.error().message().find("owner-safe") != std::string::npos,
+         "built-in recipe opt-in requires an owner-safe user global config descriptor");
+
+  {
+    std::ofstream legacy_config(owner_config_path, std::ios::binary | std::ios::trunc);
+    legacy_config << "{\"version\":1,\"servers\":[]}";
+  }
+  auto unsafe_legacy = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
+      .global_config_file = owner_config_path,
+      .project_config_file = {},
+      .workspace_root = owner_workspace,
+      .builtin_discovery = ava::lsp::BuiltinDiscoveryOptions{.use_default_search_directories = false, .system_directories = {}, .user_directories = {}},
+  });
+  expect(unsafe_legacy.has_value(), "legacy explicit-only global config retains its established metadata compatibility");
+
   auto const project_relative_workspace = make_lsp_workspace("lsp-project-relative-config");
   std::filesystem::create_directories(project_relative_workspace / ".ava");
   auto const project_relative_path = project_relative_workspace / ".ava" / "lsp.json";
@@ -1392,5 +1808,11 @@ void run_lsp_tests()
   test_lsp_configured_provider_loads_global_config_from_safe_cwd();
   test_lsp_configured_provider_timeout_defaults();
   test_lsp_configured_provider_inspection_does_not_launch_servers();
+  test_lsp_builtin_config_is_global_exact_and_default_off();
+  test_lsp_builtin_discovery_safety();
+  test_lsp_builtin_root_selection();
+  test_lsp_builtin_launch_identity_roots_and_deduplication();
+  test_lsp_builtin_explicit_precedence();
+  test_lsp_manager_publish_diagnostics_and_capability_bounds();
   test_lsp_configured_provider_rejects_invalid_config();
 }

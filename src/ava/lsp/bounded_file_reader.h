@@ -35,6 +35,8 @@ struct BoundedFileReadOptions
   std::size_t max_bytes = 0;
   BoundedFileReadScope scope = BoundedFileReadScope::External;
   bool missing_ok = false;
+  bool metadata_only = false;
+  bool require_private_owner = false;
   std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
   std::function<bool()> cancel_requested = nullptr;
   BoundedFileOpenStrategy open_strategy = BoundedFileOpenStrategy::Automatic;

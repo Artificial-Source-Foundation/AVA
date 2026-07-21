@@ -128,6 +128,7 @@ def seeded_environment(root: Path) -> tuple[dict[str, str], Path, socket.socket]
         json.dumps(
             {
                 "version": 1,
+                "builtin_servers": ["clangd"],
                 "servers": [
                     {
                         "id": "private-lsp-id",
@@ -219,12 +220,19 @@ def test_doctor_and_support(ava: Path, root: Path) -> None:
         "plugin_configuration",
         "mcp_configuration",
         "lsp_configuration",
+        "lsp_builtin_clangd",
+        "lsp_builtin_gopls",
+        "lsp_builtin_rust_analyzer",
         "permission_rules",
     ]
     checks = {check["label"]: check for check in report["checks"]}
     assert checks["plugin_configuration"]["items"] == 1 and checks["plugin_configuration"]["errors"] == 0
     assert checks["mcp_configuration"]["items"] == 1 and checks["mcp_configuration"]["enabled"] == 1
     assert checks["lsp_configuration"]["items"] == 1 and checks["lsp_configuration"]["enabled"] == 1
+    assert checks["lsp_builtin_clangd"]["enabled"] == 1
+    assert checks["lsp_builtin_clangd"]["code"] in {"ready", "missing_optional", "unsafe_metadata"}
+    for builtin in ("lsp_builtin_gopls", "lsp_builtin_rust_analyzer"):
+        assert checks[builtin]["code"] == "builtin_defaults" and checks[builtin]["enabled"] == 0
     assert checks["permission_rules"]["items"] == 1
     assert checks["auth_metadata"]["code"] == "unsafe_metadata"
     assert_clean_output(machine)

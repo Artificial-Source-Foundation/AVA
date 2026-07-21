@@ -23,6 +23,10 @@ enum class Mode
   SleepInitializeMarker,
   DelayedInitialize,
   MalformedDiagnostics,
+  PublishDiagnostics,
+  MalformedPublishDiagnostics,
+  MalformedCapabilities,
+  ServerConfigurationRequest,
   CrashDiagnostics,
   SleepDiagnostics,
   SleepDiagnosticsMarker,
@@ -43,6 +47,7 @@ struct Options
   std::string descendant_marker_path;
   std::string launch_marker_path;
   std::string environment_marker_path;
+  bool builtin_clangd = false;
 };
 
 ssize_t read_retry(char* data, std::size_t size)
@@ -116,10 +121,20 @@ Options parse_options(int argc, char** argv)
   Options options;
   for (int index = 1; index < argc; ++index)
   {
+    if (std::strcmp(argv[index], "--background-index") == 0)
+      options.builtin_clangd = true;
     if (std::strcmp(argv[index], "--malformed-diagnostics") == 0)
       options.mode = Mode::MalformedDiagnostics;
     if (std::strcmp(argv[index], "--crash-diagnostics") == 0)
       options.mode = Mode::CrashDiagnostics;
+    if (std::strcmp(argv[index], "--publish-diagnostics") == 0)
+      options.mode = Mode::PublishDiagnostics;
+    if (std::strcmp(argv[index], "--malformed-publish-diagnostics") == 0)
+      options.mode = Mode::MalformedPublishDiagnostics;
+    if (std::strcmp(argv[index], "--malformed-capabilities") == 0)
+      options.mode = Mode::MalformedCapabilities;
+    if (std::strcmp(argv[index], "--server-configuration-request") == 0)
+      options.mode = Mode::ServerConfigurationRequest;
     if (std::strcmp(argv[index], "--echo-uri-diagnostics") == 0)
       options.mode = Mode::EchoUriDiagnostics;
     if (std::strcmp(argv[index], "--sleep-initialize") == 0)
@@ -211,6 +226,20 @@ void write_launch_marker(std::string const& path)
   file << "started\n";
 }
 
+void write_builtin_clangd_marker(Options const& options)
+{
+  if (!options.builtin_clangd)
+    return;
+  auto const* state_home = std::getenv("XDG_STATE_HOME");
+  if (state_home == nullptr || *state_home == '\0')
+    return;
+  char cwd[4096]{};
+  if (getcwd(cwd, sizeof(cwd)) == nullptr)
+    return;
+  std::ofstream marker(std::string(state_home) + "/fake-clangd-launches.txt", std::ios::binary | std::ios::app);
+  marker << cwd << '\n';
+}
+
 void write_environment_marker(std::string const& path)
 {
   if (path.empty())
@@ -234,11 +263,18 @@ void write_cwd_marker(std::string const& path)
   file << buffer << '\n';
 }
 
-void respond_initialize(long long id)
+void respond_initialize(long long id, Options const& options)
 {
-  std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
-                           ",\"result\":{\"capabilities\":{\"diagnosticProvider\":{\"interFileDependencies\":false,"
-                           "\"workspaceDiagnostics\":false},\"documentSymbolProvider\":true,"
+  if (options.mode == Mode::MalformedCapabilities)
+  {
+    write_message("{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) + ",\"result\":{\"capabilities\":{\"diagnosticProvider\":\"invalid\"}}}");
+    return;
+  }
+  auto const diagnostic_capability = options.mode == Mode::PublishDiagnostics || options.mode == Mode::MalformedPublishDiagnostics
+                                         ? std::string{}
+                                         : std::string("\"diagnosticProvider\":{\"interFileDependencies\":false,\"workspaceDiagnostics\":false},");
+  std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) + ",\"result\":{\"capabilities\":{" + diagnostic_capability +
+                           "\"documentSymbolProvider\":true,"
                            "\"workspaceSymbolProvider\":true,\"definitionProvider\":true,\"referencesProvider\":true}}}";
   write_message(body);
 }
@@ -318,6 +354,19 @@ void respond_diagnostics(long long id, Options const& options, std::string_view 
   write_message(body);
 }
 
+void publish_diagnostics(std::string_view uri, Options const& options)
+{
+  if (options.mode == Mode::MalformedPublishDiagnostics)
+  {
+    write_message("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":42}}");
+    return;
+  }
+  std::string const body = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"" + ava::core::json::escape(uri) +
+                           "\",\"diagnostics\":[{\"range\":{\"start\":{\"line\":3,\"character\":2},\"end\":{\"line\":3,\"character\":7}},"
+                           "\"severity\":2,\"code\":\"AVA_PUBLISH\",\"message\":\"fake published diagnostic\"}]}}";
+  write_message(body);
+}
+
 void respond_document_symbols(long long id, Options const& options)
 {
   if (options.mode == Mode::MalformedSymbols)
@@ -380,6 +429,7 @@ void respond_references(long long id, bool did_open)
 int main(int argc, char** argv)
 {
   auto const options = parse_options(argc, argv);
+  write_builtin_clangd_marker(options);
   write_launch_marker(options.launch_marker_path);
   write_environment_marker(options.environment_marker_path);
   bool did_open = false;
@@ -402,7 +452,15 @@ int main(int argc, char** argv)
         usleep(500000);
       if (options.mode == Mode::CwdMarker)
         write_cwd_marker(options.marker_path);
-      respond_initialize(*id);
+      if (options.mode == Mode::ServerConfigurationRequest)
+      {
+        write_message("{\"jsonrpc\":\"2.0\",\"id\":900,\"method\":\"workspace/configuration\",\"params\":{\"items\":[{\"section\":\"one\"},{\"section\":\"two\"}]}}");
+        auto configuration = read_message(options);
+        if (!configuration || configuration->find("\"id\":900") == std::string::npos ||
+            configuration->find("\"result\":[null,null]") == std::string::npos)
+          return 2;
+      }
+      respond_initialize(*id, options);
     }
     else if (*method == "initialized")
     {
@@ -429,6 +487,8 @@ int main(int argc, char** argv)
       did_open = true;
       if (options.mode == Mode::SlowDidOpenDefinition)
         usleep(250000);
+      if (options.mode == Mode::PublishDiagnostics || options.mode == Mode::MalformedPublishDiagnostics)
+        publish_diagnostics(request_uri(*message), options);
     }
     else if (*method == "textDocument/references" && id)
     {

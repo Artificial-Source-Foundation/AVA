@@ -314,12 +314,16 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
   // This function is called first-thing after creating a thread.
   Debug(NAMESPACE_DEBUG::init_thread("run_rpc_loop"));
 
+#ifdef CWDEBUG
+  {
+    runtime::session_ts::rat session_r(unlocked_session);
+    DoutEntering(dc::rpc, "run_rpc_loop(...) with session_id=" << session_r->store.session_id()
+        << ", provider_id=" << session_r->model.provider_id << ", model_id=" << session_r->model.model_id);
+  }
+#endif
+
   runtime::session_ts::wat session_w(unlocked_session);
   runtime::Session& session(*session_w);
-
-  DoutEntering(dc::rpc, "run_rpc_loop(session_id=" << session.store.session_id() << ", provider_id=" << session.model.provider_id
-                                                   << ", model_id=" << session.model.model_id << ", input=" << static_cast<void*>(&input)
-                                                   << ", output=" << static_cast<void*>(&out) << ")");
 
   rpc::RpcRunState run_state;
   rpc::PendingResolverState pending_state;

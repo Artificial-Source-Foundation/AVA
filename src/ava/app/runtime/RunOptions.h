@@ -59,7 +59,7 @@ struct RunOptions
   bool offline = false;
   bool expand_prompt_file_references = true;
 
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 }  // namespace ava::app::runtime

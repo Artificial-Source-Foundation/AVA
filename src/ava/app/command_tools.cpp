@@ -523,7 +523,7 @@ ava::core::Result<CommandResult> run_tool_command(runtime::Session& session, Com
   {
     auto const command = line.substr(6);
     auto const call_id = ava::core::make_id("cmd");
-    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "bash", command); !recorded)
+    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "bash", "<redacted one-shot command>"); !recorded)
     {
       return std::unexpected(std::move(recorded.error()));
     }

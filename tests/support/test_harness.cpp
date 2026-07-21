@@ -127,7 +127,12 @@ std::filesystem::path temp_root()
 {
   auto const build_name = std::filesystem::current_path().filename();
   auto const process_id = static_cast<unsigned long long>(::getpid());
-  return std::filesystem::temp_directory_path() / ("ava_core_tests_" + build_name.string() + "_" + std::to_string(process_id));
+  auto const root = std::filesystem::temp_directory_path() / ("ava_core_tests_" + build_name.string() + "_" + std::to_string(process_id));
+  std::error_code create_error;
+  std::filesystem::create_directories(root, create_error);
+  if (!create_error)
+    static_cast<void>(::chmod(root.c_str(), S_IRWXU));
+  return root;
 }
 
 std::filesystem::path create_empty_root(std::filesystem::path root_name)

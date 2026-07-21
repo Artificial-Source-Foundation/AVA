@@ -677,8 +677,6 @@ std::optional<PathCompletionPrefix> find_path_completion_prefix(std::string_view
   while (start > 0 && !is_path_completion_delimiter(input[start - 1])) --start;
   if (start >= input.size())
   {
-    if (!force && cursor > 0 && is_ascii_space(input[cursor - 1]))
-      return PathCompletionPrefix{.start = cursor, .cursor = cursor, .value = {}, .quoted = false, .leading_dot_slash = false};
     if (!force)
       return std::nullopt;
     return PathCompletionPrefix{.start = cursor, .cursor = cursor, .value = {}, .quoted = false, .leading_dot_slash = false};

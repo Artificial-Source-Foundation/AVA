@@ -111,7 +111,7 @@ List and status omit terminal `summary`, `error`, and `message`. Result requests
 
 ### Permission request/reply
 
-`permission_requested.payload` includes `resolver_request_id`, optional durable `permission_request_id`, `operation`, `mode`, `target_path`, `command`, `tool_name`, `reason`, `risk`, and optional `diff_preview`/`diff_truncated`. Reply with `decision` equal to `allow`, `allow_session`, or `deny`; optional `reason` is at most 1024 bytes. `allow_session` creates an in-memory exact-match grant for this RPC process. Persistent allow/deny rules are separate commands and never override built-in hard denies.
+`permission_requested.payload` includes `resolver_request_id`, optional durable `permission_request_id`, `operation`, `mode`, `target_path`, `command`, `tool_name`, `reason`, `risk`, and optional `diff_preview`/`diff_truncated`. Reply with `decision` equal to `allow`, `allow_session`, or `deny`; optional `reason` is at most 1024 bytes. `allow_session` creates an in-memory exact-match grant for this RPC process. Sealed commands bind that grant to the stable workspace recipe key supplied by backend metadata rather than raw command text; commands whose backend scope is one-shot cannot create a reusable grant. Persistent allow/deny rules are separate commands and never override built-in hard denies.
 
 When `operation` is `bash` and the request originates from a sealed command plan, `permission_requested.payload` includes an optional `command_metadata` object with the following additive fields:
 
@@ -176,7 +176,7 @@ The payload column defines recognized fields. Unless marked required, listed fie
 | `permission_grant_revoke` | Required string `grant_id`. Returns and emits the revoked grant. |
 | `permission_grants_clear` | No payload. Returns/emits cleared count. |
 | `permission_rules` | No payload. Lists persistent global/workspace rules and files. |
-| `permission_rule_add` | Required strings `action`, `operation`, `reason`; optional `scope`, `mode`, `tool_name`, `target_path`/`path`, `command`. Adds/emits a rule. |
+| `permission_rule_add` | Required strings `action`, `operation`, `reason`; optional `scope`, `mode`, `tool_name`, `target_path`/`path`, `command`, `command_recipe_key`, `recipe_display`, and boolean `critical_acknowledged`. Adds/emits a rule under backend validation. |
 | `permission_rule_remove` | Required string `rule_id`. Removes/emits a persistent rule. |
 | `get_messages` | No payload. Returns bounded visible message-like entries; hides internal replay and secrets/signatures. |
 | `get_session_stats` | No payload. Returns bounded entry/usage/cost/type statistics. |

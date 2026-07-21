@@ -167,6 +167,7 @@ foreach(NEEDLE
         "\"id\":\"prompt\""
         "headless active prompt complete"
         "\"id\":\"messages-after\""
+        "\"type\":\"assistant_message\""
         "\"message_count\":2")
   string(FIND "${AVA_OUTPUT}" "${NEEDLE}" NEEDLE_INDEX)
   if(NEEDLE_INDEX EQUAL -1)

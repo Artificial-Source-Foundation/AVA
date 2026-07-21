@@ -1132,19 +1132,20 @@ void test_tui_composer_rendering_and_input()
   }
   expect(lines.size() == 14, "tui fills the viewport with transcript, spacer, and composer lines");
   expect(!lines.empty() && strip_sgr(lines.front()).find("hello") != std::string::npos, "tui starts short chats at the top of the transcript area");
-  expect(!lines.empty() && lines.back().find("\x1b[48;2;26;31;46m") != std::string::npos &&
+  expect(lines.size() == 14 && strip_sgr(lines[12]).starts_with("│  /help") && strip_sgr(lines[13]).starts_with("│  GPT-5.5") &&
+             lines[11].find("\x1b[48;2;26;31;46m") == std::string::npos &&
              std::ranges::none_of(lines, [](std::string const& line) { return line.find("/ commands") != std::string::npos; }),
-         "tui keeps only the composer block at the bottom");
-  expect(std::ranges::any_of(lines, [](std::string const& line) { return strip_sgr(line).find("▎  ❯ /help") != std::string::npos; }),
-         "tui renders old AVA-style composer input");
+         "tui keeps a one-line draft in exactly the bottom input and footer rows without composer-surface padding");
+  expect(std::ranges::any_of(lines, [](std::string const& line) { return strip_sgr(line).find("│  /help") != std::string::npos; }),
+         "tui renders the quiet composer input without a prompt glyph");
   expect(std::ranges::none_of(lines, [](std::string const& line) { return strip_sgr(line).find("slash palette dismissed") != std::string::npos; }),
          "tui keeps transient composer status text out of the footer");
   expect(std::ranges::any_of(lines,
                              [](std::string const& line) {
-                               return line.find("\x1b[48;2;26;31;46m") != std::string::npos && line.find("\x1b[38;2;77;158;246m▎") != std::string::npos &&
-                                      line.find("\x1b[1m\x1b[38;2;77;158;246m❯") != std::string::npos;
+                               return line.find("\x1b[48;2;26;31;46m") != std::string::npos && line.find("\x1b[38;2;77;158;246m│") != std::string::npos &&
+                                      strip_sgr(line).find("❯") == std::string::npos;
                              }),
-         "tui uses old AVA elevated composer surface, primary rail, and prompt color");
+         "tui preserves the elevated composer surface with one quiet accent boundary");
   expect(std::ranges::none_of(lines, [](std::string const& line) { return strip_sgr(line).find("╭─ You") != std::string::npos; }) &&
              std::ranges::none_of(lines, [](std::string const& line) { return strip_sgr(line).find("╭─ AVA") != std::string::npos; }) &&
              std::ranges::any_of(lines,
@@ -1153,6 +1154,36 @@ void test_tui_composer_rendering_and_input()
                                  }) &&
              std::ranges::any_of(lines, [](std::string const& line) { return strip_sgr(line).find("world") != std::string::npos; }),
          "tui renders user messages as highlighted input blocks and assistant messages without role headers");
+
+  auto const idle_two_row_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                                                .provider = "openai",
+                                                                .model = "gpt-5.5",
+                                                                .session_id = "session_test",
+                                                                .input = "",
+                                                                .status = "ready",
+                                                                .context_source_count = 2,
+                                                                .transcript = {},
+                                                                .width = 80,
+                                                                .height = 10};
+  auto const idle_two_row_lines = ava::tui::render_composer(idle_two_row_snapshot);
+  auto idle_input = strip_sgr(idle_two_row_lines[8]);
+  auto idle_footer = strip_sgr(idle_two_row_lines[9]);
+  while (!idle_input.empty() && idle_input.back() == ' ') idle_input.pop_back();
+  while (!idle_footer.empty() && idle_footer.back() == ' ') idle_footer.pop_back();
+  expect(idle_two_row_lines.size() == 10 && idle_input == "│  Type a message..." && idle_footer == "│  GPT-5.5 · ctx 2" &&
+             idle_two_row_lines[7].find("\x1b[48;2;26;31;46m") == std::string::npos &&
+             std::ranges::count_if(idle_two_row_lines, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }) == 2 &&
+             std::ranges::none_of(idle_two_row_lines, [](std::string const& line) { return strip_sgr(line).find("❯") != std::string::npos; }),
+         "tui empty composer is exactly two bottom rows with one boundary, quiet gutter, pure footer, and no prompt glyph");
+  auto const composer_lines_for = [&](std::string input, std::size_t width = 80) {
+    auto snapshot = idle_two_row_snapshot;
+    snapshot.input = std::move(input);
+    return ava::tui::detail::composer_block_line_count(snapshot, 100, width);
+  };
+  expect(composer_lines_for("") == 2 && composer_lines_for("one") == 2 && composer_lines_for("one\ntwo") == 3 &&
+             composer_lines_for("abcdefghijklmnopqr", 20) == 3 && composer_lines_for("1\n2\n3\n4\n5\n6\n7") == 8 &&
+             composer_lines_for("1\n2\n3\n4\n5\n6\n7\n8\n9") == 8,
+         "tui composer desired height is visible input lines plus one footer bounded to two through eight rows");
 
   auto const processing_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                      .provider = "openai",
@@ -1166,13 +1197,16 @@ void test_tui_composer_rendering_and_input()
                                                                                      .transcript = {},
                                                                                      .width = 80,
                                                                                      .height = 10});
-  expect(std::ranges::any_of(processing_lines,
-                             [](std::string const& line) {
-                               auto const visible = strip_sgr(line);
-                               return visible.find("thinking...") == std::string::npos && visible.find("working") == std::string::npos &&
-                                      visible.find("⠙") != std::string::npos && visible.find("1.3k (0.7%)") == std::string::npos;
-                             }),
-         "tui keeps only the model metadata and processing spinner in the compact footer");
+  expect(processing_lines.size() == 10 && strip_sgr(processing_lines[8]).starts_with("│  Type a message...") &&
+             strip_sgr(processing_lines[9]).starts_with("│  GPT-5.5") && strip_sgr(processing_lines[9]).find("⠙") != std::string::npos &&
+             processing_lines[7].find("\x1b[48;2;26;31;46m") == std::string::npos &&
+             std::ranges::all_of(processing_lines,
+                                 [](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("thinking...") == std::string::npos && visible.find("working") == std::string::npos &&
+                                          visible.find("1.3k (0.7%)") == std::string::npos && visible.find("❯") == std::string::npos;
+                                 }),
+         "tui processing composer stays two rows and keeps only model metadata plus the active spinner in the footer");
 
   auto narrow_footer_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
                                                            .provider = "openai",
@@ -1984,8 +2018,9 @@ void test_tui_composer_rendering_and_input()
              std::ranges::none_of(too_narrow_table_transcript,
                                   [](std::string const& line) {
                                     auto const visible = strip_sgr(line);
-                                    return visible.find("┌") != std::string::npos || visible.find("│") != std::string::npos ||
-                                           visible.find("└") != std::string::npos;
+                                    auto const quiet_composer_row = visible.starts_with("│  Type a message...") || visible.starts_with("│  GPT-");
+                                    return !quiet_composer_row && (visible.find("┌") != std::string::npos || visible.find("│") != std::string::npos ||
+                                                                   visible.find("└") != std::string::npos);
                                   }) &&
              std::ranges::all_of(too_narrow_table_transcript, [](std::string const& line) { return visible_columns(line) <= 20; }),
          "tui assistant renderer falls back to wrapped raw Markdown when a table is too narrow for stable borders");
@@ -2009,7 +2044,7 @@ void test_tui_composer_rendering_and_input()
       });
   expect(narrow_table_text.find("Command") != std::string::npos && narrow_table_text.find("npm install") != std::string::npos &&
              narrow_table_text.find("dependencies") != std::string::npos && narrow_table_text.find("workspace") != std::string::npos &&
-             std::ranges::any_of(narrow_table_transcript, [](std::string const& line) { return strip_sgr(line).find("│") != std::string::npos; }) &&
+             std::ranges::any_of(narrow_table_transcript, [](std::string const& line) { return strip_sgr(line).find("│ Command") != std::string::npos; }) &&
              std::ranges::all_of(narrow_table_transcript, [](std::string const& line) { return visible_columns(line) <= 40; }),
          "tui assistant renderer wraps Markdown table cells while preserving borders and content");
 
@@ -2059,7 +2094,8 @@ void test_tui_composer_rendering_and_input()
              std::ranges::all_of(one_column_table_transcript,
                                  [&](std::string const& line) {
                                    auto const visible = strip_sgr(line);
-                                   return visible.find("│") == std::string::npos || count_table_borders(line) == 2;
+                                   return visible.find("│") == std::string::npos || visible.starts_with("│  Type a message...") ||
+                                          visible.starts_with("│  GPT-") || count_table_borders(line) == 2;
                                  }),
          "tui assistant renderer supports one-column tables and wraps long unbroken table tokens without losing borders");
 
@@ -2097,7 +2133,8 @@ void test_tui_composer_rendering_and_input()
              std::ranges::all_of(styled_table_transcript,
                                  [&](std::string const& line) {
                                    auto const visible = strip_sgr(line);
-                                   return visible.find("│") == std::string::npos || count_table_borders(line) == 2;
+                                   return visible.find("│") == std::string::npos || visible.starts_with("│  Type a message...") ||
+                                          visible.starts_with("│  GPT-") || count_table_borders(line) == 2;
                                  }),
          "tui assistant renderer wraps styled inline code inside table cells without breaking borders");
 
@@ -2121,7 +2158,7 @@ void test_tui_composer_rendering_and_input()
              narrow_three_column_text.find("B") != std::string::npos && narrow_three_column_text.find("C") != std::string::npos &&
              narrow_three_column_text.find("1") != std::string::npos && narrow_three_column_text.find("2") != std::string::npos &&
              narrow_three_column_text.find("3") != std::string::npos &&
-             std::ranges::any_of(narrow_three_column_table, [](std::string const& line) { return strip_sgr(line).find("│") != std::string::npos; }) &&
+             std::ranges::any_of(narrow_three_column_table, [](std::string const& line) { return strip_sgr(line).find("│ A") != std::string::npos; }) &&
              std::ranges::all_of(narrow_three_column_table, [](std::string const& line) { return visible_columns(line) <= 22; }),
          "tui assistant renderer keeps narrow multi-column Markdown tables bounded and readable");
 
@@ -2479,7 +2516,7 @@ void test_tui_composer_rendering_and_input()
                                                                                   .width = 1,
                                                                                   .height = 1});
   expect(std::ranges::all_of(minimum_width, [](std::string const& line) { return line.find('\n') == std::string::npos && visible_columns(line) <= 20; }) &&
-             std::ranges::any_of(minimum_width, [](std::string const& line) { return strip_sgr(line).find("❯ hello") != std::string::npos; }),
+             std::ranges::any_of(minimum_width, [](std::string const& line) { return strip_sgr(line).find("│  hello") != std::string::npos; }),
          "tui clamps normal composer rendering to the minimum viewport");
 
   std::vector<ava::tui::SlashCommandItem> const slash_commands = {
@@ -2755,8 +2792,12 @@ void test_tui_composer_rendering_and_input()
   expect(single_quote_path_matches.size() >= 2 && single_quote_path_matches.front().value == "src/",
          "tui normal path completion treats single quotes as path token delimiters like Pi");
   auto const whitespace_path_matches = ava::tui::filter_path_completions("inspect ", std::string("inspect ").size(), file_references);
-  expect(whitespace_path_matches.size() == file_references.size() && whitespace_path_matches.front().directory,
-         "tui normal path completion opens workspace suggestions at a new token after whitespace like Pi");
+  expect(whitespace_path_matches.empty(), "tui normal path completion stays closed at a new token after whitespace");
+  expect(!ava::tui::path_completion_palette_visible("inspect ", std::string("inspect ").size(), file_references),
+         "tui normal path completion palette stays hidden at a new token after whitespace");
+  auto const forced_whitespace_path_matches = ava::tui::filter_path_completions("inspect ", std::string("inspect ").size(), file_references, true);
+  expect(forced_whitespace_path_matches.size() == file_references.size() && forced_whitespace_path_matches.front().directory,
+         "tui forced path completion can open workspace suggestions at a new token after whitespace");
   expect(ava::tui::filter_path_completions("inspect file=", std::string("inspect file=").size(), file_references).empty(),
          "tui normal path completion does not open an empty token after equals without explicit Tab");
   expect(ava::tui::filter_path_completions("inspect main", std::string("inspect main").size(), file_references).empty(),
@@ -2798,8 +2839,8 @@ void test_tui_composer_rendering_and_input()
              equals_quoted_path_selection.cursor == equals_quoted_path_selection.text.size(),
          "tui normal path completion continues inside quoted paths after equals delimiters");
   auto const whitespace_path_selection = ava::tui::path_completion_selection_text("inspect ", std::string("inspect ").size(), file_references, 1);
-  expect(whitespace_path_selection.text == "inspect src/" && whitespace_path_selection.cursor == std::string("inspect src/").size(),
-         "tui normal path completion inserts a selected workspace path at an empty token after whitespace");
+  expect(whitespace_path_selection.text == "inspect " && whitespace_path_selection.cursor == std::string("inspect ").size(),
+         "tui normal path completion selection leaves text and cursor unchanged at an empty token after whitespace");
   auto const forced_bare_path_selection =
       ava::tui::path_completion_selection_text("inspect main", std::string("inspect main").size(), file_references, 0, true);
   expect(forced_bare_path_selection.text == "inspect src/main.cpp" && forced_bare_path_selection.cursor == forced_bare_path_selection.text.size(),
@@ -3584,7 +3625,7 @@ void test_tui_composer_rendering_and_input()
                                                                                        .width = 80,
                                                                                        .height = 12});
   expect(std::ranges::none_of(suppressed_palette, [](std::string const& line) { return strip_sgr(line).find("/grep") != std::string::npos; }) &&
-             std::ranges::any_of(suppressed_palette, [](std::string const& line) { return strip_sgr(line).find("❯ /g") != std::string::npos; }),
+             std::ranges::any_of(suppressed_palette, [](std::string const& line) { return strip_sgr(line).find("│  /g") != std::string::npos; }),
          "tui can dismiss slash autocomplete without clearing the draft input");
   auto const clicked_palette_index = ava::tui::slash_palette_selection_for_screen_row(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                                                  .provider = "openai",
@@ -3597,7 +3638,7 @@ void test_tui_composer_rendering_and_input()
                                                                                                                  .selected_slash_command_index = 1,
                                                                                                                  .width = 80,
                                                                                                                  .height = 12},
-                                                                                      8);
+                                                                                      10);
   expect(clicked_palette_index && *clicked_palette_index == 1, "tui maps slash palette screen rows back to selectable commands for clicks");
   auto const suppressed_clicked_palette_index = ava::tui::slash_palette_selection_for_screen_row(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                                                             .provider = "openai",
@@ -3678,7 +3719,7 @@ void test_tui_composer_rendering_and_input()
                                                                                   .selected_slash_command_index = 6,
                                                                                   .width = 80,
                                                                                   .height = 8},
-                                                       4);
+                                                       6);
   auto const outside_scrolled_palette_click = ava::tui::slash_palette_selection_for_screen_row(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                                                           .provider = "openai",
                                                                                                                           .model = "gpt-5.5",
@@ -3690,8 +3731,8 @@ void test_tui_composer_rendering_and_input()
                                                                                                                           .selected_slash_command_index = 6,
                                                                                                                           .width = 80,
                                                                                                                           .height = 8},
-                                                                                               5);
-  expect(first_scrolled_palette_click && *first_scrolled_palette_click == 3 && selected_scrolled_palette_click && *selected_scrolled_palette_click == 6 &&
+                                                                                               7);
+  expect(first_scrolled_palette_click && *first_scrolled_palette_click == 1 && selected_scrolled_palette_click && *selected_scrolled_palette_click == 6 &&
              !outside_scrolled_palette_click,
          "tui maps slash palette click rows through a scrolled visible window and ignores outside rows");
 
@@ -4061,7 +4102,7 @@ void test_tui_composer_rendering_and_input()
       .height = 8});
   expect(permission_starved.size() <= 8 && std::ranges::all_of(permission_starved, [](std::string const& line) { return visible_columns(line) <= 40; }) &&
              std::ranges::none_of(permission_starved, [](std::string const& line) { return strip_sgr(line).find("lines hidden") != std::string::npos; }) &&
-             std::ranges::any_of(permission_starved, [](std::string const& line) { return strip_sgr(line).find("❯ hidden input") != std::string::npos; }),
+             std::ranges::any_of(permission_starved, [](std::string const& line) { return strip_sgr(line).find("│  hidden input") != std::string::npos; }),
          "tui permission prompt stays above the composer without hidden-line banners");
 
   auto const sanitized =
@@ -4089,7 +4130,7 @@ void test_tui_composer_rendering_and_input()
                                                                                     .transcript = {},
                                                                                     .width = 80,
                                                                                     .height = 8});
-  expect(std::ranges::any_of(sanitized_input, [](std::string const& line) { return strip_sgr(line).find("❯ bad?[31mred") != std::string::npos; }),
+  expect(std::ranges::any_of(sanitized_input, [](std::string const& line) { return strip_sgr(line).find("│  bad?[31mred") != std::string::npos; }),
          "tui render sanitizes composer input escape bytes");
   expect(ava::tui::sanitize_terminal_text(std::string("osc") + static_cast<char>(0x9D) + "payload") == "osc?payload",
          "tui sanitizes raw c1 terminal control bytes");
@@ -4141,9 +4182,9 @@ void test_tui_composer_rendering_and_input()
   expect(ava::tui::detail::terminal_text_columns(clipped_regional_indicator) <= 2, "tui narrow fitting does not undercount singleton regional indicators");
   auto const clipped_zwj_cluster = ava::tui::detail::fit_line(man + zwj + laptop + "x", 2);
   expect(clipped_zwj_cluster == man + zwj + laptop, "tui narrow fitting keeps emoji ZWJ clusters intact when they fit exactly");
-  auto const cursor_prefix_columns =
-      ava::tui::detail::terminal_text_columns(std::string(ava::tui::detail::kComposerBar) + "  " + std::string(ava::tui::detail::kComposerPrompt) + " ");
-  auto const cursor_base = cursor_prefix_columns + 1;
+  expect(ava::tui::detail::composer_input_prefix_columns(true) == 3 && ava::tui::detail::composer_input_prefix_columns(false) == 3,
+         "tui composer input and continuation rows share one three-column boundary and gutter");
+  auto const cursor_base = ava::tui::detail::composer_input_prefix_columns(true) + 1;
   auto const cursor_for = [](std::string input, std::size_t cursor) {
     return ava::tui::detail::input_cursor_column(ava::tui::ComposerSnapshot{.mode = "build",
                                                                             .provider = "openai",
@@ -4159,24 +4200,24 @@ void test_tui_composer_rendering_and_input()
   expect(cursor_for(cursor_text, 1) == cursor_base + 1 && cursor_for(cursor_text, 4) == cursor_base + 3 && cursor_for(cursor_text, 5) == cursor_base + 4 &&
              cursor_for(cursor_text, cursor_text.size()) == cursor_base + 4 && cursor_for(std::string("x") + std::string("\xC0\x80", 2), 3) == cursor_base + 3,
          "tui composer cursor placement uses sanitized display columns for CJK, combining marks, and invalid utf-8");
-  auto const wrapped_input = ava::tui::detail::input_render_line_spans("alpha beta gamma", 20);
-  expect(wrapped_input.size() == 2 && wrapped_input[0].text == "alpha beta " && wrapped_input[0].start == 0 &&
-             wrapped_input[0].end == std::string("alpha beta ").size() && wrapped_input[0].first_line && wrapped_input[1].text == "gamma" &&
-             wrapped_input[1].start == std::string("alpha beta ").size() && !wrapped_input[1].first_line,
+  auto const wrapped_input = ava::tui::detail::input_render_line_spans("alpha beta gamma delta", 20);
+  expect(wrapped_input.size() == 2 && wrapped_input[0].text == "alpha beta gamma " && wrapped_input[0].start == 0 &&
+             wrapped_input[0].end == std::string("alpha beta gamma ").size() && wrapped_input[0].first_line && wrapped_input[1].text == "delta" &&
+             wrapped_input[1].start == std::string("alpha beta gamma ").size() && !wrapped_input[1].first_line,
          "tui composer wraps long input at word boundaries while preserving source offsets");
-  auto const wrapped_long_word = ava::tui::detail::input_render_line_spans("abcdefghijklmnop", 20);
-  expect(wrapped_long_word.size() == 2 && wrapped_long_word[0].text == "abcdefghijklmno" && wrapped_long_word[1].text == "p",
+  auto const wrapped_long_word = ava::tui::detail::input_render_line_spans("abcdefghijklmnopqr", 20);
+  expect(wrapped_long_word.size() == 2 && wrapped_long_word[0].text == "abcdefghijklmnopq" && wrapped_long_word[1].text == "r",
          "tui composer falls back to cell-level wrapping for long unbroken input tokens");
-  auto const cjk_wrap_text = std::string("\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C");
+  auto const cjk_wrap_text = std::string("\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C");
   auto const wrapped_cjk_input = ava::tui::detail::input_render_line_spans(cjk_wrap_text, 20);
-  expect(wrapped_cjk_input.size() == 2 && ava::tui::detail::terminal_text_columns(wrapped_cjk_input[0].text) == 14 &&
+  expect(wrapped_cjk_input.size() == 2 && ava::tui::detail::terminal_text_columns(wrapped_cjk_input[0].text) == 16 &&
              ava::tui::detail::terminal_text_columns(wrapped_cjk_input[1].text) == 2,
          "tui composer wraps CJK input on full UTF-8 cell boundaries");
   auto const wrapped_cursor_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
                                                                   .provider = "openai",
                                                                   .model = "gpt-5.5",
                                                                   .session_id = "session_test",
-                                                                  .input = "alpha beta gamma",
+                                                                  .input = "alpha beta gamma delta",
                                                                   .status = "ready",
                                                                   .transcript = {},
                                                                   .width = 20,
@@ -4184,15 +4225,15 @@ void test_tui_composer_rendering_and_input()
                                                                   .input_cursor = std::string::npos};
   expect(ava::tui::detail::input_cursor_line(wrapped_cursor_snapshot, 20) == 1 &&
              ava::tui::detail::input_cursor_column(wrapped_cursor_snapshot, 20) ==
-                 ava::tui::detail::composer_input_prefix_columns(false) + std::string("gamma").size() + 1,
+                 ava::tui::detail::composer_input_prefix_columns(false) + std::string("delta").size() + 1,
          "tui composer places the cursor on the wrapped continuation row");
   auto const wrapped_render = ava::tui::render_composer(wrapped_cursor_snapshot);
-  expect(std::ranges::any_of(wrapped_render, [](std::string const& line) { return strip_sgr(line).find("▎  ❯ alpha beta ") != std::string::npos; }) &&
-             std::ranges::any_of(wrapped_render, [](std::string const& line) { return strip_sgr(line).find("▎    gamma") != std::string::npos; }),
+  expect(std::ranges::any_of(wrapped_render, [](std::string const& line) { return strip_sgr(line).find("│  alpha beta gamma ") != std::string::npos; }) &&
+             std::ranges::any_of(wrapped_render, [](std::string const& line) { return strip_sgr(line).find("│  delta") != std::string::npos; }),
          "tui composer renders wrapped input as visible continuation rows");
   auto const wrapped_click =
-      ava::tui::composer_input_cursor_for_screen_position(wrapped_cursor_snapshot, 6, ava::tui::detail::composer_input_prefix_columns(false) + 3);
-  expect(wrapped_click && *wrapped_click == std::string("alpha beta ga").size(),
+      ava::tui::composer_input_cursor_for_screen_position(wrapped_cursor_snapshot, 7, ava::tui::detail::composer_input_prefix_columns(false) + 3);
+  expect(wrapped_click && *wrapped_click == std::string("alpha beta gamma de").size(),
          "tui composer hit-tests wrapped input continuation rows to source cursor offsets");
   auto const click_cursor_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
                                                                 .provider = "openai",
@@ -4203,10 +4244,10 @@ void test_tui_composer_rendering_and_input()
                                                                 .transcript = {},
                                                                 .width = 80,
                                                                 .height = 8};
-  auto const clicked_after_alpha = ava::tui::composer_input_cursor_for_screen_position(click_cursor_snapshot, 6, cursor_base + std::string("alpha ").size());
+  auto const clicked_after_alpha = ava::tui::composer_input_cursor_for_screen_position(click_cursor_snapshot, 7, cursor_base + std::string("alpha ").size());
   expect(clicked_after_alpha && *clicked_after_alpha == std::string("alpha ").size() &&
              !ava::tui::composer_input_cursor_for_screen_position(click_cursor_snapshot, 1, cursor_base) &&
-             !ava::tui::composer_input_cursor_for_screen_position(click_cursor_snapshot, 7, cursor_base),
+             !ava::tui::composer_input_cursor_for_screen_position(click_cursor_snapshot, 8, cursor_base),
          "tui composer hit-tests visible input rows to draft cursor byte offsets and ignores non-input rows");
   auto const multiline_click_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
                                                                    .provider = "openai",
@@ -4217,7 +4258,7 @@ void test_tui_composer_rendering_and_input()
                                                                    .transcript = {},
                                                                    .width = 80,
                                                                    .height = 8};
-  auto const clicked_second_line = ava::tui::composer_input_cursor_for_screen_position(multiline_click_snapshot, 5, cursor_base + 1);
+  auto const clicked_second_line = ava::tui::composer_input_cursor_for_screen_position(multiline_click_snapshot, 6, cursor_base + 1);
   expect(clicked_second_line && *clicked_second_line == std::string("one\nt").size(),
          "tui composer hit-tests multiline visible input rows to the matching logical line cursor");
   auto const wide_click_text = std::string("a") + "\xE7\x95\x8C" + "b";
@@ -4230,7 +4271,7 @@ void test_tui_composer_rendering_and_input()
                                                                                                                 .transcript = {},
                                                                                                                 .width = 80,
                                                                                                                 .height = 8},
-                                                                                     6, cursor_base + 3);
+                                                                                     7, cursor_base + 3);
   expect(wide_click_cursor && *wide_click_cursor == std::string("a").size() + std::string("\xE7\x95\x8C").size(),
          "tui composer click-to-cursor clamps through wide utf-8 cells without landing inside a codepoint");
   auto const selected_input_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -4248,7 +4289,7 @@ void test_tui_composer_rendering_and_input()
   expect(std::ranges::any_of(selected_input_frame,
                              [](std::string const& line) {
                                return line.find(std::string(ava::tui::detail::kReverseVideo) + "beta") != std::string::npos &&
-                                      strip_sgr(line).find("▎  ❯ alpha beta") != std::string::npos;
+                                      strip_sgr(line).find("│  alpha beta") != std::string::npos;
                              }),
          "tui composer renders selected input text with reverse video without changing visible draft text");
 
@@ -4262,7 +4303,7 @@ void test_tui_composer_rendering_and_input()
                                                                                    .width = 40,
                                                                                    .height = 8});
   expect(composer_frame.size() == 8, "tui composer frame fills the requested terminal height");
-  expect(std::ranges::any_of(composer_frame, [](std::string const& line) { return strip_sgr(line).find("▎  ❯ hello") != std::string::npos; }),
+  expect(std::ranges::any_of(composer_frame, [](std::string const& line) { return strip_sgr(line).find("│  hello") != std::string::npos; }),
          "tui composer frame renders the input prompt content");
   auto const wide_frame = ava::tui::render_composer(
       ava::tui::ComposerSnapshot{.mode = "build",
@@ -4290,11 +4331,11 @@ void test_tui_composer_rendering_and_input()
       .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "bash", .operation = "bash", .target = "", .command = "true", .reason = ""},
       .width = 60,
       .height = 12});
-  expect(
-      permission_frame.size() == 12 &&
-          std::ranges::any_of(permission_frame, [](std::string const& line) { return strip_sgr(line).find("❯ do not focus composer") != std::string::npos; }) &&
-          std::ranges::any_of(permission_frame, [](std::string const& line) { return strip_sgr(line).find("Permission required") != std::string::npos; }),
-      "tui composer frame renders permission dock above composer while active");
+  expect(permission_frame.size() == 12 &&
+             std::ranges::any_of(permission_frame,
+                                 [](std::string const& line) { return strip_sgr(line).find("│  do not focus composer") != std::string::npos; }) &&
+             std::ranges::any_of(permission_frame, [](std::string const& line) { return strip_sgr(line).find("Permission required") != std::string::npos; }),
+         "tui composer frame renders permission dock above composer while active");
   for (std::size_t height = 8; height <= 11; ++height)
   {
     auto compact_permission = ava::tui::ComposerSnapshot{};
@@ -4335,7 +4376,7 @@ void test_tui_composer_rendering_and_input()
       .height = 12});
   expect(
       question_frame.size() == 12 &&
-          std::ranges::any_of(question_frame, [](std::string const& line) { return strip_sgr(line).find("❯ do not focus composer") != std::string::npos; }) &&
+          std::ranges::any_of(question_frame, [](std::string const& line) { return strip_sgr(line).find("│  do not focus composer") != std::string::npos; }) &&
           std::ranges::any_of(question_frame,
                               [](std::string const& line) { return strip_sgr(line).find("Choose tools (multi-select)") != std::string::npos; }) &&
           std::ranges::any_of(question_frame, [](std::string const& line) { return strip_sgr(line).find("2. [x] Search text") != std::string::npos; }) &&
@@ -5742,9 +5783,10 @@ void test_tui_composer_rendering_and_input()
                                                                                     .transcript = {},
                                                                                     .width = 50,
                                                                                     .height = 8});
-  expect(std::ranges::any_of(multiline_input, [](std::string const& line) { return strip_sgr(line).find("▎  ❯ first") != std::string::npos; }) &&
-             std::ranges::any_of(multiline_input, [](std::string const& line) { return strip_sgr(line).find("▎    second") != std::string::npos; }),
-         "tui renders shift-enter newlines as multiline composer input");
+  expect(multiline_input.size() == 8 && strip_sgr(multiline_input[5]).starts_with("│  first") && strip_sgr(multiline_input[6]).starts_with("│  second") &&
+             strip_sgr(multiline_input[7]).starts_with("│  GPT-5.5") && multiline_input[4].find("\x1b[48;2;26;31;46m") == std::string::npos &&
+             std::ranges::none_of(multiline_input, [](std::string const& line) { return strip_sgr(line).find("❯") != std::string::npos; }),
+         "tui renders multiline input plus one footer with the same three-column prefix and no surface padding");
   auto const empty_composer_height = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                           .provider = "openai",
                                                                                           .model = "gpt-5.5",
@@ -5768,7 +5810,7 @@ void test_tui_composer_rendering_and_input()
         std::ranges::count_if(rendered, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }));
   };
   expect(composer_bg_rows(grown_composer_height) > composer_bg_rows(empty_composer_height) &&
-             std::ranges::any_of(grown_composer_height, [](std::string const& line) { return strip_sgr(line).find("▎    five") != std::string::npos; }),
+             std::ranges::any_of(grown_composer_height, [](std::string const& line) { return strip_sgr(line).find("│  five") != std::string::npos; }),
          "tui composer grows with multiline input and keeps the latest line visible");
   auto const tall_draft = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                .provider = "openai",
@@ -5780,8 +5822,8 @@ void test_tui_composer_rendering_and_input()
                                                                                .width = 70,
                                                                                .height = 12});
   expect(std::ranges::none_of(tall_draft, [](std::string const& line) { return strip_sgr(line).find("draft +") != std::string::npos; }) &&
-             std::ranges::any_of(tall_draft, [](std::string const& line) { return strip_sgr(line).find("▎    nine") != std::string::npos; }) &&
-             std::ranges::none_of(tall_draft, [](std::string const& line) { return strip_sgr(line).find("▎  ❯ one") != std::string::npos; }),
+             std::ranges::any_of(tall_draft, [](std::string const& line) { return strip_sgr(line).find("│  nine") != std::string::npos; }) &&
+             std::ranges::none_of(tall_draft, [](std::string const& line) { return strip_sgr(line).find("│  one") != std::string::npos; }),
          "tui composer hides draft overflow text while keeping the latest draft line visible");
   auto const scrolled_draft = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                    .provider = "openai",
@@ -5795,8 +5837,8 @@ void test_tui_composer_rendering_and_input()
                                                                                    .input_cursor = std::string::npos,
                                                                                    .sidebar = std::nullopt,
                                                                                    .draft_scroll_offset = 2});
-  expect(std::ranges::any_of(scrolled_draft, [](std::string const& line) { return strip_sgr(line).find("▎  ❯ one") != std::string::npos; }) &&
-             std::ranges::none_of(scrolled_draft, [](std::string const& line) { return strip_sgr(line).find("▎    nine") != std::string::npos; }) &&
+  expect(std::ranges::any_of(scrolled_draft, [](std::string const& line) { return strip_sgr(line).find("│  one") != std::string::npos; }) &&
+             std::ranges::none_of(scrolled_draft, [](std::string const& line) { return strip_sgr(line).find("│  nine") != std::string::npos; }) &&
              std::ranges::none_of(scrolled_draft, [](std::string const& line) { return strip_sgr(line).find("draft +") != std::string::npos; }),
          "tui composer draft scroll offset shows older draft lines without footer overflow text");
 
@@ -6876,7 +6918,7 @@ void test_tui_composer_rendering_and_input()
     {
       assistant_meta_index = index;
     }
-    if (!composer_index && visible.find("▎  ❯") != std::string::npos)
+    if (!composer_index && visible.find("│  Type a message...") != std::string::npos)
       composer_index = index;
   }
   expect(assistant_meta_index && composer_index && *composer_index > *assistant_meta_index + 1 && strip_sgr(assistant_meta[*assistant_meta_index + 1]).empty(),
@@ -6897,7 +6939,7 @@ void test_tui_composer_rendering_and_input()
                                                                                      .width = 20,
                                                                                      .height = 8});
   expect(std::ranges::all_of(exact_width_utf8, [](std::string const& line) { return visible_columns(line) <= 20; }) &&
-             std::ranges::any_of(exact_width_utf8, [](std::string const& line) { return strip_sgr(line).find("▎  GPT-5.5") != std::string::npos; }),
+             std::ranges::any_of(exact_width_utf8, [](std::string const& line) { return strip_sgr(line).find("│  GPT-5.5") != std::string::npos; }),
          "tui width fitting preserves the AVA composer surface at minimum width");
 
   auto const utf8 = ava::tui::render_composer(

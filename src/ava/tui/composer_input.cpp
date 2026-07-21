@@ -266,8 +266,7 @@ std::string render_status_line(ComposerSnapshot const& snapshot, std::size_t wid
 
 std::string render_input_line(ComposerSnapshot const& snapshot, std::size_t width)
 {
-  std::string line = composer_bar() + std::string(kSgrBold) + std::string(kSgrAccent) + std::string(kComposerPrompt) + std::string(kSgrReset) +
-                     std::string(kSgrComposerBg) + " ";
+  std::string line = composer_bar();
   if (snapshot.input.empty())
   {
     line += std::string(kSgrTextDimmed) + "Type a message..." + std::string(kSgrReset) + std::string(kSgrComposerBg);
@@ -279,17 +278,9 @@ std::string render_input_line(ComposerSnapshot const& snapshot, std::size_t widt
   return composer_surface_line(std::move(line), width);
 }
 
-std::string render_input_fragment_line(ComposerSnapshot const& snapshot, std::string_view text, bool first_line, std::size_t width, std::size_t line_start)
+std::string render_input_fragment_line(ComposerSnapshot const& snapshot, std::string_view text, bool /*first_line*/, std::size_t width, std::size_t line_start)
 {
   std::string line = composer_bar();
-  if (first_line)
-  {
-    line += std::string(kSgrBold) + std::string(kSgrAccent) + std::string(kComposerPrompt) + std::string(kSgrReset) + std::string(kSgrComposerBg) + " ";
-  }
-  else
-  {
-    line += "  ";
-  }
   append_input_text(line, snapshot, text, line_start);
   return composer_surface_line(std::move(line), width);
 }
@@ -303,11 +294,9 @@ std::size_t effective_input_cursor(ComposerSnapshot const& snapshot)
 
 }  // namespace
 
-std::size_t composer_input_prefix_columns(bool first_line)
+std::size_t composer_input_prefix_columns(bool /*first_line*/)
 {
-  auto prefix = std::string(kComposerBar) + "  ";
-  prefix += first_line ? std::string(kComposerPrompt) + " " : "  ";
-  return terminal_text_columns(sanitize_terminal_text(prefix));
+  return 3;
 }
 
 std::vector<std::string> input_render_lines(std::string_view input)
@@ -343,7 +332,7 @@ std::size_t composer_block_line_count(ComposerSnapshot const& snapshot, std::siz
 std::size_t composer_block_line_count(ComposerSnapshot const& snapshot, std::size_t height, std::size_t width)
 {
   auto const input_lines = snapshot.input.empty() ? std::size_t{1} : input_render_line_spans(snapshot.input, width).size();
-  auto const desired = std::clamp(input_lines + 2, kMinComposerBlockLines, kMaxComposerBlockLines);
+  auto const desired = std::clamp(input_lines + 1, kMinComposerBlockLines, kMaxComposerBlockLines);
   return std::min(height, desired);
 }
 

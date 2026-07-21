@@ -31,6 +31,7 @@
 #include <span>
 #include <stop_token>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -49,6 +50,32 @@ ToolDispatchResult synthetic_failed_dispatch_result(ProviderToolCall const& call
 {
   return with_tool_result_payload(
       ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = dispatch_error_result_json(call, error)});
+}
+
+constexpr std::string_view kRedactedRunCommand = "<redacted one-shot command>";
+
+bool is_run_command_call(ProviderToolCall const& call)
+{
+  return call.name == "bash";
+}
+
+std::string serialized_tool_arguments(ProviderToolCall const& call)
+{
+  if (is_run_command_call(call))
+    return "{\"command\":\"" + ava::core::json::escape(kRedactedRunCommand) + "\"}";
+  return call.arguments_json;
+}
+
+ParsedAssistantTurn persistable_turn(ParsedAssistantTurn const& turn)
+{
+  auto persisted = turn;
+  for (auto& call : persisted.tool_calls) call.arguments_json = serialized_tool_arguments(call);
+  for (auto& ordered : persisted.ordered_items)
+  {
+    if (auto* function = std::get_if<AssistantFunctionCallItem>(&ordered.item))
+      function->tool_call.arguments_json = serialized_tool_arguments(function->tool_call);
+  }
+  return persisted;
 }
 
 constexpr std::size_t kMaxAvaAuthorityRoots = 64;
@@ -1293,6 +1320,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     std::vector<ava::provider::StreamEvent> provider_events;
     std::size_t streamed_assistant_text_bytes = 0;
     std::map<std::string, std::size_t> streamed_tool_argument_bytes;
+    std::unordered_map<std::string, std::string> streamed_tool_names;
     std::unordered_set<std::string> current_provider_tool_call_ids;
     bool processed_stream_chunks = false;
     auto append_stream_events = [&](std::vector<ava::provider::StreamEvent> new_events, bool publish_all_events = true) -> ava::core::VoidResult {
@@ -1392,15 +1420,43 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
                             {.key = "usage_present", .value = event.usage ? "true" : "false"}};
           });
         }
+        if (event.type == ava::provider::StreamEventType::ToolCallStart && !event.tool_call_id.empty() && !event.tool_name.empty())
+          streamed_tool_names[event.tool_call_id] = event.tool_name;
+
         bool const should_publish = publish_all_events || event.type == ava::provider::StreamEventType::ReasoningStart ||
                                     event.type == ava::provider::StreamEventType::ReasoningDelta || event.type == ava::provider::StreamEventType::ReasoningEnd;
         if (should_publish)
         {
-          if (auto published = publish_stream_event(options_, event); !published)
+          auto public_event = event;
+          if (event.type == ava::provider::StreamEventType::ToolCallStart || event.type == ava::provider::StreamEventType::ToolCallEnd)
+          {
+            // Start/end carry only lifecycle identity. Never surface an
+            // unexpected provider payload from those lifecycle records.
+            public_event.text.clear();
+          }
+          else if (event.type == ava::provider::StreamEventType::ToolCallDelta)
+          {
+            auto const found = streamed_tool_names.find(event.tool_call_id);
+            if (found == streamed_tool_names.end())
+            {
+              // A malformed stream without a start cannot prove that this is
+              // not a shell request. Suppress its arguments rather than
+              // exposing a payload before permission mediation.
+              public_event.text = "<redacted tool arguments>";
+            }
+            else if (found->second == "bash")
+            {
+              public_event.tool_name = found->second;
+              public_event.text = std::string(kRedactedRunCommand);
+            }
+          }
+          if (auto published = publish_stream_event(options_, public_event); !published)
           {
             return std::unexpected(std::move(published.error()));
           }
         }
+        if (event.type == ava::provider::StreamEventType::ToolCallEnd)
+          streamed_tool_names.erase(event.tool_call_id);
         provider_events.push_back(std::move(event));
       }
       return {};
@@ -1686,7 +1742,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     // Permission prompts receive the transient provider call below. Durable
     // assistant-output/session state never retains raw RunCommand argv or
     // shell payloads; it retains only the call identity and a stable marker.
-    auto persisted_turn = append_assistant_turn_locked(*turn, usage, cost_usd);
+    auto persisted_turn = append_assistant_turn_locked(persistable_turn(*turn), usage, cost_usd);
     if (!persisted_turn)
     {
       return std::unexpected(std::move(persisted_turn.error()));

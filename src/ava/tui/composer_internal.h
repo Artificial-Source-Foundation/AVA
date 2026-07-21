@@ -12,7 +12,7 @@ namespace ava::tui::detail {
 
 inline constexpr std::size_t kMinWidth = 20;
 inline constexpr std::size_t kMinHeight = 8;
-inline constexpr std::size_t kMinComposerBlockLines = 4;
+inline constexpr std::size_t kMinComposerBlockLines = 2;
 inline constexpr std::size_t kMaxComposerBlockLines = 8;
 inline constexpr std::size_t kMaxPaletteLines = 8;
 inline constexpr std::string_view kReverseVideo = "\x1b[7m";
@@ -35,8 +35,7 @@ inline constexpr std::string_view kSgrError = "\x1b[38;2;248;113;113m";
 inline constexpr std::string_view kSgrAccent = "\x1b[38;2;77;158;246m";
 inline constexpr std::string_view kSgrScreenBg = "\x1b[48;2;11;14;20m";
 inline constexpr std::string_view kSgrComposerBg = "\x1b[48;2;26;31;46m";
-inline constexpr std::string_view kComposerBar = "▎";
-inline constexpr std::string_view kComposerPrompt = "❯";
+inline constexpr std::string_view kComposerBar = "│";
 
 struct ComposerInputLayout {
   std::size_t top_padding = 0;

@@ -118,7 +118,7 @@ This goal is backend/headless-first. TUI evidence is optional unless the impleme
 If TUI behavior is affected, run:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 ctest --test-dir build -R '^ava_tui\.tmux_smoke$' --output-on-failure
+AVA_TUI_TMUX_SMOKE=1 ctest --test-dir build -j 13 -R '^ava_tui\.tmux_smoke_' --output-on-failure
 ```
 
 Record the relevant capture paths or exact skip reason. Do not add new visual requirements unless code changes affect terminal-visible behavior.

@@ -2363,20 +2363,42 @@ void test_app_command_dispatcher()
   auto const shell_resolver =
       [&shell_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     ++shell_prompts;
-    expect(prompt.command_metadata && prompt.command_metadata->level == ava::command::CommandLevel::Critical,
-           "Pi-style shell helper receives a critical sealed command prompt");
+    expect(prompt.command_metadata && prompt.command_metadata->level == ava::command::CommandLevel::Critical &&
+               prompt.command_metadata->family == ava::command::CommandFamily::RawShell &&
+               prompt.command_metadata->execution_domain == ava::command::CommandExecutionDomain::RawShell &&
+               prompt.command_metadata->backend_maximum_scope == ava::command::InteractiveScope::Once &&
+               !ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata),
+           "Pi-style shell helper receives a critical one-shot raw-shell prompt");
     return ava::permissions::PermissionResolution::Allow;
   };
   auto bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!pwd", .permission_resolver = shell_resolver});
   expect(bang_shell && bang_shell->handled && bang_shell->tool_timeline.size() == 2 && bang_shell->tool_timeline[0].name == "bash" &&
-             bang_shell->tool_timeline[0].argument_summary == "pwd" && bang_shell->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success &&
-             !bang_shell->output.empty() && bang_shell->output[0].find("exit: 0") != std::string::npos,
+             bang_shell->tool_timeline[0].argument_summary == "<redacted one-shot command>" &&
+             bang_shell->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success && !bang_shell->output.empty() &&
+             bang_shell->output[0].find("exit: 0") != std::string::npos,
          "Pi-style ! shell helper runs through the permissioned bash command path");
   auto hidden_bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!! pwd", .permission_resolver = shell_resolver});
   expect(hidden_bang_shell && hidden_bang_shell->handled && hidden_bang_shell->tool_timeline.size() == 2 &&
-             hidden_bang_shell->tool_timeline[0].name == "bash" && hidden_bang_shell->tool_timeline[0].argument_summary == "pwd" &&
+             hidden_bang_shell->tool_timeline[0].name == "bash" &&
+             hidden_bang_shell->tool_timeline[0].argument_summary == "<redacted one-shot command>" &&
              hidden_bang_shell->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success && shell_prompts == 2,
          "Pi-style !! shell helper is accepted as the critical one-shot bash helper without bypassing permissions");
+  std::optional<ava::permissions::PermissionPrompt> explicit_bash_prompt;
+  auto explicit_bash =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/bash git status",
+                                                               .permission_resolver = [&explicit_bash_prompt](ava::permissions::PermissionPrompt const& prompt)
+                                                                   -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+                                                                 explicit_bash_prompt = prompt;
+                                                                 return ava::permissions::PermissionResolution::Deny;
+                                                               }});
+  expect(explicit_bash && explicit_bash->handled && explicit_bash_prompt && explicit_bash_prompt->command_metadata &&
+             explicit_bash_prompt->command_metadata->level == ava::command::CommandLevel::Critical &&
+             explicit_bash_prompt->command_metadata->family == ava::command::CommandFamily::RawShell &&
+             explicit_bash_prompt->command_metadata->execution_domain == ava::command::CommandExecutionDomain::RawShell &&
+             explicit_bash_prompt->command_metadata->backend_maximum_scope == ava::command::InteractiveScope::Once &&
+             !ava::permissions::command_permission_allows_reusable_grant(*explicit_bash_prompt->command_metadata) && !explicit_bash->tool_timeline.empty() &&
+             explicit_bash->tool_timeline.back().status == ava::agent::ToolTimelineStatus::Error,
+         "/bash git status is an explicit Critical raw-shell prompt and cannot create a reusable grant");
   auto missing_bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!"});
   expect(missing_bang_shell && missing_bang_shell->handled && !missing_bang_shell->output.empty() &&
              missing_bang_shell->output[0].find("!<command> or !!<command>") != std::string::npos,

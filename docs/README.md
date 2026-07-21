@@ -49,6 +49,9 @@ This is the navigation spine for AVA's user, automation, engineering, and produc
 - [`product/parallel-tools-plan.md`](product/parallel-tools-plan.md): ordinary parallel tool execution design risks and rollout plan.
 - [`release-checklist.md`](release-checklist.md): local Linux host-artifact component/script contract, smokes, checksums, portability boundary, and explicitly deferred publish-pipeline work.
 - [`roadmap/backend.md`](roadmap/backend.md): backend roadmap and historical phase rationale.
+- [`roadmap/frontend.md`](roadmap/frontend.md): post-MVP terminal frontend maturity roadmap, using OpenCode as a behavior/quality reference without copying its architecture.
+- [`roadmap/frontend-evidence-baseline.md`](roadmap/frontend-evidence-baseline.md): completed F0 semantic-state inventory, current character-cell matrix, and reproducible terminal evidence catalog.
+- [`roadmap/backend-usability.md`](roadmap/backend-usability.md): approval ledger and implementation records for command permissions, background jobs, support diagnostics, compaction, and session titles.
 - [`roadmap/backend-maturity-baseline.md`](roadmap/backend-maturity-baseline.md): maturity gates and acceptance criteria.
 - [`goals/README.md`](goals/README.md): goal package index, including Pi MVP parity area files.
 

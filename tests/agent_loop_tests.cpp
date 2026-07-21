@@ -2504,11 +2504,12 @@ void test_agent_loop_permission_resolver_threads_to_tools()
     ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
                                                            "data: "
                                                            "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_bash\",\"delta\":\"{"
-                                                           "\\\"command\\\":\\\"true\\\"}\"}\n\n"
+                                                           "\\\"command\\\":\\\"printf AGENT_DENIED_COMMAND_SECRET_SENTINEL\\\"}\"}\n\n"
                                                            "data: [DONE]\n\n"),
                                               sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"bash denied\"}\n\n"
                                                            "data: [DONE]\n\n")});
     int bash_deny_prompts = 0;
+    std::vector<ava::provider::StreamEvent> public_bash_stream_events;
     ava::agent::AgentLoop bash_loop(ava::agent::AgentLoopOptions{
         .workspace_dir = bash_workspace,
         .anchor_set = command_anchors_for_test(bash_workspace, bash_store.session_path().parent_path() / "spill"),
@@ -2517,11 +2518,16 @@ void test_agent_loop_permission_resolver_threads_to_tools()
         .model_id = "gpt-5.5",
         .system_prompt = "system prompt",
         .access_token = "token",
+        .on_stream_event = [&public_bash_stream_events](ava::provider::StreamEvent const& event) -> ava::core::VoidResult {
+          public_bash_stream_events.push_back(event);
+          return {};
+        },
         .permission_resolver =
             [&bash_deny_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
           ++bash_deny_prompts;
           expect(prompt.operation == ava::permissions::Operation::RunCommand, "agent bash deny resolver sees run command");
-          expect(prompt.command == "true", "agent bash deny resolver sees command text");
+          expect(prompt.command.find("AGENT_DENIED_COMMAND_SECRET_SENTINEL") != std::string::npos,
+                 "agent bash deny resolver retains the exact command only in its local prompt");
           return ava::permissions::PermissionResolution::Deny;
         },
         .append_entry = append_route_for_test(bash_store),
@@ -2534,10 +2540,21 @@ void test_agent_loop_permission_resolver_threads_to_tools()
            "agent loop records denied bash Ask decisions as failed tool results and continues");
     auto bash_entries = bash_store.load();
     auto bash_audits = bash_entries ? permission_entries(*bash_entries) : std::vector<ava::session::SessionEntry>{};
+    auto const serialized_denial =
+        bash_result && !bash_result->tool_timeline.empty() ? bash_result->tool_timeline.front().structured_result_json : std::string{};
+    auto const continuation_request = bash_transport.requests().size() > 1 ? bash_transport.requests()[1].body : std::string{};
+    auto const durable_secret_absent = bash_entries && std::ranges::all_of(*bash_entries, [](ava::session::SessionEntry const& entry) {
+                                         return entry.data_json.find("AGENT_DENIED_COMMAND_SECRET_SENTINEL") == std::string::npos;
+                                       });
+    auto const public_stream_secret_absent = std::ranges::all_of(public_bash_stream_events, [](ava::provider::StreamEvent const& event) {
+      return event.text.find("AGENT_DENIED_COMMAND_SECRET_SENTINEL") == std::string::npos;
+    });
     expect(bash_audits.size() == 2 && ava::core::json::string_field(bash_audits[1].data_json, "command") == "<redacted one-shot command>" &&
                ava::core::json::string_field(bash_audits[1].data_json, "resolution") == "deny" &&
-               ava::core::json::string_field(bash_audits[1].data_json, "resolution_source") == "resolver",
-           "agent loop persists resolver-denied command permission audit entries");
+               ava::core::json::string_field(bash_audits[1].data_json, "resolution_source") == "resolver" && durable_secret_absent &&
+               public_stream_secret_absent && serialized_denial.find("AGENT_DENIED_COMMAND_SECRET_SENTINEL") == std::string::npos &&
+               continuation_request.find("AGENT_DENIED_COMMAND_SECRET_SENTINEL") == std::string::npos,
+           "agent loop redacts denied command arguments from durable audits, public stream events, serialized tool errors, and continuation payloads");
   }
 
   {

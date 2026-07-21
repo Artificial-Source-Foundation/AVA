@@ -243,8 +243,11 @@ if [ -z "$session_file" ]; then
 fi
 
 for needle in \
-  '"type":"tool_call"' \
+  '"type":"assistant_output_item"' \
+  '"type":"assistant_turn_commit"' \
+  '"kind":"function_call"' \
   '"type":"tool_result"' \
+  '"assistant_output_entry_id"' \
   '"type":"permission_decision"' \
   '"tool_name":"skill"' \
   '"operation":"edit"' \
@@ -261,6 +264,13 @@ done
 if ! grep -q '"tool_name":"apply_patch"' "$session_file" && ! grep -q '"tool_name":"edit_file"' "$session_file"; then
   echo "classification=AVA regression"
   echo "persisted session missing expected edit tool permission evidence"
+  print_evidence_note
+  exit 1
+fi
+
+if grep -q '"type":"assistant_message"' "$session_file" || grep -q '"type":"tool_call"' "$session_file"; then
+  echo "classification=AVA regression"
+  echo "new live turn unexpectedly used legacy v3 assistant/tool-call records"
   print_evidence_note
   exit 1
 fi

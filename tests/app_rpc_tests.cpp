@@ -2544,8 +2544,9 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
   expect(transport.requests().empty(), "RPC direct command execution does not dispatch provider requests");
   expect(completed && jsonl.find("\"id\":\"cmd-allow\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos &&
              jsonl.find("\"operation\":\"bash\"") != std::string::npos && jsonl.find("\"command\":\"printf rpc-direct\"") != std::string::npos &&
+             jsonl.find("\"family\":\"raw_shell\"") != std::string::npos && jsonl.find("\"backend_maximum_scope\":\"once\"") != std::string::npos &&
              jsonl.find("\"tool\":\"bash\"") != std::string::npos && jsonl.find("\"permission_request_ids\":[\"permreq_") != std::string::npos,
-         "RPC direct command returns structured bash tool output linked to the permission request");
+         "RPC direct command is a one-shot raw-shell bash operation linked to its permission request");
   expect(audited_allow, "RPC direct command persists permission audit decisions in the session");
 }
 
@@ -2581,11 +2582,12 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
                                     [&] noexcept { input_buffer.close(); });
   });
 
-  input_buffer.push(R"JSON({"id":"cmd-deny","type":"run_bash","command":"touch denied.txt"})JSON"
-                    "\n");
+  std::string const secret = "RPC_DENIED_COMMAND_SECRET_SENTINEL";
+  input_buffer.push("{\"id\":\"cmd-deny\",\"type\":\"run_bash\",\"command\":\"printf " + secret + "\"}\n");
   bool const permission_requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
   auto const request_id = rpc_string_field_from_output(output_buffer.str(), "resolver_request_id");
-  expect(permission_requested && request_id, "RPC direct command denial emits a permission request before execution");
+  expect(permission_requested && request_id && output_buffer.str().find(secret) != std::string::npos,
+         "RPC direct command denial emits a permission prompt that retains the authorized user's exact command");
   if (request_id)
   {
     input_buffer.push("{\"id\":\"deny\",\"type\":\"permission_reply\",\"request_id\":\"" + *request_id +
@@ -2605,10 +2607,13 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
                                      entry.data_json.find("\"resolution\":\"deny\"") != std::string::npos;
                             });
   expect(result.has_value(), "RPC direct command denial loop completes successfully");
-  expect(denied && jsonl.find("\"id\":\"cmd-deny\"") != std::string::npos && jsonl.find("\"tool\":\"bash\"") != std::string::npos,
-         "RPC direct command denial returns a structured bash tool error");
+  auto const session_secret_absent =
+      entries && std::ranges::all_of(*entries, [&](ava::session::SessionEntry const& entry) { return entry.data_json.find(secret) == std::string::npos; });
+  expect(denied && jsonl.find("\"id\":\"cmd-deny\"") != std::string::npos && jsonl.find("\"tool\":\"bash\"") != std::string::npos &&
+             count_substrings(jsonl, secret) == 1,
+         "RPC direct command denial keeps the argument only in its permission prompt, not its reply diagnostics");
   expect(!std::filesystem::exists(workspace / "denied.txt"), "RPC direct command denial blocks process execution before side effects");
-  expect(audited_deny, "RPC direct command denial persists the denied permission audit decision");
+  expect(audited_deny && session_secret_absent, "RPC direct command denial persists redacted session audits without command arguments");
 }
 
 void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()

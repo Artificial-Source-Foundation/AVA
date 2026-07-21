@@ -55,6 +55,7 @@ def main() -> int:
         )
         for directory in ("home", "config/ava", "state", "data", "workspace"):
             (case / directory).mkdir(parents=True, exist_ok=True)
+        (case / "config/ava").chmod(0o700)
         return env
 
     def start_provider(case: pathlib.Path, scenario: str, target: str = "", delay_ms: int = 0) -> tuple[subprocess.Popen[bytes], dict[str, str]]:

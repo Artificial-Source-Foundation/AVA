@@ -12,6 +12,8 @@ namespace ava::tests {
 
 ava::config::XdgPaths app_test_paths(std::filesystem::path const& root)
 {
+  std::filesystem::create_directories(root);
+  ::chmod(root.c_str(), S_IRWXU);
   auto const config_home = root / "config";
   auto const state_home = root / "state";
   auto const data_home = root / "data";

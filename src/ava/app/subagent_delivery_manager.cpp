@@ -2,6 +2,7 @@
 #include "ava/app/headless_policy.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/session_ts.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_sessions.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/session/session_store.h"

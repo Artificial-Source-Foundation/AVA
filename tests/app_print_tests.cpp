@@ -8,6 +8,7 @@
 #include "ava/app/print_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/permissions/permission.h"

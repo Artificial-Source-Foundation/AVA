@@ -5,6 +5,7 @@
 #include "ava/diagnostics/artifact_store.h"
 #include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/core/json.h"
 

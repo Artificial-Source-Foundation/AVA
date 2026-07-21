@@ -3,6 +3,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime_sessions.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/job_control.h"
 #include "ava/agent/subagent_coordinator.h"

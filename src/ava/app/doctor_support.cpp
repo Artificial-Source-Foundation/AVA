@@ -417,6 +417,7 @@ int run_doctor(ava::config::XdgPaths const& paths, std::filesystem::path const& 
   {
     Dout(dc::app, "operation=doctor state=start format=" << (json ? "json" : "human"));
     auto const report = collect_passive_doctor_report(paths, workspace_dir);
+#ifdef CWDEBUG
     std::uint64_t warning_count = 0;
     std::uint64_t failure_count = 0;
     for (auto const& check : report.checks)
@@ -425,6 +426,7 @@ int run_doctor(ava::config::XdgPaths const& paths, std::filesystem::path const& 
       failure_count += check.status == DoctorStatus::Fail ? 1U : 0U;
     }
     Dout(dc::config, "operation=doctor state=result checks=" << report.checks.size() << " warnings=" << warning_count << " failures=" << failure_count);
+#endif
     out << (json ? ava::diagnostics::serialize_doctor_report_json(report) + '\n' : ava::diagnostics::serialize_doctor_report_human(report));
     return report.has_failures() ? 1 : 0;
   }

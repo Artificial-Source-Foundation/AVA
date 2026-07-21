@@ -5,10 +5,10 @@
 #include "serialization_json.h"
 #include "session_commands.h"
 #include "session_operators.h"
-#include "runtime_sessions.h"
-#include "runtime/Session.h"
 
 #include "ava/app/EventEnvelope.h"
+#include "ava/app/runtime_sessions.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/agent/job_control.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"

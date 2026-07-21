@@ -6,6 +6,7 @@
 #include "ava/app/runtime.h"
 #include "ava/app/runtime_sessions.h"
 #include "ava/app/session_title_coordinator.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/config/session_title_config.h"
 #include "ava/session/assistant_output.h"
 #include "ava/provider/openai_provider.h"
@@ -25,6 +26,7 @@
 #include <string>
 #include <system_error>
 #include <vector>
+#include <unistd.h>             // ::write
 
 namespace {
 

@@ -4,15 +4,12 @@
 #include "ava/tui/terminal/Border.h"
 #include "ava/tui/terminal/GraphemeCluster.h"
 // clang-format on
-#include <codecvt>
-#include <locale>
+#include "utils/wstring_to_utf8.h"
 
 namespace ava::tui::terminal {
 
 void Border::print_members(std::ostream& os, char const* prefix) const
 {
-  std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
-
   os << prefix;
   AVA_USING_OSTREAM_PRELUDE(os)
      << __write__("ls:") << ls
@@ -25,20 +22,14 @@ void Border::print_members(std::ostream& os, char const* prefix) const
      << __write__(", br:") << br
      << __write__(", index_to_pos:") << index_to_pos
      << __write__(", default_box")                              // We are not showing `default_box`.
-     << __write__(", box_characters:") << conv.to_bytes(box_characters_)
+     << __write__(", box_characters:") << utils::wstring_to_utf8(box_characters_)
      ;
 }
 
 void GraphemeCluster::print_members(std::ostream& os, char const* prefix) const
 {
-  std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
-  std::string storage;
-  for (wchar_t wc : storage_)
-  {
-    if (!wc)
-      break;
-    storage += conv.to_bytes(wc);
-  }
+  std::wstring_view const storage_view(storage_);
+  std::string const storage = utils::wstring_to_utf8(storage_view);
 
   os << prefix;
   AVA_USING_OSTREAM_PRELUDE(os)

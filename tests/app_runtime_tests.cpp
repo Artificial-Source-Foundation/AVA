@@ -3477,12 +3477,12 @@ void test_app_runtime_model_switch_persists_and_reopens()
   expect(restored_emoji_quirk, "runtime reopen decodes escaped supplementary-plane metadata");
   if (reopened)
   {
-    ava::app::runtime::session_ts unlocked_session(std::move(*reopened));
+    ava::app::runtime::session_ts unlocked_reopened(std::move(*reopened));
     ava::provider::OpenAIProvider const provider("https://api.example.test");
     ava::tests::FakeTransport transport({});
     std::istringstream in("{\"id\":\"list\",\"type\":\"list_models\"}\n");
     std::ostringstream out;
-    auto result = ava::app::run_rpc_loop(unlocked_session, reopen_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+    auto result = ava::app::run_rpc_loop(unlocked_reopened, reopen_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
     auto const jsonl = out.str();
     auto const restored_position = jsonl.find("\"model\":\"claude-test\"");
     expect(result.has_value() && restored_position != std::string::npos, "RPC list_models includes restored removed current model");

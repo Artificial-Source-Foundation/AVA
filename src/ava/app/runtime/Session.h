@@ -23,9 +23,14 @@
 #include <utility>
 #include <vector>
 
-namespace ava::app {
-class SubagentDeliveryManager;
+namespace ava::diagnostics {
+class RuntimeDiagnostics;
 }
+
+namespace ava::app {
+class SessionTitleCoordinator;
+class SubagentDeliveryManager;
+}  // namespace ava::app
 
 namespace ava::app::runtime {
 
@@ -63,6 +68,10 @@ struct Session
   bool created = false;
   bool sessionless = false;
   std::shared_ptr<SessionRunController> run_controller = nullptr;
+  // Immutable append target bound into the controller-owned serialized routes.
+  // Tests and retained runtime capsules may inspect/copy it, but mutations flow
+  // through the controller so append failures remain latched.
+  std::shared_ptr<ava::session::SessionAppendTarget> append_target = nullptr;
   // Detached retained capsules bind reads to the exact original leased inode
   // without reacquiring the pathname. Ordinary visible sessions leave this
   // empty and derive an authority from their owned lease.
@@ -71,6 +80,8 @@ struct Session
   // compatibility seam; production sessions use the delivery manager.
   std::shared_ptr<ava::agent::SubagentCoordinator> subagent_coordinator = nullptr;
   std::shared_ptr<ava::app::SubagentDeliveryManager> subagent_delivery_manager = nullptr;
+  std::shared_ptr<ava::app::SessionTitleCoordinator> session_title_coordinator = nullptr;
+  std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
   // Null uses normal global/project discovery; non-null is immutable session-local MCP composition.
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;
   bool offline = false;
@@ -94,7 +105,7 @@ struct Session
   }
 
   // Return the stable append route owned by this session, or an empty route when the controller is unavailable.
-  [[nodiscard]] ava::agent::SessionAppendSink owner_append_route()
+  [[nodiscard]] ava::agent::SessionAppendSink owner_append_route() const
   {
     return run_controller ? run_controller->owner_append_route() : ava::agent::SessionAppendSink{};
   }

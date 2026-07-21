@@ -56,6 +56,7 @@ set(AVA_TESTS_SOURCES
   "command_tests.cpp"
   "core_tests.cpp"
   "core_mode_json_permissions_tests.cpp"
+  "diagnostics_tests.cpp"
   "events_tests.cpp"
   "job_journal_tests.cpp"
   "lsp_tests.cpp"
@@ -68,6 +69,7 @@ set(AVA_TESTS_SOURCES
   "provider_openai_tests.cpp"
   "session_tests.cpp"
   "session_run_controller_tests.cpp"
+  "session_title_coordinator_tests.cpp"
   "subagent_coordinator_tests.cpp"
   "subagent_delivery_manager_tests.cpp"
   "tool_scheduler_tests.cpp"
@@ -77,6 +79,7 @@ set(AVA_TESTS_SOURCES
   "tools_tests.cpp"
   "tui_composer_tests.cpp"
   "run_observer_tests.cpp"
+  "runtime_diagnostics_tests.cpp"
   "containment_tests.cpp"
 )
 # The debug suite relies on libcwd-backed machinery (ava_debug, CWDEBUG), so it is
@@ -101,9 +104,11 @@ ava_apply_sanitizers(ava_tests)
 
 set(AVA_TEST_SUITES
   core_mode
+  diagnostics
   acp
   session
   session_run_controller
+  session_title_coordinator
   subagent_coordinator
   subagent_delivery_manager
   core_json_permission
@@ -135,6 +140,7 @@ set(AVA_TEST_SUITES
   permission_rules
   tui_composer
   run_observer
+  runtime_diagnostics
   containment
 )
 foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
@@ -432,6 +438,22 @@ if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
 endif()
 if(Python3_Interpreter_FOUND)
   add_test(
+    NAME ava_cli.doctor_support
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/doctor_support_cli_test.py
+            --ava $<TARGET_FILE:ava>
+            --root ${CMAKE_BINARY_DIR}/doctor-support-cli)
+  set_tests_properties(ava_cli.doctor_support PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_cli.runtime_diagnostics
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/runtime_diagnostics_cli_test.py
+            --ava $<TARGET_FILE:ava>
+            --root ${CMAKE_BINARY_DIR}/runtime-diagnostics-cli)
+  set_tests_properties(ava_cli.runtime_diagnostics PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
     NAME ava_build.parallel_test_runner
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/parallel_test_runner_test.py
@@ -588,4 +610,12 @@ if(OptionEnableLibcwd)
   add_test(
     NAME ava_debug.print_members_format
     COMMAND ava_tests debug)
+endif()
+
+# Existing integration providers use exact finite response scripts. Automatic
+# title generation has dedicated fake-transport coverage and must not consume
+# those scripts or make any external provider call during ordinary CTest runs.
+get_property(AVA_REGISTERED_TESTS DIRECTORY PROPERTY TESTS)
+if(AVA_REGISTERED_TESTS)
+  set_property(TEST ${AVA_REGISTERED_TESTS} APPEND PROPERTY ENVIRONMENT "AVA_SESSION_TITLES=off")
 endif()

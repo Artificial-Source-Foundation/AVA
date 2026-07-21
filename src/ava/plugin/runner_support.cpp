@@ -9,7 +9,6 @@
 
 #include <cerrno>
 #include <chrono>
-#include <cstring>
 #include <thread>
 #include <utility>
 #include <unistd.h>
@@ -72,17 +71,14 @@ ScopedSignalIgnore::~ScopedSignalIgnore()
 
 ava::core::Error plugin_error(ava::core::ErrorCategory category, std::string message, PluginManifest const& manifest)
 {
-  auto error = ava::core::Error(category, std::move(message));
-  error.with_context("plugin", manifest.id);
-  if (!manifest.path.empty())
-    error.with_context("manifest", manifest.path.string());
-  return error;
+  static_cast<void>(manifest);
+  return ava::core::Error(category, std::move(message));
 }
 
 ava::core::Error errno_error(std::string message, PluginManifest const& manifest)
 {
   auto error = plugin_error(ava::core::ErrorCategory::Io, std::move(message), manifest);
-  error.with_context("cause", std::strerror(errno));
+  error.with_context("errno", std::to_string(errno));
   return error;
 }
 

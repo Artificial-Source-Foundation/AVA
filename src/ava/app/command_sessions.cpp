@@ -335,8 +335,9 @@ bool metadata_labels_match(std::vector<std::string> const& labels, std::string_v
 bool session_matches_query(ava::session::SessionTreeNode const& node, std::string_view query)
 {
   return contains_ascii_case_insensitive(node.summary.session_id, query) || contains_ascii_case_insensitive(node.summary.last_updated, query) ||
-         contains_ascii_case_insensitive(node.summary.path.generic_string(), query) || contains_ascii_case_insensitive(node.metadata.name, query) ||
-         contains_ascii_case_insensitive(node.metadata.parent_session_id, query) || contains_ascii_case_insensitive(node.metadata.source_session_id, query) ||
+         contains_ascii_case_insensitive(node.summary.path.generic_string(), query) ||
+         contains_ascii_case_insensitive(node.metadata.effective_title(), query) || contains_ascii_case_insensitive(node.metadata.parent_session_id, query) ||
+         contains_ascii_case_insensitive(node.metadata.source_session_id, query) ||
          contains_ascii_case_insensitive(node.metadata.branch_from_entry_id, query) || contains_ascii_case_insensitive(node.metadata.branch_origin, query) ||
          (node.metadata.archived && contains_ascii_case_insensitive("archived", query)) || contains_ascii_case_insensitive(node.metadata.actor, query) ||
          metadata_labels_match(node.metadata.labels, query);
@@ -595,9 +596,9 @@ std::string format_session_tree_line(ava::session::SessionTreeNode const& node, 
 {
   std::string output(depth * 2, ' ');
   output += node.current ? "* " : "- ";
-  if (!node.metadata.name.empty())
+  if (!node.metadata.effective_title().empty())
   {
-    output += sanitize_inline_text(node.metadata.name);
+    output += sanitize_inline_text(node.metadata.effective_title());
     output += "  id=" + sanitize_inline_text(node.summary.session_id);
   }
   else
@@ -635,6 +636,7 @@ ava::core::Result<runtime::Session> reopen_session(runtime::Session const& curre
   options.paths = current.paths;
   options.subagent_coordinator = current.subagent_coordinator;
   options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
   return open_runtime_session(options);
 }
 
@@ -650,6 +652,7 @@ ava::core::Result<runtime::Session> create_fresh_session(runtime::Session const&
   options.paths = current.paths;
   options.subagent_coordinator = current.subagent_coordinator;
   options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
   return open_runtime_session(options);
 }
 
@@ -665,6 +668,7 @@ runtime::OpenOptions owned_replacement_options(runtime::Session const& current)
   options.offline = current.offline;
   options.subagent_coordinator = current.subagent_coordinator;
   options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
   return options;
 }
 
@@ -1352,7 +1356,12 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
   {
     return fail_compaction(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "/compact requires provider-backed summary generation"));
   }
-  auto config = ava::session::load_compaction_config(session.paths);
+  auto loaded_config = ava::session::load_compaction_config(session.paths);
+  if (!loaded_config)
+  {
+    return fail_compaction(std::move(loaded_config.error()));
+  }
+  auto config = resolve_compaction_config(session, std::move(*loaded_config));
   if (!config)
   {
     return fail_compaction(std::move(config.error()));
@@ -1383,20 +1392,25 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
     {
       return fail_compaction(std::move(entries.error()));
     }
-    auto estimated_tokens = ava::session::estimate_session_tokens(*entries);
-    if (!estimated_tokens)
-      return fail_compaction(std::move(estimated_tokens.error()));
+    auto prepared = prepare_compaction_context(*entries, *config);
+    if (!prepared)
+      return fail_compaction(std::move(prepared.error()));
     auto start_event = base_command_event(session, runtime::EventType::CompactionStart);
+    start_event.provider_id = config->provider_id;
+    start_event.model_id = config->model_id;
     start_event.trigger = "manual";
+    start_event.reason = "manual";
     start_event.status = "started";
     start_event.attempt = attempt + 1;
     start_event.max_attempts = max_compaction_attempts;
-    start_event.estimated_tokens = *estimated_tokens;
+    start_event.estimated_tokens = prepared->estimated_tokens;
+    start_event.threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens);
+    start_event.retained_tokens = prepared->retained_tokens;
     if (auto emitted = emit_command_event(request, std::move(start_event)); !emitted)
     {
       return fail_compaction(std::move(emitted.error()));
     }
-    auto summary = request.compaction_summary_generator(*entries, *config, instructions, *estimated_tokens);
+    auto summary = request.compaction_summary_generator(prepared->active_entries, *config, instructions, prepared->estimated_tokens);
     if (!summary)
     {
       return fail_compaction(std::move(summary.error()));
@@ -1429,13 +1443,16 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
         last_current_entries = current_entries->size();
         return {};
       }
-      auto entry = ava::session::make_manual_compaction_entry(ava::session::ManualCompactionRequest{.summary = *summary,
-                                                                                                    .instructions = instructions,
-                                                                                                    .config = *config,
-                                                                                                    .estimated_tokens = *estimated_tokens,
-                                                                                                    .threshold_tokens = 0,
-                                                                                                    .trigger = "manual",
-                                                                                                    .recent_context = ""});
+      auto entry = ava::session::make_manual_compaction_entry(
+          ava::session::ManualCompactionRequest{.summary = *summary,
+                                                .instructions = instructions,
+                                                .config = *config,
+                                                .estimated_tokens = prepared->estimated_tokens,
+                                                .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens),
+                                                .retained_tokens = prepared->retained_tokens,
+                                                .trigger = "manual",
+                                                .recent_context = prepared->recent_context,
+                                                .recent_context_omitted = prepared->recent_context_omitted});
       if (!entry)
         return std::unexpected(std::move(entry.error()));
       return session.append_owned(std::move(*entry));
@@ -1457,11 +1474,17 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
     if (!snapshot_stale)
     {
       auto end_event = base_command_event(session, runtime::EventType::CompactionEnd);
+      end_event.provider_id = config->provider_id;
+      end_event.model_id = config->model_id;
       end_event.trigger = "manual";
+      end_event.reason = "manual";
       end_event.status = "completed";
       end_event.attempt = attempt + 1;
       end_event.max_attempts = max_compaction_attempts;
-      end_event.estimated_tokens = *estimated_tokens;
+      end_event.estimated_tokens = prepared->estimated_tokens;
+      end_event.threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens);
+      end_event.retained_tokens = prepared->retained_tokens;
+      end_event.post_compaction_tokens = ava::session::estimate_tokens(*summary) + ava::session::estimate_tokens(instructions) + prepared->retained_tokens;
       end_event.summary_bytes = summary->size();
       if (auto emitted = emit_command_event(request, std::move(end_event)); !emitted)
       {

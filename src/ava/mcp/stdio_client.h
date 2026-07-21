@@ -158,7 +158,7 @@ class McpStdioClient final
   [[nodiscard]] ava::core::VoidResult drain_stdout();
   [[nodiscard]] ava::core::VoidResult drain_stderr();
   [[nodiscard]] ava::core::VoidResult reap_child();
-  [[nodiscard]] ava::core::VoidResult set_pipe_nonblocking(int fd, std::string_view pipe_name);
+  [[nodiscard]] ava::core::VoidResult set_pipe_nonblocking(int fd);
   void append_stderr(std::string_view chunk);
   void close_fds() noexcept;
   void terminate_child() noexcept;

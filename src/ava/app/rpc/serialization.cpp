@@ -419,6 +419,8 @@ ava::core::Result<std::string> list_sessions_result_json(runtime::Session const&
     json += string_field_json("last_updated", summary.last_updated);
     json += ',';
     json += number_field_json("entry_count", summary.entry_count);
+    json += ',';
+    json += string_field_json("title", summary.title);
     json += '}';
   }
   json += "]}";
@@ -451,6 +453,12 @@ ava::core::Result<std::string> session_tree_result_json(runtime::Session const& 
     json += number_field_json("entry_count", node.summary.entry_count);
     json += ',';
     json += string_field_json("name", node.metadata.name);
+    json += ',';
+    json += string_field_json("title", node.metadata.effective_title());
+    json += ',';
+    json += string_field_json("generated_title", node.metadata.generated_title);
+    json += ',';
+    json += bool_field_json("has_manual_name", node.metadata.has_manual_name);
     json += ",\"labels\":" + string_array_json(node.metadata.labels);
     json += ',';
     json += string_field_json("labels_updated", node.metadata.labels_updated);

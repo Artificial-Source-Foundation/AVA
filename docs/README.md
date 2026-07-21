@@ -13,6 +13,7 @@ This is the navigation spine for AVA's user, automation, engineering, and produc
 - [`terminal-setup.md`](terminal-setup.md): terminal capability setup and troubleshooting for tmux, Kitty, OSC 8/52, paste, mouse, and themes.
 - [`themes-keybindings.md`](themes-keybindings.md): TUI themes, display settings, keybinding files, and Pi theme/keybinding differences.
 - [`security-sandboxing.md`](security-sandboxing.md): permission boundaries, trust, plugin/MCP process limits, and container/VM guidance.
+- [`diagnostics.md`](diagnostics.md): passive doctor, private traces, last-failure state, support exports, privacy exclusions, and libcwd's separate developer-debug role.
 
 ## Automation And Extension Contracts
 
@@ -60,4 +61,4 @@ This is the navigation spine for AVA's user, automation, engineering, and produc
 
 ## Reference Code
 
-- `reference-code/pi/` and `reference-code/opencode/` are local behavior references only. Do not copy source or architecture from them into AVA, and do not include them in builds, formatting, or broad source searches unless explicitly doing reference analysis.
+- `reference-code/pi/`, `reference-code/opencode/`, and `reference-code/grok-build/` are local behavior references only. Do not copy source or architecture from them into AVA, and do not include them in builds, formatting, or broad source searches unless explicitly doing reference analysis.

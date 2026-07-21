@@ -4,7 +4,10 @@
 #include "ava/app/runtime_credentials.h"
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_sessions.h"
+#include "ava/app/session_title_coordinator.h"
 #include "ava/app/subagent_delivery_manager.h"
+#include "ava/config/session_title_config.h"
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/session/attachments.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/ids.h"
@@ -675,34 +678,85 @@ ava::core::VoidResult AcpSessionHost::close()
 
 AcpSessionRegistry::AcpSessionRegistry(AcpSessionOptions options) : options_(std::move(options))
 {
+  auto service_anchor = options_.open_options.anchor_set;
+  if (!service_anchor)
+  {
+    std::error_code directory_error;
+    for (auto const& directory : {options_.paths.ava_config_dir, options_.paths.ava_state_dir})
+    {
+      std::filesystem::create_directories(directory, directory_error);
+      if (!directory_error)
+        std::filesystem::permissions(directory, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace, directory_error);
+      if (directory_error)
+      {
+        coordinator_startup_error_ = ava::core::Error(ava::core::ErrorCategory::Io, "failed to prepare ACP service anchors");
+        return;
+      }
+    }
+    // AnchorSet preserves its first root as the immutable launch workspace
+    // identity used by command containment and ACP tool negotiation.
+    auto opened = ava::core::AnchorSet::open(
+        {options_.launch_root, options_.paths.ava_config_dir, options_.paths.ava_state_dir, options_.paths.sessions_dir});
+    if (!opened)
+    {
+      coordinator_startup_error_ = std::move(opened.error());
+      return;
+    }
+    service_anchor = std::move(*opened);
+  }
+  options_.open_options.anchor_set = service_anchor;
+  if (options_.open_options.diagnostics)
+  {
+    if (auto bound = options_.open_options.diagnostics->bind_anchor_set(service_anchor); !bound)
+    {
+      coordinator_startup_error_ = std::move(bound.error());
+      return;
+    }
+  }
+
   if (options_.open_options.subagent_delivery_manager)
   {
     options_.open_options.subagent_coordinator = options_.open_options.subagent_delivery_manager->coordinator();
-    return;
   }
-  ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>> coordinator = options_.open_options.subagent_coordinator;
-  if (!options_.open_options.subagent_coordinator)
+  else
   {
-    auto state_anchor = ava::core::AnchorSet::open({options_.paths.ava_state_dir});
-    if (!state_anchor)
+    auto coordinator = options_.open_options.subagent_coordinator
+                           ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options_.open_options.subagent_coordinator)
+                           : ava::agent::SubagentCoordinator::create(
+                                 {.ava_state_dir = options_.paths.ava_state_dir, .anchor_set = service_anchor});
+    if (!coordinator)
     {
-      coordinator_startup_error_ = std::move(state_anchor.error());
+      coordinator_startup_error_ = std::move(coordinator.error());
       return;
     }
-    coordinator = ava::agent::SubagentCoordinator::create({.ava_state_dir = options_.paths.ava_state_dir, .anchor_set = std::move(*state_anchor)});
+    options_.open_options.subagent_coordinator = std::move(*coordinator);
+    auto manager = SubagentDeliveryManager::create(
+        {.coordinator = options_.open_options.subagent_coordinator, .provider_bundle_factory = options_.provider_bundle_factory});
+    if (manager)
+      options_.open_options.subagent_delivery_manager = std::move(*manager);
+    else
+    {
+      coordinator_startup_error_ = std::move(manager.error());
+      return;
+    }
   }
-  if (!coordinator)
+
+  if (!options_.open_options.session_title_coordinator)
   {
-    coordinator_startup_error_ = std::move(coordinator.error());
-    return;
+    auto config = ava::config::load_session_title_config(options_.paths, *service_anchor);
+    if (!config)
+    {
+      coordinator_startup_error_ = std::move(config.error());
+      return;
+    }
+    auto titles = SessionTitleCoordinator::create({.config = std::move(*config)});
+    if (!titles)
+    {
+      coordinator_startup_error_ = std::move(titles.error());
+      return;
+    }
+    options_.open_options.session_title_coordinator = std::move(*titles);
   }
-  options_.open_options.subagent_coordinator = std::move(*coordinator);
-  auto manager =
-      SubagentDeliveryManager::create({.coordinator = options_.open_options.subagent_coordinator, .provider_bundle_factory = options_.provider_bundle_factory});
-  if (manager)
-    options_.open_options.subagent_delivery_manager = std::move(*manager);
-  else
-    coordinator_startup_error_ = std::move(manager.error());
 }
 
 AcpSessionRegistry::~AcpSessionRegistry()
@@ -959,6 +1013,8 @@ void AcpSessionRegistry::shutdown() noexcept
   }
   for (auto const& host : hosts) host->cancel();
   for (auto const& host : hosts) static_cast<void>(host->close());
+  if (options_.open_options.session_title_coordinator)
+    options_.open_options.session_title_coordinator->shutdown();
   if (options_.open_options.subagent_delivery_manager)
     options_.open_options.subagent_delivery_manager->shutdown();
   else if (options_.open_options.subagent_coordinator)

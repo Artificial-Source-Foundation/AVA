@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/session/assistant_output.h"
 #include "ava/session/record.h"
+#include "ava/session/session_metadata.h"
 #include "ava/session/validation.h"
 #include "ava/session/validation_fields.h"
 #include "ava/core/json.h"
@@ -428,9 +429,23 @@ void validate_compaction_entry(SessionReplayValidation& validation, std::size_t 
     return;
   }
 
-  if (!present_non_empty_string(entry.data_json, "trigger") || !present_non_empty_string(entry.data_json, "model") ||
-      !present_integer_matching(entry.data_json, "threshold_tokens", false) || !present_integer_matching(entry.data_json, "estimated_tokens", false) ||
-      !present_integer_matching(entry.data_json, "keep_recent_tokens", false) || !present_integer_matching(entry.data_json, "keep_recent_messages", false) ||
+  auto const reason = ava::core::json::string_field(entry.data_json, "reason");
+  auto const threshold_type = ava::core::json::string_field(entry.data_json, "threshold_type");
+  auto const retry_outcome = ava::core::json::string_field(entry.data_json, "overflow_retry_outcome");
+  if (!present_non_empty_string(entry.data_json, "trigger") || !present_non_empty_string(entry.data_json, "provider") ||
+      !present_non_empty_string(entry.data_json, "model") || !present_non_empty_string(entry.data_json, "reason") ||
+      (reason && *reason != "manual" && *reason != "automatic" && *reason != "overflow") || !present_non_empty_string(entry.data_json, "threshold_type") ||
+      (threshold_type && *threshold_type != "tokens" && *threshold_type != "percent") || !present_non_empty_string(entry.data_json, "overflow_retry_outcome") ||
+      (retry_outcome && *retry_outcome != "scheduled" && *retry_outcome != "succeeded" && *retry_outcome != "failed") ||
+      !present_integer_matching(entry.data_json, "threshold_tokens", false) ||
+      !present_integer_matching(entry.data_json, "configured_threshold_tokens", false) ||
+      !present_integer_matching(entry.data_json, "configured_threshold_percent", false) ||
+      !present_integer_matching(entry.data_json, "estimated_tokens", false) ||
+      !present_integer_matching(entry.data_json, "active_pre_compaction_tokens", false) ||
+      !present_integer_matching(entry.data_json, "retained_tokens", false) ||
+      !present_integer_matching(entry.data_json, "post_compaction_estimated_tokens", false) ||
+      !present_integer_matching(entry.data_json, "keep_recent_tokens", false) || !present_integer_matching(entry.data_json, "keep_recent_turns", false) ||
+      !present_integer_matching(entry.data_json, "keep_recent_messages", false) || !present_boolean(entry.data_json, "recent_context_omitted") ||
       !present_integer_matching(entry.data_json, "max_summary_bytes", true))
   {
     add_error(validation, SessionReplayIssueKind::InvalidCompactionEntry, index, entry, "", "compaction entry has malformed semantic metadata");
@@ -994,12 +1009,13 @@ void validate_session_metadata_entry(SessionReplayValidation& validation, std::s
   auto const branch_origin = ava::core::json::string_field(entry.data_json, "branch_origin");
   bool const has_branch_origin = branch_origin && !branch_origin->empty();
   bool const has_meaningful_field =
-      ava::core::json::field_value_start(entry.data_json, "name") || ava::core::json::field_value_start(entry.data_json, "labels") ||
-      ava::core::json::field_value_start(entry.data_json, "archived") || ava::core::json::field_value_start(entry.data_json, "parent_session_id") ||
-      ava::core::json::field_value_start(entry.data_json, "source_session_id") || ava::core::json::field_value_start(entry.data_json, "branch_from_entry_id") ||
-      has_branch_origin;
+      ava::core::json::field_value_start(entry.data_json, "name") || ava::core::json::field_value_start(entry.data_json, "generated_title") ||
+      ava::core::json::field_value_start(entry.data_json, "labels") || ava::core::json::field_value_start(entry.data_json, "archived") ||
+      ava::core::json::field_value_start(entry.data_json, "parent_session_id") || ava::core::json::field_value_start(entry.data_json, "source_session_id") ||
+      ava::core::json::field_value_start(entry.data_json, "branch_from_entry_id") || has_branch_origin;
   if (!schema_version_is_current(entry.data_json) || !has_meaningful_field ||
       !valid_optional_short_string(entry.data_json, "name", kMaxSessionNameBytes, true) ||
+      !valid_optional_short_string(entry.data_json, "generated_title", kMaxGeneratedSessionTitleBytes, false) ||
       !valid_optional_string_array(entry.data_json, "labels", kMaxSessionLabels, kMaxSessionLabelBytes) || !valid_optional_bool(entry.data_json, "archived") ||
       !valid_optional_session_id(entry.data_json, "parent_session_id") || !valid_optional_session_id(entry.data_json, "source_session_id") ||
       !valid_optional_entry_id(entry.data_json, "branch_from_entry_id", entry.id) ||

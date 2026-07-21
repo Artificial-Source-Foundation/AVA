@@ -6,8 +6,11 @@
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_prompt.h"
 #include "ava/app/runtime_reasoning.h"
+#include "ava/app/session_title_coordinator.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/agent_loop_session.h"
+#include "ava/config/session_title_config.h"
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 #include "ava/core/AnchorSet.h"
@@ -152,10 +155,22 @@ ava::core::Result<std::shared_ptr<SubagentDeliveryManager>> delivery_manager_for
   return SubagentDeliveryManager::create({.coordinator = std::move(*coordinator)});
 }
 
+ava::core::Result<std::shared_ptr<SessionTitleCoordinator>> title_coordinator_for_options(
+    runtime::OpenOptions const& options, std::shared_ptr<ava::core::AnchorSet> const& anchor_set)
+{
+  if (options.session_title_coordinator)
+    return options.session_title_coordinator;
+  auto config = ava::config::load_session_title_config(options.paths, *anchor_set);
+  if (!config)
+    return std::unexpected(std::move(config.error()));
+  return SessionTitleCoordinator::create({.config = std::move(*config)});
+}
+
 ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptions const& options, ava::session::SessionStore& store,
                                                               ava::session::SessionLease& lease, bool created, bool load_existing_entries,
                                                               bool append_session_start, bool append_initial_session_name,
-                                                              std::shared_ptr<SubagentDeliveryManager> delivery_manager)
+                                                              std::shared_ptr<SubagentDeliveryManager> delivery_manager,
+                                                              std::shared_ptr<SessionTitleCoordinator> title_coordinator)
 {
   auto directories = resolve_runtime_directories(options);
   if (!directories)
@@ -307,12 +322,29 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
     anchor_roots.push_back(options.paths.ava_state_dir);
 
     for (auto const& dir : options.additional_writable_dirs) anchor_roots.push_back(dir);
-    auto opened = ava::core::AnchorSet::open(anchor_roots);
-    if (!opened || !(*opened)->find_anchor(workspace_dir) || !(*opened)->find_anchor(spill_dir) || !(*opened)->find_anchor(options.paths.ava_config_dir) ||
-        !(*opened)->find_anchor(options.paths.ava_state_dir))
-      return std::unexpected(opened ? ava::core::Error(ava::core::ErrorCategory::Io, "failed to retain all required runtime anchors")
-                                    : std::move(opened.error()));
-    anchor_set = std::move(*opened);
+    if (options.anchor_set)
+    {
+      anchor_set = options.anchor_set;
+    }
+    else
+    {
+      auto opened = ava::core::AnchorSet::open(anchor_roots);
+      if (!opened)
+        return std::unexpected(std::move(opened.error()));
+      anchor_set = std::move(*opened);
+    }
+    auto const config_anchor = anchor_set->find_anchor(options.paths.ava_config_dir);
+    auto const state_anchor = anchor_set->find_anchor(options.paths.ava_state_dir);
+    if (!anchor_set->find_anchor(workspace_dir) || !anchor_set->find_anchor(spill_dir) || !config_anchor || !config_anchor->relative().empty() || !state_anchor ||
+        !state_anchor->relative().empty() ||
+        std::ranges::any_of(options.additional_writable_dirs, [&](auto const& directory) { return !anchor_set->find_anchor(directory); }))
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to retain all required runtime anchors"));
+  }
+
+  if (options.diagnostics)
+  {
+    if (auto bound = options.diagnostics->bind_anchor_set(anchor_set); !bound)
+      return std::unexpected(std::move(bound.error()));
   }
 
   if (!delivery_manager)
@@ -321,6 +353,13 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
     if (!created_manager)
       return std::unexpected(std::move(created_manager.error()));
     delivery_manager = std::move(*created_manager);
+  }
+  if (!title_coordinator)
+  {
+    auto created_coordinator = title_coordinator_for_options(options, anchor_set);
+    if (!created_coordinator)
+      return std::unexpected(std::move(created_coordinator.error()));
+    title_coordinator = std::move(*created_coordinator);
   }
 
   runtime::Session session{.store = std::move(store),
@@ -344,9 +383,12 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
                            .scoped_model_cycle = registry.scoped_model_cycle,
                            .created = created,
                            .sessionless = sessionless,
-                           .run_controller = std::make_shared<SessionRunController>(std::move(*append_target)),
+                           .run_controller = std::make_shared<SessionRunController>(*append_target),
+                           .append_target = std::move(*append_target),
                            .subagent_coordinator = delivery_manager->coordinator(),
                            .subagent_delivery_manager = std::move(delivery_manager),
+                           .session_title_coordinator = std::move(title_coordinator),
+                           .diagnostics = options.diagnostics,
                            .offline = options.offline};
 
   if (options.initial_reasoning_level)
@@ -510,7 +552,8 @@ ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions co
   }
 
   auto session = construct_runtime_session(options, *store, lease, created, load_existing_entries, created && append_session_start,
-                                           options.initial_session_name.has_value() && !options.fork_session_id, options.subagent_delivery_manager);
+                                           options.initial_session_name.has_value() && !options.fork_session_id, options.subagent_delivery_manager,
+                                           options.session_title_coordinator);
   if (!session && created_from_fork)
   {
     auto error = std::move(session.error());
@@ -541,7 +584,8 @@ ava::core::Result<runtime::Session> open_owned_runtime_session(runtime::OpenOpti
   auto staged_recovery = store.recover_incomplete_assistant_output_suffix(lease, session_read_limits);
   if (!staged_recovery)
     return std::unexpected(std::move(staged_recovery.error()));
-  return construct_runtime_session(options, store, lease, created, true, false, false, options.subagent_delivery_manager);
+  return construct_runtime_session(options, store, lease, created, true, false, false, options.subagent_delivery_manager,
+                                   options.session_title_coordinator);
 }
 
 ava::core::VoidResult replace_runtime_session(runtime::Session& destination, runtime::Session&& replacement)
@@ -550,6 +594,7 @@ ava::core::VoidResult replace_runtime_session(runtime::Session& destination, run
   // session controller and preserve the exact coordinator across navigation.
   auto coordinator = destination.subagent_coordinator;
   auto delivery_manager = destination.subagent_delivery_manager;
+  auto title_coordinator = destination.session_title_coordinator;
   auto const detached_parent_id = destination.sessionless ? std::string{} : destination.store.session_id();
   bool const leaves_detached_parent = !detached_parent_id.empty() && (replacement.sessionless || replacement.store.session_id() != detached_parent_id);
   destination.run_controller.reset();
@@ -561,6 +606,8 @@ ava::core::VoidResult replace_runtime_session(runtime::Session& destination, run
   }
   else if (coordinator)
     destination.subagent_coordinator = coordinator;
+  if (title_coordinator)
+    destination.session_title_coordinator = std::move(title_coordinator);
 
   // This is an explicit visible-session detach boundary. The delivery manager
   // keeps a capsule and journal owner when work remains; otherwise its exact

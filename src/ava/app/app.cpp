@@ -2,6 +2,7 @@
 #include "ava/app/acp_mode.h"
 #include "ava/app/app.h"
 #include "ava/app/connect_openai.h"
+#include "ava/app/doctor_support.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/line_shell.h"
 #include "ava/app/print_mode.h"
@@ -10,6 +11,7 @@
 #include "ava/agent/mode.h"
 #include "ava/tui/composer.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/core/version.h"
 #include "ava/core/AnchorSet.h"
 
@@ -39,6 +41,8 @@ void print_help()
   std::cout << "  ava auth login [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
   std::cout << "  ava connect [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
   std::cout << "  ava connect <provider> --api-key-stdin|--api-key-env <env>\n";
+  std::cout << "  ava doctor [--json]\n";
+  std::cout << "  ava support export\n";
   std::cout << "  ava packages <list|install|remove|update|config>  # deferred\n";
   std::cout << "  ava --version\n";
   std::cout << "  ava --mode build|plan|text|json|rpc\n";
@@ -50,13 +54,14 @@ void print_help()
   std::cout << "  ava --session-dir <dir>\n";
   std::cout << "  ava --no-session\n";
   std::cout << "  ava --offline\n";
+  std::cout << "  ava --trace  # write a private bounded production trace\n";
   std::cout << "  ava [--system-prompt text] [--append-system-prompt text]\n";
   std::cout << "  ava [--tools list] [--exclude-tools list] [--no-builtin-tools|--no-tools]\n";
   std::cout << "  ava --print [@file ...] [prompt] [--json|--output json] [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava -p [@file ...] [prompt] [--json|--output json] [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava --rpc [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava --output rpc [--allow read-only] [--allow-tool list]\n";
-  std::cout << "  ava --acp  # ACP v1 transport with the implemented AVA session/tool profile\n\n";
+  std::cout << "  ava [--trace] --acp  # ACP v1 transport with the implemented AVA session/tool profile\n\n";
   std::cout << version::kDisplayVersion << " status: backend MVP runtime with terminal, print, RPC, and ACP v1 workflows.\n";
 }
 
@@ -74,7 +79,7 @@ bool is_cli_option(std::string_view arg)
 {
   return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" || arg == "--session-id" || arg == "--continue" ||
          arg == "--resume" || arg == "-c" || arg == "-r" || arg == "--fork" || arg == "--name" || arg == "-n" || arg == "--session-dir" ||
-         arg == "--no-session" || arg == "--offline" || arg == "--thinking" || arg == "--system-prompt" || arg == "--append-system-prompt" ||
+         arg == "--no-session" || arg == "--offline" || arg == "--trace" || arg == "--thinking" || arg == "--system-prompt" || arg == "--append-system-prompt" ||
          arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--acp" || arg == "--json" || arg == "--output" || arg == "--allow" ||
          arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" || arg == "--no-builtin-tools" || arg == "-nbt" ||
          arg == "--no-tools" || arg == "-nt";
@@ -206,16 +211,63 @@ namespace ava::app {
 
 int run(int argc, char** argv)
 {
-  bool acp_requested = false;
-  for (int index = 1; index < argc; ++index) acp_requested = acp_requested || std::string_view(argv[index]) == "--acp";
-  if (acp_requested)
+  if (argc >= 2 && std::string_view(argv[1]) == "doctor")
   {
-    if (argc != 2)
+    bool json = false;
+    if (argc == 3 && std::string_view(argv[2]) == "--json")
+      json = true;
+    else if (argc != 2)
     {
-      std::cerr << "--acp is a standalone mode and cannot be combined with other arguments\n";
+      std::cerr << "Usage: ava doctor [--json]\n";
       return 2;
     }
-    return run_acp_mode(std::cerr);
+    std::error_code workspace_error;
+    auto workspace = std::filesystem::current_path(workspace_error);
+    if (workspace_error)
+      workspace.clear();
+    return run_doctor(ava::config::xdg_paths(), workspace, json, std::cout, std::cerr);
+  }
+  if (argc >= 2 && std::string_view(argv[1]) == "support")
+  {
+    if (argc != 3 || std::string_view(argv[2]) != "export")
+    {
+      std::cerr << "Usage: ava support export\n";
+      return 2;
+    }
+    std::error_code workspace_error;
+    auto workspace = std::filesystem::current_path(workspace_error);
+    if (workspace_error)
+      workspace.clear();
+    return run_support_export(ava::config::xdg_paths(), workspace, std::cout, std::cerr);
+  }
+
+  int acp_flags = 0;
+  int acp_trace_flags = 0;
+  for (int index = 1; index < argc; ++index)
+  {
+    acp_flags += std::string_view(argv[index]) == "--acp" ? 1 : 0;
+    acp_trace_flags += std::string_view(argv[index]) == "--trace" ? 1 : 0;
+  }
+  if (acp_flags > 0)
+  {
+    bool const valid = acp_flags == 1 && acp_trace_flags <= 1 && argc == 2 + acp_trace_flags;
+    if (!valid)
+    {
+      std::cerr << "--acp is a standalone mode and accepts only one optional --trace flag\n";
+      return 2;
+    }
+    auto diagnostics = ava::diagnostics::RuntimeDiagnostics::create(ava::config::xdg_paths(), acp_trace_flags == 1);
+    if (!diagnostics)
+    {
+      std::cerr << "Trace startup failed: private diagnostics storage is unavailable.\n";
+      return 1;
+    }
+    return run_acp_mode(std::cerr, std::move(*diagnostics));
+  }
+  if (acp_trace_flags > 1)
+  {
+    std::cerr << "--trace may be specified only once\n";
+    return 2;
   }
 
   auto mode = ava::agent::Mode::Build;
@@ -226,6 +278,7 @@ int run(int argc, char** argv)
   bool continue_last_session = false;
   bool sessionless = false;
   bool offline = false;
+  bool trace_requested = false;
   bool print_mode = false;
   bool rpc_mode = false;
   std::optional<std::string> print_prompt;
@@ -595,6 +648,16 @@ int run(int argc, char** argv)
       offline = true;
       continue;
     }
+    if (arg == "--trace")
+    {
+      if (trace_requested)
+      {
+        std::cerr << "--trace may be specified only once\n";
+        return 2;
+      }
+      trace_requested = true;
+      continue;
+    }
     if (arg == "--thinking")
     {
       if (index + 1 >= argc || is_cli_option(argv[index + 1]))
@@ -689,6 +752,16 @@ int run(int argc, char** argv)
     runtime_paths.sessions_dir = resolved_session_dir.lexically_normal();
   }
 
+  auto diagnostics = ava::diagnostics::RuntimeDiagnostics::create(runtime_paths, trace_requested);
+  if (!diagnostics)
+  {
+    if (trace_requested)
+      std::cerr << "Trace startup failed: private diagnostics storage is unavailable.\n";
+    else
+      std::cerr << "Runtime diagnostics startup failed.\n";
+    return 1;
+  }
+
   ava::app::runtime::OpenOptions open_options;
   auto cwd = ava::core::launch_workspace_root();
   if (!cwd)
@@ -709,6 +782,7 @@ int run(int argc, char** argv)
   open_options.prompt_overrides = std::move(prompt_overrides);
   open_options.initial_reasoning_level = std::move(initial_reasoning_level);
   open_options.offline = offline;
+  open_options.diagnostics = *diagnostics;
 
   if (print_mode)
   {

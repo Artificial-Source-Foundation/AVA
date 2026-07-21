@@ -773,7 +773,7 @@ void add_output(LineResult& result, std::string text)
 }
 
 template <typename Callback>
-LineResult with_provider_runtime(ShellState& state, std::string_view offline_suffix, Callback callback)
+LineResult with_provider_runtime(ShellState& state, std::string_view offline_suffix, Callback callback, std::string_view provider_override = {})
 {
   LineResult line_result;
   if (state.session.offline)
@@ -781,8 +781,9 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
     add_output(line_result, ava::app::offline_provider_error("prompt").format() + std::string(offline_suffix));
     return line_result;
   }
+  auto const provider_id = provider_override.empty() ? std::string_view(state.session.model.provider_id) : provider_override;
   ava::provider::CurlCliTransport transport;
-  auto credential = ava::config::provider_credential_for_request(state.session.paths, state.session.model.provider_id, transport);
+  auto credential = ava::config::provider_credential_for_request(state.session.paths, provider_id, transport);
   if (!credential)
   {
     add_output(line_result, credential.error().format() + std::string(offline_suffix));
@@ -790,11 +791,19 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
   }
   if (!*credential)
   {
-    add_output(line_result, ava::app::provider_auth_required_message(state.session, offline_suffix));
+    if (provider_override.empty())
+    {
+      add_output(line_result, ava::app::provider_auth_required_message(state.session, offline_suffix));
+    }
+    else
+    {
+      add_output(line_result, "Auth is required for compaction provider `" + std::string(provider_id) + "`. Run `ava connect " + std::string(provider_id) +
+                                  "` or configure its API-key environment variable." + std::string(offline_suffix));
+    }
     return line_result;
   }
   auto registry = ava::provider::builtin_provider_registry();
-  auto provider = registry.create(state.session.model.provider_id);
+  auto provider = registry.create(provider_id);
   if (!provider)
   {
     add_output(line_result, provider.error().format() + std::string(offline_suffix));
@@ -822,6 +831,19 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
   {
     if (is_compact_command(line))
     {
+      auto loaded_config = ava::session::load_compaction_config(state.session.paths);
+      if (!loaded_config)
+      {
+        add_output(line_result, loaded_config.error().format());
+        return line_result;
+      }
+      auto config = ava::app::resolve_compaction_config(state.session, std::move(*loaded_config));
+      if (!config)
+      {
+        add_output(line_result, config.error().format());
+        return line_result;
+      }
+      auto const summary_provider_id = config->provider_id;
       return with_provider_runtime(
           state, "\nother slash tool commands still work offline.",
           [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
@@ -849,7 +871,8 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
             }
             return LineResult{
                 .quit = command_result->quit, .output = std::move(command_result->output), .tool_timeline = std::move(command_result->tool_timeline)};
-          });
+          },
+          summary_provider_id);
     }
     auto command_result = ava::app::run_command(state.session, ava::app::CommandRequest{.command = line,
                                                                                         .permission_resolver = permission_resolver,

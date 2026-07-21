@@ -150,7 +150,8 @@ Validation requires a non-empty `summary`, boolean `summary_unavailable` when pr
 
 `session_metadata.data.schema_version` is `1`. Metadata entries are append-only; the latest value for each field wins. Current fields and limits:
 
-- `name`: string, at most 256 bytes, no control bytes.
+- `name`: manual title string, at most 256 bytes, no control bytes. Presence is durable even when the value is empty.
+- `generated_title`: automatic title string, non-empty, at most 160 bytes, valid UTF-8, and no control bytes.
 - `labels`: unique non-empty strings, at most 32 labels, at most 64 bytes per label, no control bytes.
 - `archived`: boolean.
 - `parent_session_id`, `source_session_id`: AVA session ids.
@@ -158,7 +159,9 @@ Validation requires a non-empty `summary`, boolean `summary_unavailable` when pr
 - `branch_origin`: empty or one of `root`, `fork`, `clone`, `manual`, `import`.
 - `actor`: optional string, at most 64 bytes.
 
-Forks and clones copy source entries into a new session and append `session_metadata` provenance to the new session. The source session file is left untouched.
+The effective display title is the latest manual `name` whenever any `name` field has appeared; otherwise it is the latest `generated_title`. Consequently `name:""` is an explicit durable suppression of generated display titles, even if a later record contains `generated_title`. Sessions written before `generated_title` remain valid and keep their existing manual/untitled behavior; readers that do not know the additive field may ignore it.
+
+Forks and clones copy source entries into a new session and append `session_metadata` provenance to the new session. Title metadata is folded from the complete source independently of an earlier fork prefix: an explicit branch name wins, otherwise the latest source manual name (including empty suppression) is persisted, and relevant generated-title metadata is retained. Branch ancestry fields are unchanged. The source session file is left untouched.
 
 ### `branch_summary`
 

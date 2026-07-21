@@ -2631,6 +2631,13 @@ void test_app_command_dispatcher()
              reload_compaction->output[0].find("compaction: error") != std::string::npos &&
              reload_compaction->output[0].find("compaction max summary bytes must be greater than zero") != std::string::npos,
          "command dispatcher /reload compaction reports config validation errors without crashing");
+  write_app_test_file(paths.compaction_file, "{\n  \"provider\": \"anthropic\", \"model\": \"unknown-summary-model\"\n}\n");
+  auto reload_unknown_compaction = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/reload compaction"});
+  expect(reload_unknown_compaction && reload_unknown_compaction->handled && !reload_unknown_compaction->output.empty() &&
+             reload_unknown_compaction->output[0].find("compaction: error") != std::string::npos &&
+             reload_unknown_compaction->output[0].find("compaction_provider: anthropic") != std::string::npos &&
+             reload_unknown_compaction->output[0].find("compaction_model: unknown-summary-model") != std::string::npos,
+         "command dispatcher /reload compaction performs runtime provider/model catalog validation");
   std::error_code remove_compaction_error;
   std::filesystem::remove(paths.compaction_file, remove_compaction_error);
   auto filtered_sessions = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions " + session->store.session_id()});

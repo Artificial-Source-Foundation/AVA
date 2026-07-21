@@ -144,9 +144,12 @@ runtime::Session detached_session(runtime::Session const& source, ava::session::
                           .created = source.created,
                           .sessionless = source.sessionless,
                           .run_controller = source.run_controller,
+                          .append_target = source.append_target,
                           .bound_read_authority = std::move(authority),
                           .subagent_coordinator = source.subagent_coordinator,
                           .subagent_delivery_manager = std::move(manager),
+                          .session_title_coordinator = source.session_title_coordinator,
+                          .diagnostics = source.diagnostics,
                           .mcp_config = source.mcp_config,
                           .offline = source.offline};
 }

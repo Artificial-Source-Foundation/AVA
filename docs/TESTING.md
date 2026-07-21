@@ -22,6 +22,15 @@ The test suite is built as one `ava_tests` CTest target from focused test source
 
 Plugin/MCP contract changes should also follow [`docs/plugin-compatibility-policy.md`](plugin-compatibility-policy.md). Keep checked-in golden fixtures small and deterministic under `tests/golden/ava-080/`, and prefer existing `ava_tests` plugin/MCP suites for contract assertions.
 
+Privacy-safe diagnostics have focused unit and full-binary coverage:
+
+```sh
+scripts/run-tests.sh --build-dir build -R '^ava_tests\.(diagnostics|runtime_diagnostics|mcp|plugin)$' --output-on-failure
+scripts/run-tests.sh --build-dir build -R '^ava_cli\.(doctor_support|runtime_diagnostics)$' --output-on-failure
+```
+
+These suites use canary secrets and isolated XDG roots to verify passive doctor behavior, private descriptor-safe storage, bounded identity-aliased traces, drop/failure counters, typed last-failure records, unique support publication, MCP/plugin public-failure sanitization, and absence of raw values from model/session/RPC/export/support surfaces. ACP trace grammar is covered by `ava_cli.runtime_diagnostics` and the ordinary ACP tests. No live provider or network access is required.
+
 ## Headless Tool Smoke
 
 After provider streaming, tool schema, permission, or dispatcher changes, run a live headless smoke with configured provider auth when credentials are available. Keep the workspace isolated under a temporary directory outside the repository so mutating tools do not touch the checkout.

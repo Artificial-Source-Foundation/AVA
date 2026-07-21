@@ -10,9 +10,11 @@
 #include "debug.h"
 
 void run_core_mode_tests();
+void run_diagnostics_tests();
 void run_acp_tests();
 void run_session_tests();
 void run_session_run_controller_tests();
+void run_session_title_coordinator_tests();
 void run_subagent_coordinator_tests();
 void run_subagent_delivery_manager_tests();
 void run_core_json_permission_tests();
@@ -44,6 +46,7 @@ void run_mcp_tests();
 void run_permission_rules_tests();
 void run_tui_composer_tests();
 void run_run_observer_tests();
+void run_runtime_diagnostics_tests();
 void run_containment_tests();
 #ifdef CWDEBUG
 void run_debug_tests();
@@ -59,9 +62,11 @@ struct TestSuite
 
 constexpr std::array kTestSuites{
     TestSuite{"core_mode", run_core_mode_tests},
+    TestSuite{"diagnostics", run_diagnostics_tests},
     TestSuite{"acp", run_acp_tests},
     TestSuite{"session", run_session_tests},
     TestSuite{"session_run_controller", run_session_run_controller_tests},
+    TestSuite{"session_title_coordinator", run_session_title_coordinator_tests},
     TestSuite{"subagent_coordinator", run_subagent_coordinator_tests},
     TestSuite{"subagent_delivery_manager", run_subagent_delivery_manager_tests},
     TestSuite{"core_json_permission", run_core_json_permission_tests},
@@ -93,6 +98,7 @@ constexpr std::array kTestSuites{
     TestSuite{"permission_rules", run_permission_rules_tests},
     TestSuite{"tui_composer", run_tui_composer_tests},
     TestSuite{"run_observer", run_run_observer_tests},
+    TestSuite{"runtime_diagnostics", run_runtime_diagnostics_tests},
     TestSuite{"containment", run_containment_tests},
 #ifdef CWDEBUG
     TestSuite{"debug", run_debug_tests},

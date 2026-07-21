@@ -78,6 +78,8 @@ struct Event
   std::size_t remaining_ms = 0;
   std::size_t estimated_tokens = 0;
   std::size_t threshold_tokens = 0;
+  std::size_t retained_tokens = 0;
+  std::size_t post_compaction_tokens = 0;
   std::size_t summary_bytes = 0;
   std::size_t snapshot_entries = 0;
   std::size_t current_entries = 0;

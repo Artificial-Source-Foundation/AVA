@@ -6,10 +6,14 @@ AVA uses XDG paths on Linux.
 | --- | --- |
 | Config directory | `$XDG_CONFIG_HOME/ava` or `~/.config/ava` |
 | Auth file | `$XDG_CONFIG_HOME/ava/auth.json` or `~/.config/ava/auth.json` |
+| Automatic session titles | `$XDG_CONFIG_HOME/ava/session-titles.json` or `~/.config/ava/session-titles.json` |
 | Global permission rules | `$XDG_CONFIG_HOME/ava/permission-rules.json` or `~/.config/ava/permission-rules.json` |
 | Workspace-keyed permission rules | `$XDG_CONFIG_HOME/ava/workspace-permission-rules/<hash>/permission-rules.json` or `~/.config/ava/workspace-permission-rules/<hash>/permission-rules.json` |
 | Session state | `$XDG_STATE_HOME/ava/sessions` or `~/.local/state/ava/sessions` |
 | Project trust state | `$XDG_STATE_HOME/ava/project-trust.json` or `~/.local/state/ava/project-trust.json` |
+| Private diagnostic state | `$XDG_STATE_HOME/ava/diagnostics` or `~/.local/state/ava/diagnostics` |
+| Private runtime traces | `$XDG_STATE_HOME/ava/diagnostics/traces` or `~/.local/state/ava/diagnostics/traces` |
+| Local support exports | `$XDG_STATE_HOME/ava/support` or `~/.local/state/ava/support` |
 
 ## Settings Architecture And Resource Packages
 
@@ -26,6 +30,22 @@ Pi-style package/resource management (`packages list|install|remove|update|confi
 - trusted project resources: `.ava/commands/`, `.ava/skills/`, `.ava/agents/`, `.ava/plugins/`, `.ava/mcp.json`, `.ava/lsp.json`, `.ava/SYSTEM.md`, and `.ava/APPEND_SYSTEM.md`
 
 `ava packages ...` and `/packages ...` currently report this deferral instead of performing side effects or sending the request to the model. AVA also does not enable analytics/telemetry, version checks, package updates, or self-update behavior. `--offline` disables provider model calls for prompt turns and provider-backed compaction before credential resolution; it is not an OS/network sandbox, so network-capable tools still depend on tool visibility plus permission policy.
+
+## Automatic Session Titles
+
+Persistent root sessions receive a deterministic title synchronously after their first ordinary prompt commits. AVA then makes one bounded asynchronous refinement attempt with the active provider and model by default, without tools or session assistant records; failure leaves the local fallback intact. Manual `/name` values always win; `/name --clear` records an empty manual value and permanently suppresses generated-title fallback for that session. Branches, imports, resumed sessions, child sessions, sessionless runs, and synthetic delivery turns do not initiate generation.
+
+Strict optional configuration lives in `session-titles.json`:
+
+```json
+{"schema_version":1,"enabled":false}
+```
+
+Set `enabled` to `false` to disable generation. The process override `AVA_SESSION_TITLES=off` also disables generation (`on` defers to the file/default); any other value is rejected. To override the model on the active provider, add `"model":"..."`. A cross-provider override requires both `"provider":"..."` and `"model":"..."`; that provider's own configured credential is resolved for the bounded attempt. Unknown fields and unsupported schema versions are rejected.
+
+## Diagnostics State
+
+`ava doctor` is a read-only offline inspection and writes no state. Explicit `--trace` runs and terminal failures use owner-only state beneath `$XDG_STATE_HOME/ava/diagnostics`; `ava support export` publishes a unique owner-only JSON artifact beneath `$XDG_STATE_HOME/ava/support` and prints its local path. Existing directories must be current-user-owned and private, diagnostic files must be regular single-link mode `0600`, and AVA rejects unsafe symlink, FIFO, hardlink, or group/world-writable replacements rather than following them. Traces are capped at 10,000 events and 10 MiB. No diagnostic setting enables telemetry or automatic upload. See [`diagnostics.md`](diagnostics.md) for the data contract and privacy exclusions.
 
 ## TUI Display
 
@@ -262,17 +282,20 @@ Optional compaction config file: `$XDG_CONFIG_HOME/ava/compaction.json`.
 
 ```json
 {
-  "model": "gpt-5.5",
-  "auto_threshold_tokens": 0,
-  "keep_recent_tokens": 2048,
-  "keep_recent_messages": 6,
+  "auto_threshold_percent": 80,
+  "keep_recent_turns": 2,
+  "keep_recent_tokens": 20000,
   "max_summary_bytes": 16384
 }
 ```
 
-`/compact` generates a provider-backed summary and records a compaction boundary in the session. Automatic compaction runs before a provider request when the active context estimate reaches the effective threshold. If `auto_threshold_tokens` is omitted, AVA uses about 80% of the configured model context window, or an 80,000-token fallback when the model window is unknown. If `auto_threshold_tokens` is present with value `0`, automatic compaction is explicitly disabled.
+`/compact` generates a provider-backed summary and records an append-only compaction boundary. Manual, automatic, and context-overflow compaction summarize only the active context at and after the latest valid boundary, then retain the same bounded recent-turn projection. Physical session history is not rewritten.
 
-`keep_recent_messages` and `keep_recent_tokens` bound the recent transcript tail stored with a compaction entry. The tail is best-effort continuation context and may be truncated with a marker. `max_summary_bytes` rejects unexpectedly large provider summaries before they are appended to the session.
+The summary call uses the active provider and model by default. A `model` override selects that model on the active provider. A `provider` plus `model` selects that exact configured pair, including a cross-provider pair, through the normal registry and credential path. `provider` without `model` is invalid. Explicit selections are revalidated for every compaction and by `/reload compaction`; AVA does not silently fall back.
+
+Automatic compaction defaults to `auto_threshold_percent: 80`, applied to the active conversation model's context window. When that window is unknown, AVA uses a conservative 100,000-token effective window (80,000 tokens at the default percentage). Percent values must be integers from 1 through 95. The legacy absolute `auto_threshold_tokens` remains supported; explicit `0` disables automatic compaction. The percent and token forms cannot appear together.
+
+`keep_recent_turns` defaults to two complete newest user turns and `keep_recent_tokens` defaults to 20,000 estimated tokens. Tool call/result groups and committed session-v4 groups remain structurally complete. An oversized completed turn uses a UTF-8-safe, structurally safe suffix and records explicit omission metadata. The legacy `keep_recent_messages` selector remains supported as an alternative, but it cannot be combined with `keep_recent_turns`. `max_summary_bytes` must be an integer from 1 through 1,048,576. All known fields reject wrong JSON types; unknown fields remain tolerated for forward compatibility.
 
 ## Prompts
 

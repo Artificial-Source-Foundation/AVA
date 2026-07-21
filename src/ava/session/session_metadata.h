@@ -12,12 +12,17 @@
 namespace ava::session {
 
 inline constexpr std::size_t kMaxSessionNameBytes = 256;
+inline constexpr std::size_t kMaxGeneratedSessionTitleBytes = 160;
 inline constexpr std::size_t kMaxSessionLabels = 32;
 inline constexpr std::size_t kMaxSessionLabelBytes = 64;
 
 struct SessionMetadataView
 {
+  // `name` remains the latest manual value. Presence is tracked separately so
+  // a historical name:"" durably suppresses generated titles.
   std::string name;
+  bool has_manual_name = false;
+  std::string generated_title = {};
   std::vector<std::string> labels;
   std::string labels_updated = {};
   bool archived = false;
@@ -31,12 +36,14 @@ struct SessionMetadataView
   // session on client-selected state.
   std::filesystem::path original_cwd = {};
 
+  [[nodiscard]] std::string const& effective_title() const noexcept { return has_manual_name || !name.empty() ? name : generated_title; }
+
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SessionMetadataUpdate
 {
-  std::optional<std::string> name;
+  std::optional<std::string> name = std::nullopt;
   std::optional<std::vector<std::string>> labels = {};
   std::optional<bool> archived = {};
   std::string parent_session_id = {};
@@ -45,6 +52,7 @@ struct SessionMetadataUpdate
   std::string branch_origin = {};
   std::string actor = "rpc";
   std::optional<std::filesystem::path> original_cwd = std::nullopt;
+  std::optional<std::string> generated_title = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

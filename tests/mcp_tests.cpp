@@ -343,8 +343,9 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   auto exit_start = ava::mcp::McpStdioClient::start(exit_start_server, fake_client_options(workspace));
   auto const exit_start_format = exit_start ? std::string{} : exit_start.error().format();
   expect(!exit_start && exit_start.error().message().find("closed stdout") != std::string::npos &&
-             exit_start_format.find("status: exit 42") != std::string::npos && exit_start_format.find("fake MCP exited during initialize") != std::string::npos,
-         "MCP stdio client reports early startup exit with status and stderr diagnostics: " + exit_start_format);
+             exit_start_format.find("status: exit 42") != std::string::npos && exit_start_format.find("CANARY_MCP_STDERR_INIT_a138") == std::string::npos &&
+             exit_start_format.find("stderr_bytes") != std::string::npos,
+         "MCP stdio client reports early startup exit with status and safe stderr metadata: " + exit_start_format);
 
   auto const global_config_dir = root / "global-config";
   std::filesystem::create_directories(global_config_dir);
@@ -519,9 +520,10 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   if (tool_error_client)
   {
     auto tool_error = (*tool_error_client)->call_tool("echo", "{\"text\":\"hello\"}");
-    expect(tool_error && tool_error->is_error && tool_error->content == "MCP tool failed",
-           tool_error ? "MCP stdio client preserves tool-level error results"
-                      : "MCP stdio client preserves tool-level error results: " + tool_error.error().format());
+    expect(tool_error && tool_error->is_error && tool_error->content.find("external_failure") != std::string::npos &&
+               tool_error->content.find("CANARY_MCP_TOOL_CONTENT_682e") == std::string::npos && tool_error->raw_json.empty(),
+           tool_error ? "MCP stdio client replaces tool-level error content with SafeFailure"
+                      : "MCP stdio client replaces tool-level error content with SafeFailure: " + tool_error.error().format());
     auto tool_error_shutdown = (*tool_error_client)->shutdown(std::chrono::milliseconds(500));
     expect(tool_error_shutdown.has_value(), "MCP stdio client shuts down after tool-level error result");
   }
@@ -534,8 +536,9 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   if (error_call_client)
   {
     auto error_call = (*error_call_client)->call_tool("echo", "{\"text\":\"hello\"}");
-    expect(!error_call && error_call.error().message().find("fake MCP JSON-RPC call failed") != std::string::npos,
-           "MCP stdio client surfaces JSON-RPC tool-call errors");
+    expect(!error_call && error_call.error().message() == "MCP request returned a remote protocol error" &&
+               error_call.error().format().find("CANARY_MCP_RESPONSE_ERROR_f2a7") == std::string::npos,
+           "MCP stdio client classifies JSON-RPC errors without preserving remote messages");
     auto error_call_shutdown = (*error_call_client)->shutdown(std::chrono::milliseconds(500));
     expect(error_call_shutdown.has_value(), "MCP stdio client shuts down after JSON-RPC error result");
   }
@@ -551,8 +554,8 @@ void test_mcp_stdio_client_lists_and_calls_tools()
     auto exited_tools = (*exit_list_client)->list_tools();
     expect(!exited_tools && exited_tools.error().message().find("closed stdout") != std::string::npos &&
                exited_tools.error().format().find("status: exit 43") != std::string::npos &&
-               exited_tools.error().format().find("fake MCP exited during tools/list") != std::string::npos,
-           "MCP stdio client reports discovery-time process exit with status and stderr diagnostics");
+               exited_tools.error().format().find("CANARY_MCP_STDERR_LIST_4b72") == std::string::npos,
+           "MCP stdio client reports discovery-time process exit with status and safe stderr metadata");
     auto exit_list_shutdown = (*exit_list_client)->shutdown(std::chrono::milliseconds(500));
     expect(exit_list_shutdown.has_value(), "MCP stdio client shuts down after discovery-time exit");
   }
@@ -571,7 +574,7 @@ void test_mcp_stdio_client_lists_and_calls_tools()
     auto stderr_shutdown = (*stderr_client)->shutdown(std::chrono::milliseconds(500));
     expect(stderr_shutdown.has_value(), "MCP stdio client shuts down noisy fake server");
     expect((*stderr_client)->stderr_truncated(), "MCP stdio client bounds stderr diagnostics");
-    expect((*stderr_client)->stderr_tail() == "mcp-stderr-tail!", "MCP stdio client keeps stderr tail");
+    expect((*stderr_client)->stderr_tail() == "_MCP_STDERR_19d4", "MCP stdio client keeps a bounded internal stderr tail");
   }
 
   auto const slow_tool_pgid_file = root / "mcp-tool-cancel-pgid.txt";
@@ -600,9 +603,8 @@ void test_mcp_stdio_client_lists_and_calls_tools()
     auto exited_tool = (*exit_tool_client)->call_tool("echo", "{\"text\":\"hello\"}");
     auto const exited_tool_format = exited_tool ? std::string{} : exited_tool.error().format();
     expect(!exited_tool && exited_tool.error().message().find("closed stdout") != std::string::npos &&
-               exited_tool_format.find("status: exit 44") != std::string::npos &&
-               exited_tool_format.find("fake MCP exited during tools/call") != std::string::npos,
-           "MCP stdio client reports tool-call process exit with status and stderr diagnostics: " + exited_tool_format);
+               exited_tool_format.find("status: exit 44") != std::string::npos && exited_tool_format.find("CANARY_MCP_STDERR_CALL_0c95") == std::string::npos,
+           "MCP stdio client reports tool-call process exit with status and safe stderr metadata: " + exited_tool_format);
     auto exit_tool_shutdown = (*exit_tool_client)->shutdown(std::chrono::milliseconds(500));
     expect(exit_tool_shutdown.has_value(), "MCP stdio client shuts down after tool-call process exit");
   }
@@ -731,16 +733,19 @@ void test_mcp_tool_dispatcher()
 
   auto resource_bad_args = dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_mcp_resource_bad_args", .name = resource_tool_name, .arguments_json = "{\"uri\":\"other\"}"});
-  expect(resource_bad_args && !resource_bad_args->success && resource_bad_args->result_text.find("empty JSON object") != std::string::npos,
-         "MCP resource dispatcher rejects caller-supplied arguments before execution");
+  expect(resource_bad_args && !resource_bad_args->success && resource_bad_args->result_text.find("empty JSON object") == std::string::npos &&
+             resource_bad_args->result_text.find("invalid_request") != std::string::npos,
+         "MCP resource dispatcher rejects caller-supplied arguments with SafeFailure before execution");
   expect(resource_bad_args && resource_bad_args->result_text.find("file:///workspace/notes.md") == std::string::npos,
          "MCP resource invalid-argument errors do not leak raw resource URIs before read approval");
 
   auto invalid_args = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_bad_args", .name = model_tool_name, .arguments_json = "[]"});
-  expect(invalid_args && !invalid_args->success && invalid_args->result_text.find("JSON object") != std::string::npos,
-         "MCP tool dispatcher rejects non-object arguments before execution");
-  expect(invalid_args && invalid_args->payload.status == ava::agent::ToolResultStatus::Error && invalid_args->payload.error_category == "invalid_argument",
-         "MCP tool dispatcher attaches structured semantic error payloads");
+  expect(invalid_args && !invalid_args->success && invalid_args->result_text.find("JSON object") == std::string::npos &&
+             invalid_args->result_text.find("invalid_request") != std::string::npos,
+         "MCP tool dispatcher rejects non-object arguments with SafeFailure before execution");
+  expect(invalid_args && invalid_args->payload.status == ava::agent::ToolResultStatus::Error && invalid_args->payload.error_category == "configuration" &&
+             invalid_args->payload.error_code == "invalid_request",
+         "MCP tool dispatcher attaches support-safe structured semantic errors");
 
   auto const prompts_before_cancel = prompts.size();
   cancel_requested = true;
@@ -752,7 +757,7 @@ void test_mcp_tool_dispatcher()
 
 void test_mcp_tool_dispatcher_audits_permission_denials()
 {
-  auto run_denial_case = [](std::string const& suffix, ava::permissions::Operation denied_operation, std::string const& expected_error) {
+  auto run_denial_case = [](std::string const& suffix, ava::permissions::Operation denied_operation) {
     auto const root = create_empty_root("mcp-denial-" + suffix);
 
     auto const workspace = root / "workspace";
@@ -791,9 +796,9 @@ void test_mcp_tool_dispatcher_audits_permission_denials()
 
     auto dispatched =
         dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_mcp_denied_" + suffix, .name = model_tool_name, .arguments_json = arguments_json});
-    expect(dispatched && !dispatched->success && dispatched->result_text.find(expected_error) != std::string::npos,
-           dispatched ? "MCP dispatcher reports permission denial for " + suffix
-                      : "MCP dispatcher reports permission denial for " + suffix + ": " + dispatched.error().format());
+    expect(dispatched && !dispatched->success && dispatched->result_text.find("permission_denied") != std::string::npos,
+           dispatched ? "MCP dispatcher reports support-safe permission denial for " + suffix
+                      : "MCP dispatcher reports support-safe permission denial for " + suffix + ": " + dispatched.error().format());
     if (denied_operation == ava::permissions::Operation::McpResourceRead)
     {
       expect(dispatched && dispatched->result_text.find("file:///workspace/notes.md") == std::string::npos,
@@ -817,10 +822,10 @@ void test_mcp_tool_dispatcher_audits_permission_denials()
     }
   };
 
-  run_denial_case("launch", ava::permissions::Operation::McpServerLaunch, "MCP server launch requires permission");
-  run_denial_case("connect", ava::permissions::Operation::McpServerConnect, "MCP server connection requires permission");
-  run_denial_case("tool", ava::permissions::Operation::McpToolCall, "MCP tool call requires permission");
-  run_denial_case("resource", ava::permissions::Operation::McpResourceRead, "MCP resource read requires permission");
+  run_denial_case("launch", ava::permissions::Operation::McpServerLaunch);
+  run_denial_case("connect", ava::permissions::Operation::McpServerConnect);
+  run_denial_case("tool", ava::permissions::Operation::McpToolCall);
+  run_denial_case("resource", ava::permissions::Operation::McpResourceRead);
 }
 
 void test_mcp_headless_policy_allows_resource_reads()
@@ -865,10 +870,10 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
   auto dispatched =
       dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_mcp_tool_error", .name = model_tool_name, .arguments_json = "{\"text\":\"hello\"}"});
   expect(dispatched && !dispatched->success && dispatched->payload.status == ava::agent::ToolResultStatus::Error &&
-             dispatched->payload.content_type == "application/json" && dispatched->payload.content.find("\"ok\":false") != std::string::npos &&
-             dispatched->payload.content.find("MCP tool failed") != std::string::npos,
-         dispatched ? "MCP tool dispatcher contains tool-level error results as semantic payloads"
-                    : "MCP tool dispatcher contains tool-level error results as semantic payloads: " + dispatched.error().format());
+             dispatched->payload.content_type == "application/json" && dispatched->payload.content.find("external_failure") != std::string::npos &&
+             dispatched->payload.content.find("CANARY_MCP_TOOL_CONTENT_682e") == std::string::npos && dispatched->payload.error_code == "external_failure",
+         dispatched ? "MCP tool dispatcher replaces tool-level error content with SafeFailure"
+                    : "MCP tool dispatcher replaces tool-level error content with SafeFailure: " + dispatched.error().format());
   expect(!prompts.empty(), "MCP tool dispatcher still gates tool-level error calls through permission prompts");
 
   auto const text_root = create_empty_root("mcp-dispatcher-canceled-text-error");
@@ -890,10 +895,9 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
   auto text_dispatched = text_dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_mcp_canceled_text_error", .name = model_tool_name, .arguments_json = "{\"text\":\"hello\"}"});
   expect(text_dispatched && !text_dispatched->success && text_dispatched->payload.status == ava::agent::ToolResultStatus::Error &&
-             text_dispatched->payload.error_message.find("canceled upstream") != std::string::npos,
-         text_dispatched
-             ? "MCP tool dispatcher does not classify ordinary tool errors containing canceled as cancellation"
-             : "MCP tool dispatcher does not classify ordinary tool errors containing canceled as cancellation: " + text_dispatched.error().format());
+             text_dispatched->payload.error_message.find("canceled upstream") == std::string::npos && text_dispatched->payload.error_code == "external_failure",
+         text_dispatched ? "MCP tool dispatcher safely classifies ordinary remote errors as integration failures"
+                         : "MCP tool dispatcher safely classifies ordinary remote errors as integration failures: " + text_dispatched.error().format());
 }
 
 void test_mcp_strict_session_registry_failures_and_nested_cwd()
@@ -931,19 +935,24 @@ void test_mcp_strict_session_registry_failures_and_nested_cwd()
   auto startup = fake_server_config(root);
   startup.command = (root / "missing-mcp-server").string();
   auto startup_failed = ava::agent::ToolDispatcher::create_strict(context_for(std::move(startup)));
-  expect(!startup_failed && startup_failed.error().format().find("mcp_server: demo") != std::string::npos,
-         "strict session MCP registry returns startup failures instead of omitting the mandatory server");
+  expect(!startup_failed && startup_failed.error().format().find("missing-mcp-server") == std::string::npos,
+         "strict session MCP registry returns support-safe startup failures instead of omitting the mandatory server");
 
   auto initialize = fake_server_config(root);
   initialize.args = {"exit-initialize"};
   auto initialize_failed = ava::agent::ToolDispatcher::create_strict(context_for(std::move(initialize)));
-  expect(!initialize_failed && initialize_failed.error().format().find("initialize") != std::string::npos,
-         "strict session MCP registry returns initialization failures");
+  expect(!initialize_failed && initialize_failed.error().format().find("status: exit 42") != std::string::npos &&
+             initialize_failed.error().format().find("CANARY_MCP_STDERR_INIT_a138") == std::string::npos,
+         "strict session MCP registry returns support-safe initialization failures: " +
+             (initialize_failed ? std::string("unexpected success") : initialize_failed.error().format()));
 
   auto tools_list = fake_server_config(root);
   tools_list.args = {"exit-after-initialize"};
   auto tools_failed = ava::agent::ToolDispatcher::create_strict(context_for(std::move(tools_list)));
-  expect(!tools_failed && tools_failed.error().format().find("tools/list") != std::string::npos, "strict session MCP registry returns tools/list failures");
+  expect(!tools_failed && tools_failed.error().format().find("status: exit 43") != std::string::npos &&
+             tools_failed.error().format().find("CANARY_MCP_STDERR_LIST_4b72") == std::string::npos,
+         "strict session MCP registry returns support-safe tools/list failures: " +
+             (tools_failed ? std::string("unexpected success") : tools_failed.error().format()));
 
   auto resources_list = fake_server_config(root);
   resources_list.args = {"exit-resources-list"};

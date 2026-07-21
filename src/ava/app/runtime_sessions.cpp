@@ -89,8 +89,11 @@ ava::core::Result<runtime::Session> create_runtime_session_like(runtime::Session
   auto options = base_options;
   options.mode = current.mode;
   options.paths = current.paths;
+  options.anchor_set = current.anchor_set;
   options.subagent_coordinator = current.subagent_coordinator;
   options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
+  options.diagnostics = current.diagnostics;
   return create_runtime_session_at(std::move(options), current.workspace_dir, current.current_dir);
 }
 
@@ -100,8 +103,11 @@ ava::core::Result<runtime::Session> open_runtime_session_like(runtime::Session c
   auto options = base_options;
   options.mode = current.mode;
   options.paths = current.paths;
+  options.anchor_set = current.anchor_set;
   options.subagent_coordinator = current.subagent_coordinator;
   options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
+  options.diagnostics = current.diagnostics;
   return open_runtime_session_at(std::move(options), current.workspace_dir, current.current_dir, requested_session_id);
 }
 

@@ -2788,6 +2788,7 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load_bounded(SessionL
 ava::core::Result<SessionSummary> SessionStore::inspect_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested) const
 {
   SessionSummary summary{.session_id = session_id(), .path = session_path(), .last_updated = {}, .entry_count = 0, .original_cwd = {}, .title = {}};
+  bool has_manual_title = false;
   auto visited = visit_entries(
       limits,
       [&](SessionEntry const& entry) -> ava::core::Result<bool> {
@@ -2796,7 +2797,15 @@ ava::core::Result<SessionSummary> SessionStore::inspect_bounded(SessionReadLimit
         if (entry.type == EntryType::SessionMetadata)
         {
           if (auto name = ava::core::json::string_field(entry.data_json, "name"))
+          {
             summary.title = std::move(*name);
+            has_manual_title = true;
+          }
+          else if (!has_manual_title)
+          {
+            if (auto generated = ava::core::json::string_field(entry.data_json, "generated_title"))
+              summary.title = std::move(*generated);
+          }
         }
         if (entry.type == EntryType::SessionStart || entry.type == EntryType::SessionMetadata)
         {
@@ -2822,6 +2831,7 @@ ava::core::Result<SessionSummary> SessionStore::inspect_bounded(SessionLease con
                                                                 SessionCancelCallback cancel_requested) const
 {
   SessionSummary summary{.session_id = session_id(), .path = session_path(), .last_updated = {}, .entry_count = 0, .original_cwd = {}, .title = {}};
+  bool has_manual_title = false;
   auto visited = visit_entries_leased(
       lease, limits,
       [&](SessionEntry const& entry) -> ava::core::Result<bool> {
@@ -2830,7 +2840,15 @@ ava::core::Result<SessionSummary> SessionStore::inspect_bounded(SessionLease con
         if (entry.type == EntryType::SessionMetadata)
         {
           if (auto name = ava::core::json::string_field(entry.data_json, "name"))
+          {
             summary.title = std::move(*name);
+            has_manual_title = true;
+          }
+          else if (!has_manual_title)
+          {
+            if (auto generated = ava::core::json::string_field(entry.data_json, "generated_title"))
+              summary.title = std::move(*generated);
+          }
         }
         if (entry.type == EntryType::SessionStart || entry.type == EntryType::SessionMetadata)
         {
@@ -2858,6 +2876,7 @@ ava::core::Result<SessionSummary> SessionStore::inspect_bounded_for_listing(Sess
   if (auto valid = validate_read_limits(limits); !valid)
     return std::unexpected(std::move(valid.error()));
   SessionSummary summary{.session_id = session_id(), .path = session_path(), .last_updated = {}, .entry_count = 0, .original_cwd = {}, .title = {}};
+  bool has_manual_title = false;
   auto visited = visit_regular_session_snapshot(
       session_path(), limits,
       [&](SessionEntry const& entry) -> ava::core::Result<bool> {
@@ -2866,7 +2885,15 @@ ava::core::Result<SessionSummary> SessionStore::inspect_bounded_for_listing(Sess
         if (inspect_metadata && entry.type == EntryType::SessionMetadata)
         {
           if (auto name = ava::core::json::string_field(entry.data_json, "name"))
+          {
             summary.title = std::move(*name);
+            has_manual_title = true;
+          }
+          else if (!has_manual_title)
+          {
+            if (auto generated = ava::core::json::string_field(entry.data_json, "generated_title"))
+              summary.title = std::move(*generated);
+          }
         }
         if (inspect_metadata && (entry.type == EntryType::SessionStart || entry.type == EntryType::SessionMetadata))
         {
@@ -2987,7 +3014,7 @@ ava::core::Result<std::vector<SessionSummary>> SessionStore::list_sessions(std::
     auto summary = store->inspect_bounded_for_listing(SessionReadLimits{.max_file_bytes = std::numeric_limits<std::size_t>::max(),
                                                                         .max_line_bytes = kMaxSessionLineBytes,
                                                                         .max_entries = std::numeric_limits<std::size_t>::max()},
-                                                      false);
+                                                      true);
     if (!summary)
     {
       if (is_unsupported_session_version_error(summary.error()))

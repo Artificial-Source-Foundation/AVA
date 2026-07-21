@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/runtime_compaction.h"
@@ -6,6 +7,7 @@
 #include "ava/app/runtime_reasoning.h"
 #include "ava/app/runtime_retry.h"
 #include "ava/app/runtime_sessions.h"
+#include "ava/app/session_title_coordinator.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/subagent_config.h"
@@ -528,6 +530,31 @@ StopReason outcome_reason_for_error(ava::core::Error const& error)
   return StopReason::ProviderError;
 }
 
+std::optional<ava::diagnostics::RuntimeFailureClass> diagnostic_failure_class(ava::core::Error const& error) noexcept
+{
+  if (is_agent_loop_canceled_error(error))
+    return std::nullopt;
+  switch (error.category())
+  {
+    case ava::core::ErrorCategory::Configuration:
+      return ava::diagnostics::RuntimeFailureClass::Configuration;
+    case ava::core::ErrorCategory::Provider:
+      return ava::diagnostics::RuntimeFailureClass::Provider;
+    case ava::core::ErrorCategory::Session:
+    case ava::core::ErrorCategory::Io:
+      return ava::diagnostics::RuntimeFailureClass::Session;
+    case ava::core::ErrorCategory::Tool:
+      return ava::diagnostics::RuntimeFailureClass::Tool;
+    case ava::core::ErrorCategory::Unknown:
+      return ava::diagnostics::RuntimeFailureClass::Runtime;
+    case ava::core::ErrorCategory::InvalidArgument:
+    case ava::core::ErrorCategory::NotFound:
+    case ava::core::ErrorCategory::PermissionDenied:
+      return std::nullopt;
+  }
+  return std::nullopt;
+}
+
 constexpr std::size_t kMaxPromptFileReferences = 5;
 constexpr std::size_t kPromptReferenceMaxBytes = 32 * 1024;
 constexpr std::size_t kPromptReferenceMaxLines = 300;
@@ -748,7 +775,11 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& sess
     if (!joined)
       return std::unexpected(std::move(joined.error()));
     if (joined->reason == StopReason::PersistenceError && joined->error)
+    {
+      if (session.diagnostics)
+        session.diagnostics->record_terminal_failure(ava::diagnostics::RuntimeFailureClass::Session, *joined->error);
       return std::unexpected(*joined->error);
+    }
     return ava::agent::AgentLoopResult{.final_text = {},
                                        .usage = std::nullopt,
                                        .cost_usd = std::nullopt,
@@ -776,10 +807,17 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
                                                                    ava::provider::Provider const& provider, ava::provider::Transport& transport,
                                                                    runtime::RunOptions const& options, ActiveRunGuard guard)
 {
-  auto fail_run = [&guard](ava::core::Error error) -> ava::core::Result<ava::agent::AgentLoopResult> {
+  auto fail_run = [&guard, &session](ava::core::Error error) -> ava::core::Result<ava::agent::AgentLoopResult> {
+    if (session.diagnostics)
+      if (auto failure_class = diagnostic_failure_class(error))
+        session.diagnostics->record_terminal_failure(*failure_class, error);
     auto completed = guard.complete(RunOutcome{.run_id = {}, .reason = outcome_reason_for_error(error), .error = error});
     if (completed && completed->reason == StopReason::PersistenceError && completed->error)
+    {
+      if (session.diagnostics)
+        session.diagnostics->record_terminal_failure(ava::diagnostics::RuntimeFailureClass::Session, *completed->error);
       return std::unexpected(*completed->error);
+    }
     return std::unexpected(std::move(error));
   };
   struct ParentRefresh final
@@ -828,6 +866,12 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
     event_sink = make_plugin_event_observer_sink(std::move(plugin_observer_options), options.event_sink);
   }
   auto runtime_options = options;
+  if (session.diagnostics)
+  {
+    auto production_observation = session.diagnostics->observation();
+    if (production_observation && production_observation->enabled())
+      runtime_options.observation = std::move(production_observation);
+  }
   runtime_options.active_append_route = append_route;
   runtime_options.active_append_batch_route = append_batch_route;
   auto const caller_cancel_requested = runtime_options.cancel_requested;
@@ -1137,9 +1181,21 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   if (!completed)
     return std::unexpected(std::move(completed.error()));
   if (completed->reason == StopReason::PersistenceError && completed->error)
+  {
+    if (session.diagnostics)
+      session.diagnostics->record_terminal_failure(ava::diagnostics::RuntimeFailureClass::Session, *completed->error);
     return std::unexpected(*completed->error);
+  }
   if (completed->reason != proposed_reason)
     result->outcome = runtime_outcome_for_stop_reason(completed->reason);
+
+  // This boundary is deliberately after AdmissionGuard completion, not the
+  // earlier Done event. The coordinator is best-effort and cannot change the
+  // already committed ordinary user turn.
+  if (result->committed_turn_id && !options.synthetic_subagent_delivery && !session.sessionless && session.session_title_coordinator)
+  {
+    session.session_title_coordinator->schedule(session, user_message, *result->committed_turn_id, options);
+  }
 
   return result;
 }

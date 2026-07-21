@@ -27,11 +27,18 @@ ava --thinking high
 ava --print "summarize this repo"
 ava --rpc
 ava --acp
+ava doctor --json
+ava --trace --rpc
+ava support export
 ```
 
 `--continue` resumes the newest session for the current workspace; `--resume` and `-r` are Pi-compatible aliases. `--session` resumes an exact ID or a unique prefix; `--session-id` is a Pi-compatible alias. `--fork` creates a new branch from an exact ID or unique prefix. `--name` sets the startup session display name, and `--session-dir` selects a custom session storage directory for this process. `--no-session` runs with in-memory history and does not create a resumable JSONL session; it cannot be combined with `--continue`/`--resume`, `--session`/`--session-id`, or `--fork`. `--thinking off|<level>` sets the startup reasoning selection for the active model; `off` clears explicit reasoning, while other values must be listed in the active model's reasoning levels. On exit, AVA prints the command needed to resume the current session unless sessionless mode is active.
 
 Choose the interface by contract: the TUI is the interactive terminal UI; print mode is one-shot text/JSON automation; `--rpc` is AVA's proprietary JSONL subprocess API for automation/custom clients; and `--acp` is the separate stable ACP v1 JSON-RPC 2.0 stdio endpoint for specifically configured editor/IDE clients. AVA RPC is not ACP, generic JSON-RPC, or Pi RPC. Pi RPC remains reference behavior for subprocess embedding, custom UI, automation, and testing rather than AVA's editor-interoperability contract. See [`rpc-protocol.md`](rpc-protocol.md) for RPC and [`acp.md`](acp.md) for exact client setup, evidence labels, and limits.
+
+## Diagnostics And Support
+
+Use `ava doctor` for a passive human-readable readiness report or `ava doctor --json` for automation. Doctor does not call providers, read credential values, launch integrations, mutate configuration, create sessions, or write diagnostic state. Add `--trace` to a normal TUI, print, RPC, or ACP invocation to create one private bounded metadata trace; tracing is disabled by default. `ava support export` creates a new sanitized local JSON artifact and prints its exact path. The export contains generated readiness/status facts, typed counters, and a typed last-failure record—not trace lines, sessions, prompts, reasoning, commands, paths, configuration contents, identities, credentials, raw errors, stderr, or remote payloads. AVA never uploads it. See [`diagnostics.md`](diagnostics.md) for storage, limits, privacy guarantees, and libcwd's separate developer-debug role.
 
 ## Modes
 
@@ -166,7 +173,7 @@ Interactive permission requests replace the composer with a `Permission required
 - `/labels <label...|--clear>`: set or clear current session labels; `/label` is an alias. Labels are unique, non-empty strings separated by spaces.
 - `/context [query|source]`: list mode/model, base prompt metadata, loaded system prompt resources, context files, prompt commands, skills, subagents, plugin manifest/resources, and current/changed/missing status, optionally filtered by prompt, command, skill, subagent, plugin, path, or source type
 - `/trust [status|project|deny|clear]`: inspect or change the workspace trust decision for project-local commands, skills, subagents, plugins, MCP/LSP config, and system-prompt resources
-- `/compact [instructions]`: generate and record a provider summary
+- `/compact [instructions]`: summarize the active context and record an append-only provider-backed compaction checkpoint with a bounded recent-turn tail. It uses the active provider/model unless `compaction.json` selects a registered same-provider or cross-provider model; `/reload compaction` validates that selection.
 - `/export [markdown|html|jsonl] [path]`: export this session as Markdown, safe self-contained HTML, or sanitized portable AVA JSONL. With no path, AVA prints the same portable export text in the command output that it writes to a path through the normal permissioned file-mutation path. `/export <file.html>` is treated as a Pi-style HTML file export and `/export <file.jsonl>` as portable JSONL.
 - `/import <path.jsonl> --confirm`: validate a user-selected local AVA JSONL session archive, create a new local session in the current workspace, and switch to it. Without `--confirm`, AVA validates and reports the entry count but does not switch sessions. Import opens one regular non-symlink descriptor nonblockingly and is capped independently at 8 MiB per file, less than 1 MiB per JSONL record, and 16,384 entries; replay validation still applies. It is not a model-visible `/read` tool operation. Pi JSONL conversion and replacing the current session in place are deferred.
 - Session Markdown/HTML exports include sanitized textual image-attachment metadata only; raw attachment bytes are not embedded. Portable JSONL is intentionally non-lossless: provider-private reasoning replay fields are omitted, redacted reasoning uses a neutral placeholder, and image attachments are converted to redacted metadata with no source storage-path or byte dependency. The result is locally re-importable, but it cannot restore omitted provider replay data or attachment bytes.

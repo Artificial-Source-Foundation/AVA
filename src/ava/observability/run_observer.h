@@ -239,6 +239,9 @@ struct JsonlObserverOptions
   std::size_t max_events = 10'000;
   std::size_t max_bytes = 10 * 1024 * 1024;
   std::size_t max_event_bytes = 16 * 1024;
+  // Optional borrowed descriptor. The observer duplicates and verifies it in
+  // its constructor, so asynchronous writers never need to reopen by path.
+  int initial_fd = -1;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 struct JsonlObserverCounters

@@ -951,6 +951,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
         .global_config_file = session.paths.ava_config_dir / "lsp.json",
         .project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "lsp.json" : std::filesystem::path{},
         .workspace_root = session.workspace_dir,
+        .anchor_set = session.anchor_set,
         .mode = session.mode,
         .permission_resolver = runtime_options.permission_resolver,
     });

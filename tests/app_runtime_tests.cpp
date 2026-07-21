@@ -1354,7 +1354,9 @@ void test_app_context_reports_lsp_config_load_errors()
              context->output[0].find((paths.ava_config_dir / "lsp.json").string()) != std::string::npos &&
              context->output[0].find("LSP server id is invalid") != std::string::npos && context->output[0].find("lsp_config  project") != std::string::npos &&
              context->output[0].find((workspace / ".ava" / "lsp.json").string()) != std::string::npos &&
-             context->output[0].find("LSP server timeout is outside supported limits") != std::string::npos,
+             context->output[0].find("LSP server timeout is outside supported limits") != std::string::npos &&
+             context->output[0].find("lsp_builtin  id=clangd status=disabled reason=not_enabled") != std::string::npos &&
+             context->output[0].find("--background-index") == std::string::npos,
          "/context lsp surfaces global and trusted-project LSP config load errors without treating them as generic provider unavailability");
 }
 

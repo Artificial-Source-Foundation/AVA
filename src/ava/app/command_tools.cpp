@@ -201,6 +201,7 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
       .global_config_file = session.paths.ava_config_dir / "lsp.json",
       .project_config_file = include_project_resources ? session.workspace_dir / ".ava" / "lsp.json" : std::filesystem::path{},
       .workspace_root = session.workspace_dir,
+      .anchor_set = session.anchor_set,
       .mode = session.mode,
       .permission_resolver = permission_resolver,
   });

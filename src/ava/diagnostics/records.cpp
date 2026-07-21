@@ -108,7 +108,7 @@ std::optional<DoctorCheckKind> parse_check_kind(std::string_view value)
   constexpr std::array values{DoctorCheckKind::VersionPlatform,     DoctorCheckKind::ConfigRoot,       DoctorCheckKind::StateRoot,
                               DoctorCheckKind::ModelRegistry,       DoctorCheckKind::DefaultModel,     DoctorCheckKind::AuthMetadata,
                               DoctorCheckKind::PluginConfiguration, DoctorCheckKind::McpConfiguration, DoctorCheckKind::LspConfiguration,
-                              DoctorCheckKind::PermissionRules};
+                              DoctorCheckKind::LspBuiltinClangd,    DoctorCheckKind::PermissionRules};
   return parse_fixed(value, values);
 }
 
@@ -199,6 +199,8 @@ std::string_view to_string(DoctorCheckKind kind) noexcept
       return "mcp_configuration";
     case DoctorCheckKind::LspConfiguration:
       return "lsp_configuration";
+    case DoctorCheckKind::LspBuiltinClangd:
+      return "lsp_builtin_clangd";
     case DoctorCheckKind::PermissionRules:
       return "permission_rules";
   }

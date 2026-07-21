@@ -1,5 +1,6 @@
 add_library(ava_lsp
   "bounded_file_reader.cpp"
+  "builtin_recipes.cpp"
   "configured_provider.cpp"
   "lsp_client.cpp"
 )

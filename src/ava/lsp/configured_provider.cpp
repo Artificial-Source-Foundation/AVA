@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/command/environment.h"
 #include "ava/lsp/bounded_file_reader.h"
 #include "ava/lsp/configured_provider.h"
 #include "ava/core/ids.h"
@@ -37,7 +38,9 @@ struct ConfiguredServer
   std::chrono::milliseconds startup_timeout{3000};
   std::chrono::milliseconds request_timeout{3000};
   bool project_scoped = false;
+  bool builtin = false;
   std::filesystem::path source_path;
+  std::optional<ExecutableIdentity> executable_identity = std::nullopt;
 };
 
 std::optional<std::string> workspace_relative_process_arg(std::vector<std::string> const& argv)
@@ -48,19 +51,44 @@ std::optional<std::string> workspace_relative_process_arg(std::vector<std::strin
   return *match;
 }
 
-std::string argv_permission_command(std::vector<std::string> const& argv)
+std::string argv_json(std::vector<std::string> const& argv)
 {
-  std::string command = "[";
+  std::string value = "[";
   for (std::size_t index = 0; index < argv.size(); ++index)
   {
     if (index > 0)
-      command += ',';
-    command += '"';
-    command += ava::core::json::escape(argv[index]);
-    command += '"';
+      value += ',';
+    value += '"';
+    value += ava::core::json::escape(argv[index]);
+    value += '"';
   }
-  command += ']';
-  return command;
+  value += ']';
+  return value;
+}
+
+std::string executable_identity_token(ExecutableIdentity const& identity)
+{
+  ava::command::detail::Sha256Builder hash;
+  hash.append_field("ava-lsp-executable-identity-v1");
+  hash.append_field(identity.executable_path.generic_string());
+  hash.append_number(identity.owner_uid);
+  hash.append_number(identity.owner_gid);
+  hash.append_number(identity.mode);
+  hash.append_number(identity.link_count);
+  hash.append_number(identity.device);
+  hash.append_number(identity.inode);
+  hash.append_number(identity.size);
+  hash.append_field(std::to_string(identity.changed_seconds));
+  hash.append_field(std::to_string(identity.changed_nanoseconds));
+  return "sha256:ava-lsp-executable-v1:" + hash.hex();
+}
+
+std::string permission_command(ConfiguredServer const& server)
+{
+  auto const argv = argv_json(server.argv);
+  if (!server.builtin || !server.executable_identity)
+    return argv;
+  return "{\"argv\":" + argv + ",\"executable_identity\":\"" + executable_identity_token(*server.executable_identity) + "\"}";
 }
 
 ava::core::Error config_error(ava::core::ErrorCategory category, std::string message, std::filesystem::path const& path)
@@ -316,33 +344,46 @@ std::optional<std::vector<std::string>> strict_object_array_field(std::string_vi
   return values;
 }
 
-ava::core::Result<std::optional<std::string>> read_global_config_file(std::filesystem::path const& path)
+ava::core::Result<std::optional<std::string>> read_global_config_file(std::filesystem::path const& path,
+                                                                      std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
 {
-  // Global configuration intentionally has no workspace anchor: an absolute
-  // XDG path outside the workspace remains supported. The final descriptor is
-  // still opened exactly once with O_NOFOLLOW|O_NONBLOCK by the shared reader,
-  // which anchors its component resolution at the filesystem root.
-  return read_bounded_lsp_file(BoundedFileReadOptions{
-      .path = path,
-      .workspace_root = {},
-      .max_bytes = kMaxLspConfigBytes,
-      .scope = BoundedFileReadScope::External,
-      .missing_ok = true,
-  });
+  auto const read_config = [&](bool require_private_owner) {
+    return read_bounded_lsp_file(BoundedFileReadOptions{
+        .path = path,
+        .workspace_root = {},
+        .anchor_set = anchor_set,
+        .max_bytes = kMaxLspConfigBytes,
+        .scope = BoundedFileReadScope::External,
+        .missing_ok = true,
+        .require_private_owner = require_private_owner,
+    });
+  };
+
+  // Preserve explicit-only global configuration compatibility. Built-in opt-in
+  // carries installed executable authority, so any file that defines the field
+  // is reread through the same AnchorSet with descriptor-bound owner/mode/link
+  // requirements before its contents can be parsed.
+  auto content = read_config(false);
+  if (!content || !*content || !field_is_present(**content, "builtin_servers"))
+    return content;
+  return read_config(true);
 }
 
-ava::core::Result<std::optional<std::string>> read_project_config_file(std::filesystem::path const& path, std::filesystem::path const& workspace_root)
+ava::core::Result<std::optional<std::string>> read_project_config_file(std::filesystem::path const& path, std::filesystem::path const& workspace_root,
+                                                                       std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
 {
   return read_bounded_lsp_file(BoundedFileReadOptions{
       .path = path,
       .workspace_root = workspace_root,
+      .anchor_set = anchor_set,
       .max_bytes = kMaxLspConfigBytes,
       .scope = BoundedFileReadScope::Workspace,
       .missing_ok = true,
   });
 }
 
-ava::core::Result<void> parse_config(std::filesystem::path const& path, std::string_view json, std::vector<ConfiguredServer>& servers, bool project_scoped)
+ava::core::Result<void> parse_config(std::filesystem::path const& path, std::string_view json, std::vector<ConfiguredServer>& servers,
+                                     std::vector<std::string>& builtin_ids, bool project_scoped)
 {
   if (json.empty())
     return {};
@@ -360,6 +401,36 @@ ava::core::Result<void> parse_config(std::filesystem::path const& path, std::str
     return std::unexpected(config_error(ava::core::ErrorCategory::InvalidArgument, "unsupported LSP config version", path));
   }
 
+  if (field_is_present(json, "builtin_servers"))
+  {
+    if (project_scoped)
+    {
+      return std::unexpected(config_error(ava::core::ErrorCategory::InvalidArgument, "project LSP config must not define builtin_servers", path));
+    }
+    if (field_first_char(json, "builtin_servers") != std::optional<char>{'['})
+    {
+      return std::unexpected(config_error(ava::core::ErrorCategory::InvalidArgument, "LSP config builtin_servers must be an array", path));
+    }
+    auto requested = strict_string_array_field(json, "builtin_servers");
+    if (!requested || requested->size() > builtin_server_recipes().size())
+    {
+      return std::unexpected(config_error(ava::core::ErrorCategory::InvalidArgument, "LSP config builtin_servers is invalid", path));
+    }
+    auto const recipes = builtin_server_recipes();
+    for (auto const& id : *requested)
+    {
+      if (!valid_server_id(id) || std::ranges::none_of(recipes, [&](BuiltinServerRecipe const& recipe) { return recipe.id == id; }))
+      {
+        return std::unexpected(config_error(ava::core::ErrorCategory::InvalidArgument, "LSP config builtin server id is unknown", path));
+      }
+      if (std::ranges::find(builtin_ids, id) != builtin_ids.end())
+      {
+        return std::unexpected(config_error(ava::core::ErrorCategory::InvalidArgument, "LSP config builtin server id is duplicated", path));
+      }
+      builtin_ids.push_back(id);
+    }
+  }
+
   if (field_is_present(json, "servers") && field_first_char(json, "servers") != std::optional<char>{'['})
   {
     return std::unexpected(config_error(ava::core::ErrorCategory::InvalidArgument, "LSP config servers must be an array", path));
@@ -369,8 +440,6 @@ ava::core::Result<void> parse_config(std::filesystem::path const& path, std::str
   {
     return std::unexpected(config_error(ava::core::ErrorCategory::InvalidArgument, "LSP config servers must contain only objects", path));
   }
-  if (server_objects->empty())
-    return {};
   if (servers.size() + server_objects->size() > kMaxServers)
   {
     auto error = config_error(ava::core::ErrorCategory::InvalidArgument, "LSP config defines too many servers", path);
@@ -481,9 +550,44 @@ ava::core::Result<void> parse_config(std::filesystem::path const& path, std::str
                                        .startup_timeout = std::chrono::milliseconds(*startup_timeout_value),
                                        .request_timeout = std::chrono::milliseconds(*timeout_value),
                                        .project_scoped = project_scoped,
-                                       .source_path = path});
+                                       .builtin = false,
+                                       .source_path = path,
+                                       .executable_identity = std::nullopt});
   }
   return {};
+}
+
+std::vector<BuiltinServerInspection> append_available_builtin_servers(std::vector<std::string> const& builtin_ids, ConfiguredLspProviderFiles const& files,
+                                                                      std::vector<ConfiguredServer>& servers)
+{
+  auto inspections = inspect_builtin_servers(builtin_ids, files.workspace_root, files.anchor_set, files.builtin_discovery);
+  auto const recipes = builtin_server_recipes();
+  for (auto const& inspection : inspections)
+  {
+    if (inspection.status != BuiltinServerStatus::Available || !inspection.executable ||
+        std::ranges::any_of(servers, [&](ConfiguredServer const& server) { return server.id == inspection.id; }))
+    {
+      continue;
+    }
+    auto const recipe = std::ranges::find_if(recipes, [&](BuiltinServerRecipe const& candidate) { return candidate.id == inspection.id; });
+    if (recipe == recipes.end())
+      continue;
+    std::vector<std::string> argv{inspection.executable->executable_path.string()};
+    argv.insert(argv.end(), recipe->arguments.begin(), recipe->arguments.end());
+    servers.push_back(ConfiguredServer{
+        .id = recipe->id,
+        .argv = std::move(argv),
+        .file_extensions = recipe->file_extensions,
+        .language_id = recipe->language_id,
+        .startup_timeout = std::chrono::milliseconds(10000),
+        .request_timeout = std::chrono::milliseconds(3000),
+        .project_scoped = false,
+        .builtin = true,
+        .source_path = files.global_config_file,
+        .executable_identity = inspection.executable,
+    });
+  }
+  return inspections;
 }
 
 bool path_matches(ConfiguredServer const& server, std::filesystem::path const& path)
@@ -497,9 +601,13 @@ bool path_matches(ConfiguredServer const& server, std::filesystem::path const& p
 class ConfiguredLspProvider final : public DiagnosticsProvider
 {
  public:
-  ConfiguredLspProvider(std::filesystem::path workspace_root, ava::agent::Mode mode, ava::permissions::PermissionResolver permission_resolver,
-                        std::vector<ConfiguredServer> servers)
-      : workspace_root_(std::move(workspace_root)), mode_(mode), permission_resolver_(std::move(permission_resolver)), servers_(std::move(servers))
+  ConfiguredLspProvider(std::filesystem::path workspace_root, std::shared_ptr<ava::core::AnchorSet const> anchor_set, ava::agent::Mode mode,
+                        ava::permissions::PermissionResolver permission_resolver, std::vector<ConfiguredServer> servers)
+      : workspace_root_(std::move(workspace_root)),
+        anchor_set_(std::move(anchor_set)),
+        mode_(mode),
+        permission_resolver_(std::move(permission_resolver)),
+        servers_(std::move(servers))
   {
   }
 
@@ -524,7 +632,7 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
     std::vector<Symbol> symbols;
     for (auto const& server : servers_)
     {
-      auto client = start_client(server, cancel_requested);
+      auto client = start_client(server, workspace_root_, cancel_requested);
       if (!client)
         return std::unexpected(std::move(client.error()));
       auto server_symbols = (*client)->workspace_symbols(query, cancel_requested);
@@ -566,13 +674,16 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
       error.with_context("path", path.string());
       return std::unexpected(std::move(error));
     }
-    return start_client(*it, cancel_requested);
+    auto const root = it->builtin ? select_builtin_server_root(it->id, path, workspace_root_, anchor_set_) : workspace_root_;
+    return start_client(*it, root, cancel_requested);
   }
 
-  [[nodiscard]] ava::core::Result<std::shared_ptr<SubprocessLspClient>> start_client(ConfiguredServer const& server, CancelCallback const& cancel_requested)
+  [[nodiscard]] ava::core::Result<std::shared_ptr<SubprocessLspClient>> start_client(ConfiguredServer const& server, std::filesystem::path const& root,
+                                                                                     CancelCallback const& cancel_requested)
   {
     std::lock_guard<std::mutex> lock(clients_mutex_);
-    if (auto cached = clients_.find(server.id); cached != clients_.end())
+    auto const cache_key = server.id + "\n" + root.lexically_normal().generic_string();
+    if (auto cached = clients_.find(cache_key); cached != clients_.end())
     {
       if (cached->second && cached->second->is_alive())
         return cached->second;
@@ -581,17 +692,21 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
     auto launch = ensure_launch_permission(server);
     if (!launch)
       return std::unexpected(std::move(launch.error()));
-    auto const process_cwd = server.project_scoped ? workspace_root_ : ava::core::safe_global_process_cwd(server.source_path, workspace_root_);
+    auto const process_cwd =
+        server.builtin ? root : (server.project_scoped ? workspace_root_ : ava::core::safe_global_process_cwd(server.source_path, workspace_root_));
     auto client = SubprocessLspClient::start(ServerConfig{.argv = server.argv,
                                                           .workspace_root = workspace_root_,
+                                                          .server_root = root,
+                                                          .anchor_set = anchor_set_,
                                                           .process_cwd = process_cwd,
                                                           .startup_timeout = server.startup_timeout,
                                                           .request_timeout = server.request_timeout,
-                                                          .language_id = server.language_id},
+                                                          .language_id = server.language_id,
+                                                          .executable_identity = server.executable_identity},
                                              cancel_requested);
     if (!client)
       return std::unexpected(std::move(client.error()));
-    clients_.emplace(server.id, *client);
+    clients_.emplace(cache_key, *client);
     return *client;
   }
 
@@ -602,7 +717,7 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
         .mode = mode_,
         .workspace_dir = workspace_root_,
         .target_path = workspace_root_,
-        .command = argv_permission_command(server.argv),
+        .command = permission_command(server),
     });
     if (decision.action == ava::permissions::PermissionAction::Allow)
       return {};
@@ -625,7 +740,7 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
         .mode = mode_,
         .workspace_dir = workspace_root_,
         .target_path = workspace_root_,
-        .command = argv_permission_command(server.argv),
+        .command = permission_command(server),
         .tool_name = "lsp_server_launch",
         .reason = decision.reason,
         .risk = decision.risk,
@@ -646,6 +761,7 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
   }
 
   std::filesystem::path workspace_root_;
+  std::shared_ptr<ava::core::AnchorSet const> anchor_set_;
   ava::agent::Mode mode_ = ava::agent::Mode::Build;
   ava::permissions::PermissionResolver permission_resolver_ = nullptr;
   std::vector<ConfiguredServer> servers_;
@@ -655,10 +771,11 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
 };
 
 ConfiguredLspConfigDiagnostic inspect_config_source(std::string scope, std::filesystem::path const& path, bool project_scoped,
-                                                    std::filesystem::path const& workspace_root, std::vector<ConfiguredServer>& servers)
+                                                    std::filesystem::path const& workspace_root, std::shared_ptr<ava::core::AnchorSet const> const& anchor_set,
+                                                    std::vector<ConfiguredServer>& servers, std::vector<std::string>& builtin_ids)
 {
   ConfiguredLspConfigDiagnostic diagnostic{.scope = std::move(scope), .path = path};
-  auto content = project_scoped ? read_project_config_file(path, workspace_root) : read_global_config_file(path);
+  auto content = project_scoped ? read_project_config_file(path, workspace_root, anchor_set) : read_global_config_file(path, anchor_set);
   if (!content)
   {
     diagnostic.error = std::move(content.error());
@@ -670,7 +787,8 @@ ConfiguredLspConfigDiagnostic inspect_config_source(std::string scope, std::file
   diagnostic.exists = true;
   diagnostic.byte_count = (*content)->size();
   auto candidate_servers = servers;
-  auto parsed = parse_config(path, **content, candidate_servers, project_scoped);
+  auto candidate_builtin_ids = builtin_ids;
+  auto parsed = parse_config(path, **content, candidate_servers, candidate_builtin_ids, project_scoped);
   if (!parsed)
   {
     diagnostic.error = std::move(parsed.error());
@@ -680,6 +798,7 @@ ConfiguredLspConfigDiagnostic inspect_config_source(std::string scope, std::file
   diagnostic.loaded = true;
   diagnostic.server_count = candidate_servers.size() - servers.size();
   servers = std::move(candidate_servers);
+  builtin_ids = std::move(candidate_builtin_ids);
   return diagnostic;
 }
 
@@ -688,47 +807,54 @@ ConfiguredLspConfigDiagnostic inspect_config_source(std::string scope, std::file
 ava::core::Result<std::shared_ptr<DiagnosticsProvider>> make_configured_lsp_provider(ConfiguredLspProviderFiles const& files)
 {
   std::vector<ConfiguredServer> servers;
+  std::vector<std::string> builtin_ids;
   if (!files.global_config_file.empty())
   {
-    auto content = read_global_config_file(files.global_config_file);
+    auto content = read_global_config_file(files.global_config_file, files.anchor_set);
     if (!content)
       return std::unexpected(std::move(content.error()));
     if (*content)
     {
-      auto parsed = parse_config(files.global_config_file, **content, servers, false);
+      auto parsed = parse_config(files.global_config_file, **content, servers, builtin_ids, false);
       if (!parsed)
         return std::unexpected(std::move(parsed.error()));
     }
   }
   if (!files.project_config_file.empty())
   {
-    auto content = read_project_config_file(files.project_config_file, files.workspace_root);
+    auto content = read_project_config_file(files.project_config_file, files.workspace_root, files.anchor_set);
     if (!content)
       return std::unexpected(std::move(content.error()));
     if (*content)
     {
-      auto parsed = parse_config(files.project_config_file, **content, servers, true);
+      auto parsed = parse_config(files.project_config_file, **content, servers, builtin_ids, true);
       if (!parsed)
         return std::unexpected(std::move(parsed.error()));
     }
   }
+  static_cast<void>(append_available_builtin_servers(builtin_ids, files, servers));
   if (servers.empty())
     return std::shared_ptr<DiagnosticsProvider>{};
-  return std::make_shared<ConfiguredLspProvider>(files.workspace_root.lexically_normal(), files.mode, files.permission_resolver, std::move(servers));
+  return std::make_shared<ConfiguredLspProvider>(files.workspace_root.lexically_normal(), files.anchor_set, files.mode, files.permission_resolver,
+                                                 std::move(servers));
 }
 
 ConfiguredLspProviderInspection inspect_configured_lsp_provider(ConfiguredLspProviderFiles const& files)
 {
   ConfiguredLspProviderInspection inspection;
   std::vector<ConfiguredServer> servers;
+  std::vector<std::string> builtin_ids;
   if (!files.global_config_file.empty())
   {
-    inspection.configs.push_back(inspect_config_source("global", files.global_config_file, false, files.workspace_root, servers));
+    inspection.configs.push_back(
+        inspect_config_source("global", files.global_config_file, false, files.workspace_root, files.anchor_set, servers, builtin_ids));
   }
   if (!files.project_config_file.empty())
   {
-    inspection.configs.push_back(inspect_config_source("project", files.project_config_file, true, files.workspace_root, servers));
+    inspection.configs.push_back(
+        inspect_config_source("project", files.project_config_file, true, files.workspace_root, files.anchor_set, servers, builtin_ids));
   }
+  inspection.builtin_servers = append_available_builtin_servers(builtin_ids, files, servers);
   inspection.server_count = servers.size();
   inspection.error_count = static_cast<std::size_t>(
       std::ranges::count_if(inspection.configs, [](ConfiguredLspConfigDiagnostic const& diagnostic) { return diagnostic.error.has_value(); }));

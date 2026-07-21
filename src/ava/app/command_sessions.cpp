@@ -507,7 +507,21 @@ std::string lsp_provider_status_text(ava::lsp::ConfiguredLspProviderInspection c
     return "error";
   if (inspection.server_count > 0)
     return "configured";
-  return "unavailable";
+  if (std::ranges::any_of(inspection.builtin_servers, [](auto const& server) { return server.status != ava::lsp::BuiltinServerStatus::Disabled; }))
+    return "enabled";
+  return "disabled";
+}
+
+std::size_t enabled_builtin_lsp_count(ava::lsp::ConfiguredLspProviderInspection const& inspection)
+{
+  return static_cast<std::size_t>(
+      std::ranges::count_if(inspection.builtin_servers, [](auto const& server) { return server.status != ava::lsp::BuiltinServerStatus::Disabled; }));
+}
+
+std::size_t available_builtin_lsp_count(ava::lsp::ConfiguredLspProviderInspection const& inspection)
+{
+  return static_cast<std::size_t>(
+      std::ranges::count_if(inspection.builtin_servers, [](auto const& server) { return server.status == ava::lsp::BuiltinServerStatus::Available; }));
 }
 
 bool path_exists_for_status(std::filesystem::path const& path)
@@ -1223,6 +1237,7 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
       .global_config_file = session.paths.ava_config_dir / "lsp.json",
       .project_config_file = include_project_resources ? project_lsp_config : std::filesystem::path{},
       .workspace_root = session.workspace_dir,
+      .anchor_set = session.anchor_set,
       .mode = session.mode,
   });
   std::string output = "Context freshness:\n";
@@ -1259,7 +1274,9 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
                               freshness_source_count(session.freshness_sources, runtime::FreshnessSourceKind::PluginSkill);
   output += "  plugin_sources=" + std::to_string(plugin_sources) + "\n";
   output += "  lsp_status=" + lsp_provider_status_text(lsp_inspection) + " lsp_configs=" + std::to_string(configured_lsp_config_count(lsp_inspection.configs)) +
-            " lsp_servers=" + std::to_string(lsp_inspection.server_count) + " lsp_errors=" + std::to_string(lsp_inspection.error_count) + "\n";
+            " lsp_servers=" + std::to_string(lsp_inspection.server_count) + " lsp_errors=" + std::to_string(lsp_inspection.error_count) +
+            " lsp_builtins_enabled=" + std::to_string(enabled_builtin_lsp_count(lsp_inspection)) +
+            " lsp_builtins_available=" + std::to_string(available_builtin_lsp_count(lsp_inspection)) + "\n";
 
   bool matched_source = false;
   for (auto const& source : session.context_sources)
@@ -1298,6 +1315,20 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
     matched_lsp_config = true;
     output += "  lsp_config  " + sanitize_inline_text(diagnostic.scope) + "  " + lsp_config_status_text(diagnostic) + '\n';
   }
+  bool matched_lsp_builtin = false;
+  if (trimmed_query.empty() || contains_ascii_case_insensitive("lsp", trimmed_query) || contains_ascii_case_insensitive("builtin", trimmed_query))
+  {
+    for (auto const& builtin : lsp_inspection.builtin_servers)
+    {
+      if (!trimmed_query.empty() && !contains_ascii_case_insensitive(builtin.id, trimmed_query) && !contains_ascii_case_insensitive("lsp", trimmed_query) &&
+          !contains_ascii_case_insensitive("builtin", trimmed_query))
+      {
+        continue;
+      }
+      matched_lsp_builtin = true;
+      output += "  lsp_builtin  id=" + builtin.id + " status=" + std::string(ava::lsp::to_string(builtin.status)) + " reason=" + builtin.reason + '\n';
+    }
+  }
   if (!include_project_resources)
   {
     ava::lsp::ConfiguredLspConfigDiagnostic skipped_project{
@@ -1312,7 +1343,8 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
       output += "  lsp_config  project  " + project_lsp_config.string() + "  status=skipped reason=project_resources_skipped\n";
     }
   }
-  if (!matched_source && !matched_freshness_source && !matched_lsp_config && !prompt_matches_query(session, trimmed_query) && !trimmed_query.empty())
+  if (!matched_source && !matched_freshness_source && !matched_lsp_config && !matched_lsp_builtin && !prompt_matches_query(session, trimmed_query) &&
+      !trimmed_query.empty())
   {
     add_output(result, "No context sources matching: " + sanitize_inline_text(trimmed_query));
     return result;

@@ -25,6 +25,11 @@ target_link_libraries(ava_fake_lsp_server PRIVATE ${AVA_BACKEND_LIBRARIES})
 ava_apply_warnings(ava_fake_lsp_server)
 ava_apply_sanitizers(ava_fake_lsp_server)
 
+add_executable(ava_lsp_real_clangd_smoke "lsp_real_clangd_smoke.cpp")
+target_link_libraries(ava_lsp_real_clangd_smoke PRIVATE ${AVA_BACKEND_LIBRARIES})
+ava_apply_warnings(ava_lsp_real_clangd_smoke)
+ava_apply_sanitizers(ava_lsp_real_clangd_smoke)
+
 add_executable(ava_fake_mcp_server "support/fake_mcp_server.cpp")
 target_link_libraries(ava_fake_mcp_server PRIVATE ${AVA_BACKEND_LIBRARIES})
 ava_apply_warnings(ava_fake_mcp_server)
@@ -149,6 +154,9 @@ endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.containment PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.tool_scheduler PROPERTIES TIMEOUT 30)
+
+add_test(NAME ava_tests.lsp_real_clangd_smoke COMMAND ava_lsp_real_clangd_smoke)
+set_tests_properties(ava_tests.lsp_real_clangd_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 20 LABELS "lsp;offline;optional")
 
 add_test(NAME ava_cli.rpc_broken_pipe_subprocess COMMAND ava_rpc_broken_pipe_subprocess_test)
 set_tests_properties(ava_cli.rpc_broken_pipe_subprocess PROPERTIES TIMEOUT 10)

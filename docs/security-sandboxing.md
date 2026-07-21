@@ -202,13 +202,33 @@ See [mcp.md](mcp.md).
 
 Configured LSP servers are also local subprocesses. Global LSP config must use
 absolute paths or trusted `PATH` command names; project LSP config is trust
-gated. LSP queries and server launch are permissioned, but the language server
-itself is still local code once launched. AVA launches it with only the documented
-LSP environment allowlist and a fixed trusted `PATH`, not the parent process's
-provider/cloud/API/token/secret or arbitrary `AVA_*` environment. Cancellation,
-timeout, and client teardown signal the verified LSP process group with TERM and
-then KILL when needed. That covers members which remain in the verified group; a
-descendant that calls `setsid` can escape that group and needs an external OS
+gated. The sole built-in recipe is `clangd`, disabled unless an
+owner-controlled global config opts into that exact id. Discovery
+accepts only an already-installed executable from fixed system directories or
+owner-safe `~/.local/bin`. It rejects workspace/project executables, symlinked
+or hardlinked executable files, unsafe ownership/modes/directory chains, and
+script wrappers; it never downloads, updates, invokes package/toolchain
+managers, or accesses the network. Launch revalidates the sealed descriptor
+identity and executes it with `fexecve`. Its permission identity includes clear
+exact argv plus a bounded replacement-sensitive fingerprint. Automatic `gopls`
+and `rust-analyzer` recipes remain deferred; explicitly configured servers keep
+the existing trust and launch-permission boundary.
+
+Workspace documents, project config, and logical server roots are acquired
+through the runtime's shared `AnchorSet`/`AnchorOpen` authority without
+canonicalizing their identities. Contained symlink resolution may not leave the
+selected writable anchor, and external reads may not enter a writable anchor.
+LSP queries and server launch are permissioned, but the language server itself
+is still local code once launched. AVA launches it with only the documented LSP
+environment allowlist and fixed trusted `PATH`, not the parent process's
+provider/cloud/API/token/secret or arbitrary `AVA_*` environment. Capability,
+message, notification, diagnostics-cache, document-sync, file, and deadline
+bounds remain in force; passive status never launches a server or exposes
+paths, argv, fingerprints, config contents, or raw discovery errors.
+
+Cancellation, timeout, and client teardown signal the verified LSP process
+group with TERM and then KILL. That covers members which remain in the verified
+group; a descendant that calls `setsid` can escape and needs an external OS
 sandbox if it must be contained. AVA does not claim cgroup containment.
 
 ## No Built-In OS Or Container Sandbox Guarantee

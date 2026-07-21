@@ -2,6 +2,7 @@
 
 #include "ava/debug/print_members_on.h"
 #include "ava/permissions/permission.h"
+#include "ava/lsp/builtin_recipes.h"
 #include "ava/lsp/lsp_client.h"
 #include "ava/core/error.h"
 
@@ -19,8 +20,10 @@ struct ConfiguredLspProviderFiles
   std::filesystem::path global_config_file;
   std::filesystem::path project_config_file;
   std::filesystem::path workspace_root;
+  std::shared_ptr<ava::core::AnchorSet const> anchor_set = nullptr;
   ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
+  BuiltinDiscoveryOptions builtin_discovery = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -40,6 +43,7 @@ struct ConfiguredLspConfigDiagnostic
 struct ConfiguredLspProviderInspection
 {
   std::vector<ConfiguredLspConfigDiagnostic> configs;
+  std::vector<BuiltinServerInspection> builtin_servers;
   std::size_t server_count = 0;
   std::size_t error_count = 0;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

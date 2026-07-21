@@ -285,18 +285,18 @@ Rules:
 - Request `lsp.query` permission for the target path before any server query. Starting a configured LSP subprocess also requests explicit high-risk `lsp.server.launch` permission for the selected argv vector.
 - Treat permission as read-like: deny secret paths, ask outside the workspace, and allow workspace files by default.
 - Provider-visible input includes only the file path. Server command argv is local configuration/test harness state and is not model-controlled.
-- Advertise the provider schema only when an explicit LSP provider config is present; otherwise the tool is not available to model calls.
-- Load LSP server config from AVA-owned `lsp.json` files (`$AVA_CONFIG_DIR/lsp.json` and workspace `.ava/lsp.json`). The supported schema is `version:1` plus a bounded `servers[]` list with `id`, explicit `argv[]`, optional `file_extensions[]`, optional `language_id`, request `timeout_ms`, and optional `startup_timeout_ms` (which falls back to the parsed request timeout).
-- Validate unique server ids, argv strings, extension filters, language ids, config size, regular-file status, strict integer fields, and timeout bounds before exposing LSP schemas. Config symlinks, mixed-type arrays, wrong known-field types, duplicate ids, and control-byte arguments are rejected.
-- Start the selected server lazily after the tool's `lsp.query` permission and `lsp.server.launch` permission have already been granted, with an explicit argv vector and workspace root; do not use a shell and do not launch servers during schema discovery.
-- Use JSON-RPC `Content-Length` framing, initialize the server, then request the matching LSP method: `textDocument/diagnostic`, `textDocument/documentSymbol`, `workspace/symbol`, `textDocument/definition`, or `textDocument/references`.
-- Before position-based definition/reference requests, send a bounded full-text `textDocument/didOpen` notification for the on-disk workspace file. Unsaved buffers and incremental sync remain deferred.
+- Advertise provider schemas only when explicit servers or the globally opted-in built-in recipe produce a configured provider; otherwise LSP tools are unavailable to model calls.
+- Load LSP server config from AVA-owned `lsp.json` files (`$AVA_CONFIG_DIR/lsp.json` and workspace `.ava/lsp.json`). The schema is `version:1` plus bounded explicit `servers[]`; owner-controlled global config may additionally use exact `builtin_servers:["clangd"]`. Project config cannot enable built-ins.
+- Validate unique server ids, argv strings, extension filters, language ids, config size/ownership, strict integer fields, and timeout bounds before exposing schemas. Shared `AnchorSet` acquisition permits only symlink targets contained in the selected writable anchor; mixed arrays, wrong known-field types, duplicate ids, and control-byte arguments are rejected.
+- Start the selected server lazily after `lsp.query` and identity-bound `lsp.server.launch` permission, using an explicit argv vector and logical root. Do not use a shell or launch servers during schema discovery/status reporting.
+- Use JSON-RPC `Content-Length` framing, real advertised capabilities, and bounded pull or centrally routed publish diagnostics plus symbols/definitions/references.
+- Synchronize bounded on-disk text with full-text `didOpen` and versioned `didChange`. Unsaved-buffer sync remains deferred.
 - Percent-encode file URI path bytes while preserving real path separators, so literal encoded separators in filenames cannot cross the permission boundary.
 - Bound startup and request timeouts independently, contain each LSP subprocess in a parent-verified process group before exec, and tear down the verified group on timeout, cancellation, leader exit, or client destruction.
 - Return bounded structured diagnostics, symbols, or locations. Symbol, definition, and reference results normalize in-workspace file URIs to workspace-relative paths and include stable LSP ranges.
 - Redact local server command and workspace details from provider-visible LSP failures; keep detailed process context for local diagnostics only.
 
-Current non-goals: automatic language-server installation/catalog selection, workspace-wide diagnostics, incremental or unsaved-buffer document sync, TUI rendering, plugin/MCP integration, provider registry changes, and new external dependencies.
+Current non-goals: automatic language-server installation, automatic recipes beyond exact global installed-only `clangd`, workspace-wide diagnostics, unsaved-buffer sync, TUI rendering, plugin/MCP integration, provider registry changes, and new external dependencies.
 
 ## Permission Integration
 

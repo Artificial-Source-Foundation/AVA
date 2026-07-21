@@ -1328,8 +1328,8 @@ void test_lsp_builtin_config_is_global_exact_and_default_off()
       .workspace_root = workspace,
       .builtin_discovery = no_search,
   });
-  expect(disabled.server_count == 0 && disabled.builtin_servers.size() == 3 &&
-             std::ranges::all_of(disabled.builtin_servers, [](auto const& item) { return item.status == ava::lsp::BuiltinServerStatus::Disabled; }),
+  expect(disabled.server_count == 0 && disabled.builtin_servers.size() == 1 && disabled.builtin_servers.front().id == "clangd" &&
+             disabled.builtin_servers.front().status == ava::lsp::BuiltinServerStatus::Disabled,
          "built-in LSP recipes are disabled when global builtin_servers is absent");
 
   {
@@ -1380,7 +1380,9 @@ void test_lsp_builtin_config_is_global_exact_and_default_off()
   rejects_global("{\"version\":1,\"builtin_servers\":[\"clangd\",\"clangd\"]}", "duplicates");
   rejects_global("{\"version\":1,\"builtin_servers\":[\"unknown\"]}", "unknown ids");
   rejects_global("{\"version\":1,\"builtin_servers\":[\"clangd\\u0001\"]}", "control bytes");
-  rejects_global("{\"version\":1,\"builtin_servers\":[\"clangd\",\"gopls\",\"rust-analyzer\",\"clangd\"]}", "bounds");
+  rejects_global("{\"version\":1,\"builtin_servers\":[\"gopls\"]}", "deferred gopls ids");
+  rejects_global("{\"version\":1,\"builtin_servers\":[\"rust-analyzer\"]}", "deferred rust-analyzer ids");
+  rejects_global("{\"version\":1,\"builtin_servers\":[\"clangd\",\"unknown\"]}", "bounds");
 }
 
 void test_lsp_builtin_discovery_safety()
@@ -1393,21 +1395,16 @@ void test_lsp_builtin_discovery_safety()
   auto const user_bin = root / "user-bin";
   std::filesystem::create_directories(workspace);
   copy_fake_lsp_executable(system_bin / "clangd");
-  copy_fake_lsp_executable(user_bin / "gopls");
 
   ava::lsp::BuiltinDiscoveryOptions options;
   options.use_default_search_directories = false;
   options.system_directories = {};
   options.user_directories = {system_bin, user_bin};
-  auto installed = ava::lsp::inspect_builtin_servers({"clangd", "gopls"}, workspace, options);
+  auto installed = ava::lsp::inspect_builtin_servers({"clangd"}, workspace, options);
   auto const clangd = std::ranges::find_if(installed, [](auto const& item) { return item.id == "clangd"; });
-  auto const gopls = std::ranges::find_if(installed, [](auto const& item) { return item.id == "gopls"; });
   expect(clangd != installed.end() && clangd->status == ava::lsp::BuiltinServerStatus::Available && clangd->executable &&
-             clangd->executable->canonical_path == std::filesystem::absolute(system_bin / "clangd").lexically_normal() && gopls != installed.end() &&
-             gopls->status == ava::lsp::BuiltinServerStatus::Available,
-         "built-in discovery accepts owner-safe executables from narrow direct user search directories as canonical identities: clangd=" +
-             (clangd == installed.end() ? std::string("missing") : std::string(ava::lsp::to_string(clangd->status))) +
-             " gopls=" + (gopls == installed.end() ? std::string("missing") : std::string(ava::lsp::to_string(gopls->status))));
+             clangd->executable->canonical_path == std::filesystem::absolute(system_bin / "clangd").lexically_normal() && clangd->executable->link_count == 1,
+         "built-in discovery accepts one owner-safe non-hardlinked clangd executable as a sealed canonical identity");
 
   ava::lsp::BuiltinDiscoveryOptions untrusted_system_options;
   untrusted_system_options.use_default_search_directories = false;
@@ -1445,11 +1442,24 @@ void test_lsp_builtin_discovery_safety()
   auto local = ava::lsp::inspect_builtin_servers({"clangd"}, workspace, builtin_discovery_for_test(workspace_bin));
   expect(local.front().status == ava::lsp::BuiltinServerStatus::Unsafe, "built-in discovery never grants authority to a workspace-local executable");
 
-  auto const cargo_bin = root / "cargo-bin";
-  copy_fake_lsp_executable(cargo_bin / "rust-analyzer");
-  std::filesystem::create_hard_link(cargo_bin / "rust-analyzer", cargo_bin / "cargo");
-  auto proxy = ava::lsp::inspect_builtin_servers({"rust-analyzer"}, workspace, builtin_discovery_for_test(cargo_bin, true));
-  expect(proxy[2].status == ava::lsp::BuiltinServerStatus::Unsafe, "built-in discovery rejects a rustup/cargo hard-link proxy identity");
+  auto const hardlink_bin = root / "hardlink-bin";
+  copy_fake_lsp_executable(hardlink_bin / "clangd");
+  auto sealed_before_hardlink = ava::lsp::inspect_builtin_servers({"clangd"}, workspace, builtin_discovery_for_test(hardlink_bin, true));
+  expect(sealed_before_hardlink.front().status == ava::lsp::BuiltinServerStatus::Available && sealed_before_hardlink.front().executable,
+         "built-in discovery initially seals a single-link executable");
+  std::filesystem::create_hard_link(hardlink_bin / "clangd", hardlink_bin / "clangd-copy");
+  auto hardlink_launch = ava::lsp::SubprocessLspClient::start({
+      .argv = {(hardlink_bin / "clangd").string()},
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .startup_timeout = std::chrono::milliseconds(500),
+      .request_timeout = std::chrono::milliseconds(500),
+      .executable_identity = sealed_before_hardlink.front().executable,
+  });
+  expect(!hardlink_launch && hardlink_launch.error().message().find("identity is stale") != std::string::npos,
+         "built-in launch revalidation rejects an executable hardlinked after discovery");
+  auto hardlinked = ava::lsp::inspect_builtin_servers({"clangd"}, workspace, builtin_discovery_for_test(hardlink_bin, true));
+  expect(hardlinked.front().status == ava::lsp::BuiltinServerStatus::Unsafe, "built-in discovery rejects a user-local executable with more than one hard link");
 
   expect(!std::filesystem::exists(root / "downloaded") && !std::filesystem::exists(root / "package-manager-marker"),
          "passive built-in discovery performs no download or package-manager execution");
@@ -1464,22 +1474,6 @@ void test_lsp_builtin_root_selection()
   std::ofstream(cpp_root / "compile_commands.json") << "[]\n";
   expect(ava::lsp::select_builtin_server_root("clangd", cpp_nested / "unit.cpp", workspace) == cpp_root,
          "clangd selects the nearest bounded compilation marker root");
-
-  auto const go_root = workspace / "go";
-  auto const go_module = go_root / "module";
-  std::filesystem::create_directories(go_module / "pkg");
-  std::ofstream(go_root / "go.work") << "go 1.22\n";
-  std::ofstream(go_module / "go.mod") << "module example\n";
-  expect(ava::lsp::select_builtin_server_root("gopls", go_module / "pkg" / "main.go", workspace) == go_root,
-         "gopls prefers the nearest go.work before a nearer module marker");
-
-  auto const rust_root = workspace / "rust";
-  auto const rust_crate = rust_root / "crates" / "one";
-  std::filesystem::create_directories(rust_crate / "src");
-  std::ofstream(rust_root / "Cargo.toml") << "[workspace]\nmembers=[]\n";
-  std::ofstream(rust_crate / "Cargo.toml") << "[package]\nname=\"one\"\n";
-  expect(ava::lsp::select_builtin_server_root("rust-analyzer", rust_crate / "src" / "lib.rs", workspace) == rust_root,
-         "rust-analyzer selects the nearest safely detected Cargo workspace manifest");
 
   expect(ava::lsp::select_builtin_server_root("clangd", workspace.parent_path() / "outside.cpp", workspace) == workspace,
          "built-in root routing fails closed to the workspace for paths outside its bounded ancestor walk");
@@ -1563,10 +1557,12 @@ void test_lsp_builtin_launch_identity_roots_and_deduplication()
          "built-in clients are cached per selected root and concurrent first use deduplicates one launch");
   expect(commands.size() == 3 && std::ranges::all_of(commands,
                                                      [&](std::string const& command) {
-                                                       return command.find(std::filesystem::absolute(bin / "clangd").string()) != std::string::npos &&
-                                                              command.find("--background-index") != std::string::npos;
+                                                       return command == commands.front() && command.starts_with("{\"argv\":[") &&
+                                                              command.find(std::filesystem::absolute(bin / "clangd").string()) != std::string::npos &&
+                                                              command.find("--background-index") != std::string::npos &&
+                                                              command.find("\"executable_identity\":\"sha256:ava-lsp-executable-v1:") != std::string::npos;
                                                      }),
-         "built-in launch permission binds each root launch to the canonical executable identity and exact recipe argv");
+         "built-in launch permission uses one deterministic bounded fingerprint while retaining clear exact argv display");
 
   auto stale_provider = ava::lsp::make_configured_lsp_provider({
       .global_config_file = config_path,
@@ -1584,7 +1580,27 @@ void test_lsp_builtin_launch_identity_roots_and_deduplication()
           ? (*stale_provider)->diagnostics(workspace / "a" / "one.cpp")
           : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing stale provider"))};
   expect(!stale && stale.error().message().find("identity is stale") != std::string::npos,
-         "a replaced built-in executable fails its captured identity check before exec");
+         "a replaced built-in executable fails its captured owner/mode/link/inode/size/ctime identity check before exec");
+
+  std::string replacement_command;
+  auto replacement_provider = ava::lsp::make_configured_lsp_provider({
+      .global_config_file = config_path,
+      .project_config_file = {},
+      .workspace_root = workspace,
+      .permission_resolver = [&](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        replacement_command = prompt.command;
+        if (!commands.empty() && prompt.command == commands.front())
+          return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::AllowSessionGrant, "old exact grant"};
+        return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Deny, "identity changed"};
+      },
+      .builtin_discovery = builtin_discovery_for_test(bin),
+  });
+  auto replacement = replacement_provider && *replacement_provider ? (*replacement_provider)->diagnostics(workspace / "a" / "one.cpp")
+                                                                   : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(
+                                                                         ava::core::Error(ava::core::ErrorCategory::Tool, "missing replacement provider"))};
+  expect(!replacement && replacement.error().category() == ava::core::ErrorCategory::PermissionDenied && !commands.empty() &&
+             replacement_command != commands.front() && replacement_command.find("sha256:ava-lsp-executable-v1:") != std::string::npos,
+         "a newly discovered replacement has a distinct permission key and cannot inherit the prior executable's exact, session, or persistent authority");
 }
 
 void test_lsp_builtin_explicit_precedence()
@@ -1668,6 +1684,191 @@ void test_lsp_manager_publish_diagnostics_and_capability_bounds()
                                                           ava::core::Error(ava::core::ErrorCategory::Tool, "missing malformed publish client"))};
   expect(!malformed_publish && malformed_publish.error().message().find("notification is malformed") != std::string::npos,
          "LSP diagnostics rejects malformed publish notifications without reflecting their payload");
+}
+
+void test_lsp_notification_dispatch_cache_and_document_sync()
+{
+  auto const workspace = make_lsp_workspace("lsp-notification-dispatch");
+  std::ofstream(workspace / "other.cpp") << "int other() { return 1; }\n";
+
+  auto during_request = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--publish-during-request"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  auto symbols = during_request ? (*during_request)->document_symbols(workspace / "main.cpp")
+                                : ava::core::Result<std::vector<ava::lsp::Symbol>>{
+                                      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing publish-during-request client"))};
+  auto routed = during_request ? (*during_request)->diagnostics(workspace / "main.cpp")
+                               : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{
+                                     std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing publish-during-request client"))};
+  expect(symbols && routed && routed->size() == 1 && routed->front().message == "diagnostic published during document symbols",
+         "publishDiagnostics arriving during another request is centrally routed and reused by a later unchanged-document query");
+
+  auto unrelated_first = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--publish-unrelated-first"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  auto target = unrelated_first ? (*unrelated_first)->diagnostics(workspace / "main.cpp")
+                                : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{
+                                      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing unrelated-first client"))};
+  auto unrelated = unrelated_first ? (*unrelated_first)->diagnostics(workspace / "other.cpp")
+                                   : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{
+                                         std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing unrelated-first client"))};
+  expect(target && target->size() == 1 && target->front().message == "target diagnostic second" && unrelated && unrelated->size() == 1 &&
+             unrelated->front().message == "unrelated diagnostic first",
+         "an unrelated workspace document publish is retained without failing or misrouting the current target");
+
+  auto two_documents = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--publish-two-documents"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  auto main_diagnostics = two_documents ? (*two_documents)->diagnostics(workspace / "main.cpp")
+                                        : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{
+                                              std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing two-document client"))};
+  auto other_diagnostics = two_documents ? (*two_documents)->diagnostics(workspace / "other.cpp")
+                                         : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{
+                                               std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing two-document client"))};
+  auto main_cached = two_documents ? (*two_documents)->diagnostics(workspace / "main.cpp")
+                                   : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{
+                                         std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing two-document client"))};
+  expect(main_diagnostics && other_diagnostics && main_cached && main_diagnostics->front().message.find("main.cpp") != std::string::npos &&
+             other_diagnostics->front().message.find("other.cpp") != std::string::npos && main_cached->front().message == main_diagnostics->front().message,
+         "latest published diagnostics are cached independently by normalized workspace-confined document URI");
+
+  auto changed_client = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--publish-did-change"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  auto before_change =
+      changed_client
+          ? (*changed_client)->diagnostics(workspace / "main.cpp")
+          : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing didChange client"))};
+  {
+    std::ofstream changed(workspace / "main.cpp", std::ios::binary | std::ios::trunc);
+    changed << "int changed() { return 2; }\n";
+  }
+  auto after_change =
+      changed_client
+          ? (*changed_client)->diagnostics(workspace / "main.cpp")
+          : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing didChange client"))};
+  expect(before_change && before_change->front().message == "initial diagnostic" && after_change &&
+             after_change->front().message == "fresh diagnostic after didChange",
+         "descriptor-safe content changes send versioned full-text didChange, clear stale target cache, and await fresh diagnostics");
+
+  auto unversioned_changed_client = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--publish-unversioned-did-change"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  auto before_unversioned_change = unversioned_changed_client ? (*unversioned_changed_client)->diagnostics(workspace / "main.cpp")
+                                                              : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(
+                                                                    ava::core::Error(ava::core::ErrorCategory::Tool, "missing unversioned didChange client"))};
+  {
+    std::ofstream changed(workspace / "main.cpp", std::ios::binary | std::ios::trunc);
+    changed << "int changed_again() { return 3; }\n";
+  }
+  auto after_unversioned_change = unversioned_changed_client ? (*unversioned_changed_client)->diagnostics(workspace / "main.cpp")
+                                                             : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(
+                                                                   ava::core::Error(ava::core::ErrorCategory::Tool, "missing unversioned didChange client"))};
+  expect(before_unversioned_change && before_unversioned_change->front().message == "initial diagnostic" && after_unversioned_change &&
+             after_unversioned_change->front().message == "fresh unversioned diagnostic after didChange",
+         "unversioned publishDiagnostics remains usable after didChange because the version field is optional in LSP");
+
+  auto clearing_client = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--publish-empty-clear"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  auto before_clear =
+      clearing_client
+          ? (*clearing_client)->diagnostics(workspace / "main.cpp")
+          : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing clearing client"))};
+  auto clear_request =
+      clearing_client
+          ? (*clearing_client)->document_symbols(workspace / "main.cpp")
+          : ava::core::Result<std::vector<ava::lsp::Symbol>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing clearing client"))};
+  auto after_clear =
+      clearing_client
+          ? (*clearing_client)->diagnostics(workspace / "main.cpp")
+          : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing clearing client"))};
+  expect(before_clear && !before_clear->empty() && clear_request && after_clear && after_clear->empty(),
+         "an empty publishDiagnostics notification replaces and clears prior target diagnostics");
+}
+
+void test_lsp_notification_cache_bounds_and_rejections()
+{
+  auto const workspace = make_lsp_workspace("lsp-notification-bounds");
+
+  auto document_bound_client = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--publish-document-overflow"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .request_timeout = std::chrono::milliseconds(2000),
+  });
+  auto document_bound = document_bound_client ? (*document_bound_client)->workspace_symbols("bound")
+                                              : ava::core::Result<std::vector<ava::lsp::Symbol>>{
+                                                    std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing document-bound client"))};
+  expect(!document_bound && document_bound.error().message().find("document count exceeds cap") != std::string::npos,
+         "publishDiagnostics cache rejects a sixty-fifth retained document with a fixed local error");
+
+  auto byte_bound_client = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--publish-cache-overflow"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .request_timeout = std::chrono::milliseconds(3000),
+  });
+  auto byte_bound =
+      byte_bound_client
+          ? (*byte_bound_client)->workspace_symbols("bound")
+          : ava::core::Result<std::vector<ava::lsp::Symbol>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing byte-bound client"))};
+  expect(!byte_bound && byte_bound.error().message().find("cache exceeds byte cap") != std::string::npos,
+         "publishDiagnostics cache enforces its total retained-byte bound across documents");
+
+  auto outside_client = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv({"--publish-outside"}),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  auto outside =
+      outside_client
+          ? (*outside_client)->diagnostics(workspace / "main.cpp")
+          : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing outside client"))};
+  expect(!outside && outside.error().message().find("outside the workspace") != std::string::npos &&
+             outside.error().format().find("outside-ava-workspace") == std::string::npos,
+         "out-of-workspace publishDiagnostics is rejected with a fixed local error that does not reflect the server URI");
+
+  auto open_bound_client = ava::lsp::SubprocessLspClient::start({
+      .argv = fake_lsp_argv(),
+      .workspace_root = workspace,
+      .process_cwd = workspace,
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  bool first_sixty_four_opened = open_bound_client.has_value();
+  for (int index = 0; index < 64 && first_sixty_four_opened; ++index)
+  {
+    auto const path = workspace / ("open-" + std::to_string(index) + ".cpp");
+    std::ofstream(path) << "int value_" << index << ";\n";
+    first_sixty_four_opened = (*open_bound_client)->definitions(path, 0, 0).has_value();
+  }
+  auto const overflow_path = workspace / "open-overflow.cpp";
+  std::ofstream(overflow_path) << "int overflow;\n";
+  auto open_overflow =
+      open_bound_client
+          ? (*open_bound_client)->definitions(overflow_path, 0, 0)
+          : ava::core::Result<std::vector<ava::lsp::Location>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing open-bound client"))};
+  expect(first_sixty_four_opened && !open_overflow && open_overflow.error().message().find("open document count exceeds cap") != std::string::npos,
+         "LSP document synchronization bounds tracked open document identities and versions");
 }
 
 void test_lsp_configured_provider_rejects_invalid_config()
@@ -1814,5 +2015,7 @@ void run_lsp_tests()
   test_lsp_builtin_launch_identity_roots_and_deduplication();
   test_lsp_builtin_explicit_precedence();
   test_lsp_manager_publish_diagnostics_and_capability_bounds();
+  test_lsp_notification_dispatch_cache_and_document_sync();
+  test_lsp_notification_cache_bounds_and_rejections();
   test_lsp_configured_provider_rejects_invalid_config();
 }

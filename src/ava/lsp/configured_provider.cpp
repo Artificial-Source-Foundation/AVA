@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/command/environment.h"
 #include "ava/lsp/bounded_file_reader.h"
 #include "ava/lsp/configured_provider.h"
 #include "ava/core/ids.h"
@@ -50,19 +51,44 @@ std::optional<std::string> workspace_relative_process_arg(std::vector<std::strin
   return *match;
 }
 
-std::string argv_permission_command(std::vector<std::string> const& argv)
+std::string argv_json(std::vector<std::string> const& argv)
 {
-  std::string command = "[";
+  std::string value = "[";
   for (std::size_t index = 0; index < argv.size(); ++index)
   {
     if (index > 0)
-      command += ',';
-    command += '"';
-    command += ava::core::json::escape(argv[index]);
-    command += '"';
+      value += ',';
+    value += '"';
+    value += ava::core::json::escape(argv[index]);
+    value += '"';
   }
-  command += ']';
-  return command;
+  value += ']';
+  return value;
+}
+
+std::string executable_identity_token(ExecutableIdentity const& identity)
+{
+  ava::command::detail::Sha256Builder hash;
+  hash.append_field("ava-lsp-executable-identity-v1");
+  hash.append_field(identity.canonical_path.generic_string());
+  hash.append_number(identity.owner_uid);
+  hash.append_number(identity.owner_gid);
+  hash.append_number(identity.mode);
+  hash.append_number(identity.link_count);
+  hash.append_number(identity.device);
+  hash.append_number(identity.inode);
+  hash.append_number(identity.size);
+  hash.append_field(std::to_string(identity.changed_seconds));
+  hash.append_field(std::to_string(identity.changed_nanoseconds));
+  return "sha256:ava-lsp-executable-v1:" + hash.hex();
+}
+
+std::string permission_command(ConfiguredServer const& server)
+{
+  auto const argv = argv_json(server.argv);
+  if (!server.builtin || !server.executable_identity)
+    return argv;
+  return "{\"argv\":" + argv + ",\"executable_identity\":\"" + executable_identity_token(*server.executable_identity) + "\"}";
 }
 
 ava::core::Error config_error(ava::core::ErrorCategory category, std::string message, std::filesystem::path const& path)
@@ -688,7 +714,7 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
         .mode = mode_,
         .workspace_dir = workspace_root_,
         .target_path = workspace_root_,
-        .command = argv_permission_command(server.argv),
+        .command = permission_command(server),
     });
     if (decision.action == ava::permissions::PermissionAction::Allow)
       return {};
@@ -711,7 +737,7 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
         .mode = mode_,
         .workspace_dir = workspace_root_,
         .target_path = workspace_root_,
-        .command = argv_permission_command(server.argv),
+        .command = permission_command(server),
         .tool_name = "lsp_server_launch",
         .reason = decision.reason,
         .risk = decision.risk,

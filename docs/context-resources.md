@@ -165,10 +165,12 @@ LSP servers are optional and only affect LSP-backed tools.
   `lsp_workspace_symbols`, `lsp_definition`, and `lsp_references`.
 - Querying requires `lsp.query`; starting a server requires
   `lsp.server.launch`.
-- Built-in `clangd`, `gopls`, and `rust-analyzer` recipes are disabled by
-  default. Only global `lsp.json` can opt into their exact ids; project config
-  cannot enable them. Discovery is passive, installed-only, and excludes
-  workspace-local executables, downloads, package managers, and network access.
+- The only built-in recipe is installed-only `clangd`, disabled by default.
+  Only global `lsp.json` can opt into that exact id; project config cannot enable
+  it. Discovery is passive and excludes workspace-local or hardlinked
+  executables, downloads, package managers, and network access. Automatic
+  `gopls`/`rust-analyzer` recipes are deferred; explicit configuration remains
+  available behind existing trust and launch permission.
 - `/context lsp` reports fixed built-in status without starting a process or
   exposing discovered paths, argv, config contents, or raw discovery errors.
 

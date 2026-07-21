@@ -10,16 +10,16 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_set>
+#include <unordered_map>
 #include <vector>
-
 #include <sys/types.h>
 
 namespace ava::lsp {
 
 using CancelCallback = std::function<bool()>;
 
-struct Diagnostic {
+struct Diagnostic
+{
   int severity = 0;
   std::string message;
   int line = 0;
@@ -29,7 +29,8 @@ struct Diagnostic {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct Range {
+struct Range
+{
   int start_line = 0;
   int start_column = 0;
   int end_line = 0;
@@ -38,7 +39,8 @@ struct Range {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct Symbol {
+struct Symbol
+{
   std::string name;
   int kind = 0;
   std::filesystem::path path;
@@ -48,15 +50,21 @@ struct Symbol {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct Location {
+struct Location
+{
   std::filesystem::path path;
   Range range;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct ExecutableIdentity {
+struct ExecutableIdentity
+{
   std::filesystem::path canonical_path;
+  std::uintmax_t owner_uid = 0;
+  std::uintmax_t owner_gid = 0;
+  std::uintmax_t mode = 0;
+  std::uintmax_t link_count = 0;
   std::uintmax_t device = 0;
   std::uintmax_t inode = 0;
   std::uintmax_t size = 0;
@@ -66,7 +74,8 @@ struct ExecutableIdentity {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct ServerConfig {
+struct ServerConfig
+{
   std::vector<std::string> argv;
   std::filesystem::path workspace_root;
   std::filesystem::path server_root = {};
@@ -79,7 +88,8 @@ struct ServerConfig {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-class DiagnosticsProvider {
+class DiagnosticsProvider
+{
  public:
   DiagnosticsProvider() = default;
   DiagnosticsProvider(DiagnosticsProvider const&) = delete;
@@ -88,22 +98,21 @@ class DiagnosticsProvider {
   DiagnosticsProvider& operator=(DiagnosticsProvider&&) = delete;
   virtual ~DiagnosticsProvider() = default;
 
-  [[nodiscard]] virtual ava::core::Result<std::vector<Diagnostic>> diagnostics(
-      std::filesystem::path const& path, CancelCallback cancel_requested = nullptr) = 0;
-  [[nodiscard]] virtual ava::core::Result<std::vector<Symbol>> document_symbols(
-      std::filesystem::path const& path, CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] virtual ava::core::Result<std::vector<Symbol>> workspace_symbols(
-      std::string_view query, CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] virtual ava::core::Result<std::vector<Location>> definitions(
-      std::filesystem::path const& path, int line, int column, CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] virtual ava::core::Result<std::vector<Location>> references(
-      std::filesystem::path const& path, int line, int column, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] virtual ava::core::Result<std::vector<Diagnostic>> diagnostics(std::filesystem::path const& path,
+                                                                               CancelCallback cancel_requested = nullptr) = 0;
+  [[nodiscard]] virtual ava::core::Result<std::vector<Symbol>> document_symbols(std::filesystem::path const& path, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] virtual ava::core::Result<std::vector<Symbol>> workspace_symbols(std::string_view query, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] virtual ava::core::Result<std::vector<Location>> definitions(std::filesystem::path const& path, int line, int column,
+                                                                             CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] virtual ava::core::Result<std::vector<Location>> references(std::filesystem::path const& path, int line, int column,
+                                                                            CancelCallback cancel_requested = nullptr);
   virtual void set_permission_request_ids(std::shared_ptr<std::vector<std::string>> ids);
 
   AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS
 };
 
-class SubprocessLspClient final : public DiagnosticsProvider {
+class SubprocessLspClient final : public DiagnosticsProvider
+{
  public:
   explicit SubprocessLspClient(ServerConfig config);
   ~SubprocessLspClient() override;
@@ -113,18 +122,14 @@ class SubprocessLspClient final : public DiagnosticsProvider {
   SubprocessLspClient(SubprocessLspClient&&) = delete;
   SubprocessLspClient& operator=(SubprocessLspClient&&) = delete;
 
-  [[nodiscard]] static ava::core::Result<std::shared_ptr<SubprocessLspClient>> start(
-      ServerConfig config, CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::Result<std::vector<Diagnostic>> diagnostics(
-      std::filesystem::path const& path, CancelCallback cancel_requested = nullptr) override;
-  [[nodiscard]] ava::core::Result<std::vector<Symbol>> document_symbols(
-      std::filesystem::path const& path, CancelCallback cancel_requested = nullptr) override;
-  [[nodiscard]] ava::core::Result<std::vector<Symbol>> workspace_symbols(
-      std::string_view query, CancelCallback cancel_requested = nullptr) override;
-  [[nodiscard]] ava::core::Result<std::vector<Location>> definitions(
-      std::filesystem::path const& path, int line, int column, CancelCallback cancel_requested = nullptr) override;
-  [[nodiscard]] ava::core::Result<std::vector<Location>> references(
-      std::filesystem::path const& path, int line, int column, CancelCallback cancel_requested = nullptr) override;
+  [[nodiscard]] static ava::core::Result<std::shared_ptr<SubprocessLspClient>> start(ServerConfig config, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Result<std::vector<Diagnostic>> diagnostics(std::filesystem::path const& path, CancelCallback cancel_requested = nullptr) override;
+  [[nodiscard]] ava::core::Result<std::vector<Symbol>> document_symbols(std::filesystem::path const& path, CancelCallback cancel_requested = nullptr) override;
+  [[nodiscard]] ava::core::Result<std::vector<Symbol>> workspace_symbols(std::string_view query, CancelCallback cancel_requested = nullptr) override;
+  [[nodiscard]] ava::core::Result<std::vector<Location>> definitions(std::filesystem::path const& path, int line, int column,
+                                                                     CancelCallback cancel_requested = nullptr) override;
+  [[nodiscard]] ava::core::Result<std::vector<Location>> references(std::filesystem::path const& path, int line, int column,
+                                                                    CancelCallback cancel_requested = nullptr) override;
   [[nodiscard]] bool is_alive();
 
   AVA_DEBUG_PRINT_MEMBERS_ON
@@ -132,33 +137,26 @@ class SubprocessLspClient final : public DiagnosticsProvider {
  private:
   [[nodiscard]] ava::core::VoidResult launch();
   [[nodiscard]] ava::core::VoidResult initialize(CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::VoidResult send_notification(std::string_view method, std::string_view params_json,
-                                                        std::chrono::steady_clock::time_point deadline,
-                                                        std::chrono::milliseconds timeout, std::string_view phase,
-                                                        CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::VoidResult respond_to_server_request(std::string_view message, std::int64_t id,
-                                                                std::chrono::steady_clock::time_point deadline,
+  [[nodiscard]] ava::core::VoidResult send_notification(std::string_view method, std::string_view params_json, std::chrono::steady_clock::time_point deadline,
+                                                        std::chrono::milliseconds timeout, std::string_view phase, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::VoidResult respond_to_server_request(std::string_view message, std::int64_t id, std::chrono::steady_clock::time_point deadline,
                                                                 std::chrono::milliseconds timeout, std::string_view phase,
                                                                 CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::VoidResult send_did_open(std::filesystem::path const& path,
-                                                    std::chrono::steady_clock::time_point deadline,
-                                                    CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::VoidResult synchronize_document(std::filesystem::path const& path, std::chrono::steady_clock::time_point deadline,
+                                                           CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::VoidResult dispatch_notification(std::string_view message);
+  [[nodiscard]] std::optional<std::vector<Diagnostic>> cached_diagnostics(std::filesystem::path const& path) const;
   [[nodiscard]] ava::core::Result<std::string> request_response(std::string_view method, std::string_view params_json,
-                                                                std::chrono::steady_clock::time_point deadline,
-                                                                std::chrono::milliseconds timeout, std::string_view phase,
-                                                                CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::VoidResult write_message(std::string_view body, std::chrono::steady_clock::time_point deadline,
-                                                    std::chrono::milliseconds timeout, std::string_view phase,
-                                                    std::string_view method, CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::Result<std::string> read_message(std::chrono::steady_clock::time_point deadline,
-                                                            std::chrono::milliseconds timeout, std::string_view phase,
-                                                            std::string_view method, CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::VoidResult wait_for_readable(std::chrono::steady_clock::time_point deadline,
-                                                        std::chrono::milliseconds timeout, std::string_view phase,
-                                                        std::string_view method, CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::VoidResult wait_for_writable(std::chrono::steady_clock::time_point deadline,
-                                                        std::chrono::milliseconds timeout, std::string_view phase,
-                                                        std::string_view method, CancelCallback cancel_requested = nullptr);
+                                                                std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
+                                                                std::string_view phase, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::VoidResult write_message(std::string_view body, std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
+                                                    std::string_view phase, std::string_view method, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Result<std::string> read_message(std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
+                                                            std::string_view phase, std::string_view method, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::VoidResult wait_for_readable(std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
+                                                        std::string_view phase, std::string_view method, CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::VoidResult wait_for_writable(std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
+                                                        std::string_view phase, std::string_view method, CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult check_child_running();
   void close_fds() noexcept;
   void terminate_child() noexcept;
@@ -172,7 +170,11 @@ class SubprocessLspClient final : public DiagnosticsProvider {
   int stdout_fd_ = -1;
   int next_id_ = 1;
   std::string read_buffer_;
-  std::unordered_set<std::string> open_documents_;
+  std::unordered_map<std::string, std::string> open_document_contents_;
+  std::unordered_map<std::string, int> open_document_versions_;
+  std::unordered_map<std::string, std::vector<Diagnostic>> diagnostics_cache_;
+  std::unordered_map<std::string, std::size_t> diagnostics_cache_bytes_;
+  std::size_t diagnostics_cache_total_bytes_ = 0;
   bool supports_pull_diagnostics_ = false;
 };
 

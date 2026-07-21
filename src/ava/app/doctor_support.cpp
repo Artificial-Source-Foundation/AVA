@@ -399,13 +399,6 @@ DoctorReport collect_passive_doctor_report(ava::config::XdgPaths const& paths, s
 
     if (lsp_builtins.empty())
       lsp_builtins = ava::lsp::inspect_builtin_servers({}, workspace_dir);
-    auto const builtin_kind = [](std::string_view id) {
-      if (id == "clangd")
-        return DoctorCheckKind::LspBuiltinClangd;
-      if (id == "gopls")
-        return DoctorCheckKind::LspBuiltinGopls;
-      return DoctorCheckKind::LspBuiltinRustAnalyzer;
-    };
     for (auto const& builtin : lsp_builtins)
     {
       DoctorStatus status = DoctorStatus::Pass;
@@ -430,7 +423,7 @@ DoctorReport collect_passive_doctor_report(ava::config::XdgPaths const& paths, s
         enabled = 1;
         errors = 1;
       }
-      report.checks.push_back({.kind = builtin_kind(builtin.id), .status = status, .code = code, .items = 1, .enabled = enabled, .errors = errors});
+      report.checks.push_back({.kind = DoctorCheckKind::LspBuiltinClangd, .status = status, .code = code, .items = 1, .enabled = enabled, .errors = errors});
     }
 
     ava::permissions::PermissionRuleStore const permission_store{

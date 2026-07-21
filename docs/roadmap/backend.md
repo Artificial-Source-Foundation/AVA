@@ -166,7 +166,7 @@ Missing or incomplete:
 - Search parity for unsupported `.gitignore` edge syntax such as bracket character classes; current native matcher documents its subset.
 - Broader process-tree cleanup proofs beyond the current bash timeout, plugin, MCP, and LSP process-group coverage.
 - RPC/headless upload plumbing for image attachments; backend replay/storage/provider serialization for existing AVA-managed image attachments is implemented.
-- LSP diagnostics, document symbols, workspace symbols, definitions, references, bounded on-disk `didOpen` sync, and explicit `lsp.json` server config are implemented. Built-in installed-only `clangd`, `gopls`, and `rust-analyzer` recipes plus pull/publish diagnostics negotiation are implemented behind global exact opt-in. Remaining LSP maturity work is incremental/unsaved-buffer sync and UI/RPC presentation polish.
+- LSP diagnostics, document symbols, workspace symbols, definitions, references, bounded on-disk full-text `didOpen`/`didChange` sync, and explicit `lsp.json` server config are implemented. One installed-only `clangd` recipe plus bounded pull/publish diagnostics are implemented behind global exact opt-in and sealed executable identity permission. Automatic `gopls` and `rust-analyzer` recipes remain deferred pending separately approved verified containment/offline designs. Remaining LSP maturity work is unsaved-buffer sync and UI/RPC presentation polish.
 - Delete/move tools, only after audit and permissions are stronger.
 
 1.0 target:

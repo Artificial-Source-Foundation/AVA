@@ -3,6 +3,7 @@
 #include "ava/context/skill_loader.h"
 #include "ava/core/error.h"
 #include "ava/core/path.h"
+#include "ava/core/string_utils.h"
 
 #include <algorithm>
 #include <array>
@@ -30,24 +31,6 @@ std::optional<std::filesystem::path> home_dir()
   if (!path.is_absolute())
     return std::nullopt;
   return path;
-}
-
-std::string trim(std::string_view value)
-{
-  std::size_t start = 0;
-  while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])) != 0) ++start;
-  auto end = value.size();
-  while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) --end;
-  return std::string(value.substr(start, end - start));
-}
-
-std::string strip_matching_quotes(std::string value)
-{
-  if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') || (value.front() == '\'' && value.back() == '\'')))
-  {
-    return value.substr(1, value.size() - 2);
-  }
-  return value;
 }
 
 bool has_control_byte(std::string_view value)
@@ -201,6 +184,7 @@ struct ParsedSkillMarkdown
   std::string body;
 };
 
+// FIXME: this is a duplicate of parse_markdown
 ParsedSkillMarkdown parse_skill_markdown(std::string_view content)
 {
   ParsedSkillMarkdown parsed;
@@ -228,10 +212,10 @@ ParsedSkillMarkdown parse_skill_markdown(std::string_view content)
       line.remove_suffix(1);
     if (auto const colon = line.find(':'); colon != std::string_view::npos)
     {
-      auto key = trim(line.substr(0, colon));
-      auto value = strip_matching_quotes(trim(line.substr(colon + 1)));
+      auto key = core::trim(line.substr(0, colon));
+      auto value = core::strip_matching_quotes(core::trim_view(line.substr(colon + 1)));
       if (!key.empty())
-        parsed.frontmatter[std::move(key)] = std::move(value);
+        parsed.frontmatter[std::move(key)] = value;
     }
     if (line_end == std::string_view::npos)
       break;
@@ -280,8 +264,8 @@ void load_skill_file(std::vector<LoadedSkill>& skills, std::vector<SkillDiagnost
   auto const directory = ava::core::normalized_absolute_path(skill_file.parent_path());
   auto name = field(parsed.frontmatter, "name").value_or(directory.filename().string());
   auto description = field(parsed.frontmatter, "description").value_or("");
-  name = trim(name);
-  description = trim(description);
+  name = core::trim(name);
+  description = core::trim(description);
 
   if (!valid_skill_name(name))
   {
@@ -387,8 +371,8 @@ ava::core::Result<LoadedSkill> load_declared_skill_file(DeclaredSkillFileOptions
     return std::unexpected(std::move(content.error()));
 
   auto parsed = parse_skill_markdown(*content);
-  auto name = trim(options.name);
-  auto description = trim(options.description);
+  auto name = core::trim(options.name);
+  auto description = core::trim(options.description);
 
   if (!valid_skill_name_for_source(name, options.source_type))
   {

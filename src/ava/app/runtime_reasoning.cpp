@@ -1,8 +1,10 @@
 #include "sys.h"
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_reasoning.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/core/json.h"
+#include "ava/core/string_utils.h"
 
 #include <algorithm>
 #include <utility>
@@ -20,7 +22,7 @@ bool same_reasoning_selection(std::optional<ReasoningSelection> const& left, std
 
 ava::core::Result<ReasoningSelection> resolve_runtime_reasoning_selection(ava::config::ModelInfo const& model, ReasoningSelection selection)
 {
-  auto const level = trim(selection.level);
+  auto const level = core::trim(selection.level);
   if (level.empty())
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning level is required"));
@@ -118,8 +120,8 @@ ava::core::Result<bool> set_runtime_reasoning(runtime::Session& session, std::op
 {
   if (selection)
   {
-    selection->level = runtime::trimmed_copy(selection->level);
-    selection->display = runtime::trimmed_copy(selection->display);
+    selection->level = core::trim(selection->level);
+    selection->display = core::trim(selection->display);
     auto resolved = runtime::resolve_runtime_reasoning_selection(session.model, std::move(*selection));
     if (!resolved)
     {

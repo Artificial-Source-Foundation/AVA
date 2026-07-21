@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_models.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/config/auth.h"
 #include "ava/config/auth_record.h"
 #include "ava/config/model_config.h"

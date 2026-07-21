@@ -3,10 +3,12 @@
 #include "serialization.h"
 #include "serialization_json.h"
 #include "serialization_models.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/session/session_tree.h"
 #include "ava/session/stats.h"
 #include "ava/session/validation.h"
 #include "ava/core/json.h"
+#include "ava/core/string_utils.h"
 
 #include <cctype>
 #include <utility>
@@ -75,22 +77,15 @@ std::string session_entry_json(ava::session::SessionEntry const& entry)
   return json;
 }
 
-std::string_view trim(std::string_view value)
-{
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) value.remove_prefix(1);
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) value.remove_suffix(1);
-  return value;
-}
-
 bool json_bool_field(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start)
     return false;
-  auto const value = trim(object.substr(*start));
+  auto const value = core::trim(object.substr(*start));
   if (!value.starts_with("true"))
     return false;
-  auto const rest = trim(value.substr(4));
+  auto const rest = core::trim(value.substr(4));
   return rest.empty() || rest.front() == ',' || rest.front() == '}';
 }
 

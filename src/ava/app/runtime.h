@@ -3,8 +3,8 @@
 #include "runtime/OpenOptions.h"
 #include "runtime/PromptState.h"
 #include "runtime/RunOptions.h"
-#include "runtime/Session.h"
 #include "ava/app/session_run_controller.h"
+#include "ava/app/runtime/ReasoningSelection.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
@@ -22,6 +22,10 @@
 #include <vector>
 
 namespace ava::app {
+
+namespace runtime {
+struct Session;
+} // namespace runtime
 
 using CompactionSummaryGenerator =
     std::function<ava::core::Result<std::string>(std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,

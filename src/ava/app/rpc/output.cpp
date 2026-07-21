@@ -3,6 +3,7 @@
 #include "protocol.h"
 #include "serialization.h"
 #include "ava/app/EventEnvelope.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 

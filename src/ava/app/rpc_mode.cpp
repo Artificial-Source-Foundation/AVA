@@ -3,6 +3,7 @@
 #include "ava/app/command_registry.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/rpc/input.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/prompt_worker.h"
@@ -485,8 +486,8 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
         continue;
       }
       std::lock_guard lock(session_mutex);
-      auto registry = load_command_registry(
-          session, CommandRegistryOptions{.include_builtins = true,
+      auto registry = session.load_command_registry(
+          CommandRegistryOptions{.include_builtins = true,
                                           .include_prompt_commands = true,
                                           .include_skills = true,
                                           .include_plugin_commands = true,

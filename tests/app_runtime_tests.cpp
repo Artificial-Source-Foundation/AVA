@@ -18,6 +18,7 @@
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_retry.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"

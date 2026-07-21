@@ -1,6 +1,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/observability/run_observer.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/session_run_controller.h"
 #include "ava/session/session_store.h"
 

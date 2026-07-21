@@ -14,6 +14,7 @@
 #include "ava/app/rpc/session_operators.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/agent/question.h"
 #include "ava/config/auth.h"
 #include "ava/session/attachments.h"

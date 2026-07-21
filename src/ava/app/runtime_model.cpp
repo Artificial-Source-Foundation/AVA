@@ -2,10 +2,12 @@
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_prompt.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/session/validation.h"
 #include "ava/provider/registry.h"
 #include "ava/core/json.h"
+#include "ava/core/string_utils.h"
 
 #include <algorithm>
 #include <iterator>
@@ -240,8 +242,8 @@ namespace ava::app {
 
 ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths, std::string_view provider_id, std::string_view model_id)
 {
-  auto const trimmed_provider_id = runtime::trimmed_copy(provider_id);
-  auto const trimmed_model_id = runtime::trimmed_copy(model_id);
+  auto const trimmed_provider_id = core::trim(provider_id);
+  auto const trimmed_model_id = core::trim(model_id);
   if (trimmed_provider_id.empty() || trimmed_model_id.empty())
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider and model are required"));

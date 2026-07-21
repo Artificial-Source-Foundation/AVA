@@ -2,6 +2,7 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_mcp.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/mcp/config.h"
 #include "ava/mcp/stdio_client.h"
 #include "ava/mcp/tool_broker.h"

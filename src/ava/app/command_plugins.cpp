@@ -2,6 +2,7 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_plugins.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/enablement.h"
 #include "ava/plugin/manifest.h"

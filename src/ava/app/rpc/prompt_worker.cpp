@@ -7,6 +7,7 @@
 #include "session_operators.h"
 #include "ava/app/events.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 
 #include <optional>
 #include <utility>

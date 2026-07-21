@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_permissions.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/json.h"

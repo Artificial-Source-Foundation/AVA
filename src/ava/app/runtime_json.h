@@ -10,9 +10,6 @@
 
 namespace ava::app::runtime {
 
-[[nodiscard]] std::string_view trim(std::string_view value);
-[[nodiscard]] std::string trimmed_copy(std::string_view value);
-
 [[nodiscard]] std::string json_string_field(std::string_view key, std::string_view value);
 [[nodiscard]] std::string json_bool_field(std::string_view key, bool value);
 [[nodiscard]] std::string optional_bool_json(std::string_view key, std::optional<bool> const& value);

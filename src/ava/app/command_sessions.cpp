@@ -2,6 +2,7 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_sessions.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
 #include "ava/session/record.h"

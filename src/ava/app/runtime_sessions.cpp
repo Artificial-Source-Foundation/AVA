@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_sessions.h"
 
 #include <string>

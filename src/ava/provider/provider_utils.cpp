@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/core/string_utils.h"
 #include "ava/provider/provider_utils.h"
 
 #include <algorithm>
@@ -6,13 +7,6 @@
 
 namespace ava::provider {
 namespace {
-
-std::string_view trim(std::string_view value)
-{
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) value.remove_prefix(1);
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) value.remove_suffix(1);
-  return value;
-}
 
 bool is_hex_digit(char ch)
 {
@@ -251,7 +245,7 @@ void redact_json_string_value(std::string& snippet, std::string_view key)
 
 bool is_json_object_shape(std::string_view value)
 {
-  value = trim(value);
+  value = core::trim_view(value);
   if (value.size() < 2 || value.front() != '{')
     return false;
   bool in_string = false;
@@ -294,9 +288,9 @@ bool is_json_object_shape(std::string_view value)
   }
   if (in_string || depth != 0 || end == std::string_view::npos)
     return false;
-  if (!trim(value.substr(end + 1)).empty())
+  if (!core::trim(value.substr(end + 1)).empty())
     return false;
-  auto const first_member = trim(value.substr(1, end - 1));
+  auto const first_member = core::trim(value.substr(1, end - 1));
   return first_member.empty() || first_member.front() == '"';
 }
 

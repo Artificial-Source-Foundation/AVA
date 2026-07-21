@@ -105,11 +105,12 @@ struct CommandRegistryOptions
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+namespace runtime {
+struct Session;
+} // namespace runtime
+
 [[nodiscard]] std::string to_string(UnifiedCommandSource source);
 [[nodiscard]] std::string to_string(UnifiedCommandKind kind);
-[[nodiscard]] std::vector<PromptCommandSourceFile> prompt_command_source_files(std::filesystem::path const& workspace_dir, ava::config::XdgPaths const& paths,
-                                                                               bool include_project_commands = true);
-[[nodiscard]] CommandRegistry load_command_registry(runtime::Session& session, CommandRegistryOptions options = {});
 [[nodiscard]] CommandRegistryEntry const* find_command_registry_entry(CommandRegistry const& registry, std::string_view line) noexcept;
 [[nodiscard]] bool command_registry_contains(runtime::Session& session, std::string_view line);
 [[nodiscard]] ava::core::Result<std::string> expand_prompt_command_template(std::string_view template_text, std::string_view argument_text);

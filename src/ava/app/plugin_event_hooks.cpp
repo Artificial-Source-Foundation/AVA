@@ -2,6 +2,7 @@
 #include "ava/app/EventEnvelope.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/discovery.h"

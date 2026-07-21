@@ -3,6 +3,7 @@
 #include "runtime_navigation.h"
 #include "serialization.h"
 #include "session_operators.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_catalog.h"
 #include "ava/app/runtime_credentials.h"
 #include "ava/app/runtime_sessions.h"

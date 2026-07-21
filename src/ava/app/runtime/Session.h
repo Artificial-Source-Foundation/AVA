@@ -6,6 +6,7 @@
 #include "PromptOverrides.h"
 #include "ReasoningSelection.h"
 #include "ava/debug/print_members_on.h"
+#include "ava/app/command_registry.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/session_run_controller.h"
 #include "ava/agent/agent_loop.h"
@@ -83,6 +84,9 @@ struct Session
   {
     return run_controller ? run_controller->owner_append_route() : ava::agent::SessionAppendSink{};
   }
+
+ public:
+  [[nodiscard]] CommandRegistry load_command_registry(CommandRegistryOptions options = {});
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

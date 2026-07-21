@@ -6,6 +6,7 @@
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
 #include "ava/session/record.h"

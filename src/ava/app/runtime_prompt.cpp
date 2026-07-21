@@ -1,10 +1,15 @@
 #include "sys.h"
-#include "ava/app/command_registry.h"
-#include "ava/app/plugin_event_hooks.h"
-#include "ava/app/runtime_compaction.h"
-#include "ava/app/runtime_prompt.h"
-#include "ava/app/runtime_reasoning.h"
-#include "ava/app/runtime_retry.h"
+
+#include "command_registry.h"
+#include "plugin_event_hooks.h"
+#include "runtime_compaction.h"
+#include "runtime_prompt.h"
+#include "runtime_reasoning.h"
+#include "runtime_retry.h"
+#include "runtime/Session.h"
+#include "runtime/markdown_files.h"
+#include "runtime/command_names.h"
+
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/tools/file_tools.h"
@@ -20,6 +25,7 @@
 #include "ava/core/fingerprint.h"
 #include "ava/core/ids.h"
 #include "ava/core/path.h"
+#include "ava/core/string_utils.h"
 
 #include <algorithm>
 #include <array>
@@ -33,6 +39,7 @@
 #include <vector>
 
 namespace ava::app::runtime {
+
 namespace {
 
 constexpr std::size_t kMaxRuntimeFreshnessBytes = 256 * 1024;
@@ -81,6 +88,7 @@ struct PluginRuntimeResources
   std::vector<PluginResourceLoadFailure> failures;
 };
 
+//FIXME: this is virtually identical to `read_bounded_file` and thus a duplicate: remove code duplication!
 ava::core::Result<std::string> read_freshness_file(std::filesystem::path const& path, std::size_t max_bytes)
 {
   std::error_code status_error;
@@ -143,6 +151,52 @@ void add_freshness_file(std::vector<FreshnessSourceMetadata>& sources, Freshness
                                             .path = ava::core::normalized_absolute_path(path),
                                             .byte_count = content->size(),
                                             .content_fingerprint = ava::core::content_fingerprint(*content)});
+}
+
+void add_prompt_command_source_files(std::vector<PromptCommandSourceFile>& sources, std::filesystem::path const& root, UnifiedCommandSource source,
+                                     std::string_view scope)
+{
+  std::vector<CommandRegistryDiagnostic> diagnostics;
+  auto files = markdown_files(root, diagnostics, source);
+  for (auto const& file : files)
+  {
+    auto name = command_name_for_file(root, file);
+    if (!name)
+      continue;
+    auto content = read_bounded_file(file);
+    if (!content)
+      continue;
+    auto parsed = parse_markdown(*content);
+    auto body = markdown_field(parsed, "template");
+    if (body.empty())
+      body = std::move(parsed.body);
+    if (core::trim_view(body).empty())
+      continue;
+    sources.push_back(PromptCommandSourceFile{.command_name = std::move(*name),
+                                              .scope = std::string(scope),
+                                              .path = file,
+                                              .byte_count = content->size(),
+                                              .content_fingerprint = ava::core::content_fingerprint(*content)});
+  }
+}
+
+std::vector<PromptCommandSourceFile> prompt_command_source_files(std::filesystem::path const& workspace_dir, ava::config::XdgPaths const& paths,
+                                                                 bool include_project_commands)
+{
+  std::vector<PromptCommandSourceFile> sources;
+  if (include_project_commands)
+  {
+    add_prompt_command_source_files(sources, workspace_dir / ".ava" / "commands", UnifiedCommandSource::PromptProject, "project");
+    add_prompt_command_source_files(sources, workspace_dir / ".ava" / "command", UnifiedCommandSource::PromptProject, "project");
+  }
+  add_prompt_command_source_files(sources, paths.ava_config_dir / "commands", UnifiedCommandSource::PromptGlobal, "global");
+  add_prompt_command_source_files(sources, paths.ava_config_dir / "command", UnifiedCommandSource::PromptGlobal, "global");
+  std::ranges::sort(sources, [](PromptCommandSourceFile const& left, PromptCommandSourceFile const& right) {
+    if (left.scope != right.scope)
+      return left.scope < right.scope;
+    return left.command_name < right.command_name;
+  });
+  return sources;
 }
 
 void add_prompt_command_freshness_sources(std::vector<FreshnessSourceMetadata>& sources, ava::config::XdgPaths const& paths,

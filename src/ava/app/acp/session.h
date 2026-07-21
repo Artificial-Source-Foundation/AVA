@@ -7,6 +7,7 @@
 #include "ava/app/acp/session_update.h"
 #include "ava/app/runtime_credentials.h"
 #include "ava/app/runtime_sessions.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/mcp/config.h"
 #include "ava/config/xdg_paths.h"
 

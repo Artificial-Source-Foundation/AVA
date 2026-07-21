@@ -3,6 +3,7 @@
 #include "ava/app/command_palette.h"
 #include "ava/app/display_settings.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/mcp/config.h"
 #include "ava/config/model_config.h"

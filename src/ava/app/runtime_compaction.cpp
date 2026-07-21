@@ -2,9 +2,11 @@
 #include "ava/app/runtime_compaction.h"
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_retry.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/agent/message_builder.h"
 #include "ava/session/validation.h"
 #include "ava/core/json.h"
+#include "ava/core/string_utils.h"
 
 #include <algorithm>
 #include <optional>
@@ -353,7 +355,7 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
   auto summary = parse_compaction_response_text(provider, *response, provider_request.stream);
   if (!summary)
     return std::unexpected(std::move(summary.error()));
-  *summary = runtime::trimmed_copy(*summary);
+  *summary = core::trim(*summary);
   if (summary->empty())
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "compaction summary generation returned an empty summary"));

@@ -3,6 +3,7 @@
 #include "ava/provider/curl_transport.h"
 #include "ava/core/error.h"
 #include "ava/core/json.h"
+#include "ava/core/string_utils.h"
 
 #include <algorithm>
 #include <array>
@@ -18,18 +19,9 @@ constexpr std::size_t kMaxWebSearchResults = 10;
 constexpr std::size_t kMaxWebSearchContextChars = 30000;
 constexpr int kMaxWebSearchTimeoutMs = 60000;
 
-std::string trim(std::string_view value)
-{
-  std::size_t start = 0;
-  while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])) != 0) ++start;
-  auto end = value.size();
-  while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) --end;
-  return std::string(value.substr(start, end - start));
-}
-
 ava::core::Result<std::string> validate_query(std::string_view query)
 {
-  auto trimmed = trim(query);
+  auto trimmed = core::trim(query);
   if (trimmed.empty() || trimmed.size() > kMaxQueryBytes)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "websearch query is empty or too long");

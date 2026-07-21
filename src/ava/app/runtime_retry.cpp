@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/app/runtime_retry.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/session/session_store.h"
 
 #include <mutex>

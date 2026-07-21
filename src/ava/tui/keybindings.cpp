@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/tui/keybindings.h"
 #include "ava/core/error.h"
+#include "ava/core/string_utils.h"
 
 #include <algorithm>
 #include <array>
@@ -271,15 +272,6 @@ std::string normalize_action_id(std::string_view text)
   return result;
 }
 
-std::string trim(std::string_view text)
-{
-  std::size_t begin = 0;
-  while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])) != 0) ++begin;
-  std::size_t end = text.size();
-  while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) --end;
-  return std::string(text.substr(begin, end - begin));
-}
-
 int hex_value(char ch)
 {
   if (ch >= '0' && ch <= '9')
@@ -338,7 +330,7 @@ std::vector<std::string> split_comma_list(std::string_view text)
   {
     auto const comma = text.find(',', start);
     auto const end = comma == std::string_view::npos ? text.size() : comma;
-    auto part = trim(text.substr(start, end - start));
+    auto part = core::trim(text.substr(start, end - start));
     if (!part.empty())
       parts.push_back(std::move(part));
     if (comma == std::string_view::npos)
@@ -531,7 +523,7 @@ ava::core::Result<std::vector<std::string>> parse_key_binding_value(std::string_
       value.error().with_context("action", std::string(action));
       return std::unexpected(std::move(value.error()));
     }
-    if (trim(*value).empty())
+    if (core::trim(*value).empty())
     {
       auto error = keybinds_error("empty TUI key binding");
       error.with_context("action", std::string(action));

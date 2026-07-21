@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/app/runtime_credentials.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/provider/curl_transport.h"

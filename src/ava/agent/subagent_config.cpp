@@ -1,7 +1,10 @@
 #include "sys.h"
 #include "ava/agent/subagent_config.h"
+#include "ava/app/runtime/command_names.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/core/json.h"
+#include "ava/core/string_utils.h"
+#include "ava/app/runtime/markdown_files.h"
 
 #include <algorithm>
 #include <cctype>
@@ -21,36 +24,11 @@ constexpr std::size_t kMaxSubagentDescriptionBytes = 1024;
 constexpr std::size_t kMaxSubagentPromptBytes = 64 * 1024;
 constexpr std::size_t kMaxSubagents = 128;
 
-struct ParsedMarkdown
-{
-  std::map<std::string, std::string> frontmatter;
-  std::string body;
-};
-
 std::optional<std::filesystem::path> home_dir()
 {
   if (auto const* home = std::getenv("HOME"); home != nullptr && *home != '\0')
     return std::filesystem::path(home);
   return std::nullopt;
-}
-
-std::string_view trim_view(std::string_view value)
-{
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) value.remove_prefix(1);
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) value.remove_suffix(1);
-  return value;
-}
-
-std::string trim(std::string_view value)
-{
-  return std::string(trim_view(value));
-}
-
-std::string strip_matching_quotes(std::string value)
-{
-  if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') || (value.front() == '\'' && value.back() == '\'')))
-    return value.substr(1, value.size() - 2);
-  return value;
 }
 
 bool has_control_byte(std::string_view value)
@@ -100,96 +78,9 @@ std::optional<std::string> field(std::map<std::string, std::string> const& front
   return it->second;
 }
 
-ParsedMarkdown parse_markdown(std::string_view content)
-{
-  ParsedMarkdown parsed;
-  if (!(content.starts_with("---\n") || content.starts_with("---\r\n")))
-  {
-    parsed.body = std::string(content);
-    return parsed;
-  }
-
-  auto const body_start = content.starts_with("---\r\n") ? 5 : 4;
-  auto const delimiter = content.find("\n---", body_start);
-  if (delimiter == std::string_view::npos)
-  {
-    parsed.body = std::string(content);
-    return parsed;
-  }
-
-  auto const frontmatter = content.substr(body_start, delimiter - body_start);
-  std::size_t line_start = 0;
-  while (line_start <= frontmatter.size())
-  {
-    auto const line_end = frontmatter.find('\n', line_start);
-    auto line = frontmatter.substr(line_start, line_end == std::string_view::npos ? std::string_view::npos : line_end - line_start);
-    if (!line.empty() && line.back() == '\r')
-      line.remove_suffix(1);
-    if (auto const colon = line.find(':'); colon != std::string_view::npos)
-    {
-      auto key = trim(line.substr(0, colon));
-      auto value = strip_matching_quotes(trim(line.substr(colon + 1)));
-      if (!key.empty())
-        parsed.frontmatter[std::move(key)] = std::move(value);
-    }
-    if (line_end == std::string_view::npos)
-      break;
-    line_start = line_end + 1;
-  }
-
-  auto after = delimiter + 4;
-  if (after < content.size() && content[after] == '\r')
-    ++after;
-  if (after < content.size() && content[after] == '\n')
-    ++after;
-  parsed.body = std::string(content.substr(after));
-  return parsed;
-}
-
-ava::core::Result<std::string> read_bounded_file(std::filesystem::path const& path, std::size_t max_file_bytes)
-{
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (status_error || std::filesystem::is_symlink(status) || !std::filesystem::is_regular_file(status))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "subagent file is not a regular file");
-    error.with_context("path", path.string());
-    if (status_error)
-      error.with_context("cause", status_error.message());
-    return std::unexpected(std::move(error));
-  }
-
-  std::error_code size_error;
-  auto const size = std::filesystem::file_size(path, size_error);
-  if (size_error || size > max_file_bytes)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "subagent file is too large");
-    error.with_context("path", path.string());
-    error.with_context("max_bytes", std::to_string(max_file_bytes));
-    if (size_error)
-      error.with_context("cause", size_error.message());
-    return std::unexpected(std::move(error));
-  }
-
-  std::ifstream file(path, std::ios::binary);
-  if (!file)
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to open subagent file").with_context("path", path.string()));
-  }
-  std::string content;
-  content.resize(static_cast<std::size_t>(size));
-  if (!content.empty())
-    file.read(content.data(), static_cast<std::streamsize>(content.size()));
-  if (!file && !file.eof())
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read subagent file").with_context("path", path.string()));
-  }
-  return content;
-}
-
 SubagentToolPreset parse_tool_preset(std::string value)
 {
-  value = trim(value);
+  value = core::trim(value);
   std::ranges::transform(value, value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   if (value == "read-only" || value == "read_only" || value == "readonly" || value == "explore")
     return SubagentToolPreset::ReadOnly;
@@ -201,7 +92,7 @@ bool hidden_field(std::map<std::string, std::string> const& frontmatter)
   auto value = field(frontmatter, "hidden");
   if (!value)
     return false;
-  auto text = trim(*value);
+  auto text = core::trim(*value);
   std::ranges::transform(text, text.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   return text == "true" || text == "yes" || text == "1";
 }
@@ -228,15 +119,15 @@ void add_or_replace_subagent(std::vector<SubagentDefinition>& subagents, std::ve
 void load_subagent_file(std::vector<SubagentDefinition>& subagents, std::vector<SubagentDiagnostic>& diagnostics, std::filesystem::path const& path,
                         std::size_t max_file_bytes)
 {
-  auto content = read_bounded_file(path, max_file_bytes);
+  auto content = app::runtime::read_bounded_file(path, max_file_bytes);
   if (!content)
   {
     diagnostics.push_back(SubagentDiagnostic{.path = path, .message = content.error().format()});
     return;
   }
-  auto parsed = parse_markdown(*content);
+  auto parsed = app::runtime::parse_markdown(*content);
   auto mode = field(parsed.frontmatter, "mode").value_or("subagent");
-  mode = trim(mode);
+  mode = core::trim(mode);
   std::ranges::transform(mode, mode.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   if (mode == "primary")
     return;
@@ -248,8 +139,8 @@ void load_subagent_file(std::vector<SubagentDefinition>& subagents, std::vector<
 
   auto name = field(parsed.frontmatter, "name").value_or(path.stem().string());
   auto description = field(parsed.frontmatter, "description").value_or("");
-  name = trim(name);
-  description = trim(description);
+  name = core::trim(name);
+  description = core::trim(description);
   if (!valid_subagent_name(name))
   {
     diagnostics.push_back(SubagentDiagnostic{.path = path, .message = "subagent name is invalid: " + name});

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/core/string_utils.h"
 #include "ava/tools/webfetch_tool.h"
 #include "ava/provider/curl_transport.h"
 
@@ -53,15 +54,6 @@ bool starts_with_case_insensitive(std::string_view value, std::string_view prefi
 bool all_decimal_digits(std::string_view value)
 {
   return !value.empty() && std::ranges::all_of(value, [](unsigned char ch) { return std::isdigit(ch); });
-}
-
-std::string trim(std::string_view value)
-{
-  std::size_t start = 0;
-  while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])) != 0) ++start;
-  auto end = value.size();
-  while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) --end;
-  return std::string(value.substr(start, end - start));
 }
 
 bool hex_literal(std::string_view value)
@@ -466,7 +458,7 @@ std::string html_to_text(std::string_view html, bool markdown)
     newlines = 0;
     compact.push_back(ch);
   }
-  return trim(std::string_view(compact));
+  return core::trim(std::string_view(compact));
 }
 
 bool is_html_content(std::string_view content_type)

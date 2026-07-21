@@ -4,6 +4,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/app/command_plugins.h"
 #include "ava/app/plugin_event_hooks.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/session_run_controller.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/file_tools.h"

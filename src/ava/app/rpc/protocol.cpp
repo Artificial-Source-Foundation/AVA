@@ -3,6 +3,7 @@
 #include "ava/session/session_store.h"
 #include "ava/core/json.h"
 #include "ava/core/strict_json.h"
+#include "ava/core/string_utils.h"
 
 #include <algorithm>
 #include <cctype>
@@ -17,16 +18,9 @@
 namespace ava::app::rpc {
 namespace {
 
-std::string_view trim(std::string_view value)
-{
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) value.remove_prefix(1);
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) value.remove_suffix(1);
-  return value;
-}
-
 bool is_json_object_line(std::string_view line)
 {
-  line = trim(line);
+  line = core::trim_view(line);
   if (line.size() < 2 || line.front() != '{')
     return false;
   bool in_string = false;
@@ -71,7 +65,7 @@ bool is_json_object_line(std::string_view line)
   }
   if (in_string || depth != 0 || object_end == std::string_view::npos)
     return false;
-  return trim(line.substr(object_end + 1)).empty();
+  return core::trim(line.substr(object_end + 1)).empty();
 }
 
 std::string string_field_json(std::string_view key, std::string_view value)

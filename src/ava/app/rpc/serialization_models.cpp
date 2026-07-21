@@ -2,6 +2,7 @@
 #include "serialization_json.h"
 #include "serialization_models.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/config/model_config.h"
 #include "ava/provider/registry.h"
 #include "ava/core/json.h"

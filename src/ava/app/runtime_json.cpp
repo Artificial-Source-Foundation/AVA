@@ -2,6 +2,7 @@
 #include "ava/app/runtime_json.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/string_utils.h"
 
 #include <cctype>
 #include <utility>
@@ -228,18 +229,6 @@ std::string reasoning_change_data_json(ava::config::ModelInfo const& model, std:
 
 }  // namespace
 
-std::string_view trim(std::string_view value)
-{
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) value.remove_prefix(1);
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) value.remove_suffix(1);
-  return value;
-}
-
-std::string trimmed_copy(std::string_view value)
-{
-  return std::string(trim(value));
-}
-
 std::string json_string_field(std::string_view key, std::string_view value)
 {
   return "\"" + std::string(key) + "\":\"" + ava::core::json::escape(value) + "\"";
@@ -355,16 +344,16 @@ std::optional<bool> bool_json_field(std::string_view object, std::string_view ke
   auto start = ava::core::json::field_value_start(object, key);
   if (!start)
     return std::nullopt;
-  auto value = trim(object.substr(*start));
+  auto value = core::trim(object.substr(*start));
   if (value.starts_with("true"))
   {
-    auto rest = trim(value.substr(4));
+    auto rest = core::trim(value.substr(4));
     if (rest.empty() || rest.front() == ',' || rest.front() == '}')
       return true;
   }
   if (value.starts_with("false"))
   {
-    auto rest = trim(value.substr(5));
+    auto rest = core::trim(value.substr(5));
     if (rest.empty() || rest.front() == ',' || rest.front() == '}')
       return false;
   }

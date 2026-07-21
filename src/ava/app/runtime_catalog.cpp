@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/app/runtime_catalog.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/provider/registry.h"
 
 #include <algorithm>

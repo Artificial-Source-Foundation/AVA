@@ -64,6 +64,9 @@ add_library(ava_app
   "runtime_sessions.cpp"
   "session_run_controller.cpp"
   "runtime_session.cpp"
+  "runtime/Session.cpp"
+  "runtime/markdown_files.cpp"
+  "runtime/command_names.cpp"
 )
 
 target_include_directories(ava_app

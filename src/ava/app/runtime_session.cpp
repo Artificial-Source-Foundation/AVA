@@ -2,10 +2,12 @@
 #include "ava/app/project_trust.h"
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_prompt.h"
 #include "ava/app/runtime_reasoning.h"
+#include "ava/core/string_utils.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 #include "ava/core/ids.h"
@@ -78,7 +80,7 @@ void add_cli_reasoning_context(ava::core::Error& error, ava::config::ModelInfo c
 
 ava::core::VoidResult apply_initial_reasoning_level(runtime::Session& session, std::string_view requested_level)
 {
-  auto level = runtime::trimmed_copy(requested_level);
+  auto level = core::trim(requested_level);
   if (level.empty())
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning level is required");

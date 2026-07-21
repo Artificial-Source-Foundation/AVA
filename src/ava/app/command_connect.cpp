@@ -3,6 +3,7 @@
 #include "ava/app/command_connect.h"
 #include "ava/app/command_format.h"
 #include "ava/app/connect_openai.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/config/provider_profiles.h"

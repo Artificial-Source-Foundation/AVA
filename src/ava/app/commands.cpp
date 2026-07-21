@@ -14,6 +14,7 @@
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime_prompt.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/theme.h"
@@ -1319,7 +1320,7 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   if (!entry)
   {
     auto const token = command_token(request.command);
-    auto registry = load_command_registry(session, CommandRegistryOptions{.include_builtins = false,
+    auto registry = session.load_command_registry(CommandRegistryOptions{.include_builtins = false,
                                                                           .include_prompt_commands = true,
                                                                           .include_skills = true,
                                                                           .include_plugin_commands = true,
@@ -1332,7 +1333,7 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
     }
     if (!token.starts_with("/skill:") && !token.starts_with("/mcp:") && !token.starts_with("/plugin:"))
     {
-      registry = load_command_registry(session, CommandRegistryOptions{.include_builtins = false,
+      registry = session.load_command_registry(CommandRegistryOptions{.include_builtins = false,
                                                                        .include_prompt_commands = false,
                                                                        .include_skills = false,
                                                                        .include_plugin_commands = false,

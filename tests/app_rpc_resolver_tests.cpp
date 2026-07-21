@@ -8,6 +8,7 @@
 #include "ava/app/rpc/resolvers.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/openai_provider.h"

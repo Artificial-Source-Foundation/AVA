@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/core/error.h"
-
 #include <expected>
 
 namespace ava::core {

@@ -5,19 +5,24 @@
 #include <array>
 #include <cstdlib>
 #include <iostream>
-#include <unistd.h>
 #include <string_view>
+#include <unistd.h>
 #include "debug.h"
 
 void run_core_mode_tests();
+void run_diagnostics_tests();
 void run_acp_tests();
 void run_session_tests();
 void run_session_run_controller_tests();
+void run_session_title_coordinator_tests();
+void run_subagent_coordinator_tests();
+void run_subagent_delivery_manager_tests();
 void run_core_json_permission_tests();
 void run_app_command_classification_tests();
 void run_app_command_registry_tests();
 void run_tools_tests();
 void run_config_context_auth_oauth_tests();
+void run_command_tests();
 void run_app_compaction_tests();
 void run_app_print_tests();
 void run_app_event_serialization_tests();
@@ -34,12 +39,15 @@ void run_agent_loop_resilience_tests();
 void run_agent_loop_tests();
 void run_agent_tool_dispatcher_tests();
 void run_tool_scheduler_tests();
+void run_job_journal_tests();
 void run_lsp_tests();
 void run_plugin_tests();
 void run_mcp_tests();
 void run_permission_rules_tests();
 void run_tui_composer_tests();
 void run_run_observer_tests();
+void run_runtime_diagnostics_tests();
+void run_containment_tests();
 #ifdef CWDEBUG
 void run_debug_tests();
 #endif
@@ -54,14 +62,19 @@ struct TestSuite
 
 constexpr std::array kTestSuites{
     TestSuite{"core_mode", run_core_mode_tests},
+    TestSuite{"diagnostics", run_diagnostics_tests},
     TestSuite{"acp", run_acp_tests},
     TestSuite{"session", run_session_tests},
     TestSuite{"session_run_controller", run_session_run_controller_tests},
+    TestSuite{"session_title_coordinator", run_session_title_coordinator_tests},
+    TestSuite{"subagent_coordinator", run_subagent_coordinator_tests},
+    TestSuite{"subagent_delivery_manager", run_subagent_delivery_manager_tests},
     TestSuite{"core_json_permission", run_core_json_permission_tests},
     TestSuite{"app_command_classification", run_app_command_classification_tests},
     TestSuite{"app_command_registry", run_app_command_registry_tests},
     TestSuite{"tools", run_tools_tests},
     TestSuite{"config_context_auth_oauth", run_config_context_auth_oauth_tests},
+    TestSuite{"command", run_command_tests},
     TestSuite{"app_compaction", run_app_compaction_tests},
     TestSuite{"app_print", run_app_print_tests},
     TestSuite{"app_event_serialization", run_app_event_serialization_tests},
@@ -78,12 +91,15 @@ constexpr std::array kTestSuites{
     TestSuite{"agent_loop", run_agent_loop_tests},
     TestSuite{"agent_tool_dispatcher", run_agent_tool_dispatcher_tests},
     TestSuite{"tool_scheduler", run_tool_scheduler_tests},
+    TestSuite{"job_journal", run_job_journal_tests},
     TestSuite{"lsp", run_lsp_tests},
     TestSuite{"plugin", run_plugin_tests},
     TestSuite{"mcp", run_mcp_tests},
     TestSuite{"permission_rules", run_permission_rules_tests},
     TestSuite{"tui_composer", run_tui_composer_tests},
     TestSuite{"run_observer", run_run_observer_tests},
+    TestSuite{"runtime_diagnostics", run_runtime_diagnostics_tests},
+    TestSuite{"containment", run_containment_tests},
 #ifdef CWDEBUG
     TestSuite{"debug", run_debug_tests},
 #endif

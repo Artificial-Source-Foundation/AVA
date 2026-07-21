@@ -3,6 +3,7 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/app/connect_openai.h"
+#include "ava/app/command_tools.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/runtime.h"
@@ -421,8 +422,9 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
   std::ostringstream error_err;
   auto error_result = ava::app::run_print_prompt(*error_session, "bad terminal sanitize", provider, error_transport, run_options, error_out, error_err);
   expect(!error_result && error_out.str().empty() && error_err.str().find('\x1b') == std::string::npos &&
-             error_err.str().find("?]52;c;RElBRw==? diagnostic") != std::string::npos,
-         "print text mode strips terminal controls from tty-bound diagnostics");
+             error_err.str().find("provider streaming diagnostic omitted") != std::string::npos && error_err.str().find("RElBRw==") == std::string::npos &&
+             error_err.str().find('\a') == std::string::npos,
+         "print diagnostics use fixed local provider errors without terminal-control or payload leakage");
 }
 
 void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
@@ -519,11 +521,11 @@ void test_app_print_mode_uses_headless_permission_policy()
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
-                                           .body = "data: {\"type\":\"response.function_call.added\",\"item_id\":"
+                                           .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
                                                    "\"call_outside\",\"name\":\"read_file\"}\n\n"
                                                    "data: "
                                                    "{\"type\":\"response.function_call_arguments.delta\","
-                                                   "\"item_id\":\"call_outside\",\"delta\":\"{"
+                                                   "\"call_id\":\"call_outside\",\"delta\":\"{"
                                                    "\\\"path\\\":\\\"" +
                                                    ava::core::json::escape(outside_path.generic_string()) +
                                                    "\\\"}\"}\n\n"
@@ -579,11 +581,11 @@ void test_app_print_mode_default_permission_denial_is_actionable()
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
-                                           .body = "data: {\"type\":\"response.function_call.added\",\"item_id\":"
+                                           .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
                                                    "\"call_outside\",\"name\":\"read_file\"}\n\n"
                                                    "data: "
                                                    "{\"type\":\"response.function_call_arguments.delta\","
-                                                   "\"item_id\":\"call_outside\",\"delta\":\"{"
+                                                   "\"call_id\":\"call_outside\",\"delta\":\"{"
                                                    "\\\"path\\\":\\\"" +
                                                    ava::core::json::escape(outside_path.generic_string()) +
                                                    "\\\"}\"}\n\n"
@@ -613,6 +615,110 @@ void test_app_print_mode_default_permission_denial_is_actionable()
          "print mode emits actionable permission denial diagnostics to stderr");
 }
 
+void test_runtime_command_authority_roots_are_shared_with_direct_tool_context()
+{
+  auto const root = create_empty_root("app-runtime-command-authority-roots");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime authority-root test opens a session");
+  if (!session)
+    return;
+
+  auto const roots = ava::app::command_authority_roots_for_session(*session);
+  auto const direct_context = ava::app::make_tool_context(*session, nullptr);
+  auto const contains = [&roots](std::filesystem::path const& path) {
+    auto const normalized = path.lexically_normal();
+    return std::ranges::any_of(roots, [&normalized](std::filesystem::path const& root_path) {
+      auto const relative = normalized.lexically_relative(root_path);
+      auto const text = relative.generic_string();
+      return !relative.empty() && relative != ".." && !text.starts_with("../");
+    });
+  };
+  expect(contains(paths.ava_config_dir) && contains(paths.ava_state_dir) && contains(paths.sessions_dir) && direct_context.ava_authority_roots == roots,
+         "one bounded deduplicated app helper supplies config, state, session, and credential authority roots to direct command ToolContexts");
+}
+
+void test_app_print_mode_model_command_persistent_deny_preflight()
+{
+  auto const root = create_empty_root("app-print-model-command-persistent-deny");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "print model-command persistent Deny fixture keeps sealed planning roots owner-only");
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "print model-command persistent Deny test opens runtime session");
+  if (!session)
+    return;
+
+  auto added = ava::permissions::add_persistent_permission_rule(
+      ava::app::permission_rule_store_for_session(*session),
+      ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                            .action = ava::permissions::PermissionAction::Deny,
+                                            .operation = ava::permissions::Operation::RunCommand,
+                                            .mode = ava::permissions::PermissionRuleMode::Build,
+                                            .tool_name = "bash",
+                                            .target_path = {},
+                                            .command = "ls",
+                                            .command_recipe_key = {},
+                                            .recipe_display = {},
+                                            .critical_acknowledged = false,
+                                            .reason = "external exact model-command deny",
+                                            .actor = "test"});
+  expect(added.has_value(), "print model-command persistent Deny test stores an external exact Deny");
+  if (!added)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_print_bash\",\"name\":\"bash\"}\n\n"
+                                                    "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_print_bash\",\"delta\":\"{\\\"command\\\":\\\"ls\\\"}\"}\n\n"
+                                                    "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_print_bash\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response(final_text_sse("persistent model deny handled"))});
+  int interactive_prompts = 0;
+  ava::app::runtime::RunOptions runtime_options;
+  runtime_options.access_token = "token";
+  runtime_options.permission_resolver =
+      [&interactive_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    ++interactive_prompts;
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = std::move(runtime_options)};
+  std::ostringstream out;
+  std::ostringstream err;
+  auto result = ava::app::run_print_prompt(*session, "model tries ls", provider, transport, run_options, out, err);
+
+  auto entries = session->store.load();
+  bool saw_preflight_deny = false;
+  if (entries)
+  {
+    for (auto const& entry : *entries)
+    {
+      saw_preflight_deny = saw_preflight_deny ||
+                            (entry.type == ava::session::EntryType::PermissionDecision &&
+                             ava::core::json::string_field(entry.data_json, "resolution") == "deny" &&
+                             ava::core::json::string_field(entry.data_json, "resolution_source") == "persistent_rule" &&
+                             ava::core::json::string_field(entry.data_json, "rule_id") == added->rule_id);
+    }
+  }
+  expect(result && result->final_text == "persistent model deny handled" && result->tool_calls == 1 && interactive_prompts == 0 &&
+             result->tool_timeline.size() == 1 && result->tool_timeline.front().status == ava::agent::ToolTimelineStatus::Error && saw_preflight_deny,
+         "runtime prompt wires persistent exact Denies into model-command auto-Allow preflight before execution or interactive resolution");
+}
+
 void test_app_print_mode_uses_persistent_permission_rules()
 {
   auto const root = create_empty_root("app-print-persistent-permission-rule");
@@ -632,11 +738,7 @@ void test_app_print_mode_uses_persistent_permission_rules()
   if (!session)
     return;
 
-  ava::permissions::PermissionRuleStore const store{
-      .global_rules_file = paths.ava_config_dir / "permission-rules.json",
-      .workspace_rules_file = workspace / ".ava" / "permission-rules.json",
-      .workspace_dir = workspace,
-  };
+  auto const store = ava::app::permission_rule_store_for_session(*session);
   auto added =
       ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
                                                                                                     .action = ava::permissions::PermissionAction::Allow,
@@ -645,6 +747,9 @@ void test_app_print_mode_uses_persistent_permission_rules()
                                                                                                     .tool_name = "",
                                                                                                     .target_path = outside_path,
                                                                                                     .command = "",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
                                                                                                     .reason = "allow exact print outside read",
                                                                                                     .actor = "test"});
   expect(added.has_value(), "print persistent permission rule test stores allow rule");
@@ -978,7 +1083,8 @@ void test_app_print_json_mode_outputs_runtime_events()
   ava::tests::FakeTransport error_transport({ava::provider::HttpResponse{
       .status_code = 500,
       .headers = {},
-      .body = "upstream failure",
+      .body =
+          R"({"error":{"message":"safe upstream failure","unknown":{"private":"CLI_HTTP_NESTED_CANARY"}},"unknown":"CLI_HTTP_OUTER_CANARY","authorization":"Bearer CLI_HTTP_BEARER_CANARY"})",
   }});
   std::ostringstream error_out;
   std::ostringstream error_err;
@@ -986,8 +1092,15 @@ void test_app_print_json_mode_outputs_runtime_events()
   auto const error_jsonl = error_out.str();
   auto const error_last_break = error_jsonl.size() > 1 ? error_jsonl.rfind('\n', error_jsonl.size() - 2) : std::string::npos;
   auto const error_last_line = error_jsonl.substr(error_last_break == std::string::npos ? 0 : error_last_break + 1);
-  expect(!error_result && error_err.str().empty() && error_last_line.find("\"name\":\"error\"") != std::string::npos,
-         "print json mode writes failed turns as JSONL envelopes ending in error");
+  auto const formatted_error = error_result ? std::string{} : error_result.error().format();
+  auto const combined_error_output = error_jsonl + error_err.str() + formatted_error;
+  expect(!error_result && error_err.str().empty() && error_last_line.find("\"name\":\"error\"") != std::string::npos &&
+             combined_error_output.find("OpenAI HTTP request failed with status 500") != std::string::npos &&
+             combined_error_output.find("safe upstream failure") == std::string::npos &&
+             combined_error_output.find("CLI_HTTP_NESTED_CANARY") == std::string::npos &&
+             combined_error_output.find("CLI_HTTP_OUTER_CANARY") == std::string::npos &&
+             combined_error_output.find("CLI_HTTP_BEARER_CANARY") == std::string::npos,
+         "print JSON CLI errors expose fixed status diagnostics without provider-controlled payload fields");
 }
 
 void test_app_print_json_mode_streams_provider_deltas_before_final_message()
@@ -1038,6 +1151,8 @@ void run_app_print_tests()
   test_app_print_text_mode_reports_stdout_write_failure();
   test_app_print_mode_uses_headless_permission_policy();
   test_app_print_mode_default_permission_denial_is_actionable();
+  test_runtime_command_authority_roots_are_shared_with_direct_tool_context();
+  test_app_print_mode_model_command_persistent_deny_preflight();
   test_app_print_mode_uses_persistent_permission_rules();
   test_app_print_mode_refreshes_expired_oauth_before_provider_request();
   test_app_print_offline_fails_before_auth_refresh_or_provider_request();

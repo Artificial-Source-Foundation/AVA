@@ -7,9 +7,13 @@
 #include "runtime_reasoning.h"
 #include "runtime_retry.h"
 #include "runtime/Session.h"
+#include "runtime_sessions.h"
 #include "runtime/markdown_files.h"
 #include "runtime/command_names.h"
+#include "session_title_coordinator.h"
+#include "subagent_delivery_manager.h"
 
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/tools/file_tools.h"
@@ -580,6 +584,31 @@ StopReason outcome_reason_for_error(ava::core::Error const& error)
   return StopReason::ProviderError;
 }
 
+std::optional<ava::diagnostics::RuntimeFailureClass> diagnostic_failure_class(ava::core::Error const& error) noexcept
+{
+  if (is_agent_loop_canceled_error(error))
+    return std::nullopt;
+  switch (error.category())
+  {
+    case ava::core::ErrorCategory::Configuration:
+      return ava::diagnostics::RuntimeFailureClass::Configuration;
+    case ava::core::ErrorCategory::Provider:
+      return ava::diagnostics::RuntimeFailureClass::Provider;
+    case ava::core::ErrorCategory::Session:
+    case ava::core::ErrorCategory::Io:
+      return ava::diagnostics::RuntimeFailureClass::Session;
+    case ava::core::ErrorCategory::Tool:
+      return ava::diagnostics::RuntimeFailureClass::Tool;
+    case ava::core::ErrorCategory::Unknown:
+      return ava::diagnostics::RuntimeFailureClass::Runtime;
+    case ava::core::ErrorCategory::InvalidArgument:
+    case ava::core::ErrorCategory::NotFound:
+    case ava::core::ErrorCategory::PermissionDenied:
+      return std::nullopt;
+  }
+  return std::nullopt;
+}
+
 constexpr std::size_t kMaxPromptFileReferences = 5;
 constexpr std::size_t kPromptReferenceMaxBytes = 32 * 1024;
 constexpr std::size_t kPromptReferenceMaxLines = 300;
@@ -658,6 +687,8 @@ ava::tools::ToolContext prompt_file_reference_context(runtime::Session& session,
                                  .cancel_requested = options.cancel_requested,
                                  .permission_tool_name = "file_reference",
                                  .permission_actor = "user",
+                                 .anchor_set = session.anchor_set,
+                                 .ava_authority_roots = command_authority_roots_for_session(session),
                                  .exact_file_access = options.exact_file_access,
                                  .command_executor = options.command_executor,
                                  .session_id = session.store.session_id(),
@@ -768,13 +799,19 @@ ava::core::Error offline_provider_error(std::string_view action)
   return error;
 }
 
-void apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state)
+ava::core::VoidResult refresh_runtime_parent_configuration(runtime::Session const& session)
+{
+  return session.subagent_delivery_manager ? session.subagent_delivery_manager->refresh_parent_configuration(session) : ava::core::VoidResult{};
+}
+
+ava::core::VoidResult apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state)
 {
   session.mode = prompt_state.mode;
   session.base_prompt = std::move(prompt_state.base_prompt);
   session.context_sources = std::move(prompt_state.context_sources);
   session.freshness_sources = std::move(prompt_state.freshness_sources);
   session.system_prompt = std::move(prompt_state.system_prompt);
+  return refresh_runtime_parent_configuration(session);
 }
 
 ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message, ava::provider::Provider const& provider,
@@ -792,7 +829,11 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& sess
     if (!joined)
       return std::unexpected(std::move(joined.error()));
     if (joined->reason == StopReason::PersistenceError && joined->error)
+    {
+      if (session.diagnostics)
+        session.diagnostics->record_terminal_failure(ava::diagnostics::RuntimeFailureClass::Session, *joined->error);
       return std::unexpected(*joined->error);
+    }
     return ava::agent::AgentLoopResult{.final_text = {},
                                        .usage = std::nullopt,
                                        .cost_usd = std::nullopt,
@@ -820,12 +861,37 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
                                                                    ava::provider::Provider const& provider, ava::provider::Transport& transport,
                                                                    runtime::RunOptions const& options, ActiveRunGuard guard)
 {
-  auto fail_run = [&guard](ava::core::Error error) -> ava::core::Result<ava::agent::AgentLoopResult> {
+  auto fail_run = [&guard, &session](ava::core::Error error) -> ava::core::Result<ava::agent::AgentLoopResult> {
+    if (session.diagnostics)
+      if (auto failure_class = diagnostic_failure_class(error))
+        session.diagnostics->record_terminal_failure(*failure_class, error);
     auto completed = guard.complete(RunOutcome{.run_id = {}, .reason = outcome_reason_for_error(error), .error = error});
     if (completed && completed->reason == StopReason::PersistenceError && completed->error)
+    {
+      if (session.diagnostics)
+        session.diagnostics->record_terminal_failure(ava::diagnostics::RuntimeFailureClass::Session, *completed->error);
       return std::unexpected(*completed->error);
+    }
     return std::unexpected(std::move(error));
   };
+  struct ParentRefresh final
+  {
+    std::shared_ptr<SubagentDeliveryManager> manager;
+    std::string session_id;
+    std::optional<SubagentDeliveryManager::CapsuleGeneration> generation = std::nullopt;
+    ~ParentRefresh()
+    {
+      if (manager && generation)
+        manager->release_parent_if_unused(session_id, *generation);
+    }
+  } refresh{options.synthetic_subagent_delivery ? nullptr : session.subagent_delivery_manager, session.store.session_id()};
+  if (refresh.manager)
+  {
+    auto retained = refresh.manager->refresh_parent(session, options);
+    if (!retained)
+      return fail_run(std::move(retained.error()));
+    refresh.generation = *retained;
+  }
   if (session.offline || options.offline)
     return fail_run(offline_provider_error("prompt"));
   if (!session.run_controller)
@@ -842,6 +908,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   // immutable route rather than the legacy direct store callback. Isolated
   // runs bypass ambient plugin event hooks entirely.
   auto append_route = guard.append_route();
+  auto append_batch_route = guard.append_batch_route();
   runtime::EventSink event_sink = options.event_sink;
   if (!options.isolate_project_resources)
   {
@@ -853,7 +920,14 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
     event_sink = make_plugin_event_observer_sink(std::move(plugin_observer_options), options.event_sink);
   }
   auto runtime_options = options;
+  if (session.diagnostics)
+  {
+    auto production_observation = session.diagnostics->observation();
+    if (production_observation && production_observation->enabled())
+      runtime_options.observation = std::move(production_observation);
+  }
   runtime_options.active_append_route = append_route;
+  runtime_options.active_append_batch_route = append_batch_route;
   auto const caller_cancel_requested = runtime_options.cancel_requested;
   runtime_options.cancel_requested = [guard_token = guard.stop_token(), caller_cancel_requested] {
     return guard_token.stop_requested() || (caller_cancel_requested && caller_cancel_requested());
@@ -903,10 +977,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
     runtime_transport = &*retry_transport;
     runtime_options.enable_transport_retries = false;
   }
-  ava::permissions::register_enforceable_permission_rule_files(
-      ava::permissions::PermissionRuleStore{.global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-                                            .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-                                            .workspace_dir = session.workspace_dir});
+  ava::permissions::register_enforceable_permission_rule_files(permission_rule_store_for_session(session));
 
   auto expanded_user_message = runtime_options.expand_prompt_file_references ? expand_prompt_file_references(session, user_message, runtime_options)
                                                                              : ava::core::Result<std::string>(user_message);
@@ -934,6 +1005,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
         .global_config_file = session.paths.ava_config_dir / "lsp.json",
         .project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "lsp.json" : std::filesystem::path{},
         .workspace_root = session.workspace_dir,
+        .anchor_set = session.anchor_set,
         .mode = session.mode,
         .permission_resolver = runtime_options.permission_resolver,
     });
@@ -966,12 +1038,13 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
                                         ? session.workspace_dir / ".ava" / "plugins"
                                         : std::filesystem::path{},
       .plugin_enablement_file = runtime_options.isolate_project_resources ? std::filesystem::path{} : session.paths.ava_state_dir / "plugin-enablement.json",
-      .session_mcp_config = session.mcp_config,
+      .session_mcp_config = runtime_options.disable_session_mcp ? std::make_shared<ava::mcp::McpConfig const>() : session.mcp_config,
       .exact_builtin_tool_names = runtime_options.exact_builtin_tool_names,
       .require_descriptor_secure_workspace = runtime_options.require_descriptor_secure_workspace,
       .announce_execution_after_permission = runtime_options.announce_execution_after_permission,
       .redact_permission_audit_arguments = runtime_options.redact_permission_audit_arguments,
       .require_explicit_file_permissions = runtime_options.require_explicit_file_permissions,
+      .ava_authority_roots = command_authority_roots_for_session(session),
       .exact_file_access = runtime_options.exact_file_access,
       .command_executor = runtime_options.command_executor,
       .subagents = std::move(subagents),
@@ -1078,6 +1151,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
         return {};
       },
       .permission_resolver = runtime_options.permission_resolver,
+      .command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(permission_rule_store_for_session(session)),
       .question_resolver = runtime_options.question_resolver,
       .cancel_requested = [&runtime_options,
                            &sink_error] { return sink_error.has_value() || (runtime_options.cancel_requested && runtime_options.cancel_requested()); },
@@ -1096,11 +1170,13 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
         std::unique_ptr<ava::provider::Transport> transport = std::make_unique<ava::provider::CurlCliTransport>();
         return transport;
       },
-      .background_jobs = session.background_jobs,
+      .subagent_coordinator = session.subagent_coordinator,
       .session_mutex = runtime_options.session_mutex,
       .append_entry = append_route,
+      .append_batch = std::move(append_batch_route),
       .session_read_authority = std::move(*session_read_authority),
-      .parent_notification_sink = session.owner_append_route(),
+      .session_read_limits = session.session_read_limits,
+      .synthetic_user_message_provenance = runtime_options.synthetic_subagent_delivery ? runtime_options.synthetic_user_message_provenance : std::nullopt,
       .on_phase = [&guard, &runtime_options](ava::agent::RunPhase phase) -> ava::core::VoidResult {
         if (phase == ava::agent::RunPhase::Completing && runtime_options.on_terminal_commit)
         {
@@ -1160,9 +1236,21 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   if (!completed)
     return std::unexpected(std::move(completed.error()));
   if (completed->reason == StopReason::PersistenceError && completed->error)
+  {
+    if (session.diagnostics)
+      session.diagnostics->record_terminal_failure(ava::diagnostics::RuntimeFailureClass::Session, *completed->error);
     return std::unexpected(*completed->error);
+  }
   if (completed->reason != proposed_reason)
     result->outcome = runtime_outcome_for_stop_reason(completed->reason);
+
+  // This boundary is deliberately after AdmissionGuard completion, not the
+  // earlier Done event. The coordinator is best-effort and cannot change the
+  // already committed ordinary user turn.
+  if (result->committed_turn_id && !options.synthetic_subagent_delivery && !session.sessionless && session.session_title_coordinator)
+  {
+    session.session_title_coordinator->schedule(session, user_message, *result->committed_turn_id, options);
+  }
 
   return result;
 }

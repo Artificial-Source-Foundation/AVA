@@ -518,6 +518,27 @@ JsonlRunObserver::JsonlRunObserver(JsonlObserverOptions options) : options_(std:
     throw std::invalid_argument("trace path must include parent directory");
   options_.max_events = std::max<std::size_t>(1, options_.max_events);
   options_.max_event_bytes = std::min(options_.max_event_bytes, options_.max_bytes);
+  if (options_.initial_fd >= 0)
+  {
+    int const fd = ::fcntl(options_.initial_fd, F_DUPFD_CLOEXEC, 0);
+    if (fd < 0)
+      throw std::system_error(errno, std::generic_category(), "duplicate trace artifact descriptor");
+    try
+    {
+      verify_trace_file(fd);
+      int const flags = ::fcntl(fd, F_GETFL);
+      if (flags < 0 || (flags & O_ACCMODE) == O_RDONLY || (flags & O_APPEND) == 0)
+        throw std::invalid_argument("trace artifact descriptor must be append-writable");
+      if (::flock(fd, LOCK_EX | LOCK_NB) != 0)
+        throw std::system_error(errno, std::generic_category(), "lock trace artifact");
+      fd_ = fd;
+    }
+    catch (...)
+    {
+      ::close(fd);
+      throw;
+    }
+  }
 }
 JsonlRunObserver::~JsonlRunObserver() noexcept
 {
@@ -614,8 +635,11 @@ bool queue_has_capacity(std::size_t queued_events, std::size_t queued_bytes, std
 
 QueuedJsonlRunObserver::QueuedJsonlRunObserver(QueuedJsonlObserverOptions options)
     : options_(std::move(options)),
-      writer_(JsonlObserverOptions{
-          .path = options_.path, .max_events = options_.max_events, .max_bytes = options_.max_bytes, .max_event_bytes = options_.max_event_bytes})
+      writer_(JsonlObserverOptions{.path = options_.path,
+                                   .max_events = options_.max_events,
+                                   .max_bytes = options_.max_bytes,
+                                   .max_event_bytes = options_.max_event_bytes,
+                                   .initial_fd = options_.initial_fd})
 {
   options_.max_queue_events = std::max<std::size_t>(1, options_.max_queue_events);
   options_.max_queue_bytes = std::max(options_.max_event_bytes, options_.max_queue_bytes);

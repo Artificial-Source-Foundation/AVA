@@ -25,6 +25,11 @@ target_link_libraries(ava_fake_lsp_server PRIVATE ${AVA_BACKEND_LIBRARIES})
 ava_apply_warnings(ava_fake_lsp_server)
 ava_apply_sanitizers(ava_fake_lsp_server)
 
+add_executable(ava_lsp_real_clangd_smoke "lsp_real_clangd_smoke.cpp")
+target_link_libraries(ava_lsp_real_clangd_smoke PRIVATE ${AVA_BACKEND_LIBRARIES})
+ava_apply_warnings(ava_lsp_real_clangd_smoke)
+ava_apply_sanitizers(ava_lsp_real_clangd_smoke)
+
 add_executable(ava_fake_mcp_server "support/fake_mcp_server.cpp")
 target_link_libraries(ava_fake_mcp_server PRIVATE ${AVA_BACKEND_LIBRARIES})
 ava_apply_warnings(ava_fake_mcp_server)
@@ -53,9 +58,12 @@ set(AVA_TESTS_SOURCES
   "app_rpc_tests.cpp"
   "app_runtime_tests.cpp"
   "config_context_auth_oauth_tests.cpp"
+  "command_tests.cpp"
   "core_tests.cpp"
   "core_mode_json_permissions_tests.cpp"
+  "diagnostics_tests.cpp"
   "events_tests.cpp"
+  "job_journal_tests.cpp"
   "lsp_tests.cpp"
   "mcp_tests.cpp"
   "permission_rules_tests.cpp"
@@ -66,6 +74,9 @@ set(AVA_TESTS_SOURCES
   "provider_openai_tests.cpp"
   "session_tests.cpp"
   "session_run_controller_tests.cpp"
+  "session_title_coordinator_tests.cpp"
+  "subagent_coordinator_tests.cpp"
+  "subagent_delivery_manager_tests.cpp"
   "tool_scheduler_tests.cpp"
   "tools_file_tests.cpp"
   "tools_process_network_tests.cpp"
@@ -73,6 +84,8 @@ set(AVA_TESTS_SOURCES
   "tools_tests.cpp"
   "tui_composer_tests.cpp"
   "run_observer_tests.cpp"
+  "runtime_diagnostics_tests.cpp"
+  "containment_tests.cpp"
 )
 # The debug suite relies on libcwd-backed machinery (ava_debug, CWDEBUG), so it is
 # only compiled in when libcwd is effectively enabled.
@@ -96,14 +109,19 @@ ava_apply_sanitizers(ava_tests)
 
 set(AVA_TEST_SUITES
   core_mode
+  diagnostics
   acp
   session
   session_run_controller
+  session_title_coordinator
+  subagent_coordinator
+  subagent_delivery_manager
   core_json_permission
   app_command_classification
   app_command_registry
   tools
   config_context_auth_oauth
+  command
   app_compaction
   app_print
   app_event_serialization
@@ -120,18 +138,25 @@ set(AVA_TEST_SUITES
   agent_loop
   agent_tool_dispatcher
   tool_scheduler
+  job_journal
   lsp
   plugin
   mcp
   permission_rules
   tui_composer
   run_observer
+  runtime_diagnostics
+  containment
 )
 foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
 endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(ava_tests.containment PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.tool_scheduler PROPERTIES TIMEOUT 30)
+
+add_test(NAME ava_tests.lsp_real_clangd_smoke COMMAND ava_lsp_real_clangd_smoke)
+set_tests_properties(ava_tests.lsp_real_clangd_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 20 LABELS "lsp;offline;optional")
 
 add_test(NAME ava_cli.rpc_broken_pipe_subprocess COMMAND ava_rpc_broken_pipe_subprocess_test)
 set_tests_properties(ava_cli.rpc_broken_pipe_subprocess PROPERTIES TIMEOUT 10)
@@ -421,6 +446,22 @@ if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
 endif()
 if(Python3_Interpreter_FOUND)
   add_test(
+    NAME ava_cli.doctor_support
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/doctor_support_cli_test.py
+            --ava $<TARGET_FILE:ava>
+            --root ${CMAKE_BINARY_DIR}/doctor-support-cli)
+  set_tests_properties(ava_cli.doctor_support PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_cli.runtime_diagnostics
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/runtime_diagnostics_cli_test.py
+            --ava $<TARGET_FILE:ava>
+            --root ${CMAKE_BINARY_DIR}/runtime-diagnostics-cli)
+  set_tests_properties(ava_cli.runtime_diagnostics PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
     NAME ava_build.parallel_test_runner
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/parallel_test_runner_test.py
@@ -531,13 +572,39 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(ava_release.package_linux PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 240 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
   endif()
 
-  add_test(
-    NAME ava_tui.tmux_smoke
-    COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tui_tmux_smoke.py
-            --ava $<TARGET_FILE:ava>
-            --root ${CMAKE_BINARY_DIR}/tui-tmux-smoke)
-  set_tests_properties(ava_tui.tmux_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+  set(AVA_TUI_TMUX_SMOKE_SCENARIOS
+    suspend_resume
+    keybind_conflict
+    theme_env
+    theme_persisted
+    active_run
+    restore_followup
+    main_startup_trust_keybinds
+    main_models_selectors
+    main_editor_input
+    main_slash_completions
+    main_permission_flow
+    main_session_mgmt
+    main_paste_scrollback_attach)
+  foreach(AVA_TUI_TMUX_SMOKE_SCENARIO IN LISTS AVA_TUI_TMUX_SMOKE_SCENARIOS)
+    add_test(
+      NAME ava_tui.tmux_smoke_${AVA_TUI_TMUX_SMOKE_SCENARIO}
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/tui_tmux_smoke.py
+              --scenario ${AVA_TUI_TMUX_SMOKE_SCENARIO}
+              --ava $<TARGET_FILE:ava>
+              --fake-provider $<TARGET_FILE:ava_fake_provider_server>
+              --root ${CMAKE_BINARY_DIR}/tui-tmux-smoke/${AVA_TUI_TMUX_SMOKE_SCENARIO})
+    set_tests_properties(
+      ava_tui.tmux_smoke_${AVA_TUI_TMUX_SMOKE_SCENARIO}
+      PROPERTIES
+        SKIP_RETURN_CODE 77
+        TIMEOUT 60
+        TIMEOUT_SIGNAL_NAME SIGTERM
+        TIMEOUT_SIGNAL_GRACE_PERIOD 10
+        LABELS "tui;tmux;smoke;opt-in"
+        ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+  endforeach()
 
   add_test(
     NAME ava_tui.kitty_image_smoke
@@ -577,4 +644,12 @@ if(OptionEnableLibcwd)
   add_test(
     NAME ava_debug.print_members_format
     COMMAND ava_tests debug)
+endif()
+
+# Existing integration providers use exact finite response scripts. Automatic
+# title generation has dedicated fake-transport coverage and must not consume
+# those scripts or make any external provider call during ordinary CTest runs.
+get_property(AVA_REGISTERED_TESTS DIRECTORY PROPERTY TESTS)
+if(AVA_REGISTERED_TESTS)
+  set_property(TEST ${AVA_REGISTERED_TESTS} APPEND PROPERTY ENVIRONMENT "AVA_SESSION_TITLES=off")
 endif()

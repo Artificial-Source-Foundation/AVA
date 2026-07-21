@@ -695,7 +695,15 @@ void test_permission_audit_persistence()
   auto const root = create_empty_root("permission-audit");
 
   auto const workspace = root / "workspace";
+  auto const spill = root / "spill";
   std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(spill);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0 && ::chmod(spill.c_str(), S_IRWXU) == 0,
+         "permission audit command workspace is owner-only for sealed planning");
+  auto anchors = ava::core::AnchorSet::open({workspace, spill});
+  expect(anchors.has_value(), "permission audit opens its shared command AnchorSet");
+  if (!anchors)
+    return;
 
   auto const allowed_path = workspace / "allowed.txt";
   {
@@ -715,7 +723,11 @@ void test_permission_audit_persistence()
 
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "audit"});
   auto sink = [&store](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult { return append_permission_audit_for_test(store, event); };
-  ava::tools::ToolContext const context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build, .permission_audit_sink = sink};
+  ava::tools::ToolContext const context{.workspace_dir = workspace,
+                                        .spill_dir = spill,
+                                        .mode = ava::agent::Mode::Build,
+                                        .permission_audit_sink = sink,
+                                        .anchor_set = *anchors};
 
   auto allowed = ava::tools::read_file(context, allowed_path);
   expect(allowed && allowed->content == "allowed", "permission audit allows normal read");
@@ -784,16 +796,20 @@ void test_permission_audit_persistence()
   }
 
   auto bash_denied = ava::tools::run_bash(context, "rm -rf important");
-  expect(!bash_denied, "permission audit preserves bash policy denial");
+  expect(!bash_denied && bash_denied.error().format().find("resolution: no_resolver") != std::string::npos,
+         "sealed destructive bash command asks and fails closed without a resolver");
   loaded = store.load();
   audits = loaded ? permission_entries(*loaded) : std::vector<ava::session::SessionEntry>{};
-  expect(audits.size() == 5, "bash policy decision appends command audit entry");
-  if (audits.size() >= 5)
+  expect(audits.size() == 6, "sealed command Ask appends policy and no-resolver audit entries");
+  if (audits.size() >= 6)
   {
     expect(ava::core::json::string_field(audits[4].data_json, "operation") == "bash" &&
-               ava::core::json::string_field(audits[4].data_json, "command") == "rm -rf important" &&
-               ava::core::json::string_field(audits[4].data_json, "risk") == "critical" && !ava::core::json::string_field(audits[4].data_json, "target_path"),
-           "bash audit records command risk without path-only target field");
+               ava::core::json::string_field(audits[4].data_json, "command") == "<redacted one-shot command>" &&
+               ava::core::json::string_field(audits[4].data_json, "action") == "ask" &&
+               ava::core::json::string_field(audits[4].data_json, "risk") == "critical" && !ava::core::json::string_field(audits[4].data_json, "target_path") &&
+               ava::core::json::string_field(audits[5].data_json, "resolution") == "deny" &&
+               ava::core::json::string_field(audits[5].data_json, "resolution_source") == "no_resolver",
+           "bash audit records critical sealed metadata without a path-only target field");
   }
 
   ava::tools::ToolContext const denying_context{
@@ -807,12 +823,12 @@ void test_permission_audit_persistence()
   expect(!resolver_denied, "permission audit preserves resolver denial behavior");
   loaded = store.load();
   audits = loaded ? permission_entries(*loaded) : std::vector<ava::session::SessionEntry>{};
-  expect(audits.size() == 7, "resolver denial appends ask and outcome audit entries");
-  if (audits.size() >= 7)
+  expect(audits.size() == 8, "resolver denial appends ask and outcome audit entries after sealed command auditing");
+  if (audits.size() >= 8)
   {
-    expect(ava::core::json::string_field(audits[6].data_json, "resolution") == "deny" &&
-               ava::core::json::string_field(audits[6].data_json, "resolution_source") == "resolver" &&
-               ava::core::json::string_field(audits[6].data_json, "resolution_reason") == "manual resolver denial",
+    expect(ava::core::json::string_field(audits[7].data_json, "resolution") == "deny" &&
+               ava::core::json::string_field(audits[7].data_json, "resolution_source") == "resolver" &&
+               ava::core::json::string_field(audits[7].data_json, "resolution_reason") == "manual resolver denial",
            "resolver denial audit records the client-supplied resolution reason");
   }
 

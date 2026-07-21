@@ -7,7 +7,7 @@
 namespace ava::app::rpc {
 namespace {
 
-constexpr std::array<std::string_view, 58> kCommandTypes = {
+constexpr std::array<std::string_view, 64> kCommandTypes = {
     "get_protocol",
     "get_state",
     "prompt",
@@ -26,6 +26,12 @@ constexpr std::array<std::string_view, 58> kCommandTypes = {
     "get_session_stats",
     "validate_session",
     "list_sessions",
+    "list_jobs",
+    "get_job",
+    "wait_job",
+    "get_job_result",
+    "cancel_job",
+    "promote_job",
     "session_tree",
     "session_metadata",
     "set_session_name",
@@ -105,9 +111,9 @@ constexpr std::array<std::string_view, 34> kEventNames = {
     "follow_up_skipped",
 };
 
-constexpr std::array<std::string_view, 11> kStableErrorCodes = {
-    "invalid_request",   "active_run",     "canceled",      "follow_up_skipped", "io_error",       "not_found",
-    "permission_denied", "provider_error", "session_error", "tool_error",        "internal_error",
+constexpr std::array<std::string_view, 12> kStableErrorCodes = {
+    "invalid_request", "active_run",        "canceled",       "follow_up_skipped", "job_not_ready", "io_error",
+    "not_found",       "permission_denied", "provider_error", "session_error",     "tool_error",    "internal_error",
 };
 
 template <std::size_t Size>

@@ -32,7 +32,8 @@ function(assert_after VAR_NAME ANCHOR NEEDLE)
   endif()
 endfunction()
 
-get_filename_component(TEST_ROOT "${AVA_CLI_TEST_ROOT}" ABSOLUTE)
+get_filename_component(TEST_ROOT_NAME "${AVA_CLI_TEST_ROOT}" NAME)
+set(TEST_ROOT "/tmp/${TEST_ROOT_NAME}")
 set(WORKSPACE "${TEST_ROOT}/workspace")
 set(HOME_DIR "${TEST_ROOT}/home")
 set(CONFIG_DIR "${TEST_ROOT}/config")
@@ -52,7 +53,11 @@ set(TARGET_FILE "${WORKSPACE}/src/todo.txt")
 set(MUTATION_FILE "${TEST_ROOT}/outside-todo.txt")
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
-file(MAKE_DIRECTORY "${WORKSPACE}/src" "${WORKSPACE}/docs" "${HOME_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}" "${DATA_DIR}")
+file(MAKE_DIRECTORY "${WORKSPACE}/src" "${WORKSPACE}/docs" "${HOME_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}/ava/sessions" "${DATA_DIR}")
+# Model command sealing treats AVA's config and current-session namespace as
+# authority roots, so this fixture must model the owner-private XDG layout.
+file(CHMOD "${TEST_ROOT}" "${WORKSPACE}" "${HOME_DIR}" "${CONFIG_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}" "${STATE_DIR}/ava" "${STATE_DIR}/ava/sessions" "${DATA_DIR}"
+     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 file(WRITE "${WORKSPACE}/AGENTS.md" "headless e2e smoke project instructions\n")
 file(WRITE "${TARGET_FILE}" "status: TODO\ndetail: replace TODO with DONE and verify.\n")
 file(WRITE "${MUTATION_FILE}" "status: TODO\ndetail: replace TODO with DONE and verify.\n")
@@ -238,13 +243,18 @@ foreach(NEEDLE
         "\"ok\":true"
         "\"id\":\"messages-after\""
         "\"type\":\"user_message\""
-        "\"type\":\"assistant_message\""
-        "\"type\":\"tool_call\""
+        "\"name\":\"assistant_message\""
+        "\"name\":\"tool_start\""
         "\"type\":\"tool_result\""
         "\"id\":\"sessions-after\""
         "\"sessions\":[")
   assert_contains(AVA_OUTPUT "${NEEDLE}")
 endforeach()
+
+assert_after(AVA_OUTPUT "\"id\":\"messages-after\"" "\"type\":\"assistant_message\"")
+assert_after(AVA_OUTPUT "\"id\":\"messages-after\"" "E2E task complete: TODO fixed and verification command passed.")
+assert_after(AVA_OUTPUT "\"id\":\"messages-after\"" "\"type\":\"tool_call\"")
+assert_after(AVA_OUTPUT "\"id\":\"messages-after\"" "\"call_id\":\"call_bash_e2e\"")
 
 file(GLOB_RECURSE SESSION_FILES "${STATE_DIR}/ava/sessions/*.jsonl")
 list(LENGTH SESSION_FILES SESSION_FILE_COUNT)
@@ -255,8 +265,8 @@ list(GET SESSION_FILES 0 SESSION_FILE)
 file(READ "${SESSION_FILE}" SESSION_JSONL)
 foreach(NEEDLE
         "\"type\":\"user_message\""
-        "\"type\":\"assistant_message\""
-        "\"type\":\"tool_call\""
+        "\"type\":\"assistant_output_item\""
+        "\"type\":\"assistant_turn_commit\""
         "\"type\":\"tool_result\""
         "\"type\":\"permission_decision\""
         "\"tool_name\":\"apply_patch\""
@@ -309,13 +319,15 @@ foreach(NEEDLE
         "\"ok\":true"
         "\"id\":\"replay-messages\""
         "Fix the TODO and verify the build."
-        "E2E task complete: TODO fixed and verification command passed."
         "\"type\":\"user_message\""
-        "\"type\":\"assistant_message\""
-        "\"type\":\"tool_call\""
         "\"type\":\"tool_result\""
         "status: DONE"
         "\"id\":\"replay-sessions\""
         "\"sessions\":[")
   assert_contains(REPLAY_OUTPUT "${NEEDLE}")
 endforeach()
+
+assert_after(REPLAY_OUTPUT "\"id\":\"replay-messages\"" "\"type\":\"assistant_message\"")
+assert_after(REPLAY_OUTPUT "\"id\":\"replay-messages\"" "E2E task complete: TODO fixed and verification command passed.")
+assert_after(REPLAY_OUTPUT "\"id\":\"replay-messages\"" "\"type\":\"tool_call\"")
+assert_after(REPLAY_OUTPUT "\"id\":\"replay-messages\"" "\"call_id\":\"call_bash_e2e\"")

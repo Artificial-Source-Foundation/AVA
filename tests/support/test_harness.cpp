@@ -127,7 +127,12 @@ std::filesystem::path temp_root()
 {
   auto const build_name = std::filesystem::current_path().filename();
   auto const process_id = static_cast<unsigned long long>(::getpid());
-  return std::filesystem::temp_directory_path() / ("ava_core_tests_" + build_name.string() + "_" + std::to_string(process_id));
+  auto const root = std::filesystem::temp_directory_path() / ("ava_core_tests_" + build_name.string() + "_" + std::to_string(process_id));
+  std::error_code create_error;
+  std::filesystem::create_directories(root, create_error);
+  if (!create_error)
+    static_cast<void>(::chmod(root.c_str(), S_IRWXU));
+  return root;
 }
 
 std::filesystem::path create_empty_root(std::filesystem::path root_name)
@@ -146,6 +151,19 @@ std::filesystem::path create_empty_root(std::filesystem::path root_name)
   std::filesystem::remove(link, link_error);
   std::filesystem::create_symlink("physical", link, link_error);
   return link / root_name;
+}
+
+std::shared_ptr<ava::core::AnchorSet> command_anchors_for_test(std::filesystem::path const& workspace,
+                                                               std::filesystem::path const& spill_dir)
+{
+  std::error_code error;
+  std::filesystem::create_directories(spill_dir, error);
+  if (error || ::chmod(spill_dir.c_str(), S_IRWXU) != 0)
+    throw std::runtime_error("failed to create command test spill anchor");
+  auto anchors = ava::core::AnchorSet::open({workspace, spill_dir});
+  if (!anchors || !(*anchors)->find_anchor(workspace) || !(*anchors)->find_anchor(spill_dir))
+    throw std::runtime_error("failed to open command test AnchorSet");
+  return *anchors;
 }
 
 ScopedEnvVar::ScopedEnvVar(std::string name, std::string value) : name_(std::move(name))
@@ -234,6 +252,21 @@ ava::core::Result<ava::session::SessionLease> acquire_test_session_lease(ava::se
 
 ava::core::VoidResult append_session_entry_for_test(ava::session::SessionStore& store, ava::session::SessionEntry const& entry)
 {
+  // Test fixtures follow the same authority boundary as production for v4.
+  // Tests that need malformed physical bytes write their fixture directly.
+  if (entry.type == ava::session::EntryType::AssistantOutputItem || entry.type == ava::session::EntryType::AssistantTurnCommit)
+  {
+    if (store.is_ephemeral())
+    {
+      auto target = ava::session::SessionAppendTarget::create_ephemeral(store);
+      return target ? (*target)->append(entry) : ava::core::VoidResult(std::unexpected(std::move(target.error())));
+    }
+    auto lease = acquire_test_session_lease(store);
+    if (!lease)
+      return std::unexpected(std::move(lease.error()));
+    auto target = ava::session::SessionAppendTarget::create_persistent(store, *lease);
+    return target ? (*target)->append(entry) : ava::core::VoidResult(std::unexpected(std::move(target.error())));
+  }
   if (store.is_ephemeral())
     return store.append_ephemeral(entry);
   auto lease = acquire_test_session_lease(store);
@@ -264,6 +297,23 @@ std::function<ava::core::VoidResult(ava::session::SessionEntry const&)> append_r
   auto const message = target.error().format();
   return [message](ava::session::SessionEntry const&) {
     return ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, message)));
+  };
+}
+
+std::function<ava::core::VoidResult(std::vector<ava::session::SessionEntry>)> append_batch_route_for_test(ava::session::SessionStore const& store)
+{
+  std::shared_ptr<ava::session::SessionAppendTarget> target;
+  {
+    std::lock_guard lock(test_authority_mutex);
+    auto const found = test_append_targets.find(store.session_path().string());
+    if (found != test_append_targets.end())
+      target = found->second.lock();
+  }
+  if (target)
+    return [target = std::move(target)](std::vector<ava::session::SessionEntry> entries) { return target->append_batch(std::move(entries)); };
+  return [](std::vector<ava::session::SessionEntry>) {
+    return ava::core::VoidResult(
+        std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "test batch append route requires append_route_for_test to be initialized first")));
   };
 }
 

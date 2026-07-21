@@ -2,6 +2,7 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_permissions.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/json.h"
@@ -43,16 +44,11 @@ struct PermissionAuditRow
   std::string resolution_reason;
   std::string actor;
   std::string rule_id;
+  std::string recipe_display;
+  std::string global_recipe_key;
+  std::string workspace_recipe_key;
+  std::string effective_allowed_scopes;
 };
-
-ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session)
-{
-  return ava::permissions::PermissionRuleStore{
-      .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-      .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-      .workspace_dir = session.workspace_dir,
-  };
-}
 
 std::string permissions_usage()
 {
@@ -65,7 +61,8 @@ std::string permissions_usage()
          "  /permissions diagnose [query]\n"
          "  /permissions explain <rule_id>\n"
          "  /permissions add action=<allow|deny> operation=<operation> reason=\"<why>\" "
-         "[scope=workspace|global] [mode=any|build|plan] [path=<path>] [command=\"<cmd>\"] [tool=<tool>]\n"
+         "[scope=workspace|global] [mode=any|build|plan] [path=<path>] [command=\"<cmd>\"] [recipe_key=<key>] [tool=<tool>]\n"
+         "    Advanced: exact Critical command Allows require critical_acknowledged=true and command=<exact command>; prompt UI never creates them.\n"
          "  /permissions remove <rule_id>\n"
          "operations: read, search, edit, bash, network.fetch, network.search, lsp.server.launch, lsp.query, "
          "skill, plugin.execute, plugin.tool.call, plugin.command.run, plugin.event.observe, mcp.server.launch, "
@@ -115,6 +112,12 @@ std::string rule_target_text(ava::permissions::PersistentPermissionRule const& r
     text += " path=" + sanitize_inline_text(display_permission_path(rule.target_path, session.workspace_dir));
   if (!rule.command.empty())
     text += " command=\"" + sanitize_inline_text(rule.command) + "\"";
+  if (!rule.command_recipe_key.empty())
+    text += " recipe_key=" + sanitize_inline_text(rule.command_recipe_key);
+  if (!rule.recipe_display.empty())
+    text += " recipe=\"" + sanitize_inline_text(rule.recipe_display) + "\"";
+  if (rule.critical_acknowledged)
+    text += " critical_acknowledged=true";
   if (!rule.tool_name.empty())
     text += " tool=" + sanitize_inline_text(rule.tool_name);
   return text;
@@ -141,7 +144,8 @@ bool rule_matches_query(ava::permissions::PersistentPermissionRule const& rule, 
          contains_ascii_case_insensitive(ava::permissions::to_string(rule.operation), query) ||
          contains_ascii_case_insensitive(ava::permissions::to_string(rule.mode), query) || contains_ascii_case_insensitive(rule.tool_name, query) ||
          contains_ascii_case_insensitive(display_permission_path(rule.target_path, session.workspace_dir), query) ||
-         contains_ascii_case_insensitive(rule.command, query) || contains_ascii_case_insensitive(rule.reason, query) ||
+         contains_ascii_case_insensitive(rule.command, query) || contains_ascii_case_insensitive(rule.command_recipe_key, query) ||
+         contains_ascii_case_insensitive(rule.recipe_display, query) || contains_ascii_case_insensitive(rule.reason, query) ||
          contains_ascii_case_insensitive(rule.actor, query) || contains_ascii_case_insensitive(rule.created_at, query);
 }
 
@@ -155,6 +159,16 @@ PermissionAuditRow permission_audit_row(ava::session::SessionEntry const& entry,
   auto target_path = audit_field(entry.data_json, "target_path");
   if (!target_path.empty())
     target_path = display_permission_path(target_path, session.workspace_dir);
+
+  auto const command_metadata = ava::core::json::object_field(entry.data_json, "command_metadata").value_or("");
+  auto scopes = ava::core::json::strings_in_array_field(command_metadata, "effective_allowed_scopes");
+  auto scope_text = std::string{};
+  for (std::size_t index = 0; index < scopes.size(); ++index)
+  {
+    if (index > 0)
+      scope_text += ",";
+    scope_text += scopes[index];
+  }
 
   return PermissionAuditRow{.timestamp = entry.timestamp,
                             .entry_id = entry.id,
@@ -171,7 +185,11 @@ PermissionAuditRow permission_audit_row(ava::session::SessionEntry const& entry,
                             .resolution_source = audit_field(entry.data_json, "resolution_source"),
                             .resolution_reason = audit_field(entry.data_json, "resolution_reason"),
                             .actor = audit_field(entry.data_json, "actor"),
-                            .rule_id = audit_field(entry.data_json, "rule_id")};
+                            .rule_id = audit_field(entry.data_json, "rule_id"),
+                            .recipe_display = audit_field(command_metadata, "recipe_display"),
+                            .global_recipe_key = audit_field(command_metadata, "global_recipe_key"),
+                            .workspace_recipe_key = audit_field(command_metadata, "workspace_recipe_key"),
+                            .effective_allowed_scopes = std::move(scope_text)};
 }
 
 void append_audit_field(std::string& line, std::string_view label, std::string_view value)
@@ -212,6 +230,10 @@ std::string format_permission_audit_line(PermissionAuditRow const& row)
   append_audit_quoted_field(line, "reason", row.reason);
   append_audit_quoted_field(line, "resolution_reason", row.resolution_reason);
   append_audit_field(line, "rule", row.rule_id);
+  append_audit_quoted_field(line, "recipe", row.recipe_display);
+  append_audit_field(line, "global_recipe_key", row.global_recipe_key);
+  append_audit_field(line, "workspace_recipe_key", row.workspace_recipe_key);
+  append_audit_field(line, "scopes", row.effective_allowed_scopes);
   append_audit_field(line, "actor", row.actor);
   return line;
 }
@@ -343,8 +365,8 @@ std::string format_permission_audit_export(std::vector<ava::session::SessionEntr
 
   output << "```markdown\n";
   output << "| timestamp | entry | request | action | resolution | source | operation | mode | risk | tool | target | command | "
-            "reason | resolution reason | rule | actor |\n";
-  output << "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n";
+            "reason | resolution reason | rule | recipe | global recipe key | workspace recipe key | scopes | actor |\n";
+  output << "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n";
   for (auto const& row : rows)
   {
     output << "| " << markdown_table_cell(row.timestamp) << " | " << markdown_table_cell(row.entry_id) << " | " << markdown_table_cell(row.request_id) << " | "
@@ -352,6 +374,8 @@ std::string format_permission_audit_export(std::vector<ava::session::SessionEntr
            << markdown_table_cell(row.operation) << " | " << markdown_table_cell(row.mode) << " | " << markdown_table_cell(row.risk) << " | "
            << markdown_table_cell(row.tool_name) << " | " << markdown_table_cell(row.target_path) << " | " << markdown_table_cell(row.command) << " | "
            << markdown_table_cell(row.reason) << " | " << markdown_table_cell(row.resolution_reason) << " | " << markdown_table_cell(row.rule_id) << " | "
+           << markdown_table_cell(row.recipe_display) << " | " << markdown_table_cell(row.global_recipe_key) << " | "
+           << markdown_table_cell(row.workspace_recipe_key) << " | " << markdown_table_cell(row.effective_allowed_scopes) << " | "
            << markdown_table_cell(row.actor) << " |\n";
   }
   output << "```";
@@ -546,6 +570,10 @@ std::string format_permission_audit_detail(std::vector<ava::session::SessionEntr
     append_audit_detail_field(output, "reason", row.reason);
     append_audit_detail_field(output, "resolution reason", row.resolution_reason);
     append_audit_detail_field(output, "rule", row.rule_id);
+    append_audit_detail_field(output, "recipe", row.recipe_display);
+    append_audit_detail_field(output, "global recipe key", row.global_recipe_key);
+    append_audit_detail_field(output, "workspace recipe key", row.workspace_recipe_key);
+    append_audit_detail_field(output, "effective allowed scopes", row.effective_allowed_scopes);
     append_audit_detail_field(output, "actor", row.actor);
   }
 
@@ -747,13 +775,20 @@ std::string format_permission_rule_explain(ava::permissions::PermissionRuleStore
     output << "  path: " << sanitize_inline_text(display_permission_path(rule.target_path, session.workspace_dir)) << "\n";
   if (!rule.command.empty())
     output << "  command: " << sanitize_inline_text(rule.command) << "\n";
+  if (!rule.command_recipe_key.empty())
+    output << "  recipe key: " << sanitize_inline_text(rule.command_recipe_key) << "\n";
+  if (!rule.recipe_display.empty())
+    output << "  recipe display: " << sanitize_inline_text(rule.recipe_display) << "\n";
+  if (rule.critical_acknowledged)
+    output << "  critical acknowledged: true (advanced exact-command allow)\n";
+  output << "  schema version: " << rule.schema_version << "\n";
   if (!rule.tool_name.empty())
     output << "  tool: " << sanitize_inline_text(rule.tool_name) << "\n";
   output << "  reason: " << sanitize_inline_text(rule.reason) << "\n";
   output << "  actor: " << sanitize_inline_text(rule.actor) << "\n";
   output << "  created: " << sanitize_inline_text(rule.created_at) << "\n";
   output << "  storage: " << sanitize_inline_text(permission_rule_storage_path(store, rule)) << "\n";
-  output << "  matching: exact operation plus any non-empty path, command, tool, scope, and mode fields\n";
+  output << "  matching: exact operation plus any non-empty path, command, recipe key, tool, scope, and mode fields\n";
   output << "  precedence: built-in hard denies run first; matching deny rules override allow rules";
   return output.str();
 }
@@ -817,6 +852,8 @@ std::string normalize_field_key(std::string_view key)
     return "path";
   if (normalized == "tool_name")
     return "tool";
+  if (normalized == "command_recipe_key")
+    return "recipe_key";
   return normalized;
 }
 
@@ -835,7 +872,8 @@ ava::core::Result<ParsedAddRule> parse_permission_add_rule(std::vector<std::stri
 
     auto key = normalize_field_key(std::string_view(tokens[index]).substr(0, separator));
     auto value = tokens[index].substr(separator + 1);
-    if (key != "action" && key != "operation" && key != "scope" && key != "mode" && key != "path" && key != "command" && key != "tool" && key != "reason")
+    if (key != "action" && key != "operation" && key != "scope" && key != "mode" && key != "path" && key != "command" && key != "recipe_key" &&
+        key != "recipe_display" && key != "critical_acknowledged" && key != "tool" && key != "reason")
     {
       auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "permission rule add argument is unsupported");
       error.with_context("argument", key);
@@ -918,6 +956,13 @@ ava::core::Result<ParsedAddRule> parse_permission_add_rule(std::vector<std::stri
       return "";
     return found->second;
   };
+  if (auto const acknowledged = fields.find("critical_acknowledged");
+      acknowledged != fields.end() && acknowledged->second != "true" && acknowledged->second != "false")
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "critical_acknowledged must be true or false");
+    error.with_context("critical_acknowledged", acknowledged->second);
+    return std::unexpected(std::move(error));
+  }
 
   return ParsedAddRule{.draft = ava::permissions::PermissionRuleDraft{.scope = scope,
                                                                       .action = *action,
@@ -926,6 +971,9 @@ ava::core::Result<ParsedAddRule> parse_permission_add_rule(std::vector<std::stri
                                                                       .tool_name = field_value("tool"),
                                                                       .target_path = field_value("path"),
                                                                       .command = field_value("command"),
+                                                                      .command_recipe_key = field_value("recipe_key"),
+                                                                      .recipe_display = field_value("recipe_display"),
+                                                                      .critical_acknowledged = field_value("critical_acknowledged") == "true",
                                                                       .reason = *reason,
                                                                       .actor = "tui"}};
 }
@@ -1051,6 +1099,7 @@ ava::core::Result<CommandResult> run_permissions_command(runtime::Session& sessi
     output << "  loaded rules: " << rules->size() << "\n";
     output << "  hard-deny policy: evaluated before persistent rules\n";
     output << "  precedence: matching deny rules override allow rules\n";
+    output << "  command allows: schema-v2 exact stable recipe keys; v1 allows are non-authoritative; Critical exact allows require acknowledgement\n";
     output << "  workspace storage: outside the model-writable workspace";
     output << "\n\n" << format_permission_denial_diagnostics(*entries, session, *rules, query);
     add_output(result, output.str());

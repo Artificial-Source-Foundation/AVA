@@ -22,6 +22,15 @@ The test suite is built as one `ava_tests` CTest target from focused test source
 
 Plugin/MCP contract changes should also follow [`docs/plugin-compatibility-policy.md`](plugin-compatibility-policy.md). Keep checked-in golden fixtures small and deterministic under `tests/golden/ava-080/`, and prefer existing `ava_tests` plugin/MCP suites for contract assertions.
 
+Privacy-safe diagnostics have focused unit and full-binary coverage:
+
+```sh
+scripts/run-tests.sh --build-dir build -R '^ava_tests\.(diagnostics|runtime_diagnostics|mcp|plugin)$' --output-on-failure
+scripts/run-tests.sh --build-dir build -R '^ava_cli\.(doctor_support|runtime_diagnostics)$' --output-on-failure
+```
+
+These suites use canary secrets and isolated XDG roots to verify passive doctor behavior, private descriptor-safe storage, bounded identity-aliased traces, drop/failure counters, typed last-failure records, unique support publication, MCP/plugin public-failure sanitization, and absence of raw values from model/session/RPC/export/support surfaces. ACP trace grammar is covered by `ava_cli.runtime_diagnostics` and the ordinary ACP tests. No live provider or network access is required.
+
 ## Headless Tool Smoke
 
 After provider streaming, tool schema, permission, or dispatcher changes, run a live headless smoke with configured provider auth when credentials are available. Keep the workspace isolated under a temporary directory outside the repository so mutating tools do not touch the checkout.
@@ -42,7 +51,11 @@ Recommended coverage:
 - `./build/ava_tests plugin` after plugin authoring changes. The plugin suite validates the checked-in sample under `examples/plugins/todo/` through source-path fixture plumbing instead of duplicating the sample manifest or protocol JSON, and remains the coverage for successful sample entrypoint execution.
 - `./build/ava_tests mcp` after MCP contract changes. The MCP suite uses the local fake MCP server and golden fixtures for representative tool schema, resource read, and audit shapes; MCP resource behavior must stay behind explicit read-style permission coverage.
 
-`lsp_diagnostics` is capability-gated in normal headless runtime. Verify it through `ava_tests` and the fake LSP server unless a local diagnostics provider is configured for a live run.
+`lsp_diagnostics` is capability-gated in normal headless runtime. `ava_tests.lsp` uses the stable fake server to cover default-off/global-only exact `clangd` opt-in, rejection of automatic `gopls`/`rust-analyzer`, executable hardlink/replacement rejection, replacement-sensitive launch permission identity, logical per-root cache deduplication, pull and routed publish diagnostics, full-text versioned `didChange`, cache bounds, malformed/out-of-workspace notifications, absolute deadlines, cancellation, environment filtering, and cleanup without downloads or provider calls. `ava_tests.lsp_real_clangd_smoke` is an optional offline real-server smoke: it discovers an already-installed safe `clangd`, uses a private finite fixture, proves initialization plus definition and cleanup, and returns CTest skip code 77 when `clangd` is absent or unsafe. It never installs or downloads clangd.
+
+```sh
+scripts/run-tests.sh -R '^ava_tests\.lsp(_real_clangd_smoke)?$'
+```
 
 ## End-To-End AVA Tool Smoke
 
@@ -131,7 +144,7 @@ Pi's reference tree has broad Jest/Vitest coverage across provider protocols, co
 | Provider protocol regressions | `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `ava_tests.provider_gemini`, `ava_tests.config_context_auth_oauth`, and `ava_tests.provider_live_smoke` | Local protocol tests must pass. Live provider cases are credential-gated and classified in the matrix below. |
 | Headless/RPC automation | `ava_cli.headless_print_*`, `ava_cli.headless_rpc_*`, `ava_cli.headless_tool_visibility`, `ava_cli.headless_performance_smoke`, `ava_cli.headless_e2e_model_smoke` | Fake-provider smokes must pass in default CTest; live credentials are not required. |
 | Subagent/background jobs | `ava_tests.agent_loop` task-subagent and `BackgroundJobRegistry` tests; opt-in live task/coding dogfood when credentials are present | Foreground/background task delegation, custom subagent config, cancellation, retained job snapshots, and explicit `--allow-tool task` behavior must remain covered by deterministic tests. |
-| TUI/editor/renderer | `ava_tests.tui_composer` plus gated `ava_tui.tmux_smoke`, `ava_tui.kitty_image_smoke`, and `ava_tui.osc8_smoke` | Deterministic renderer/editor tests are required; PTY smokes are run when prerequisites exist and otherwise skip with code 77. |
+| TUI/editor/renderer | `ava_tests.tui_composer` plus gated `ava_tui.tmux_smoke_*`, `ava_tui.kitty_image_smoke`, and `ava_tui.osc8_smoke` | Deterministic renderer/editor tests are required; PTY smokes are run when prerequisites exist and otherwise skip with code 77. |
 | Virtual-terminal decision | AVA does not add a Pi-style TypeScript virtual terminal for MVP. Renderer tests assert visible rows/widths and tmux/PTY captures assert real terminal behavior. | Revisit a screen-model parser only if tmux/PTY smoke flakes or cannot cover a terminal protocol that renderer tests cannot prove. |
 | Performance thresholds | `ava_tests.tui_composer` large-render budgets and `ava_cli.headless_performance_smoke` | Treat budget failures as release regressions unless the threshold is intentionally raised with profiling evidence. |
 | Side-effect safety | [`docs/engineering/side-effect-safety-checklist.md`](engineering/side-effect-safety-checklist.md) | New side-effect classes must answer the permission/audit/cancellation/output-bound/test questions before release. |
@@ -202,13 +215,23 @@ scripts/run-tests.sh -R "ava_tests.tui_composer"
 
 The suite includes the CI-safe ncurses baseline currently available in-tree: configured `ESCDELAY`, escape buffering/discard for CSI/OSC/DCS/bracketed-paste markers, mouse wheel/click mapping at the composer layer, resize stress renders, Unicode/CJK/combining/emoji width and cursor placement, `newterm` smokes for xterm/screen terminfo plus tmux/kitty/wezterm/ssh-like environment variables without a real TTY, and large/very-long transcript performance budgets.
 
-Real terminal coverage exists as prerequisite-gated CTest smokes:
+Real terminal coverage exists as prerequisite-gated CTest smokes. The historical
+pre-F1 F0 semantic inventory, four-row shell observations, artifact policy, and
+future evidence gaps are recorded in `docs/roadmap/frontend-evidence-baseline.md`.
+The current `main_startup_trust_keybinds` scenario generates four F1
+plain-text composer captures below its evidence root: `160x48`
+(`frontend-f1-wide-idle-composer.txt`, input/footer rows 46/47), `120x36`
+(`frontend-f1-ordinary-idle-composer.txt`, rows 34/35), `80x24`
+(`frontend-f1-narrow-idle-composer.txt`, rows 22/23), and `100x12`
+(`frontend-f1-short-idle-composer.txt`, rows 10/11). Rows are zero-based.
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh -R ava_tui.tmux_smoke
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 13 -R '^ava_tui\.tmux_smoke_'
 AVA_TUI_KITTY_IMAGE_SMOKE=1 scripts/run-tests.sh -R ava_tui.kitty_image_smoke
 AVA_TUI_OSC8_SMOKE=1 scripts/run-tests.sh -R ava_tui.osc8_smoke
 ```
+
+The tmux family dispatches 13 independent scenarios. Each gets a guarded leaf under `build/tui-tmux-smoke/<scenario>/`, its own HOME/XDG/workspace, private config-free tmux socket, and separate evidence directory at `build/tui-tmux-smoke/<scenario>/evidence/`. Drivers enforce a 50-second internal deadline, clean private tmux/provider process groups on SIGINT or SIGTERM, and receive a 10-second graceful-cleanup window before CTest's 60-second outer timeout. The fake-provider request logs remain at `build/tui-tmux-smoke/active_run/active-provider-requests.log` and `build/tui-tmux-smoke/restore_followup/restore-provider-requests.log`.
 
 The MVP strategy is renderer/editor reducers first, then PTY/tmux assertions for terminal protocols and cleanup. AVA intentionally does not require a separate virtual-terminal parser for MVP; add one only if focused renderer tests plus the existing PTY smokes stop providing stable evidence.
 

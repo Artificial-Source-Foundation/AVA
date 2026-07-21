@@ -3,6 +3,11 @@
 #include "ava/app/acp/session.h"
 #include "ava/app/runtime_credentials.h"
 #include "ava/app/runtime_model.h"
+#include "ava/app/runtime_sessions.h"
+#include "ava/app/session_title_coordinator.h"
+#include "ava/app/subagent_delivery_manager.h"
+#include "ava/config/session_title_config.h"
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/session/attachments.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/ids.h"
@@ -267,11 +272,14 @@ bool AcpSessionHost::prompt_cancel_pending(std::uint64_t reservation) const noex
 
 AcpSessionHost::PermissionGrantKey AcpSessionHost::permission_grant_key(ava::permissions::PermissionPrompt const& prompt) const
 {
+  bool const command_recipe = prompt.operation == ava::permissions::Operation::RunCommand && prompt.command_metadata &&
+                              ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata);
   return PermissionGrantKey{.operation = prompt.operation,
                             .mode = prompt.mode,
                             .workspace = normalized_absolute(options_.launch_root, prompt.workspace_dir).string(),
                             .target = prompt.target_path.empty() ? std::string{} : normalized_absolute(prompt.workspace_dir, prompt.target_path).string(),
-                            .command = prompt.command,
+                            .command = command_recipe ? std::string{} : prompt.command,
+                            .command_recipe_key = command_recipe ? prompt.command_metadata->workspace_recipe_key : std::string{},
                             .tool_name = prompt.tool_name};
 }
 
@@ -306,9 +314,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> AcpSessionHost
     }
   }
 
-  ava::permissions::PermissionRuleStore const rule_store{.global_rules_file = options_.paths.ava_config_dir / "permission-rules.json",
-                                                         .workspace_rules_file = session_.workspace_dir / ".ava" / "permission-rules.json",
-                                                         .workspace_dir = session_.workspace_dir};
+  auto const rule_store = permission_rule_store_for_session(session_);
   auto persistent = ava::permissions::match_persistent_permission_rule(rule_store, prompt);
   if (!persistent)
   {
@@ -319,6 +325,11 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> AcpSessionHost
   }
   if (*persistent)
   {
+    // match_persistent_permission_rule is the shared authoritative matcher: it
+    // already rejected non-authoritative Allow rules (unverified executors,
+    // unavailable containment, critical commands, legacy schema, and
+    // repository-controlled build/test text). The MCP/session restriction
+    // below is the only ACP-local gate that remains.
     bool const session_mcp_allow_requires_exact_command =
         session_.mcp_config && acp_mcp_operation(prompt.operation) && (*persistent)->action == PermissionAction::Allow;
     bool const exact_session_mcp_allow =
@@ -667,6 +678,85 @@ ava::core::VoidResult AcpSessionHost::close()
 
 AcpSessionRegistry::AcpSessionRegistry(AcpSessionOptions options) : options_(std::move(options))
 {
+  auto service_anchor = options_.open_options.anchor_set;
+  if (!service_anchor)
+  {
+    std::error_code directory_error;
+    for (auto const& directory : {options_.paths.ava_config_dir, options_.paths.ava_state_dir})
+    {
+      std::filesystem::create_directories(directory, directory_error);
+      if (!directory_error)
+        std::filesystem::permissions(directory, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace, directory_error);
+      if (directory_error)
+      {
+        coordinator_startup_error_ = ava::core::Error(ava::core::ErrorCategory::Io, "failed to prepare ACP service anchors");
+        return;
+      }
+    }
+    // AnchorSet preserves its first root as the immutable launch workspace
+    // identity used by command containment and ACP tool negotiation.
+    auto opened = ava::core::AnchorSet::open(
+        {options_.launch_root, options_.paths.ava_config_dir, options_.paths.ava_state_dir, options_.paths.sessions_dir});
+    if (!opened)
+    {
+      coordinator_startup_error_ = std::move(opened.error());
+      return;
+    }
+    service_anchor = std::move(*opened);
+  }
+  options_.open_options.anchor_set = service_anchor;
+  if (options_.open_options.diagnostics)
+  {
+    if (auto bound = options_.open_options.diagnostics->bind_anchor_set(service_anchor); !bound)
+    {
+      coordinator_startup_error_ = std::move(bound.error());
+      return;
+    }
+  }
+
+  if (options_.open_options.subagent_delivery_manager)
+  {
+    options_.open_options.subagent_coordinator = options_.open_options.subagent_delivery_manager->coordinator();
+  }
+  else
+  {
+    auto coordinator = options_.open_options.subagent_coordinator
+                           ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options_.open_options.subagent_coordinator)
+                           : ava::agent::SubagentCoordinator::create(
+                                 {.ava_state_dir = options_.paths.ava_state_dir, .anchor_set = service_anchor});
+    if (!coordinator)
+    {
+      coordinator_startup_error_ = std::move(coordinator.error());
+      return;
+    }
+    options_.open_options.subagent_coordinator = std::move(*coordinator);
+    auto manager = SubagentDeliveryManager::create(
+        {.coordinator = options_.open_options.subagent_coordinator, .provider_bundle_factory = options_.provider_bundle_factory});
+    if (manager)
+      options_.open_options.subagent_delivery_manager = std::move(*manager);
+    else
+    {
+      coordinator_startup_error_ = std::move(manager.error());
+      return;
+    }
+  }
+
+  if (!options_.open_options.session_title_coordinator)
+  {
+    auto config = ava::config::load_session_title_config(options_.paths, *service_anchor);
+    if (!config)
+    {
+      coordinator_startup_error_ = std::move(config.error());
+      return;
+    }
+    auto titles = SessionTitleCoordinator::create({.config = std::move(*config)});
+    if (!titles)
+    {
+      coordinator_startup_error_ = std::move(titles.error());
+      return;
+    }
+    options_.open_options.session_title_coordinator = std::move(*titles);
+  }
 }
 
 AcpSessionRegistry::~AcpSessionRegistry()
@@ -715,6 +805,8 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::insert_re
 ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::create(std::filesystem::path const& cwd,
                                                                               std::shared_ptr<ava::mcp::McpConfig const> mcp_config)
 {
+  if (coordinator_startup_error_)
+    return std::unexpected(*coordinator_startup_error_);
   if (auto reserved = reserve_insertion(); !reserved)
     return std::unexpected(std::move(reserved.error()));
   bool release_reservation = true;
@@ -738,6 +830,8 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::create(st
 ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::load(std::string_view session_id, std::filesystem::path const& cwd,
                                                                             std::shared_ptr<ava::mcp::McpConfig const> mcp_config)
 {
+  if (coordinator_startup_error_)
+    return std::unexpected(*coordinator_startup_error_);
   if (auto reserved = reserve_insertion(session_id); !reserved)
     return std::unexpected(std::move(reserved.error()));
   bool release_reservation = true;
@@ -758,7 +852,7 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::load(std:
   auto read_authority = session->read_authority();
   if (!read_authority)
     return std::unexpected(std::move(read_authority.error()));
-  auto compatible = ava::app::runtime::validate_runtime_model_history(std::move(*read_authority), session->model, kAcpSessionReadLimits);
+  auto compatible = ava::app::runtime::validate_runtime_model_history(std::move(*read_authority), session->model);
   if (!compatible)
     return std::unexpected(std::move(compatible.error()));
   session->mcp_config = std::move(mcp_config);
@@ -919,6 +1013,12 @@ void AcpSessionRegistry::shutdown() noexcept
   }
   for (auto const& host : hosts) host->cancel();
   for (auto const& host : hosts) static_cast<void>(host->close());
+  if (options_.open_options.session_title_coordinator)
+    options_.open_options.session_title_coordinator->shutdown();
+  if (options_.open_options.subagent_delivery_manager)
+    options_.open_options.subagent_delivery_manager->shutdown();
+  else if (options_.open_options.subagent_coordinator)
+    options_.open_options.subagent_coordinator->shutdown();
 }
 
 std::filesystem::path const& AcpSessionRegistry::launch_root() const noexcept

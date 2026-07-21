@@ -11,7 +11,6 @@
 
 #include <cerrno>
 #include <chrono>
-#include <cstring>
 #include <thread>
 #include <utility>
 #include <unistd.h>
@@ -74,17 +73,14 @@ ScopedSignalIgnore::~ScopedSignalIgnore()
 
 ava::core::Error mcp_error(ava::core::ErrorCategory category, std::string message, McpServerConfig const& server)
 {
-  auto error = ava::core::Error(category, std::move(message));
-  error.with_context("mcp_server", server.id);
-  if (!server.source_path.empty())
-    error.with_context("config", server.source_path.string());
-  return error;
+  static_cast<void>(server);
+  return ava::core::Error(category, std::move(message));
 }
 
 ava::core::Error errno_error(std::string message, McpServerConfig const& server)
 {
   auto error = mcp_error(ava::core::ErrorCategory::Io, std::move(message), server);
-  error.with_context("cause", std::strerror(errno));
+  error.with_context("errno", std::to_string(errno));
   return error;
 }
 

@@ -11,3 +11,8 @@ use `#include "ava/debug/print_members_on.h"` to get that macro.
 If you get a compile error in a generated `print_members.cpp`, aka somewhere
 in `$BUILDDIR/generated/print_members/` then the first thing to try is to
 regenerate those headers using `--target generate-print-members`.
+
+If you get a compile error like:
+`error: function 'ava::*::(anonymous namespace)::*::print_members' has internal linkage but is not defined`
+then use `AVA_DEBUG_PRINT_MEMBERS_OPT_OUT` in that struct/class: you can currently not
+use `AVA_DEBUG_PRINT_MEMBERS_ON` in a struct/class that is in an anonymous namespace.

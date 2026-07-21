@@ -24,6 +24,15 @@
 #include <utility>
 #include <vector>
 
+namespace ava::diagnostics {
+class RuntimeDiagnostics;
+}
+
+namespace ava::app {
+class SessionTitleCoordinator;
+class SubagentDeliveryManager;
+}  // namespace ava::app
+
 namespace ava::app::runtime {
 
 // Hold the mutable application state associated with an open runtime session.
@@ -38,6 +47,8 @@ struct Session
   ava::config::ModelInfo model;
   BasePromptMetadata base_prompt;
   ava::config::XdgPaths paths;
+  // Resolved once at open time and reused by every runtime history reader.
+  ava::session::SessionReadLimits session_read_limits = ava::session::legacy_unbounded_session_read_limits();
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
   // Additional writable directories beyond workspace_dir (e.g., user-configured
@@ -57,9 +68,21 @@ struct Session
   std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
   bool created = false;
   bool sessionless = false;
-  // Declare before workers so reverse destruction stops background work before destroying store routes.
-  std::unique_ptr<SessionRunController> run_controller = nullptr;
-  std::shared_ptr<ava::agent::BackgroundJobRegistry> background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>();
+  std::shared_ptr<SessionRunController> run_controller = nullptr;
+  // Immutable append target bound into the controller-owned serialized routes.
+  // Tests and retained runtime capsules may inspect/copy it, but mutations flow
+  // through the controller so append failures remain latched.
+  std::shared_ptr<ava::session::SessionAppendTarget> append_target = nullptr;
+  // Detached retained capsules bind reads to the exact original leased inode
+  // without reacquiring the pathname. Ordinary visible sessions leave this
+  // empty and derive an authority from their owned lease.
+  std::optional<ava::session::SessionReadAuthority> bound_read_authority = std::nullopt;
+  // Shared application process state. Direct coordinator injection remains a
+  // compatibility seam; production sessions use the delivery manager.
+  std::shared_ptr<ava::agent::SubagentCoordinator> subagent_coordinator = nullptr;
+  std::shared_ptr<ava::app::SubagentDeliveryManager> subagent_delivery_manager = nullptr;
+  std::shared_ptr<ava::app::SessionTitleCoordinator> session_title_coordinator = nullptr;
+  std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
   // Null uses normal global/project discovery; non-null is immutable session-local MCP composition.
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;
   bool offline = false;
@@ -68,7 +91,10 @@ struct Session
   // (or to its shared in-memory state in sessionless mode).
   [[nodiscard]] ava::core::Result<ava::session::SessionReadAuthority> read_authority() const
   {
-    return sessionless ? ava::session::SessionReadAuthority::create_ephemeral(store) : ava::session::SessionReadAuthority::create_persistent(store, lease);
+    if (bound_read_authority)
+      return *bound_read_authority;
+    return sessionless ? ava::session::SessionReadAuthority::create_ephemeral(store, session_read_limits)
+                       : ava::session::SessionReadAuthority::create_persistent(store, lease, session_read_limits);
   }
 
   // Append through the session owner so writes remain serialized with active runs.
@@ -80,13 +106,17 @@ struct Session
   }
 
   // Return the stable append route owned by this session, or an empty route when the controller is unavailable.
-  [[nodiscard]] ava::agent::SessionAppendSink owner_append_route()
+  [[nodiscard]] ava::agent::SessionAppendSink owner_append_route() const
   {
     return run_controller ? run_controller->owner_append_route() : ava::agent::SessionAppendSink{};
   }
 
  public:
   [[nodiscard]] CommandRegistry load_command_registry(CommandRegistryOptions options = {});
+  [[nodiscard]] ava::agent::SessionAppendBatchSink owner_append_batch_route()
+  {
+    return run_controller ? run_controller->owner_append_batch_route() : ava::agent::SessionAppendBatchSink{};
+  }
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

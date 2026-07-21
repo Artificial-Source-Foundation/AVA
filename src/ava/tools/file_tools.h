@@ -19,6 +19,10 @@
 #include <string>
 #include <vector>
 
+namespace ava::agent {
+class SubagentCoordinator;
+}
+
 namespace ava::lsp {
 class DiagnosticsProvider;
 }  // namespace ava::lsp
@@ -48,6 +52,10 @@ struct PermissionAuditEvent
   std::string resolution_reason;
   std::string actor = "agent";
   std::string rule_id;
+  // Durable audit serialization must suppress command and recipe-display
+  // fields derived from arguments when a strict frontend supplied redacted args.
+  bool command_arguments_redacted = false;
+  std::optional<ava::permissions::CommandPermissionMetadata> command_metadata = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -103,7 +111,13 @@ struct ToolContext
   std::filesystem::path workspace_dir;
   std::filesystem::path spill_dir = {};
   ava::agent::Mode mode = ava::agent::Mode::Build;
+  // Local sealed command execution is enabled by default. Legacy and
+  // PromptOnly contexts remain explicit non-executing compatibility modes.
+  ava::command::CommandRuntimeOptions command_runtime{.mode = ava::command::CommandRuntimeMode::Enabled};
   ava::permissions::PermissionResolver permission_resolver = nullptr;
+  // Deny-only, non-interactive policy check used before a command's backend
+  // auto-Allow. It must never prompt or return reusable authority.
+  ava::permissions::PermissionResolver command_deny_preflight = nullptr;
   PermissionAuditSink permission_audit_sink = nullptr;
   ToolProgressSink progress_sink = nullptr;
   // Strict adapters may expose a distinct pending -> in_progress boundary.
@@ -113,6 +127,9 @@ struct ToolContext
   std::function<bool()> cancel_requested = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   TaskSubagentRunner task_subagent_runner = nullptr;
+  // Exact coordinator/owner pair for public job controls. Child loops clear
+  // both this coordinator and the task runner, then hide both schemas.
+  std::shared_ptr<ava::agent::SubagentCoordinator> subagent_coordinator = nullptr;
   std::vector<ava::agent::SubagentDefinition> subagents = {};
   std::string permission_tool_name = {};
   std::string permission_actor = {};
@@ -126,11 +143,17 @@ struct ToolContext
   // identity resolution and the actual built-in file operation.
   std::shared_ptr<SecureWorkspace> secure_workspace = nullptr;
   // Pre-opened anchor descriptors for all writable directories (workspace,
-  // spill, session storage, and any user-configured additional dirs). When
-  // present, this supersedes the single secure_workspace for path resolution
-  // and permission checks. Each anchor independently contains symlinks via
-  // open_beneath; a symlink in one anchor that points into another is rejected.
+  // spill, session storage, synthetic command roots, and any user-configured
+  // additional dirs). Path authority is selected lexically and resolved
+  // descriptor-relative; configured anchor roots may themselves contain
+  // symlink components.
   std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
+  // Actual AVA config/state/sessions/auth authority directories supplied from
+  // the runtime session. These are passed to command sealing so workspace
+  // overlap with authority roots is rejected, and to containment so authority
+  // roots are never made writable through a broader workspace rule. Direct
+  // test contexts may leave this empty.
+  std::vector<std::filesystem::path> ava_authority_roots = {};
   // ToolContext is copied into dispatchers/workers, so immutable adapters share
   // session ownership rather than storing lifetime-sensitive references.
   std::shared_ptr<ExactFileAccess const> exact_file_access = nullptr;
@@ -223,7 +246,18 @@ struct WriteOptions
 [[nodiscard]] ava::core::VoidResult announce_tool_execution_start(ToolContext const& context);
 [[nodiscard]] ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permissions::Operation operation,
                                                       std::filesystem::path const& target_path, std::string_view command, std::string_view tool_name,
-                                                      std::string_view error_message, std::string_view diff_preview = {}, bool diff_truncated = false);
+                                                      std::string_view error_message, std::string_view diff_preview = {}, bool diff_truncated = false,
+                                                      std::optional<ava::permissions::CommandPermissionMetadata> command_metadata = std::nullopt);
+// Command approval receives an already prepared plan. The caller retains that
+// exact preparation through execution, so resolver, audit, and executor share
+// one sealed identity rather than reparsing compatibility text.
+[[nodiscard]] ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command,
+                                                              ava::command::CommandPreparation const& preparation, bool unverified_delegated_executor,
+                                                              std::string_view tool_name, std::string_view error_message);
+[[nodiscard]] ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command,
+                                                              ava::command::CommandPreparation const& preparation,
+                                                              ava::permissions::CommandContainmentInfo const& containment, bool unverified_delegated_executor,
+                                                              std::string_view tool_name, std::string_view error_message);
 [[nodiscard]] std::string permission_audit_data_json(PermissionAuditEvent const& event);
 [[nodiscard]] ava::core::VoidResult replace_file_with_staged_file(std::filesystem::path const& staged_path, std::filesystem::path const& target_path);
 void remove_staged_file_best_effort(std::filesystem::path const& staged_path);

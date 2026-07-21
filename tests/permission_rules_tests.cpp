@@ -1,12 +1,13 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "ava/command/private_group.h"
 #include "ava/tools/file_tools.h"
-
 #include "ava/permissions/permission_rules.h"
 
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <sys/stat.h>
@@ -16,15 +17,29 @@ namespace {
 ava::permissions::PermissionRuleStore test_store(std::filesystem::path const& root)
 {
   auto const workspace = root / "workspace";
+  auto const config_dir = root / "config" / "ava";
   std::filesystem::create_directories(workspace);
-  return ava::permissions::PermissionRuleStore{.global_rules_file = root / "config" / "ava" / "permission-rules.json",
+  std::filesystem::create_directories(config_dir);
+  static_cast<void>(::chmod(temp_root().c_str(), S_IRWXU));
+  static_cast<void>(::chmod(root.c_str(), S_IRWXU));
+  static_cast<void>(::chmod(workspace.c_str(), S_IRWXU));
+  static_cast<void>(::chmod(config_dir.c_str(), S_IRWXU));
+  auto anchors = ava::core::AnchorSet::open({workspace, config_dir});
+  if (!anchors)
+    throw std::runtime_error("failed to open permission rule test AnchorSet");
+  return ava::permissions::PermissionRuleStore{.global_rules_file = config_dir / "permission-rules.json",
                                                .workspace_rules_file = workspace / ".ava" / "permission-rules.json",
-                                               .workspace_dir = workspace};
+                                               .workspace_dir = workspace,
+                                               .anchor_set = *anchors};
 }
 
 void write_file_with_mode(std::filesystem::path const& path, std::string const& content, mode_t mode)
 {
   std::filesystem::create_directories(path.parent_path());
+  for (auto current = path.parent_path(); current != temp_root().parent_path(); current = current.parent_path())
+  {
+    static_cast<void>(::chmod(current.c_str(), S_IRWXU));
+  }
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << content;
   file.close();
@@ -59,6 +74,7 @@ void test_permission_rule_storage_add_list_remove()
   auto const workspace = root / "workspace";
   auto const store = test_store(root);
   auto const outside = root / "outside.txt";
+  static_cast<void>(::chmod(root.c_str(), S_IRWXU));
 
   auto added =
       ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
@@ -68,6 +84,9 @@ void test_permission_rule_storage_add_list_remove()
                                                                                                     .tool_name = "",
                                                                                                     .target_path = outside,
                                                                                                     .command = "",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
                                                                                                     .reason = "allow this exact file",
                                                                                                     .actor = "test"});
   expect(added.has_value() && added->rule_id.starts_with("permrule_"), "permission rule storage creates a stable rule id");
@@ -89,6 +108,65 @@ void test_permission_rule_storage_add_list_remove()
   expect(after_remove && after_remove->empty(), "permission rule removal persists an empty rules array");
 }
 
+void test_legacy_command_allows_are_removed_one_at_a_time()
+{
+  auto const root = temp_root() / "permission-rules-legacy-sequential-remove";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto legacy_allow = ava::permissions::PersistentPermissionRule{.rule_id = "permrule_legacy_first",
+                                                                 .scope = ava::permissions::PermissionRuleScope::Global,
+                                                                 .workspace_dir = {},
+                                                                 .action = ava::permissions::PermissionAction::Allow,
+                                                                 .operation = ava::permissions::Operation::RunCommand,
+                                                                 .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                 .tool_name = "bash",
+                                                                 .target_path = {},
+                                                                 .command = "legacy first",
+                                                                 .command_recipe_key = {},
+                                                                 .recipe_display = {},
+                                                                 .critical_acknowledged = false,
+                                                                 .schema_version = ava::permissions::kLegacyPermissionRulesSchemaVersion,
+                                                                 .reason = "legacy command allow",
+                                                                 .actor = "test",
+                                                                 .created_at = "2026-07-19T00:00:00Z"};
+  auto second_legacy_allow = legacy_allow;
+  second_legacy_allow.rule_id = "permrule_legacy_second";
+  second_legacy_allow.command = "legacy second";
+  write_file_with_mode(store.global_rules_file,
+                       std::string("{\"schema_version\":1,\"rules\":[") + ava::permissions::permission_rule_json(legacy_allow) + "," +
+                           ava::permissions::permission_rule_json(second_legacy_allow) + "]}",
+                       S_IRUSR | S_IWUSR);
+
+  auto first_removed = ava::permissions::remove_persistent_permission_rule(store, legacy_allow.rule_id);
+  std::ifstream after_first_file(store.global_rules_file);
+  std::string after_first((std::istreambuf_iterator<char>(after_first_file)), std::istreambuf_iterator<char>());
+  auto add_while_legacy_remains =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Global,
+                                                                                                    .action = ava::permissions::PermissionAction::Deny,
+                                                                                                    .operation = ava::permissions::Operation::ReadFile,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Any,
+                                                                                                    .tool_name = "",
+                                                                                                    .target_path = root / "outside.txt",
+                                                                                                    .command = "",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
+                                                                                                    .reason = "must not rewrite legacy command allows",
+                                                                                                    .actor = "test"});
+  auto second_removed = ava::permissions::remove_persistent_permission_rule(store, second_legacy_allow.rule_id);
+  std::ifstream after_second_file(store.global_rules_file);
+  std::string after_second((std::istreambuf_iterator<char>(after_second_file)), std::istreambuf_iterator<char>());
+  auto reloaded = ava::permissions::load_persistent_permission_rules(store);
+
+  expect(
+      first_removed && first_removed->rule_id == legacy_allow.rule_id && after_first.find("\"schema_version\":1") != std::string::npos &&
+          after_first.find(second_legacy_allow.rule_id) != std::string::npos && !add_while_legacy_remains && second_removed &&
+          second_removed->rule_id == second_legacy_allow.rule_id && after_second.find("\"schema_version\":2") != std::string::npos && reloaded &&
+          reloaded->empty(),
+      "legacy command Allows can be removed sequentially without rewriting the remaining v1 Allow, additions remain blocked, and final removal migrates to v2");
+}
+
 void test_permission_rule_precedence_denies_win()
 {
   auto const root = create_empty_root("permission-rules-precedence");
@@ -105,6 +183,9 @@ void test_permission_rule_precedence_denies_win()
                                                                                                     .tool_name = "",
                                                                                                     .target_path = outside,
                                                                                                     .command = "",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
                                                                                                     .reason = "global allow",
                                                                                                     .actor = "test"});
   auto workspace_deny =
@@ -115,6 +196,9 @@ void test_permission_rule_precedence_denies_win()
                                                                                                     .tool_name = "",
                                                                                                     .target_path = outside,
                                                                                                     .command = "",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
                                                                                                     .reason = "workspace deny",
                                                                                                     .actor = "test"});
   expect(global_allow && workspace_deny, "permission rule precedence test creates allow and deny rules");
@@ -137,6 +221,220 @@ ava::permissions::PermissionPrompt command_prompt(ava::permissions::PermissionRu
                                             .risk = ava::permissions::PermissionRisk::High};
 }
 
+ava::permissions::CommandPermissionMetadata stable_command_metadata(std::string global_key, std::string workspace_key)
+{
+  ava::permissions::CommandPermissionMetadata metadata;
+  metadata.level = ava::command::CommandLevel::Standard;
+  metadata.family = ava::command::CommandFamily::CmakeBuild;
+  metadata.containment_status = ava::permissions::CommandContainmentStatus::Available;
+  metadata.backend_maximum_scope = ava::command::InteractiveScope::Workspace;
+  metadata.global_recipe_key = std::move(global_key);
+  metadata.workspace_recipe_key = std::move(workspace_key);
+  metadata.recipe_display = "cmake-build: workspace:build";
+  metadata.effective_allowed_scopes = {ava::command::InteractiveScope::Once, ava::command::InteractiveScope::Session,
+                                       ava::command::InteractiveScope::Workspace};
+  return metadata;
+}
+
+void test_schema_v2_recipe_rules_bind_scope_and_deny_precedence()
+{
+  auto const root = temp_root() / "permission-rules-stable-recipe";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace_a = root / "workspace-a";
+  auto const workspace_b = root / "workspace-b";
+  std::filesystem::create_directories(workspace_a);
+  std::filesystem::create_directories(workspace_b);
+  static_cast<void>(::chmod(root.c_str(), S_IRWXU));
+  auto const global_file = root / "config" / "ava" / "permission-rules.json";
+  auto const store_a = ava::permissions::PermissionRuleStore{
+      .global_rules_file = global_file, .workspace_rules_file = workspace_a / ".ava" / "permission-rules.json", .workspace_dir = workspace_a};
+  auto const store_b = ava::permissions::PermissionRuleStore{
+      .global_rules_file = global_file, .workspace_rules_file = workspace_b / ".ava" / "permission-rules.json", .workspace_dir = workspace_b};
+  auto prompt_a = command_prompt(store_a, "cmake --build build");
+  auto prompt_b = command_prompt(store_b, "cmake --build build");
+  auto const global_key = std::string("sha256:ava-command-recipe-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  auto const workspace_a_key = std::string("sha256:ava-command-workspace-recipe-v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+  auto const workspace_b_key = std::string("sha256:ava-command-workspace-recipe-v1:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+  prompt_a.command_metadata = stable_command_metadata(global_key, workspace_a_key);
+  prompt_b.command_metadata = stable_command_metadata(global_key, workspace_b_key);
+
+  auto workspace_allow =
+      ava::permissions::add_persistent_permission_rule(store_a, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                      .action = ava::permissions::PermissionAction::Allow,
+                                                                                                      .operation = ava::permissions::Operation::RunCommand,
+                                                                                                      .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                      .tool_name = "bash",
+                                                                                                      .target_path = {},
+                                                                                                      .command = "cmake --build ./build",
+                                                                                                      .command_recipe_key = workspace_a_key,
+                                                                                                      .recipe_display = "cmake-build: workspace:build",
+                                                                                                      .critical_acknowledged = false,
+                                                                                                      .reason = "remember exact workspace recipe",
+                                                                                                      .actor = "test"});
+  auto reloaded = ava::permissions::load_persistent_permission_rules(store_a);
+  auto workspace_match = ava::permissions::match_persistent_permission_rule(store_a, prompt_a);
+  auto cross_workspace_miss = ava::permissions::match_persistent_permission_rule(store_b, prompt_b);
+
+  auto global_allow =
+      ava::permissions::add_persistent_permission_rule(store_a, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Global,
+                                                                                                      .action = ava::permissions::PermissionAction::Allow,
+                                                                                                      .operation = ava::permissions::Operation::RunCommand,
+                                                                                                      .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                      .tool_name = "bash",
+                                                                                                      .target_path = {},
+                                                                                                      .command = {},
+                                                                                                      .command_recipe_key = global_key,
+                                                                                                      .recipe_display = "cmake-build: workspace:build",
+                                                                                                      .critical_acknowledged = false,
+                                                                                                      .reason = "allow exact typed recipe across workspaces",
+                                                                                                      .actor = "test"});
+  auto global_match = ava::permissions::match_persistent_permission_rule(store_b, prompt_b);
+  auto global_deny = ava::permissions::add_persistent_permission_rule(
+      store_a, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Global,
+                                                     .action = ava::permissions::PermissionAction::Deny,
+                                                     .operation = ava::permissions::Operation::RunCommand,
+                                                     .mode = ava::permissions::PermissionRuleMode::Build,
+                                                     .tool_name = "bash",
+                                                     .target_path = {},
+                                                     .command = {},
+                                                     .command_recipe_key = global_key,
+                                                     .recipe_display = "cmake-build: workspace:build",
+                                                     .critical_acknowledged = false,
+                                                     .reason = "deny overrides standard auto-allow before execution",
+                                                     .actor = "test"});
+  auto denied = ava::permissions::match_persistent_permission_rule(store_b, prompt_b);
+
+  expect(workspace_allow && reloaded && reloaded->size() == 1 && workspace_match && *workspace_match &&
+             (*workspace_match)->rule_id == workspace_allow->rule_id && cross_workspace_miss && !*cross_workspace_miss && global_allow && global_match &&
+             *global_match && (*global_match)->rule_id == global_allow->rule_id && global_deny && denied && *denied &&
+             (*denied)->action == ava::permissions::PermissionAction::Deny && (*denied)->rule_id == global_deny->rule_id,
+         "schema-v2 recipe rules match by typed workspace key rather than raw command spelling, global recipe rules span workspaces, and exact recipe denies win "
+         "before Standard auto-allow");
+}
+
+void test_critical_command_allows_are_always_one_shot()
+{
+  auto const root = temp_root() / "permission-rules-critical-ack";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto prompt = command_prompt(store, "python -c 'print(1)'");
+  ava::permissions::CommandPermissionMetadata critical;
+  critical.level = ava::command::CommandLevel::Critical;
+  critical.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  critical.containment_status = ava::permissions::CommandContainmentStatus::Available;
+  prompt.command_metadata = critical;
+
+  auto missing_ack =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Allow,
+                                                                                                    .operation = ava::permissions::Operation::RunCommand,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "bash",
+                                                                                                    .target_path = {},
+                                                                                                    .command = prompt.command,
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
+                                                                                                    .reason = "must fail without acknowledgement",
+                                                                                                    .actor = "test"});
+  auto acknowledged =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Allow,
+                                                                                                    .operation = ava::permissions::Operation::RunCommand,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "bash",
+                                                                                                    .target_path = {},
+                                                                                                    .command = prompt.command,
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = true,
+                                                                                                    .reason = "advanced exact critical allow",
+                                                                                                    .actor = "test"});
+  auto matched = ava::permissions::match_persistent_permission_rule(store, prompt);
+  critical.executor_identity_verified = false;
+  critical.containment_status = ava::permissions::CommandContainmentStatus::UnverifiedDelegatedExecutor;
+  prompt.command_metadata = critical;
+  auto unverified = ava::permissions::match_persistent_permission_rule(store, prompt);
+
+  expect(!missing_ack && !acknowledged && acknowledged.error().category() == ava::core::ErrorCategory::InvalidArgument && matched && !*matched &&
+             unverified && !*unverified,
+         "Critical command Allows cannot be persisted with or without an acknowledgement and remain one-shot for every executor");
+}
+
+void test_critical_acknowledgements_cannot_authorize_repository_build_or_test_text()
+{
+  auto const root = temp_root() / "permission-rules-critical-ack-repository-build";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto const command = std::string("cmake --build build");
+  auto created =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Allow,
+                                                                                                    .operation = ava::permissions::Operation::RunCommand,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "bash",
+                                                                                                    .target_path = {},
+                                                                                                    .command = command,
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = true,
+                                                                                                    .reason = "forged raw cmake acknowledgement",
+                                                                                                    .actor = "test"});
+  auto forged = ava::permissions::PersistentPermissionRule{.rule_id = "permrule_forged_cmake_ack",
+                                                           .scope = ava::permissions::PermissionRuleScope::Global,
+                                                           .workspace_dir = {},
+                                                           .action = ava::permissions::PermissionAction::Allow,
+                                                           .operation = ava::permissions::Operation::RunCommand,
+                                                           .mode = ava::permissions::PermissionRuleMode::Build,
+                                                           .tool_name = "bash",
+                                                           .target_path = {},
+                                                           .command = command,
+                                                           .command_recipe_key = {},
+                                                           .recipe_display = {},
+                                                           .critical_acknowledged = true,
+                                                           .schema_version = ava::permissions::kCurrentPermissionRulesSchemaVersion,
+                                                           .reason = "forged persisted cmake acknowledgement",
+                                                           .actor = "test",
+                                                           .created_at = "2026-07-19T00:00:00Z"};
+  write_file_with_mode(store.global_rules_file, std::string("{\"schema_version\":2,\"rules\":[") + ava::permissions::permission_rule_json(forged) + "]}",
+                       S_IRUSR | S_IWUSR);
+  auto prompt = command_prompt(store, command);
+  ava::permissions::CommandPermissionMetadata critical;
+  critical.level = ava::command::CommandLevel::Critical;
+  critical.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  prompt.command_metadata = critical;
+  auto matched = ava::permissions::match_persistent_permission_rule(store, prompt);
+  auto ctest_created =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Allow,
+                                                                                                    .operation = ava::permissions::Operation::RunCommand,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "bash",
+                                                                                                    .target_path = {},
+                                                                                                    .command = "ctest --test-dir build",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = true,
+                                                                                                    .reason = "forged raw ctest acknowledgement",
+                                                                                                    .actor = "test"});
+  auto forged_ctest = forged;
+  forged_ctest.rule_id = "permrule_forged_ctest_ack";
+  forged_ctest.command = "ctest --test-dir build";
+  forged_ctest.reason = "forged persisted ctest acknowledgement";
+  write_file_with_mode(store.global_rules_file, std::string("{\"schema_version\":2,\"rules\":[") + ava::permissions::permission_rule_json(forged_ctest) + "]}",
+                       S_IRUSR | S_IWUSR);
+  auto ctest_prompt = command_prompt(store, forged_ctest.command);
+  ctest_prompt.command_metadata = critical;
+  auto ctest_matched = ava::permissions::match_persistent_permission_rule(store, ctest_prompt);
+
+  expect(!created && created.error().category() == ava::core::ErrorCategory::InvalidArgument && !matched && !ctest_created &&
+             ctest_created.error().category() == ava::core::ErrorCategory::InvalidArgument && !ctest_matched,
+         "raw critical acknowledgements for repository-controlled cmake build and ctest text are rejected both on creation and during persisted-rule matching");
+}
+
 void test_permission_rule_precedence_prefers_specific_same_scope_rules()
 {
   auto const root = create_empty_root("permission-rules-specificity");
@@ -152,6 +450,9 @@ void test_permission_rule_precedence_prefers_specific_same_scope_rules()
                                                                                                     .tool_name = "",
                                                                                                     .target_path = outside,
                                                                                                     .command = "",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
                                                                                                     .reason = "allow this path",
                                                                                                     .actor = "test"});
   auto specific_deny =
@@ -162,6 +463,9 @@ void test_permission_rule_precedence_prefers_specific_same_scope_rules()
                                                                                                     .tool_name = "read_file",
                                                                                                     .target_path = outside,
                                                                                                     .command = "",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
                                                                                                     .reason = "deny this tool/path pair",
                                                                                                     .actor = "test"});
   expect(broad_allow && specific_deny, "permission rule specificity test creates broad and specific rules");
@@ -185,15 +489,39 @@ void test_permission_rule_matches_command_operations_without_path_targets()
                                                                                                     .tool_name = "bash",
                                                                                                     .target_path = {},
                                                                                                     .command = "echo safe",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
                                                                                                     .reason = "allow exact verification command",
                                                                                                     .actor = "test"});
-  expect(allow_echo.has_value(), "permission rule storage accepts exact command rules for non-file operations");
+  expect(!allow_echo && allow_echo.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "schema-v2 raw command Allows are rejected without a stable recipe key or explicit critical acknowledgement");
 
+  // Schema-v1 command Allows predate sealed recipe identities and remain
+  // non-authoritative; exact Denies remain authoritative.
   auto matched = ava::permissions::match_persistent_permission_rule(store, command_prompt(store, "echo safe"));
+  expect(matched && !*matched, "legacy v1 command Allow rules are ignored for one-shot command plans");
+
+  auto deny_echo =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Deny,
+                                                                                                    .operation = ava::permissions::Operation::RunCommand,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "bash",
+                                                                                                    .target_path = {},
+                                                                                                    .command = "echo safe",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
+                                                                                                    .reason = "deny exact verification command",
+                                                                                                    .actor = "test"});
+  expect(deny_echo.has_value(), "permission rule storage accepts exact command deny rules");
+  auto matched_deny = ava::permissions::match_persistent_permission_rule(store, command_prompt(store, "echo safe"));
+  expect(matched_deny && *matched_deny && (*matched_deny)->rule_id == deny_echo->rule_id && (*matched_deny)->action == ava::permissions::PermissionAction::Deny,
+         "legacy v1 command Deny rules remain authoritative for one-shot command plans");
+
   auto unmatched = ava::permissions::match_persistent_permission_rule(store, command_prompt(store, "echo unsafe"));
-  expect(matched && *matched && (*matched)->rule_id == allow_echo->rule_id && (*matched)->action == ava::permissions::PermissionAction::Allow && unmatched &&
-             !*unmatched,
-         "persistent permission rules match command operations by exact command/tool without a path target");
+  expect(unmatched && !*unmatched, "non-matching command prompts produce no persistent rule match");
 }
 
 void test_repository_build_test_persistent_allows_are_rejected_but_denies_win()
@@ -214,6 +542,9 @@ void test_repository_build_test_persistent_allows_are_rejected_but_denies_win()
                                                                                                       .tool_name = "bash",
                                                                                                       .target_path = {},
                                                                                                       .command = prompt.command,
+                                                                                                      .command_recipe_key = {},
+                                                                                                      .recipe_display = {},
+                                                                                                      .critical_acknowledged = false,
                                                                                                       .reason = "never persist build test approval",
                                                                                                       .actor = "test"});
     expect(!persistent_allow && persistent_allow.error().category() == ava::core::ErrorCategory::InvalidArgument,
@@ -228,6 +559,9 @@ void test_repository_build_test_persistent_allows_are_rejected_but_denies_win()
                                                                   .tool_name = "bash",
                                                                   .target_path = {},
                                                                   .command = prompt.command,
+                                                                  .command_recipe_key = {},
+                                                                  .recipe_display = {},
+                                                                  .critical_acknowledged = false,
                                                                   .reason = "legacy repository test allow",
                                                                   .actor = "test",
                                                                   .created_at = "2026-07-11T00:00:00Z"};
@@ -246,6 +580,9 @@ void test_repository_build_test_persistent_allows_are_rejected_but_denies_win()
                                                                                                     .tool_name = "bash",
                                                                                                     .target_path = {},
                                                                                                     .command = prompt.command,
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
                                                                                                     .reason = "deny repository test",
                                                                                                     .actor = "test"});
   auto matched = ava::permissions::match_persistent_permission_rule(store, prompt);
@@ -253,12 +590,133 @@ void test_repository_build_test_persistent_allows_are_rejected_but_denies_win()
          "persistent deny rules continue to override repository build and test approvals");
 }
 
+void test_legacy_command_allows_do_not_authorize_sealed_critical_or_unverified_plans()
+{
+  auto const root = temp_root() / "permission-rules-sealed-command-v1";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto prompt = command_prompt(store, "python -c 'print(1)'");
+  ava::permissions::PersistentPermissionRule const legacy_allow{.rule_id = "permrule_legacy_command_allow",
+                                                                .scope = ava::permissions::PermissionRuleScope::Global,
+                                                                .workspace_dir = {},
+                                                                .action = ava::permissions::PermissionAction::Allow,
+                                                                .operation = ava::permissions::Operation::RunCommand,
+                                                                .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                .tool_name = "bash",
+                                                                .target_path = {},
+                                                                .command = prompt.command,
+                                                                .command_recipe_key = {},
+                                                                .recipe_display = {},
+                                                                .critical_acknowledged = false,
+                                                                .reason = "legacy exact command allow",
+                                                                .actor = "test",
+                                                                .created_at = "2026-07-19T00:00:00Z"};
+  ava::permissions::PersistentPermissionRule legacy_deny = legacy_allow;
+  legacy_deny.rule_id = "permrule_legacy_command_deny";
+  legacy_deny.action = ava::permissions::PermissionAction::Deny;
+  legacy_deny.reason = "legacy exact command deny";
+
+  auto verify_legacy_allow_blocked = [&](ava::permissions::CommandPermissionMetadata metadata, std::string_view label) {
+    prompt.command_metadata = std::move(metadata);
+    write_file_with_mode(store.global_rules_file,
+                         std::string("{\"schema_version\":1,\"rules\":[") + ava::permissions::permission_rule_json(legacy_allow) + "]}", S_IRUSR | S_IWUSR);
+    auto ignored_allow = ava::permissions::match_persistent_permission_rule(store, prompt);
+    expect(ignored_allow && !*ignored_allow, std::string("legacy v1 exact Allow cannot authorize ") + std::string(label) + " sealed command plans");
+
+    write_file_with_mode(store.global_rules_file,
+                         std::string("{\"schema_version\":1,\"rules\":[") + ava::permissions::permission_rule_json(legacy_allow) + "," +
+                             ava::permissions::permission_rule_json(legacy_deny) + "]}",
+                         S_IRUSR | S_IWUSR);
+    auto matched_deny = ava::permissions::match_persistent_permission_rule(store, prompt);
+    expect(matched_deny && *matched_deny && (*matched_deny)->rule_id == legacy_deny.rule_id,
+           std::string("legacy v1 exact Deny remains authoritative for ") + std::string(label) + " sealed command plans");
+  };
+
+  ava::permissions::CommandPermissionMetadata critical;
+  critical.level = ava::command::CommandLevel::Critical;
+  critical.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  verify_legacy_allow_blocked(critical, "critical");
+
+  ava::permissions::CommandPermissionMetadata unverified;
+  unverified.level = ava::command::CommandLevel::Critical;
+  unverified.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  unverified.executor_identity_verified = false;
+  unverified.containment_status = ava::permissions::CommandContainmentStatus::UnverifiedDelegatedExecutor;
+  verify_legacy_allow_blocked(unverified, "unverified delegated");
+}
+
+void test_old_critical_acknowledgements_never_recover_authority()
+{
+  auto const root = temp_root() / "permission-rules-critical-unavailable";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto const command = std::string("curl https://example.test/releases");
+  auto rejected = ava::permissions::add_persistent_permission_rule(
+      store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                   .action = ava::permissions::PermissionAction::Allow,
+                                                   .operation = ava::permissions::Operation::RunCommand,
+                                                   .mode = ava::permissions::PermissionRuleMode::Build,
+                                                   .tool_name = "bash",
+                                                   .target_path = {},
+                                                   .command = command,
+                                                   .command_recipe_key = {},
+                                                   .recipe_display = {},
+                                                   .critical_acknowledged = true,
+                                                   .reason = "exact critical allow for uncontained network command",
+                                                   .actor = "test"});
+  auto old_rule = ava::permissions::PersistentPermissionRule{.rule_id = "permrule_old_critical_ack",
+                                                              .scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                              .workspace_dir = store.workspace_dir,
+                                                              .action = ava::permissions::PermissionAction::Allow,
+                                                              .operation = ava::permissions::Operation::RunCommand,
+                                                              .mode = ava::permissions::PermissionRuleMode::Build,
+                                                              .tool_name = "bash",
+                                                              .target_path = {},
+                                                              .command = command,
+                                                              .command_recipe_key = {},
+                                                              .recipe_display = {},
+                                                              .critical_acknowledged = true,
+                                                              .schema_version = ava::permissions::kCurrentPermissionRulesSchemaVersion,
+                                                              .reason = "old exact critical allow",
+                                                              .actor = "test",
+                                                              .created_at = "2026-07-19T00:00:00Z"};
+  std::filesystem::create_directories(store.workspace_rules_file.parent_path());
+  write_file_with_mode(store.workspace_rules_file,
+                       std::string("{\"schema_version\":2,\"rules\":[") + ava::permissions::permission_rule_json(old_rule) + "]}",
+                       S_IRUSR | S_IWUSR);
+  auto prompt = command_prompt(store, command);
+
+  ava::permissions::CommandPermissionMetadata unavailable;
+  unavailable.level = ava::command::CommandLevel::Critical;
+  unavailable.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  unavailable.executor_identity_verified = true;
+  unavailable.containment_status = ava::permissions::CommandContainmentStatus::Unavailable;
+  prompt.command_metadata = unavailable;
+  auto unavailable_match = ava::permissions::match_persistent_permission_rule(store, prompt);
+
+  auto available = unavailable;
+  available.containment_status = ava::permissions::CommandContainmentStatus::Available;
+  prompt.command_metadata = available;
+  auto available_match = ava::permissions::match_persistent_permission_rule(store, prompt);
+
+  auto unverified = unavailable;
+  unverified.executor_identity_verified = false;
+  unverified.containment_status = ava::permissions::CommandContainmentStatus::UnverifiedDelegatedExecutor;
+  prompt.command_metadata = unverified;
+  auto unverified_match = ava::permissions::match_persistent_permission_rule(store, prompt);
+  expect(!rejected && rejected.error().category() == ava::core::ErrorCategory::InvalidArgument && unavailable_match && !*unavailable_match &&
+             available_match && !*available_match && unverified_match && !*unverified_match,
+         "new and old exact Critical acknowledgements never recover authority, regardless of containment or executor status");
+}
+
 void test_permission_rule_storage_fail_closed()
 {
   auto const root = create_empty_root("permission-rules-corrupt");
 
   auto const store = test_store(root);
-  write_file_with_mode(store.global_rules_file, "{\"schema_version\":2,\"rules\":[]}", S_IRUSR | S_IWUSR);
+  write_file_with_mode(store.global_rules_file, "{\"schema_version\":3,\"rules\":[]}", S_IRUSR | S_IWUSR);
 
   auto loaded = ava::permissions::load_persistent_permission_rules(store);
   expect(!loaded && loaded.error().message() == "unsupported permission rules schema_version", "permission rule storage rejects unsupported schema versions");
@@ -273,6 +731,11 @@ void test_permission_rule_storage_fail_closed()
   expect(decision && decision->resolution == ava::permissions::PermissionResolution::Deny && decision->resolution_source == "persistent_rule_error" &&
              decision->authoritative && !fallback_called,
          "malformed persistent rule storage fails closed before resolver fallback");
+
+  write_file_with_mode(store.global_rules_file, "{\"schema_version\":2,\"rules\":[],\"unexpected\":true}", S_IRUSR | S_IWUSR);
+  auto unknown_v2_member = ava::permissions::load_persistent_permission_rules(store);
+  expect(!unknown_v2_member && unknown_v2_member.error().message() == "schema-v2 permission rules file has unsupported member",
+         "strict bounded schema-v2 rule storage rejects unknown members rather than silently broadening policy");
 }
 
 void test_permission_rule_broad_permissions_rejected()
@@ -284,6 +747,146 @@ void test_permission_rule_broad_permissions_rejected()
 
   auto loaded = ava::permissions::load_persistent_permission_rules(store);
   expect(!loaded && loaded.error().category() == ava::core::ErrorCategory::PermissionDenied, "permission rule storage rejects group/world-readable rule files");
+}
+
+ava::permissions::PermissionRuleDraft persistent_deny_draft(std::filesystem::path const& target)
+{
+  return ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Global,
+                                               .action = ava::permissions::PermissionAction::Deny,
+                                               .operation = ava::permissions::Operation::ReadFile,
+                                               .mode = ava::permissions::PermissionRuleMode::Any,
+                                               .tool_name = "",
+                                               .target_path = target,
+                                               .command = "",
+                                               .command_recipe_key = {},
+                                               .recipe_display = {},
+                                               .critical_acknowledged = false,
+                                               .reason = "persistent deny must survive unsafe storage paths",
+                                               .actor = "test"};
+}
+
+void test_permission_rule_storage_rejects_unsafe_ancestor_without_dropping_denies()
+{
+  auto const root = temp_root() / "permission-rules-unsafe-ancestor";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto const target = root / "outside.txt";
+  auto deny = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(target));
+  auto const config_dir = store.global_rules_file.parent_path().parent_path();
+  expect(deny && ::chmod(config_dir.c_str(), S_IRWXU | S_IRWXO) == 0,
+         "unsafe ancestor fixture creates a persistent deny then makes its ancestor world writable without a root sticky namespace");
+
+  auto anchored_load = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  auto anchored_write = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(root / "other.txt"));
+
+  expect(::chmod(config_dir.c_str(), S_IRWXU) == 0, "unsafe ancestor fixture restores private ancestor mode");
+  auto restored = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  expect(anchored_load && *anchored_load && anchored_write && restored && *restored && (*restored)->rule_id == deny->rule_id,
+         "a pre-opened permission-rule anchor remains authoritative across later logical-ancestor mode changes without losing a persisted Deny");
+}
+
+void test_permission_rule_storage_allows_private_primary_group_ancestor_when_verified()
+{
+  auto const root = temp_root() / "permission-rules-private-primary-group-ancestor";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto const config_dir = store.global_rules_file.parent_path().parent_path();
+  std::filesystem::create_directories(config_dir);
+  if (::chown(config_dir.c_str(), ::geteuid(), ::getegid()) != 0 || ::chmod(config_dir.c_str(), S_IRWXU | S_IRWXG) != 0)
+    return;
+
+  struct stat status{};
+  if (::stat(config_dir.c_str(), &status) != 0 || !ava::command::detail::is_current_user_private_primary_group_directory(status))
+    return;
+
+  auto const target = root / "outside.txt";
+  auto deny = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(target));
+  auto matched = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  expect(deny && matched && *matched && (*matched)->rule_id == deny->rule_id,
+         "a verified private-primary-group group-writable ancestor is accepted while final rules storage remains private");
+}
+
+void test_permission_rule_storage_rejects_symlinked_or_replaced_directories()
+{
+  auto const root = temp_root() / "permission-rules-replaced-directories";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto const target = root / "outside.txt";
+  auto deny = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(target));
+  auto const rules_dir = store.global_rules_file.parent_path();
+  auto const redirected_root = root / "redirected";
+  std::filesystem::create_directories(redirected_root);
+  expect(::chmod(redirected_root.c_str(), S_IRWXU) == 0, "replacement fixture creates private redirect destination");
+
+  auto const parked_dir = rules_dir.string() + ".parked";
+  std::error_code rename_error;
+  std::filesystem::rename(rules_dir, parked_dir, rename_error);
+  std::error_code link_error;
+  std::filesystem::create_directory_symlink(redirected_root, rules_dir, link_error);
+  auto symlink_load = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  auto symlink_write = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(root / "redirected-write.txt"));
+  auto const redirect_untouched = !std::filesystem::exists(redirected_root / "permission-rules.json");
+
+  std::filesystem::remove(rules_dir, remove_error);
+  std::filesystem::rename(parked_dir, rules_dir, rename_error);
+
+  auto const config_dir = rules_dir.parent_path();
+  auto const parked_config = config_dir.string() + ".parked";
+  std::filesystem::rename(config_dir, parked_config, rename_error);
+  std::filesystem::create_directory_symlink(redirected_root, config_dir, link_error);
+  auto ancestor_symlink_load = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  auto ancestor_symlink_write = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(root / "ancestor-redirected-write.txt"));
+  std::filesystem::remove(config_dir, remove_error);
+  std::filesystem::rename(parked_config, config_dir, rename_error);
+
+  auto const redirect_still_untouched =
+      !std::filesystem::exists(redirected_root / "permission-rules.json") && !std::filesystem::exists(redirected_root / "ava" / "permission-rules.json");
+  auto restored = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  expect(deny && !rename_error && !link_error && symlink_load && *symlink_load && symlink_write && ancestor_symlink_load && *ancestor_symlink_load &&
+             ancestor_symlink_write && redirect_untouched && redirect_still_untouched && restored && *restored && (*restored)->rule_id == deny->rule_id,
+         "pre-opened permission-rule anchors ignore later pathname redirection, keep writes on the original inode tree, and retain the original Deny");
+}
+
+void test_permission_rule_storage_requires_owner_only_final_directory()
+{
+  auto const root = temp_root() / "permission-rules-final-directory-mode";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+  auto const target = root / "outside.txt";
+  auto deny = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(target));
+  auto const rules_dir = store.global_rules_file.parent_path();
+  expect(deny && ::chmod(rules_dir.c_str(), S_IRWXU | S_IRGRP | S_IXGRP) == 0, "final rules-directory fixture makes an existing Deny directory non-private");
+
+  auto rejected_load = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  auto rejected_write = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(root / "other.txt"));
+  expect(::chmod(rules_dir.c_str(), S_IRWXU) == 0, "final rules-directory fixture restores exact 0700 mode");
+  auto restored = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  expect(!rejected_load && !rejected_write && restored && *restored && (*restored)->rule_id == deny->rule_id,
+         "a non-0700 final rule directory fails closed and cannot drop or replace a persisted Deny");
+}
+
+void test_permission_rule_storage_allows_root_sticky_temp_ancestor()
+{
+  auto const temporary_root = std::filesystem::temp_directory_path();
+  struct stat temporary_status{};
+  auto const root = temporary_root / ("ava-permission-rules-sticky-" + std::to_string(static_cast<long long>(::getpid())));
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(root);
+  auto const temporary_is_root_sticky =
+      ::stat(temporary_root.c_str(), &temporary_status) == 0 && temporary_status.st_uid == 0 && (temporary_status.st_mode & S_ISVTX) != 0;
+  expect(::chmod(root.c_str(), S_IRWXU) == 0, "root-sticky ancestor fixture creates an owned 0700 child");
+
+  auto const store = test_store(root);
+  auto const target = root / "outside.txt";
+  auto deny = ava::permissions::add_persistent_permission_rule(store, persistent_deny_draft(target));
+  auto matched = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, target));
+  expect(temporary_is_root_sticky && deny && matched && *matched && (*matched)->rule_id == deny->rule_id,
+         "a root-owned sticky temporary namespace is accepted when the rule-storage child is owned and exact 0700");
 }
 
 void test_permission_rule_workspace_legacy_path_is_not_enforceable()
@@ -302,6 +905,9 @@ void test_permission_rule_workspace_legacy_path_is_not_enforceable()
                                                           .tool_name = "",
                                                           .target_path = outside,
                                                           .command = "",
+                                                          .command_recipe_key = {},
+                                                          .recipe_display = {},
+                                                          .critical_acknowledged = false,
                                                           .reason = "forged workspace rule",
                                                           .actor = "model",
                                                           .created_at = "2026-05-07T00:00:00Z"};
@@ -333,10 +939,19 @@ void test_file_tools_reject_enforceable_permission_rule_writes()
   auto const root = create_empty_root("permission-rules-enforceable-file-tool-guard");
 
   auto const workspace = root / "workspace";
-  std::filesystem::create_directories(workspace);
-  auto const store = ava::permissions::PermissionRuleStore{.global_rules_file = workspace / ".config" / "ava" / "permission-rules.json",
+  auto const config_dir = workspace / ".config" / "ava";
+  std::filesystem::create_directories(config_dir);
+  static_cast<void>(::chmod(root.c_str(), S_IRWXU));
+  static_cast<void>(::chmod(workspace.c_str(), S_IRWXU));
+  static_cast<void>(::chmod(config_dir.c_str(), S_IRWXU));
+  auto anchors = ava::core::AnchorSet::open({workspace, config_dir});
+  expect(anchors.has_value(), "enforceable file-tool guard opens its shared AnchorSet");
+  if (!anchors)
+    return;
+  auto const store = ava::permissions::PermissionRuleStore{.global_rules_file = config_dir / "permission-rules.json",
                                                            .workspace_rules_file = workspace / ".ava" / "permission-rules.json",
-                                                           .workspace_dir = workspace};
+                                                           .workspace_dir = workspace,
+                                                           .anchor_set = *anchors};
   auto const outside = root / "outside.txt";
 
   auto added =
@@ -347,6 +962,9 @@ void test_file_tools_reject_enforceable_permission_rule_writes()
                                                                                                     .tool_name = "",
                                                                                                     .target_path = outside,
                                                                                                     .command = "",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
                                                                                                     .reason = "register protected rule paths",
                                                                                                     .actor = "test"});
   expect(added.has_value(),
@@ -372,7 +990,7 @@ void test_file_tools_reject_enforceable_permission_rule_writes()
     auto alias_write =
         ava::tools::write_file(context, config_link / "permission-rules.json", "{}", ava::tools::WriteOptions{.permission_already_checked = true});
     expect(!alias_write && alias_write.error().category() == ava::core::ErrorCategory::PermissionDenied,
-           "normal file tools use canonical comparison for enforceable permission rule file aliases");
+           "normal file tools use inode comparison for enforceable permission rule file aliases");
   }
 }
 
@@ -425,12 +1043,23 @@ void test_registered_permission_rule_paths_protect_agent_loop_context()
 void run_permission_rules_tests()
 {
   test_permission_rule_storage_add_list_remove();
+  test_old_critical_acknowledgements_never_recover_authority();
+  test_legacy_command_allows_are_removed_one_at_a_time();
   test_permission_rule_precedence_denies_win();
   test_permission_rule_precedence_prefers_specific_same_scope_rules();
+  test_schema_v2_recipe_rules_bind_scope_and_deny_precedence();
+  test_critical_command_allows_are_always_one_shot();
+  test_critical_acknowledgements_cannot_authorize_repository_build_or_test_text();
   test_permission_rule_matches_command_operations_without_path_targets();
   test_repository_build_test_persistent_allows_are_rejected_but_denies_win();
+  test_legacy_command_allows_do_not_authorize_sealed_critical_or_unverified_plans();
   test_permission_rule_storage_fail_closed();
   test_permission_rule_broad_permissions_rejected();
+  test_permission_rule_storage_rejects_unsafe_ancestor_without_dropping_denies();
+  test_permission_rule_storage_allows_private_primary_group_ancestor_when_verified();
+  test_permission_rule_storage_rejects_symlinked_or_replaced_directories();
+  test_permission_rule_storage_requires_owner_only_final_directory();
+  test_permission_rule_storage_allows_root_sticky_temp_ancestor();
   test_permission_rule_workspace_legacy_path_is_not_enforceable();
   test_file_tools_reject_workspace_permission_rule_writes();
   test_file_tools_reject_enforceable_permission_rule_writes();

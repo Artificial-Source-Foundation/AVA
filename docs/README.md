@@ -13,6 +13,7 @@ This is the navigation spine for AVA's user, automation, engineering, and produc
 - [`terminal-setup.md`](terminal-setup.md): terminal capability setup and troubleshooting for tmux, Kitty, OSC 8/52, paste, mouse, and themes.
 - [`themes-keybindings.md`](themes-keybindings.md): TUI themes, display settings, keybinding files, and Pi theme/keybinding differences.
 - [`security-sandboxing.md`](security-sandboxing.md): permission boundaries, trust, plugin/MCP process limits, and container/VM guidance.
+- [`diagnostics.md`](diagnostics.md): passive doctor, private traces, last-failure state, support exports, privacy exclusions, and libcwd's separate developer-debug role.
 
 ## Automation And Extension Contracts
 
@@ -48,6 +49,9 @@ This is the navigation spine for AVA's user, automation, engineering, and produc
 - [`product/parallel-tools-plan.md`](product/parallel-tools-plan.md): ordinary parallel tool execution design risks and rollout plan.
 - [`release-checklist.md`](release-checklist.md): local Linux host-artifact component/script contract, smokes, checksums, portability boundary, and explicitly deferred publish-pipeline work.
 - [`roadmap/backend.md`](roadmap/backend.md): backend roadmap and historical phase rationale.
+- [`roadmap/frontend.md`](roadmap/frontend.md): post-MVP terminal frontend maturity roadmap, using OpenCode as a behavior/quality reference without copying its architecture.
+- [`roadmap/frontend-evidence-baseline.md`](roadmap/frontend-evidence-baseline.md): completed F0 semantic-state inventory, current character-cell matrix, and reproducible terminal evidence catalog.
+- [`roadmap/backend-usability.md`](roadmap/backend-usability.md): approval ledger and implementation records for command permissions, background jobs, support diagnostics, compaction, and session titles.
 - [`roadmap/backend-maturity-baseline.md`](roadmap/backend-maturity-baseline.md): maturity gates and acceptance criteria.
 - [`goals/README.md`](goals/README.md): goal package index, including Pi MVP parity area files.
 
@@ -60,4 +64,4 @@ This is the navigation spine for AVA's user, automation, engineering, and produc
 
 ## Reference Code
 
-- `reference-code/pi/` and `reference-code/opencode/` are local behavior references only. Do not copy source or architecture from them into AVA, and do not include them in builds, formatting, or broad source searches unless explicitly doing reference analysis.
+- `reference-code/pi/`, `reference-code/opencode/`, and `reference-code/grok-build/` are local behavior references only. Do not copy source or architecture from them into AVA, and do not include them in builds, formatting, or broad source searches unless explicitly doing reference analysis.

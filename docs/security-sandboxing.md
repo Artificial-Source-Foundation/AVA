@@ -113,43 +113,48 @@ These checks reduce accidental or model-initiated damage. They do not make a
 host account safe to expose to untrusted code. A command, plugin, LSP server, or
 MCP server that you approve can still run with the AVA process's OS privileges.
 
-## Bash Tool Safety And Argv-Style Limitations
+## Bash Tool Safety And Sealed Command Plans
 
-The `/bash` tool and model-visible `bash` tool are intentionally conservative.
-Despite the name, AVA does **not** pass the command through an interactive shell.
-It parses a simple command string into an argv vector, sets a trusted `PATH`,
-uses the workspace as the child working directory, captures stdout/stderr
-together, applies output limits/spill behavior, enforces a timeout, and cleans
-up the child process group on timeout/cancel.
+The `/bash` command, `!`/`!!` helpers, and model-visible `bash` tool all use the
+sealed command-plan path. A compatibility command that is a simple argv form is
+executed directly. Shell syntax is represented as raw shell intent instead of
+being mistaken for argv, and remains Critical with one-shot approval only.
+Explicit user shell commands are also always Critical even when their text
+looks like a standard inspection.
 
-Important limitations:
+AVA derives a secret-free child environment, preserves the logical cwd spelling
+in `PWD`, resolves executables and bounded shebang chains before permission,
+binds the approved executable/interpreter inodes, uses the descriptor-bound
+workspace cwd, captures bounded output, and cleans up the verified child
+process group on timeout/cancel.
 
-- Shell metacharacters are rejected: `;`, `&`, `|`, `<`, `>`, backticks, `$`,
-  `(`, and `)` are not supported.
-- Pipelines, redirection, command substitution, environment expansion, globbing
-  by a shell, shell functions, aliases, and `VAR=value command` shell syntax are
-  not available through this parser.
-- Quotes and backslashes only group literal argv text; they are not a full POSIX
-  shell language.
-- Direct script/interpreter/package-manager entrypoints such as `bash`, `sh`,
-  `python`, `node`, `npm`, `pnpm`, `yarn`, `bun`, `make`, `ninja`, and `cargo`
-  are denied by policy because they can execute arbitrary project code.
-- Read-only/local verification commands such as safe `git status`, `git diff`,
-  `git log`, `rg` without preprocessors, `ls`, `pwd`, and bounded `sleep` may be
-  allowed when their arguments stay within the safe path rules.
-- Repository-controlled `ctest` and `cmake --build` invocations always require
-  an explicit one-shot approval or an exact in-memory grant for the active
-  session; AVA never persists an allow for them.
-- Unknown commands ask for approval instead of being silently run.
+Policy details:
 
-An approval is mediation, not containment: `ctest`, build tools, compiler
-wrappers, test binaries, and hooks can execute repository-controlled code. For
-untrusted repositories, run those commands inside OS/container/VM containment;
-an AVA approval does not sandbox the child process.
+- Exact `pwd` and `ls` inspection recipes can be Standard. A path-bearing `ls`
+  is contained so a post-check path replacement cannot redirect it outside the
+  permitted filesystem view.
+- Exact `git status`, `git diff`, and `git log -1` recipes are Standard but
+  require containment because repository Git configuration, hooks, filters,
+  pagers, or helpers may execute mutable project code.
+- Recognized `cmake --build`, `ctest`, `ninja`, `make`, Cargo
+  build/check/test, package-manager script, pytest, and configured workspace
+  script recipes are Standard only under verified development containment.
+- Network, installation, publishing, and workspace-mutation families are
+  Sensitive and require explicit approval. Destructive/privileged commands,
+  inline interpreters, unknown wrappers, and raw shell remain Critical and
+  one-shot.
+- A persistent Deny is checked before Standard auto-allow. Reusable session or
+  workspace Allows exist only for secret-screened, typed recipe identities;
+  Critical/raw/unverified commands cannot acquire reusable Allow authority.
 
-If you need full shell semantics, run AVA inside a container/VM or execute the
-command yourself outside AVA after reviewing it. Do not treat an approved
-`bash` tool call as sandboxed.
+Linux development containment uses Landlock filesystem rules, no-new-privileges,
+and a seccomp network-deny filter when networking is not part of the approved
+plan. This materially restricts contained build/test commands, but it is not a
+complete VM boundary: in particular, verified process-group cleanup cannot
+contain descendants that deliberately create a new session. Use an external
+container/VM sandbox for hostile code or stronger descendant isolation. See
+[Command containment](security/containment.md) for the exact contract and
+platform fallback.
 
 ## Plugin, MCP, And LSP Process Boundaries
 
@@ -197,13 +202,33 @@ See [mcp.md](mcp.md).
 
 Configured LSP servers are also local subprocesses. Global LSP config must use
 absolute paths or trusted `PATH` command names; project LSP config is trust
-gated. LSP queries and server launch are permissioned, but the language server
-itself is still local code once launched. AVA launches it with only the documented
-LSP environment allowlist and a fixed trusted `PATH`, not the parent process's
-provider/cloud/API/token/secret or arbitrary `AVA_*` environment. Cancellation,
-timeout, and client teardown signal the verified LSP process group with TERM and
-then KILL when needed. That covers members which remain in the verified group; a
-descendant that calls `setsid` can escape that group and needs an external OS
+gated. The sole built-in recipe is `clangd`, disabled unless an
+owner-controlled global config opts into that exact id. Discovery
+accepts only an already-installed executable from fixed system directories or
+owner-safe `~/.local/bin`. It rejects workspace/project executables, symlinked
+or hardlinked executable files, unsafe ownership/modes/directory chains, and
+script wrappers; it never downloads, updates, invokes package/toolchain
+managers, or accesses the network. Launch revalidates the sealed descriptor
+identity and executes it with `fexecve`. Its permission identity includes clear
+exact argv plus a bounded replacement-sensitive fingerprint. Automatic `gopls`
+and `rust-analyzer` recipes remain deferred; explicitly configured servers keep
+the existing trust and launch-permission boundary.
+
+Workspace documents, project config, and logical server roots are acquired
+through the runtime's shared `AnchorSet`/`AnchorOpen` authority without
+canonicalizing their identities. Contained symlink resolution may not leave the
+selected writable anchor, and external reads may not enter a writable anchor.
+LSP queries and server launch are permissioned, but the language server itself
+is still local code once launched. AVA launches it with only the documented LSP
+environment allowlist and fixed trusted `PATH`, not the parent process's
+provider/cloud/API/token/secret or arbitrary `AVA_*` environment. Capability,
+message, notification, diagnostics-cache, document-sync, file, and deadline
+bounds remain in force; passive status never launches a server or exposes
+paths, argv, fingerprints, config contents, or raw discovery errors.
+
+Cancellation, timeout, and client teardown signal the verified LSP process
+group with TERM and then KILL. That covers members which remain in the verified
+group; a descendant that calls `setsid` can escape and needs an external OS
 sandbox if it must be contained. AVA does not claim cgroup containment.
 
 ## No Built-In OS Or Container Sandbox Guarantee

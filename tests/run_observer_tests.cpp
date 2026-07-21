@@ -636,6 +636,10 @@ void test_dispatcher_trace_correlation_and_ordering()
   ava::tools::ToolContext context;
   context.workspace_dir = root / "dispatcher-trace";
   std::filesystem::create_directories(context.workspace_dir);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(context.workspace_dir.c_str(), S_IRWXU) == 0,
+         "dispatcher trace workspace is owner-only for sealed command planning");
+  context.spill_dir = root / "dispatcher-spill";
+  context.anchor_set = command_anchors_for_test(context.workspace_dir, context.spill_dir);
   context.observation = observation;
   context.trace_context = {.run_id = "run",
                            .turn_id = "turn",
@@ -818,6 +822,10 @@ void test_session_and_process_boundaries_are_independent()
   ava::tools::ToolContext context;
   context.workspace_dir = root / "process-boundary";
   std::filesystem::create_directories(context.workspace_dir);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(context.workspace_dir.c_str(), S_IRWXU) == 0,
+         "process boundary workspace is owner-only for sealed command planning");
+  context.spill_dir = root / "process-boundary-spill";
+  context.anchor_set = command_anchors_for_test(context.workspace_dir, context.spill_dir);
   context.observation = observation;
   context.permission_resolver = [](ava::permissions::PermissionPrompt const&) {
     return ava::core::Result<ava::permissions::PermissionResolutionDecision>(
@@ -879,6 +887,7 @@ void test_agent_fake_provider_boundaries()
   options.system_prompt = "system";
   options.access_token = "CANARY_TOKEN";
   options.append_entry = append_route_for_test(store);
+  options.append_batch = append_batch_route_for_test(store);
   options.session_read_authority = read_authority_for_test(store);
   options.observation = observation;
   ava::agent::AgentLoop loop(std::move(options));
@@ -931,6 +940,7 @@ void test_disabled_and_enabled_runs_preserve_authoritative_session_semantics()
                                 .system_prompt = "system",
                                 .access_token = "CANARY_TOKEN",
                                 .append_entry = append_route_for_test(store),
+                                .append_batch = append_batch_route_for_test(store),
                                 .session_read_authority = read_authority_for_test(store),
                                 .observation = observation});
     auto result = loop.run_turn("scripted prompt", store, provider, transport);
@@ -953,13 +963,19 @@ void test_disabled_and_enabled_runs_preserve_authoritative_session_semantics()
 
   auto const disabled = run_scripted(false);
   auto const enabled = run_scripted(true);
-  expect(disabled.entries == enabled.entries && !enabled.entries.empty(), "enabled observation preserves scripted session entry type and data ordering");
+  auto same_logical_turn = [](std::vector<std::pair<ava::session::EntryType, std::string>> const& entries) {
+    return entries.size() == 3 && entries[0].first == ava::session::EntryType::UserMessage &&
+           entries[1].first == ava::session::EntryType::AssistantOutputItem && entries[1].second.find("\"text\":\"ok\"") != std::string::npos &&
+           entries[2].first == ava::session::EntryType::AssistantTurnCommit && entries[2].second.find("\"provider\":\"openai\"") != std::string::npos &&
+           entries[2].second.find("\"model\":\"gpt-5.5\"") != std::string::npos;
+  };
+  expect(same_logical_turn(disabled.entries) && same_logical_turn(enabled.entries),
+         "enabled observation preserves the v4 scripted record ordering and logical payloads despite fresh opaque entry IDs");
   expect(enabled.session_jsonl.find("agent.run_start") == std::string::npos && enabled.session_jsonl.find("agent.run_terminal") == std::string::npos &&
              enabled.session_jsonl.find("session.append_attempt") == std::string::npos &&
              enabled.session_jsonl.find("session.append_result") == std::string::npos &&
              enabled.session_jsonl.find("transport.request_result") == std::string::npos &&
-             enabled.session_jsonl.find("provider.stream_event") == std::string::npos && enabled.session_jsonl.find("\"sequence\":") == std::string::npos &&
-             enabled.session_jsonl.find("\"timestamp_ms\":") == std::string::npos,
+             enabled.session_jsonl.find("provider.stream_event") == std::string::npos && enabled.session_jsonl.find("\"timestamp_ms\":") == std::string::npos,
          "observer data never enters authoritative session JSONL");
   expect(!enabled.observer_jsonl.empty() && enabled.observer_jsonl.find("agent.run_start") != std::string::npos &&
              !std::filesystem::exists(root / "disabled" / "observer" / "trace.jsonl"),
@@ -1209,6 +1225,7 @@ void test_agent_terminal_uses_returned_control_state_without_callback_repoll()
                                 throw std::runtime_error("terminal classification repolled cancellation");
                               },
                               .append_entry = append_route_for_test(store),
+                              .append_batch = append_batch_route_for_test(store),
                               .session_read_authority = read_authority_for_test(store),
                               .observation = observation});
   bool cancellation_callback_threw = false;
@@ -1249,6 +1266,7 @@ void test_agent_lifecycle_survives_observation_attachment_failure()
                               .system_prompt = "system",
                               .access_token = "CANARY",
                               .append_entry = append_route_for_test(store),
+                              .append_batch = append_batch_route_for_test(store),
                               .session_read_authority = read_authority_for_test(store),
                               .observation = observation});
   auto result = loop.run_turn("prompt", store, provider, transport);
@@ -1290,12 +1308,14 @@ void test_session_results_and_agent_terminal_cleanup()
   ava::provider::OpenAIProvider provider("https://api.example.test");
   ava::tests::FakeTransport provider_failure({});
   auto append_route = append_route_for_test(store);
+  auto append_batch = append_batch_route_for_test(store);
   ava::agent::AgentLoop failed_loop({.workspace_dir = workspace,
                                      .provider_id = "openai",
                                      .model_id = "gpt-5.5",
                                      .system_prompt = "system",
                                      .access_token = "CANARY",
                                      .append_entry = append_route,
+                                     .append_batch = append_batch,
                                      .session_read_authority = read_authority_for_test(store),
                                      .observation = observation});
   auto failed = failed_loop.run_turn("prompt", store, provider, provider_failure);
@@ -1308,6 +1328,7 @@ void test_session_results_and_agent_terminal_cleanup()
                                        .access_token = "CANARY",
                                        .cancel_requested = [] { return true; },
                                        .append_entry = append_route,
+                                       .append_batch = append_batch,
                                        .session_read_authority = read_authority_for_test(store),
                                        .observation = observation});
   auto canceled = canceled_loop.run_turn("prompt", store, provider, canceled_transport);
@@ -1321,6 +1342,7 @@ void test_session_results_and_agent_terminal_cleanup()
       .access_token = "CANARY",
       .cancel_requested = [] { return true; },
       .append_entry = append_route,
+      .append_batch = append_batch,
       .session_read_authority = read_authority_for_test(store),
   });
   static_cast<void>(disabled_loop.run_turn("prompt", store, provider, canceled_transport));
@@ -1357,6 +1379,8 @@ void test_process_cancellation_and_bounded_output_observation()
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
   ava::tools::ToolContext context;
   context.workspace_dir = root;
+  context.spill_dir = root.parent_path() / "process-cancellation-spill";
+  context.anchor_set = command_anchors_for_test(context.workspace_dir, context.spill_dir);
   context.current_call_id = "process-call";
   context.observation = observation;
   context.trace_context = {
@@ -1364,9 +1388,13 @@ void test_process_cancellation_and_bounded_output_observation()
   context.permission_resolver = [](ava::permissions::PermissionPrompt const&) {
     return ava::permissions::PermissionResolutionDecision(ava::permissions::PermissionResolution::Allow);
   };
-  context.cancel_requested = [] { return true; };
+  context.cancel_requested = [collector] {
+    std::lock_guard lock(collector->mutex);
+    return std::ranges::any_of(collector->events, [](auto const& event) { return event.type == ava::observability::TraceEventType::ProcessStart; });
+  };
   auto result = ava::tools::run_bash(context, "sleep 1", {.timeout = std::chrono::seconds(2)});
-  expect(result && result->canceled, "process cancellation remains a normal bash result");
+  expect(result && result->canceled,
+         result ? "process cancellation remains a normal bash result" : "process cancellation remains a normal bash result: " + result.error().format());
   std::lock_guard lock(collector->mutex);
   auto const output_events = 0U;  // Schema v1 has no per-output-chunk event.
   auto const start = std::find_if(collector->events.begin(), collector->events.end(), [](auto const& event) {

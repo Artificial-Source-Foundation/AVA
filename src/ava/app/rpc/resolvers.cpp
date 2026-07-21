@@ -25,14 +25,23 @@ std::string next_resolver_request_id(std::string_view prefix)
 
 bool grant_matches(PermissionSessionGrant const& grant, ava::permissions::PermissionPrompt const& prompt, std::string_view session_id)
 {
-  return grant.session_id == session_id && grant.operation == prompt.operation && grant.mode == prompt.mode && grant.tool_name == prompt.tool_name &&
-         grant.target_path == prompt.target_path && grant.command == prompt.command;
+  if (grant.session_id != session_id || grant.operation != prompt.operation || grant.mode != prompt.mode || grant.tool_name != prompt.tool_name ||
+      grant.target_path != prompt.target_path)
+    return false;
+  if (prompt.operation != ava::permissions::Operation::RunCommand)
+    return grant.command == prompt.command && grant.command_recipe_key.empty();
+  return prompt.command_metadata && ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata) && !grant.command_recipe_key.empty() &&
+         grant.command_recipe_key == prompt.command_metadata->workspace_recipe_key;
 }
 
 bool grant_matches(PermissionSessionGrant const& grant, PendingPermissionRequest const& request)
 {
-  return grant.session_id == request.session_id && grant.operation == request.operation && grant.mode == request.mode && grant.tool_name == request.tool_name &&
-         grant.target_path == request.target_path && grant.command == request.command;
+  if (grant.session_id != request.session_id || grant.operation != request.operation || grant.mode != request.mode || grant.tool_name != request.tool_name ||
+      grant.target_path != request.target_path)
+    return false;
+  if (request.operation != ava::permissions::Operation::RunCommand)
+    return grant.command == request.command && grant.command_recipe_key.empty();
+  return !grant.command_recipe_key.empty() && grant.command_recipe_key == request.command_recipe_key;
 }
 
 PermissionSessionGrant grant_from_request(PendingPermissionRequest const& request)
@@ -45,6 +54,8 @@ PermissionSessionGrant grant_from_request(PendingPermissionRequest const& reques
                                 .tool_name = request.tool_name,
                                 .target_path = request.target_path,
                                 .command = request.command,
+                                .command_recipe_key = request.command_recipe_key,
+                                .command_recipe_display = request.command_recipe_display,
                                 .reason = request.reason,
                                 .risk = request.risk};
 }
@@ -67,6 +78,13 @@ std::string permission_session_grant_json(PermissionSessionGrant const& grant)
   json += string_field_json("target_path", grant.target_path.string());
   json += ',';
   json += string_field_json("command", grant.command);
+  if (!grant.command_recipe_key.empty())
+  {
+    json += ',';
+    json += string_field_json("command_recipe_key", grant.command_recipe_key);
+    json += ',';
+    json += string_field_json("recipe_display", grant.command_recipe_display);
+  }
   json += ',';
   json += string_field_json("reason", grant.reason);
   json += ',';
@@ -233,6 +251,9 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolve
     pending->tool_name = prompt.tool_name;
     pending->target_path = prompt.target_path;
     pending->command = prompt.command;
+    pending->command_recipe_key = prompt.command_metadata ? prompt.command_metadata->workspace_recipe_key : std::string{};
+    pending->command_recipe_display = prompt.command_metadata ? prompt.command_metadata->recipe_display : std::string{};
+    pending->command_allows_reusable_grant = !prompt.command_metadata || ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata);
     pending->reason = prompt.reason;
     pending->risk = prompt.risk;
     std::string request_id;
@@ -374,7 +395,7 @@ ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_sta
       return std::unexpected(std::move(error));
     }
     pending_state.permission_requests.erase(found);
-    if (create_session_grant)
+    if (create_session_grant && pending->command_allows_reusable_grant)
     {
       auto grant = grant_from_request(*pending);
       bool duplicate = false;

@@ -7,6 +7,7 @@
 #include "ava/app/events.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/session/assistant_output.h"
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
 #include "ava/session/record.h"
@@ -127,13 +128,17 @@ void test_app_compact_provider_summary_success()
          "provider-backed /compact sends deterministic prompt with sanitized source data and required sections");
 
   auto entries = session->store.load();
-  expect(entries && std::ranges::any_of(*entries,
-                                        [&](ava::session::SessionEntry const& entry) {
-                                          return entry.type == ava::session::EntryType::Compaction &&
-                                                 ava::core::json::string_field(entry.data_json, "summary") == summary &&
-                                                 entry.data_json.find("\"summary_unavailable\":false") != std::string::npos;
-                                        }),
-         "/compact appends returned summary with summary_unavailable false");
+  expect(entries && std::ranges::any_of(
+                        *entries,
+                        [&](ava::session::SessionEntry const& entry) {
+                          return entry.type == ava::session::EntryType::Compaction && ava::core::json::string_field(entry.data_json, "summary") == summary &&
+                                 ava::core::json::string_field(entry.data_json, "recent_context").value_or("").find("Goal: refactor compaction") !=
+                                     std::string::npos &&
+                                 entry.data_json.find("\"reason\":\"manual\"") != std::string::npos &&
+                                 entry.data_json.find("\"provider\":\"openai\"") != std::string::npos &&
+                                 entry.data_json.find("\"summary_unavailable\":false") != std::string::npos;
+                        }),
+         "/compact appends the returned summary and the shared bounded recent-turn projection");
 }
 
 void test_app_compact_rejects_replaced_current_session_history()
@@ -268,8 +273,8 @@ void test_app_compact_provider_failure_leaves_session_untouched()
   auto entries = session->store.load();
   expect(compact && compact->handled && !compact->output.empty() &&
              compact->output[0].find("compaction summary request failed with status 500") != std::string::npos &&
-             compact->output[0].find("boom") != std::string::npos,
-         "provider-backed /compact reports provider failure with status and body details");
+             compact->output[0].find("boom") == std::string::npos,
+         "provider-backed /compact reports fixed local failure status without a provider body diagnostic");
   expect(entries && std::ranges::none_of(*entries, [](ava::session::SessionEntry const& entry) { return entry.type == ava::session::EntryType::Compaction; }),
          "provider-backed /compact failure leaves session without compaction entry");
 }
@@ -440,11 +445,16 @@ void test_app_compaction_prompt_builder_sections()
 {
   auto config = ava::session::default_compaction_config();
   std::vector<ava::session::SessionEntry> const entries = {
+      ava::session::SessionEntry{.id = "entry_tool_call",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-05-01T00:00:00Z",
+                                 .data_json = "{\"call_id\":\"call_compaction\",\"name\":\"read\",\"arguments\":\"{}\"}"},
       ava::session::SessionEntry{.id = "entry_tool",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ToolResult,
                                  .timestamp = "2026-05-01T00:00:00Z",
-                                 .data_json = "{\"name\":\"read\",\"result\":\"src/main.cpp contents\"}"},
+                                 .data_json = "{\"call_id\":\"call_compaction\",\"name\":\"read\",\"success\":true,\"result\":\"src/main.cpp contents\"}"},
       ava::session::SessionEntry{.id = "entry_replay",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::UserMessage,
@@ -452,11 +462,268 @@ void test_app_compaction_prompt_builder_sections()
                                  .data_json = "{\"text\":\"duplicated active prompt\",\"internal_replay\":true,"
                                               "\"replay_of\":\"entry_user\"}"}};
   auto const prompt = ava::app::build_compaction_summary_prompt(entries, config, "preserve files", 42);
-  expect(prompt.find("# Goal") != std::string::npos && prompt.find("# Constraints / Preferences") != std::string::npos &&
-             prompt.find("# Files Read or Modified") != std::string::npos && prompt.find("src/main.cpp") != std::string::npos &&
-             prompt.find("preserve files") != std::string::npos && prompt.find("internal_replay") == std::string::npos &&
-             prompt.find("duplicated active prompt") == std::string::npos,
+  expect(prompt && prompt->find("# Goal") != std::string::npos && prompt->find("# Constraints / Preferences") != std::string::npos &&
+             prompt->find("# Files Read or Modified") != std::string::npos && prompt->find("src/main.cpp") != std::string::npos &&
+             prompt->find("preserve files") != std::string::npos && prompt->find("internal_replay") == std::string::npos &&
+             prompt->find("duplicated active prompt") == std::string::npos,
          "compaction prompt builder includes source data and skips internal replay messages");
+
+  auto compacted_entries = entries;
+  compacted_entries.push_back(ava::session::SessionEntry{.id = "boundary",
+                                                         .parent_id = "",
+                                                         .type = ava::session::EntryType::Compaction,
+                                                         .timestamp = "2026-05-01T00:00:02Z",
+                                                         .data_json = "{\"summary\":\"ACTIVE_BOUNDARY_SUMMARY\"}"});
+  compacted_entries.push_back(ava::session::SessionEntry{.id = "active_user",
+                                                         .parent_id = "",
+                                                         .type = ava::session::EntryType::UserMessage,
+                                                         .timestamp = "2026-05-01T00:00:03Z",
+                                                         .data_json = "{\"text\":\"ACTIVE_AFTER_BOUNDARY\"}"});
+  auto const active_prompt = ava::app::build_compaction_summary_prompt(compacted_entries, config, "", 10);
+  expect(active_prompt && active_prompt->find("ACTIVE_BOUNDARY_SUMMARY") != std::string::npos &&
+             active_prompt->find("ACTIVE_AFTER_BOUNDARY") != std::string::npos && active_prompt->find("src/main.cpp") == std::string::npos,
+         "compaction prompt builder summarizes only context active after the latest compaction boundary");
+}
+
+void test_app_compaction_model_selection_uses_runtime_catalog()
+{
+  auto const root = temp_root() / "app-compaction-model-selection";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::app::runtime::OpenOptions options;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = app_test_paths(root);
+  auto session = ava::app::open_runtime_session(options);
+  expect(session.has_value(), "compaction model-selection test opens runtime session");
+  if (!session)
+    return;
+
+  auto active = ava::app::resolve_compaction_config(*session, ava::session::default_compaction_config());
+  auto same_config = ava::session::parse_compaction_config(R"({"model":"gpt-5.5"})");
+  auto same = same_config ? ava::app::resolve_compaction_config(*session, std::move(*same_config))
+                          : ava::core::Result<ava::session::CompactionConfig>(std::unexpected(same_config.error()));
+  auto cross_config = ava::session::parse_compaction_config(R"({"provider":"anthropic","model":"claude-sonnet-4-5"})");
+  auto cross = cross_config ? ava::app::resolve_compaction_config(*session, std::move(*cross_config))
+                            : ava::core::Result<ava::session::CompactionConfig>(std::unexpected(cross_config.error()));
+  auto unknown_config = ava::session::parse_compaction_config(R"({"provider":"anthropic","model":"not-configured"})");
+  auto unknown = unknown_config ? ava::app::resolve_compaction_config(*session, std::move(*unknown_config))
+                                : ava::core::Result<ava::session::CompactionConfig>(std::unexpected(unknown_config.error()));
+  expect(active && active->provider_id == session->model.provider_id && active->model_id == session->model.model_id && same &&
+             same->provider_id == session->model.provider_id && same->model_id == "gpt-5.5" && cross && cross->provider_id == "anthropic" &&
+             cross->model_id == "claude-sonnet-4-5" && !unknown && unknown.error().format().find("compaction_model: not-configured") != std::string::npos,
+         "compaction selection defaults active, resolves same/cross-provider overrides, and rejects unknown models without fallback");
+}
+
+void test_app_compaction_recent_tail_preserves_tool_group()
+{
+  auto config = ava::session::default_compaction_config();
+  config.keep_recent_messages = 1;
+  config.keep_recent_messages_explicit = true;
+  config.keep_recent_tokens = 1000;
+  std::vector<ava::session::SessionEntry> const entries = {
+      ava::session::SessionEntry{.id = "tool_turn_user",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-01T00:00:00Z",
+                                 .data_json = "{\"text\":\"inspect file\"}"},
+      ava::session::SessionEntry{.id = "tool_turn_assistant",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-05-01T00:00:01Z",
+                                 .data_json = "{\"text\":\"\",\"tool_calls\":1}"},
+      ava::session::SessionEntry{.id = "tool_turn_call",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-05-01T00:00:02Z",
+                                 .data_json = "{\"call_id\":\"call_safe_tail\",\"name\":\"read_file\",\"arguments\":\"{}\"}"},
+      ava::session::SessionEntry{.id = "tool_turn_result",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-05-01T00:00:03Z",
+                                 .data_json = "{\"call_id\":\"call_safe_tail\",\"name\":\"read_file\",\"success\":true,\"result\":\"SAFE_RESULT\"}"}};
+  auto prepared = ava::app::prepare_compaction_context(entries, config);
+  expect(prepared && prepared->recent_context.find("call_safe_tail") != std::string::npos &&
+             prepared->recent_context.find("SAFE_RESULT") != std::string::npos &&
+             prepared->recent_context.find("call_safe_tail") < prepared->recent_context.find("SAFE_RESULT"),
+         "legacy message retention expands a selected tool result backward to keep its complete call/result group");
+}
+
+void test_app_compaction_recent_tail_budget_never_orphans_tools()
+{
+  auto config = ava::session::default_compaction_config();
+  config.keep_recent_messages = 1;
+  config.keep_recent_messages_explicit = true;
+  config.keep_recent_tokens = 1000;
+  std::vector<ava::session::SessionEntry> const entries = {
+      ava::session::SessionEntry{.id = "budget_tool_assistant",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-05-01T00:00:00Z",
+                                 .data_json = "{\"text\":\"\",\"tool_calls\":1}"},
+      ava::session::SessionEntry{.id = "budget_tool_call",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-05-01T00:00:01Z",
+                                 .data_json = "{\"call_id\":\"call_exact_budget\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"large.cpp\\\"}\"}"},
+      ava::session::SessionEntry{.id = "budget_tool_result",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-05-01T00:00:02Z",
+                                 .data_json = "{\"call_id\":\"call_exact_budget\",\"name\":\"read_file\",\"success\":true,\"result\":\"EXACT_TOOL_RESULT\"}"}};
+  auto unbounded = ava::app::prepare_compaction_context(entries, config);
+  auto const exact_tokens = unbounded ? ava::session::estimate_tokens(unbounded->recent_context) : 0;
+  config.keep_recent_tokens = exact_tokens;
+  auto exact = ava::app::prepare_compaction_context(entries, config);
+  config.keep_recent_tokens = exact_tokens > 0 ? exact_tokens - 1 : 0;
+  auto tight = ava::app::prepare_compaction_context(entries, config);
+  expect(exact && !exact->recent_context_omitted && exact->recent_context.find("call_exact_budget") != std::string::npos &&
+             exact->recent_context.find("EXACT_TOOL_RESULT") != std::string::npos && ava::session::estimate_tokens(exact->recent_context) <= exact_tokens,
+         "an exact recent-context budget retains a complete tool call/result group");
+  expect(tight && tight->recent_context_omitted && tight->recent_context.find("call_exact_budget") == std::string::npos &&
+             tight->recent_context.find("EXACT_TOOL_RESULT") == std::string::npos &&
+             ava::session::estimate_tokens(tight->recent_context) <= config.keep_recent_tokens,
+         "a budget too tight for a structured tool group omits the whole group instead of retaining an orphan or truncating JSON");
+}
+
+void test_app_compaction_oversized_turn_retains_latest_user_anchor()
+{
+  auto config = ava::session::default_compaction_config();
+  config.keep_recent_tokens = 40;
+  config.keep_recent_turns = 1;
+  std::vector<ava::session::SessionEntry> const entries = {
+      ava::session::SessionEntry{.id = "huge_latest_user",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-01T00:00:00Z",
+                                 .data_json = "{\"text\":\"LATEST_USER_ANCHOR " + std::string(2000, 'x') + "\"}"},
+      ava::session::SessionEntry{.id = "short_latest_assistant",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-05-01T00:00:01Z",
+                                 .data_json = "{\"text\":\"LATEST_ASSISTANT_SUFFIX\"}"}};
+  auto prepared = ava::app::prepare_compaction_context(entries, config);
+  auto const user = prepared ? prepared->recent_context.find("LATEST_USER_ANCHOR") : std::string::npos;
+  auto const assistant = prepared ? prepared->recent_context.find("LATEST_ASSISTANT_SUFFIX") : std::string::npos;
+  expect(prepared && prepared->recent_context_omitted && user != std::string::npos && assistant != std::string::npos && user < assistant &&
+             prepared->recent_context.find("plain text truncated") != std::string::npos &&
+             ava::session::estimate_tokens(prepared->recent_context) <= config.keep_recent_tokens,
+         "an oversized complete turn keeps a recognizable truncated latest-user anchor before the assistant suffix");
+}
+
+void test_app_manual_compaction_uses_only_active_context()
+{
+  auto const root = temp_root() / "app-manual-compact-active-context";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::app::runtime::OpenOptions options;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = app_test_paths(root);
+  auto session = ava::app::open_runtime_session(options);
+  expect(session.has_value(), "active-context manual /compact test opens runtime session");
+  if (!session)
+    return;
+  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "replaced_old_user",
+                                                                     .parent_id = "",
+                                                                     .type = ava::session::EntryType::UserMessage,
+                                                                     .timestamp = "2026-05-01T00:00:00Z",
+                                                                     .data_json = "{\"text\":\"REPLACED_OLD_CONTEXT\"}"}));
+  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "existing_boundary",
+                                                                     .parent_id = "",
+                                                                     .type = ava::session::EntryType::Compaction,
+                                                                     .timestamp = "2026-05-01T00:00:01Z",
+                                                                     .data_json = "{\"summary\":\"EXISTING_ACTIVE_SUMMARY\"}"}));
+  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "active_new_user",
+                                                                     .parent_id = "",
+                                                                     .type = ava::session::EntryType::UserMessage,
+                                                                     .timestamp = "2026-05-01T00:00:02Z",
+                                                                     .data_json = "{\"text\":\"ACTIVE_NEW_CONTEXT\"}"}));
+
+  bool saw_active_projection = false;
+  auto compact = ava::app::run_command(
+      *session, ava::app::CommandRequest{
+                    .command = "/compact",
+                    .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const&,
+                                                        std::string_view, std::size_t estimated_tokens) -> ava::core::Result<std::string> {
+                      saw_active_projection =
+                          entries.size() == 2 && entries.front().id == "existing_boundary" && entries.back().id == "active_new_user" && estimated_tokens > 0;
+                      return std::string("NEXT ACTIVE SUMMARY");
+                    }});
+  auto entries = session->store.load();
+  auto const checkpoint = entries ? latest_compaction_entry(*entries) : std::nullopt;
+  auto const recent = checkpoint ? ava::core::json::string_field(checkpoint->data_json, "recent_context").value_or("") : std::string{};
+  expect(compact && saw_active_projection && checkpoint && recent.find("ACTIVE_NEW_CONTEXT") != std::string::npos &&
+             recent.find("REPLACED_OLD_CONTEXT") == std::string::npos,
+         "manual /compact shares active-boundary input and recent-tail selection without re-summarizing replaced physical history");
+}
+
+void test_app_compact_honors_cross_provider_selection()
+{
+  auto const root = temp_root() / "app-compact-cross-provider";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(paths.ava_config_dir);
+  {
+    std::ofstream file(paths.compaction_file, std::ios::binary | std::ios::trunc);
+    file << R"({"provider":"anthropic","model":"claude-sonnet-4-5","auto_threshold_tokens":0})";
+  }
+  auto const* prior_key = std::getenv("ANTHROPIC_API_KEY");
+  auto const saved_key = prior_key ? std::optional<std::string>(prior_key) : std::nullopt;
+  setenv("ANTHROPIC_API_KEY", "test-anthropic-key", 1);
+
+  ava::app::runtime::OpenOptions options;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
+  auto session = ava::app::open_runtime_session(options);
+  expect(session.has_value(), "cross-provider /compact test opens runtime session");
+  if (!session)
+  {
+    if (saved_key)
+      setenv("ANTHROPIC_API_KEY", saved_key->c_str(), 1);
+    else
+      unsetenv("ANTHROPIC_API_KEY");
+    return;
+  }
+  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "cross_provider_user",
+                                                                     .parent_id = "",
+                                                                     .type = ava::session::EntryType::UserMessage,
+                                                                     .timestamp = ava::session::now_timestamp(),
+                                                                     .data_json = "{\"text\":\"cross provider source\"}"}));
+
+  ava::provider::OpenAIProvider const active_provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+      .status_code = 200, .headers = {}, .body = R"({"content":[{"type":"text","text":"CROSS PROVIDER SUMMARY"}],"stop_reason":"end_turn"})"}});
+  ava::app::runtime::RunOptions run_options;
+  run_options.access_token = "active-openai-token";
+  auto compact = ava::app::run_command(
+      *session, ava::app::CommandRequest{
+                    .command = "/compact",
+                    .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
+                                                        std::string_view instructions, std::size_t estimated_tokens) {
+                      return ava::app::generate_compaction_summary(*session, entries, config, instructions, estimated_tokens, active_provider, transport,
+                                                                   run_options);
+                    }});
+  if (saved_key)
+    setenv("ANTHROPIC_API_KEY", saved_key->c_str(), 1);
+  else
+    unsetenv("ANTHROPIC_API_KEY");
+
+  auto entries = session->store.load();
+  auto const compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
+  expect(compact && !transport.requests().empty() && transport.requests().front().url.find("anthropic.com") != std::string::npos &&
+             transport.requests().front().body.find("claude-sonnet-4-5") != std::string::npos && compaction &&
+             ava::core::json::string_field(compaction->data_json, "provider") == "anthropic" &&
+             ava::core::json::string_field(compaction->data_json, "model") == "claude-sonnet-4-5",
+         "/compact resolves credentials and dispatches the exact configured cross-provider summary model without fallback");
 }
 
 void test_app_auto_compaction_appends_summary_and_rebuilds_context()
@@ -507,12 +774,13 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context()
          "auto compaction summary request sees pre-compaction context");
   expect(transport.requests().size() == 2 && transport.requests()[1].body.find("AUTO SUMMARY") != std::string::npos &&
              transport.requests()[1].body.find("\"content\":\"continue after compaction\"") != std::string::npos &&
-             transport.requests()[1].body.find("old context marker") == std::string::npos,
-         "provider request is rebuilt from the new compaction boundary with the active prompt as a normal user turn");
+             transport.requests()[1].body.find("old context marker") != std::string::npos,
+         "provider request is rebuilt from the new compaction boundary with the configured recent turn and active prompt");
   expect(compaction && compaction->data_json.find("\"trigger\":\"auto\"") != std::string::npos &&
              compaction->data_json.find("\"summary\":\"AUTO SUMMARY\"") != std::string::npos &&
              compaction->data_json.find("\"threshold_tokens\":80") != std::string::npos &&
-             compaction->data_json.find("\"keep_recent_messages\":6") != std::string::npos &&
+             compaction->data_json.find("\"keep_recent_turns\":2") != std::string::npos &&
+             compaction->data_json.find("\"provider\":\"openai\"") != std::string::npos &&
              compaction->data_json.find("\"model\":\"gpt-5.5\"") != std::string::npos,
          "auto compaction entry records trigger, summary, threshold, retention, and model metadata");
 }
@@ -843,8 +1111,8 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
   expect(entries && std::ranges::count_if(*entries, ava::session::is_internal_replay_user_message) == 1,
          "context overflow compaction stores active prompt replay as an internal user message");
   auto const markdown = entries ? ava::session::format_session_markdown(*entries) : std::string{};
-  auto const stats = entries ? ava::session::compute_session_stats(*entries) : ava::session::SessionStats{};
-  expect(markdown.find("internal_replay") == std::string::npos && count_substrings(markdown, "overflow prompt") == 1 && stats.counts.user_message == 1,
+  auto const stats = entries ? ava::session::compute_session_stats(*entries) : ava::core::Result<ava::session::SessionStats>(ava::session::SessionStats{});
+  expect(markdown.find("internal_replay") == std::string::npos && count_substrings(markdown, "overflow prompt") == 1 && stats->counts.user_message == 1,
          "consumer-facing export and stats hide internal active prompt replays");
 }
 
@@ -875,8 +1143,9 @@ void test_app_context_overflow_compaction_failure_leaves_no_partial_entry()
   auto result = ava::app::run_prompt(*session, "overflow then summary fails", provider, transport, run_options);
   auto entries = session->store.load();
   expect(!result && result.error().message() == "context overflow compaction failed", "context overflow returns clear compaction failure");
-  expect(!result && result.error().format().find("429") != std::string::npos && result.error().format().find("summary quota exhausted") != std::string::npos,
-         "context overflow compaction failure preserves provider status and error body details");
+  expect(!result && result.error().format().find("compaction_provider_status: 429") != std::string::npos &&
+             result.error().format().find("summary quota exhausted") == std::string::npos,
+         "context overflow compaction failure preserves only allowlisted provider status metadata");
   expect(transport.requests().size() == 2, "failed context overflow compaction does not retry provider call");
   expect(entries && count_compaction_entries(*entries) == 0, "failed context overflow compaction leaves no partial compaction entry");
 }
@@ -913,6 +1182,90 @@ void test_app_non_overflow_provider_error_does_not_compact_or_retry()
   auto auth_error = ava::core::Error(ava::core::ErrorCategory::Provider, "authentication failed");
   expect(ava::provider::is_context_overflow_error(context_error) && !ava::provider::is_context_overflow_error(auth_error),
          "context overflow helper distinguishes token-window errors from unrelated provider errors");
+}
+
+void test_app_compaction_projects_committed_v4_and_ignores_incomplete_staging()
+{
+  auto config = ava::session::default_compaction_config();
+  auto item = [](std::string id, std::size_t sequence, ava::session::AssistantOutputItemPayload payload) {
+    auto data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+        .assistant_turn_id = "turn_compaction",
+        .sequence = sequence,
+        .kind = std::holds_alternative<ava::session::AssistantOutputText>(payload)
+                    ? ava::session::AssistantOutputItemKind::Text
+                    : (std::holds_alternative<ava::session::AssistantOutputReasoning>(payload) ? ava::session::AssistantOutputItemKind::Reasoning
+                                                                                               : ava::session::AssistantOutputItemKind::FunctionCall),
+        .provider_item_id = std::nullopt,
+        .provider_output_index = std::nullopt,
+        .payload = std::move(payload)});
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::AssistantOutputItem,
+                                      .timestamp = "2026-07-18T00:00:01Z",
+                                      .data_json = data.value_or("{}")};
+  };
+  auto commit_data = ava::session::serialize_assistant_turn_commit_data_json(
+      ava::session::AssistantTurnCommit{.assistant_turn_id = "turn_compaction",
+                                        .item_count = 3,
+                                        .provider = "openai",
+                                        .model = "gpt-5.5",
+                                        .finish_reason = "tool_calls",
+                                        .usage_json = "{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3,\"source\":\"provider\"}"});
+  std::vector<ava::session::SessionEntry> const entries = {
+      ava::session::SessionEntry{.id = "safe_user",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-07-18T00:00:00Z",
+                                 .data_json = "{\"text\":\"safe compaction context\"}"},
+      item("v4_reasoning", 0,
+           ava::session::AssistantOutputReasoning{.text = "visible v4 reasoning",
+                                                  .format = "openai_responses",
+                                                  .redacted = false,
+                                                  .signature = "V4_COMPACTION_PRIVATE_SIGNATURE",
+                                                  .redacted_data = "V4_COMPACTION_PRIVATE_REDACTED",
+                                                  .native_item_json = "{\"id\":\"rs_compaction\",\"type\":\"reasoning\",\"summary\":[]}"}),
+      item("v4_function", 1,
+           ava::session::AssistantOutputFunctionCall{.call_id = "call_compaction_v4", .name = "read_file", .arguments_json = "{\"path\":\"src/main.cpp\"}"}),
+      item("v4_text", 2,
+           ava::session::AssistantOutputText{.text = "visible v4 commentary", .assistant_phase = ava::session::AssistantOutputTextPhase::Commentary}),
+      ava::session::SessionEntry{.id = "v4_commit",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantTurnCommit,
+                                 .timestamp = "2026-07-18T00:00:02Z",
+                                 .data_json = commit_data.value_or("{}")},
+      ava::session::SessionEntry{.id = "v4_result",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-07-18T00:00:03Z",
+                                 .data_json = "{\"assistant_output_entry_id\":\"v4_function\",\"call_id\":\"call_compaction_v4\",\"name\":\"read_file\","
+                                              "\"success\":true,\"result\":\"BOUND_V4_RESULT\"}"},
+      ava::session::SessionEntry{.id = "v4_staged_private",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantOutputItem,
+                                 .timestamp = "2026-07-18T00:00:04Z",
+                                 .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"tail_compaction\",\"sequence\":0,\"kind\":\"text\",\"text\":\"V4_"
+                                              "COMPACTION_STAGED_CANARY\",\"assistant_phase\":\"commentary\"}"},
+  };
+
+  auto const prompt = ava::app::build_compaction_summary_prompt(entries, config, "", 42);
+  expect(prompt && prompt->find("safe compaction context") != std::string::npos && prompt->find("visible v4 commentary") != std::string::npos &&
+             prompt->find("visible v4 reasoning") != std::string::npos && prompt->find("src/main.cpp") != std::string::npos &&
+             prompt->find("V4_COMPACTION_PRIVATE_SIGNATURE") == std::string::npos && prompt->find("V4_COMPACTION_PRIVATE_REDACTED") == std::string::npos &&
+             prompt->find("rs_compaction") == std::string::npos && prompt->find("V4_COMPACTION_STAGED_CANARY") == std::string::npos &&
+             prompt->find("assistant_output_entry_id") == std::string::npos,
+         "compaction prompt uses the committed v4 logical projection and excludes private/incomplete staging data");
+
+  auto prepared = ava::app::prepare_compaction_context(entries, config);
+  auto const reasoning = prepared ? prepared->recent_context.find("visible v4 reasoning") : std::string::npos;
+  auto const function = prepared ? prepared->recent_context.find("call_compaction_v4") : std::string::npos;
+  auto const text = prepared ? prepared->recent_context.find("visible v4 commentary") : std::string::npos;
+  auto const result = prepared ? prepared->recent_context.find("BOUND_V4_RESULT") : std::string::npos;
+  expect(prepared && reasoning != std::string::npos && function != std::string::npos && text != std::string::npos && result != std::string::npos &&
+             reasoning < function && function < text && text < result &&
+             prepared->recent_context.find("V4_COMPACTION_PRIVATE_SIGNATURE") == std::string::npos &&
+             prepared->recent_context.find("V4_COMPACTION_PRIVATE_REDACTED") == std::string::npos &&
+             prepared->recent_context.find("V4_COMPACTION_STAGED_CANARY") == std::string::npos,
+         "retained compaction tail rebuilds the physical committed v4 reasoning/function/text group in order with its exact bound tool result");
 }
 
 void test_app_context_overflow_retry_is_bounded()
@@ -960,6 +1313,12 @@ void run_app_compaction_tests()
   test_app_compact_oversized_summary_leaves_session_untouched();
   test_app_compact_cancellation_before_append_leaves_session_untouched();
   test_app_compaction_prompt_builder_sections();
+  test_app_compaction_model_selection_uses_runtime_catalog();
+  test_app_compaction_recent_tail_preserves_tool_group();
+  test_app_compaction_recent_tail_budget_never_orphans_tools();
+  test_app_compaction_oversized_turn_retains_latest_user_anchor();
+  test_app_manual_compaction_uses_only_active_context();
+  test_app_compact_honors_cross_provider_selection();
   test_app_auto_compaction_appends_summary_and_rebuilds_context();
   test_app_auto_compaction_recent_context_respects_token_budget();
   test_app_auto_compaction_recent_context_truncates_utf8_safely();
@@ -970,5 +1329,6 @@ void run_app_compaction_tests()
   test_app_context_overflow_compacts_and_retries_once_successfully();
   test_app_context_overflow_compaction_failure_leaves_no_partial_entry();
   test_app_non_overflow_provider_error_does_not_compact_or_retry();
+  test_app_compaction_projects_committed_v4_and_ignores_incomplete_staging();
   test_app_context_overflow_retry_is_bounded();
 }

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/session/logical_projection.h"
 #include "ava/session/transcript.h"
 #include "ava/session/validation.h"
 #include "ava/core/json.h"
@@ -42,9 +43,13 @@ ava::core::Result<std::vector<TranscriptItem>> project_transcript(std::vector<Se
   if (limits.max_items == 0 || limits.max_text_bytes == 0 || limits.max_item_text_bytes == 0)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "transcript projection limits must be non-zero"));
 
+  auto projected = project_ordered_public_session_history(entries);
+  if (!projected)
+    return std::unexpected(std::move(projected.error()));
+
   std::vector<TranscriptItem> transcript;
   std::size_t text_bytes = 0;
-  for (auto const& entry : entries)
+  for (auto const& entry : *projected)
   {
     auto appended = append_transcript_item(transcript, text_bytes, entry, limits);
     if (!appended)
@@ -58,15 +63,12 @@ ava::core::Result<std::vector<TranscriptItem>> project_transcript_bounded(Sessio
 {
   if (limits.max_items == 0 || limits.max_text_bytes == 0 || limits.max_item_text_bytes == 0)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "transcript projection limits must be non-zero"));
-  std::vector<TranscriptItem> transcript;
-  transcript.reserve(std::min<std::size_t>(limits.max_items, 32));
-  std::size_t text_bytes = 0;
-  auto visited = store.visit_entries(
-      read_limits, [&](SessionEntry const& entry) -> ava::core::Result<bool> { return append_transcript_item(transcript, text_bytes, entry, limits); },
-      std::move(cancel_requested));
-  if (!visited)
-    return std::unexpected(std::move(visited.error()));
-  return transcript;
+  // The compatibility overload first obtains one bounded snapshot so the
+  // shared v4 classifier can reject malformed interleaving atomically.
+  auto entries = store.load_bounded(read_limits, std::move(cancel_requested));
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  return project_transcript(*entries, limits);
 }
 
 }  // namespace ava::session

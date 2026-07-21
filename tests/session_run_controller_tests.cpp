@@ -187,61 +187,52 @@ void test_session_run_controller_owner_and_generation_routes()
     expect(entries->at(0).id == "inactive-owner" && entries->at(4).id == "during-B-owner", "owner append FIFO order is durable");
 }
 
-void test_runtime_session_destroys_background_before_owner_route()
+void test_runtime_session_destruction_does_not_own_background_coordinator()
 {
   auto const root = create_empty_root("session-run-controller-teardown");
-
-  auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
-  expect(store.has_value(), "teardown fixture store creates");
-  if (!store)
+  auto const state = root / "state";
+  std::filesystem::create_directories(state);
+  std::filesystem::permissions(state, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+  auto state_anchor = ava::core::AnchorSet::open({state});
+  expect(state_anchor.has_value(), "application coordinator opens the logical state root as startup authority");
+  if (!state_anchor)
     return;
-
-  auto lease = ava::session::SessionLease::create_and_acquire(store->session_path());
-  expect(lease.has_value(), "teardown fixture acquires a lease");
-  if (!lease)
+  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = state, .anchor_set = *state_anchor});
+  expect(coordinator_result.has_value(), "application coordinator creates for runtime teardown fixture");
+  if (!coordinator_result)
     return;
-  auto target = persistent_controller_target(*store, *lease);
-  expect(target.has_value(), "teardown fixture creates append target");
-  if (!target)
-    return;
-  std::atomic<bool> worker_started = false;
-  std::atomic<bool> owner_append_succeeded = false;
+  auto coordinator = *coordinator_result;
+  std::mutex mutex;
+  std::condition_variable changed;
+  bool worker_started = false;
+  bool worker_canceled = false;
   {
-    ava::app::runtime::Session session{.store = std::move(*store),
-                                       .lease = std::move(*lease),
-                                       .mode = ava::agent::Mode::Build,
-                                       .model = {},
-                                       .base_prompt = {},
-                                       .paths = {},
-                                       .workspace_dir = {},
-                                       .current_dir = {},
-                                       .project_trust = {},
-                                       .prompt_overrides = {},
-                                       .tool_visibility = {},
-                                       .context_sources = {},
-                                       .freshness_sources = {},
-                                       .system_prompt = {},
-                                       .reasoning = std::nullopt,
-                                       .scoped_model_cycle = std::nullopt,
-                                       .created = false,
-                                       .sessionless = false,
-                                       .run_controller = std::make_unique<ava::app::SessionRunController>(std::move(*target)),
-                                       .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>(),
-                                       .offline = false};
-    auto owner = session.owner_append_route();
-    auto started = session.background_jobs->start(
-        {.title = "blocked", .description = "blocked"},
-        [owner = std::move(owner), &worker_started, &owner_append_succeeded](ava::agent::BackgroundJobContext const& context) {
-          worker_started.store(true, std::memory_order_release);
-          while (!context.stop_token.stop_requested()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-          owner_append_succeeded.store(owner(append_entry("teardown-owner")).has_value(), std::memory_order_release);
+    auto visible_session_coordinator = coordinator;
+    auto started = visible_session_coordinator->start_background(
+        "parent_teardown", {.title = "blocked", .description = "blocked", .child_session_id = "child_teardown"},
+        [&](ava::agent::BackgroundJobContext const& context) {
+          std::stop_callback wake_on_stop(context.stop_token, [&] { changed.notify_all(); });
+          std::unique_lock lock(mutex);
+          worker_started = true;
+          changed.notify_all();
+          changed.wait(lock, [&] { return context.stop_token.stop_requested(); });
+          worker_canceled = true;
+          changed.notify_all();
           return ava::agent::BackgroundJobCompletion{
               .state = ava::agent::BackgroundJobState::Canceled, .final_text = {}, .stop_reason = "canceled", .error = std::nullopt};
         });
-    expect(started.has_value(), "blocked teardown worker starts");
-    while (!worker_started.load(std::memory_order_acquire)) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    expect(started.has_value(), "application coordinator starts blocked worker");
+    std::unique_lock lock(mutex);
+    expect(changed.wait_for(lock, std::chrono::seconds(1), [&] { return worker_started; }), "blocked worker starts before visible session destruction");
+    visible_session_coordinator.reset();
   }
-  expect(owner_append_succeeded.load(std::memory_order_acquire), "background teardown can use owner route before controller/store destruction");
+  {
+    std::lock_guard lock(mutex);
+    expect(!worker_canceled, "visible runtime session destruction does not cancel application-owned worker");
+  }
+  coordinator->shutdown();
+  std::lock_guard lock(mutex);
+  expect(worker_canceled, "application coordinator shutdown cancels and joins worker");
 }
 
 void test_session_run_controller_admission_inspection_and_join()
@@ -631,7 +622,6 @@ void test_session_run_controller_cross_thread_observer_shutdown_is_nonblocking()
 
   auto const root = create_empty_root("session-run-controller-observer-shutdown");
 
-
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
                      : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
@@ -797,7 +787,6 @@ void test_session_run_controller_observer_reset_is_immediate_for_unrelated_obser
   };
 
   auto const root = create_empty_root("session-run-controller-observer-reset");
-
 
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
@@ -989,7 +978,6 @@ void test_session_run_controller_unrelated_observer_shutdown_without_active_appe
 
   auto const root = create_empty_root("session-run-controller-unrelated-observer-shutdown");
 
-
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
                      : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
@@ -1112,6 +1100,90 @@ void test_session_run_controller_failure_drains_tickets_with_exact_accounting()
          "one immutable partial failure terminally drains every accepted ticket, prevents queued writes, and recovers without byte-account drift");
 }
 
+void test_session_run_controller_batch_is_one_ticket_and_latches_failure()
+{
+  auto const root = create_empty_root("session-run-controller-batch");
+  auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+  auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                     : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+  if (!store || !lease)
+    return;
+
+  std::mutex gate_mutex;
+  std::condition_variable gate_changed;
+  bool entered = false;
+  bool release = false;
+  store->set_before_append_identity_check_for_test([&] {
+    std::unique_lock lock(gate_mutex);
+    entered = true;
+    gate_changed.notify_all();
+    static_cast<void>(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return release; }));
+  });
+  store->set_append_write_for_test([](int, std::string_view) -> ssize_t {
+    errno = EIO;
+    return -1;
+  });
+
+  auto target = persistent_controller_target(*store, *lease);
+  if (!target)
+    return;
+  ava::app::SessionRunController controller(std::move(*target));
+  auto admitted = controller.admit({.request_id = "batch"});
+  if (!admitted)
+    return;
+  auto guard = std::move(*admitted);
+  auto route = guard.append_batch_route();
+  auto output_data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+      .assistant_turn_id = "controller-batch-turn",
+      .sequence = 0,
+      .kind = ava::session::AssistantOutputItemKind::Text,
+      .provider_item_id = "controller-batch-item",
+      .provider_output_index = 0,
+      .payload = ava::session::AssistantOutputText{.text = "staged", .assistant_phase = ava::session::AssistantOutputTextPhase::Commentary}});
+  auto commit_data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{.assistant_turn_id = "controller-batch-turn",
+                                                                                                               .item_count = 1,
+                                                                                                               .provider = "openai",
+                                                                                                               .model = "gpt-5.5",
+                                                                                                               .finish_reason = "completed",
+                                                                                                               .usage_json = std::nullopt});
+  if (!output_data || !commit_data)
+    return;
+  std::vector<ava::session::SessionEntry> entries;
+  auto output = append_entry("batch-output");
+  output.type = ava::session::EntryType::AssistantOutputItem;
+  output.data_json = std::move(*output_data);
+  entries.push_back(std::move(output));
+  auto commit = append_entry("batch-commit");
+  commit.type = ava::session::EntryType::AssistantTurnCommit;
+  commit.data_json = std::move(*commit_data);
+  entries.push_back(std::move(commit));
+  auto bytes = [](ava::session::SessionEntry const& entry) {
+    return entry.id.size() + entry.parent_id.size() + entry.timestamp.size() + entry.data_json.size() + 32;
+  };
+  auto const expected_bytes = bytes(entries[0]) + bytes(entries[1]);
+  std::optional<ava::core::VoidResult> result;
+  std::jthread writer([&] { result.emplace(route(std::move(entries))); });
+  bool reached_gate = false;
+  {
+    std::unique_lock lock(gate_mutex);
+    reached_gate = gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return entered; });
+  }
+  auto queued = controller.snapshot();
+  {
+    std::lock_guard lock(gate_mutex);
+    release = true;
+  }
+  gate_changed.notify_all();
+  writer.join();
+
+  auto outcome = guard.complete({.run_id = {}, .reason = ava::app::StopReason::ProviderError});
+  auto drained = controller.snapshot();
+  expect(reached_gate && queued.queued_appends == 1 && queued.queued_append_bytes == expected_bytes && result && !*result && outcome &&
+             outcome->reason == ava::app::StopReason::PersistenceError && drained.queued_appends == 0 && drained.queued_append_bytes == 0 &&
+             controller.inspect_admission({.request_id = "blocked"}) == ava::app::AdmissionDisposition::RejectPersistenceFailure,
+         "one session append batch reserves one bounded controller ticket and latches a persistence failure exactly like a single append");
+}
+
 void test_session_run_controller_concurrent_fifo_appends()
 {
   auto const root = create_empty_root("session-run-controller-fifo");
@@ -1231,7 +1303,7 @@ void run_session_run_controller_tests()
   test_session_run_controller_concurrent_admit_wake_stop();
   test_session_run_controller_generation_and_cancel_precedence();
   test_session_run_controller_owner_and_generation_routes();
-  test_runtime_session_destroys_background_before_owner_route();
+  test_runtime_session_destruction_does_not_own_background_coordinator();
   test_session_run_controller_admission_inspection_and_join();
   test_session_run_controller_stable_join_and_command_kinds();
   test_session_run_controller_effective_failure_and_stop_reentry();
@@ -1243,6 +1315,7 @@ void run_session_run_controller_tests()
   test_session_run_controller_nested_controller_membership_is_stack_aware();
   test_session_run_controller_unrelated_observer_shutdown_without_active_append();
   test_session_run_controller_failure_drains_tickets_with_exact_accounting();
+  test_session_run_controller_batch_is_one_ticket_and_latches_failure();
   test_session_run_controller_concurrent_fifo_appends();
   test_session_run_controller_routes_release_target_on_shutdown();
   test_session_run_controller_bounds_and_reentrant_snapshot();

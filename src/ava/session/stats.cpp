@@ -1,9 +1,12 @@
 #include "sys.h"
+#include "ava/session/assistant_output.h"
 #include "ava/session/stats.h"
 #include "ava/core/json.h"
 
 #include <cctype>
+#include <cmath>
 #include <initializer_list>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -17,7 +20,8 @@ void add_optional_integer(std::optional<long long>& total, std::optional<long lo
     return;
   if (!total)
     total = 0;
-  *total += *value;
+  constexpr auto maximum = std::numeric_limits<long long>::max();
+  *total = *total > maximum - *value ? maximum : *total + *value;
 }
 
 std::optional<long long> integer_field_from_usage_or_entry(std::string_view data_json, std::string_view key)
@@ -132,26 +136,110 @@ std::optional<long double> cost_field_from_usage_or_entry(std::string_view data_
 
 void add_optional_cost(std::optional<long double>& total, std::optional<long double> value)
 {
-  if (!value || *value < 0.0L)
+  if (!value || *value < 0.0L || !std::isfinite(*value))
     return;
   if (!total)
     total = 0.0L;
-  *total += *value;
+  constexpr auto maximum = std::numeric_limits<long double>::max();
+  if (!std::isfinite(*total) || *total > maximum - *value)
+    *total = maximum;
+  else
+    *total += *value;
+}
+
+void add_usage_and_cost(SessionStats& stats, std::string_view data_json, bool is_assistant_message)
+{
+  auto const usage = ava::core::json::object_field(data_json, "usage");
+  if (usage)
+  {
+    if (usage_is_estimated(*usage))
+    {
+      add_optional_integer(stats.estimated_input_bytes, integer_field_from_usage_or_entry(data_json, "estimated_input_bytes"));
+      add_optional_integer(stats.estimated_output_bytes, integer_field_from_usage_or_entry(data_json, "estimated_output_bytes"));
+      add_optional_integer(stats.estimated_total_bytes, integer_field_from_usage_or_entry(data_json, "estimated_total_bytes"));
+      ++stats.estimated_usage_entries;
+      return;
+    }
+    ++stats.exact_usage_entries;
+  }
+
+  add_optional_integer(stats.input_tokens, integer_field_from_usage_or_entry(data_json, "input_tokens"));
+  add_optional_integer(stats.output_tokens, integer_field_from_usage_or_entry(data_json, "output_tokens"));
+  add_optional_integer(stats.reasoning_tokens, integer_field_from_usage_or_entry(data_json, "reasoning_tokens"));
+  add_optional_integer(stats.cache_read_tokens, integer_field_from_usage_or_entry(data_json, {"cache_read_tokens", "cache_read_input_tokens"}));
+  add_optional_integer(stats.cache_write_tokens, integer_field_from_usage_or_entry(data_json, {"cache_write_tokens", "cache_creation_input_tokens"}));
+  add_optional_integer(stats.total_tokens, integer_field_from_usage_or_entry(data_json, "total_tokens"));
+
+  auto const cost = cost_field_from_usage_or_entry(data_json);
+  bool const has_known_cost = cost && *cost >= 0.0L;
+  if (has_known_cost)
+    add_optional_cost(stats.known_cost_usd, cost);
+  bool const has_billable_usage_tokens = usage && object_has_billable_tokens(*usage);
+  bool const has_billable_legacy_assistant_tokens = !usage && is_assistant_message && object_has_billable_tokens(data_json);
+  if ((has_billable_usage_tokens || has_billable_legacy_assistant_tokens) && !has_known_cost)
+    ++stats.unknown_cost_entries;
+}
+
+void add_timestamp(SessionStats& stats, std::string_view timestamp)
+{
+  if (stats.first_timestamp.empty())
+    stats.first_timestamp = timestamp;
+  stats.last_timestamp = timestamp;
 }
 
 }  // namespace
 
-SessionStats compute_session_stats(std::vector<SessionEntry> const& entries)
+ava::core::Result<SessionStats> compute_session_stats(std::vector<SessionEntry> const& entries)
 {
   SessionStats stats;
-  stats.entry_count = entries.size();
-
-  for (auto const& entry : entries)
+  auto const assistant_output = classify_assistant_output(entries);
+  for (auto const& diagnostic : assistant_output.diagnostics)
   {
-    if (stats.first_timestamp.empty())
-      stats.first_timestamp = entry.timestamp;
-    stats.last_timestamp = entry.timestamp;
+    if (diagnostic.severity != AssistantOutputDiagnosticSeverity::Error)
+      continue;
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "cannot compute stats from malformed assistant-output session history");
+    error.with_context("diagnostic_kind", std::string(to_string(diagnostic.kind)))
+        .with_context("diagnostic_entry_id", diagnostic.entry_id)
+        .with_context("diagnostic", diagnostic.message);
+    return std::unexpected(std::move(error));
+  }
 
+  for (std::size_t index = 0; index < entries.size(); ++index)
+  {
+    auto const& entry = entries[index];
+    if (entry.type == EntryType::AssistantOutputItem)
+      continue;
+    if (entry.type == EntryType::AssistantTurnCommit)
+    {
+      auto const* turn = assistant_output.find_turn_by_commit_index(index);
+      if (!turn)
+        continue;
+
+      // A committed v4 group has the same logical persistence shape as its
+      // v3 counterpart: one assistant message plus standalone reasoning and
+      // tool-call records. Its commit owns response accounting and timestamp.
+      ++stats.entry_count;
+      ++stats.counts.assistant_message;
+      add_timestamp(stats, entry.timestamp);
+      for (auto const& output_item : turn->items)
+      {
+        if (std::holds_alternative<AssistantOutputReasoning>(output_item.item.payload))
+        {
+          ++stats.entry_count;
+          ++stats.counts.reasoning_block;
+        }
+        else if (std::holds_alternative<AssistantOutputFunctionCall>(output_item.item.payload))
+        {
+          ++stats.entry_count;
+          ++stats.counts.tool_call;
+        }
+      }
+      add_usage_and_cost(stats, entry.data_json, true);
+      continue;
+    }
+
+    ++stats.entry_count;
+    add_timestamp(stats, entry.timestamp);
     switch (entry.type)
     {
       case EntryType::SessionStart:
@@ -188,6 +276,9 @@ SessionStats compute_session_stats(std::vector<SessionEntry> const& entries)
       case EntryType::ReasoningChange:
         ++stats.counts.reasoning_change;
         break;
+      case EntryType::AssistantOutputItem:
+      case EntryType::AssistantTurnCommit:
+        break;
       case EntryType::Compaction:
         ++stats.counts.compaction;
         break;
@@ -201,41 +292,7 @@ SessionStats compute_session_stats(std::vector<SessionEntry> const& entries)
         ++stats.counts.cancel;
         break;
     }
-
-    auto const usage = ava::core::json::object_field(entry.data_json, "usage");
-    if (usage)
-    {
-      if (usage_is_estimated(*usage))
-      {
-        add_optional_integer(stats.estimated_input_bytes, integer_field_from_usage_or_entry(entry.data_json, "estimated_input_bytes"));
-        add_optional_integer(stats.estimated_output_bytes, integer_field_from_usage_or_entry(entry.data_json, "estimated_output_bytes"));
-        add_optional_integer(stats.estimated_total_bytes, integer_field_from_usage_or_entry(entry.data_json, "estimated_total_bytes"));
-        ++stats.estimated_usage_entries;
-        continue;
-      }
-      else
-      {
-        ++stats.exact_usage_entries;
-      }
-    }
-
-    add_optional_integer(stats.input_tokens, integer_field_from_usage_or_entry(entry.data_json, "input_tokens"));
-    add_optional_integer(stats.output_tokens, integer_field_from_usage_or_entry(entry.data_json, "output_tokens"));
-    add_optional_integer(stats.reasoning_tokens, integer_field_from_usage_or_entry(entry.data_json, "reasoning_tokens"));
-    add_optional_integer(stats.cache_read_tokens, integer_field_from_usage_or_entry(entry.data_json, {"cache_read_tokens", "cache_read_input_tokens"}));
-    add_optional_integer(stats.cache_write_tokens, integer_field_from_usage_or_entry(entry.data_json, {"cache_write_tokens", "cache_creation_input_tokens"}));
-    add_optional_integer(stats.total_tokens, integer_field_from_usage_or_entry(entry.data_json, "total_tokens"));
-
-    auto const cost = cost_field_from_usage_or_entry(entry.data_json);
-    bool const has_known_cost = cost && *cost >= 0.0L;
-    if (has_known_cost)
-      add_optional_cost(stats.known_cost_usd, cost);
-    bool const has_billable_usage_tokens = usage && object_has_billable_tokens(*usage);
-    bool const has_billable_legacy_assistant_tokens = !usage && entry.type == EntryType::AssistantMessage && object_has_billable_tokens(entry.data_json);
-    if ((has_billable_usage_tokens || has_billable_legacy_assistant_tokens) && !has_known_cost)
-    {
-      ++stats.unknown_cost_entries;
-    }
+    add_usage_and_cost(stats, entry.data_json, entry.type == EntryType::AssistantMessage);
   }
 
   stats.cost_complete = stats.unknown_cost_entries == 0;

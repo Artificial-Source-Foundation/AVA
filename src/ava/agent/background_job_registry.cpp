@@ -159,8 +159,10 @@ ava::core::Result<BackgroundJobSnapshot> BackgroundJobRegistry::start(Background
   }
   static_cast<void>(join_finished());
 
+  bool const caller_supplied_job_id = !options.job_id.empty();
   auto record = std::make_shared<JobRecord>();
-  record->snapshot = BackgroundJobSnapshot{.title = std::move(options.title),
+  record->snapshot = BackgroundJobSnapshot{.job_id = std::move(options.job_id),
+                                           .title = std::move(options.title),
                                            .description = std::move(options.description),
                                            .subagent_type = std::move(options.subagent_type),
                                            .child_session_id = std::move(options.child_session_id),
@@ -173,13 +175,16 @@ ava::core::Result<BackgroundJobSnapshot> BackgroundJobRegistry::start(Background
   std::string job_id;
   {
     std::lock_guard lock(mutex_);
+    if (!accepting_)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "background job registry is shutting down"));
     if (running_job_count_locked() >= options_.max_running_jobs)
     {
       return std::unexpected(background_job_limit_error(options_.max_running_jobs));
     }
     for (std::size_t attempt = 0; attempt < 8; ++attempt)
     {
-      record->snapshot.job_id = ava::core::make_id("job");
+      if (record->snapshot.job_id.empty())
+        record->snapshot.job_id = ava::core::make_id("job");
       auto [_, inserted] = jobs_.emplace(record->snapshot.job_id, record);
       if (inserted)
       {
@@ -187,10 +192,27 @@ ava::core::Result<BackgroundJobSnapshot> BackgroundJobRegistry::start(Background
         snapshot = record->snapshot;
         break;
       }
+      // A caller-supplied durable ID must never be silently replaced.
+      if (caller_supplied_job_id)
+        break;
+      record->snapshot.job_id.clear();
     }
     if (job_id.empty())
     {
       return std::unexpected(duplicate_job_id_error(record->snapshot.job_id));
+    }
+  }
+
+  if (options_.thread_start_preflight)
+  {
+    if (auto allowed = options_.thread_start_preflight(); !allowed)
+    {
+      {
+        std::lock_guard lock(mutex_);
+        jobs_.erase(job_id);
+      }
+      changed_.notify_all();
+      return std::unexpected(std::move(allowed.error()));
     }
   }
 
@@ -307,6 +329,20 @@ ava::core::Result<BackgroundJobSnapshot> BackgroundJobRegistry::cancel(std::stri
 
 ava::core::Result<BackgroundJobSnapshot> BackgroundJobRegistry::wait(std::string_view job_id, std::chrono::milliseconds timeout)
 {
+  auto snapshot = wait_snapshot(job_id, timeout);
+  if (!snapshot)
+    return std::unexpected(std::move(snapshot.error()));
+  if (snapshot->timed_out)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "timed out waiting for background job");
+    error.with_context("job_id", std::string(job_id));
+    return std::unexpected(std::move(error));
+  }
+  return snapshot;
+}
+
+ava::core::Result<BackgroundJobSnapshot> BackgroundJobRegistry::wait_snapshot(std::string_view job_id, std::chrono::milliseconds timeout)
+{
   std::unique_lock lock(mutex_);
   auto record = find_record_locked(job_id);
   if (!record)
@@ -318,9 +354,9 @@ ava::core::Result<BackgroundJobSnapshot> BackgroundJobRegistry::wait(std::string
   };
   if (!changed_.wait_for(lock, timeout, ready))
   {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "timed out waiting for background job");
-    error.with_context("job_id", job_id_string);
-    return std::unexpected(std::move(error));
+    auto snapshot = record->snapshot;
+    snapshot.timed_out = true;
+    return snapshot;
   }
   record = find_record_locked(job_id);
   if (!record)
@@ -410,6 +446,17 @@ void BackgroundJobRegistry::request_stop_all()
   changed_.notify_all();
 }
 
+void BackgroundJobRegistry::shutdown()
+{
+  {
+    std::lock_guard lock(mutex_);
+    accepting_ = false;
+  }
+  request_stop_all();
+  join_all();
+  static_cast<void>(join_finished());
+}
+
 std::shared_ptr<BackgroundJobRegistry::JobRecord> BackgroundJobRegistry::find_record_locked(std::string_view job_id) const
 {
   auto const match = jobs_.find(std::string(job_id));
@@ -459,6 +506,9 @@ void BackgroundJobRegistry::complete(std::string const& job_id, BackgroundJobCom
     record->snapshot.final_text_truncated = truncate_to_bytes(record->snapshot.final_text, options_.max_final_text_bytes);
     record->snapshot.stop_reason = std::move(completion.stop_reason);
     record->snapshot.error = formatted_error(completion.error);
+    record->snapshot.provider_iterations = completion.provider_iterations;
+    record->snapshot.tool_calls = completion.tool_calls;
+    record->snapshot.tool_iterations = completion.tool_iterations;
   }
   changed_.notify_all();
 }

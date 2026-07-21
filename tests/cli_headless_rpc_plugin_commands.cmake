@@ -86,7 +86,7 @@ foreach(NEEDLE
         "0.1.0"
         "Failures: 1"
         "\"id\":\"failures\""
-        "plugin manifest must be a valid JSON object"
+        "Plugin integration request was rejected [invalid_request]."
         "\"id\":\"inspect\""
         "entrypoint: /bin/sh plugin.sh (not executed)"
         "no plugin process is started yet"
@@ -117,6 +117,15 @@ foreach(NEEDLE
   string(FIND "${AVA_OUTPUT}" "${NEEDLE}" NEEDLE_INDEX)
   if(NEEDLE_INDEX EQUAL -1)
     message(FATAL_ERROR "ava --rpc output did not contain ${NEEDLE}\nstdout:\n${AVA_OUTPUT}\nstderr:\n${AVA_ERROR}")
+  endif()
+endforeach()
+
+foreach(FORBIDDEN
+        "plugin manifest must be a valid JSON object"
+        "{not-json")
+  string(FIND "${AVA_OUTPUT}${AVA_ERROR}" "${FORBIDDEN}" FORBIDDEN_INDEX)
+  if(NOT FORBIDDEN_INDEX EQUAL -1)
+    message(FATAL_ERROR "ava --rpc exposed raw plugin failure content: ${FORBIDDEN}\nstdout:\n${AVA_OUTPUT}\nstderr:\n${AVA_ERROR}")
   endif()
 endforeach()
 

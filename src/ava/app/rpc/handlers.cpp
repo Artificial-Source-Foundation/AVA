@@ -67,15 +67,6 @@ ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session co
   return ProviderHandle{.provider = nullptr, .owned = std::move(*provider)};
 }
 
-ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session)
-{
-  return ava::permissions::PermissionRuleStore{
-      .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-      .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-      .workspace_dir = session.workspace_dir,
-  };
-}
-
 bool is_plugin_rpc_command(std::string_view type)
 {
   return type == "list_plugins" || type == "plugin_failures" || type == "inspect_plugin" || type == "install_plugin" || type == "remove_plugin" ||

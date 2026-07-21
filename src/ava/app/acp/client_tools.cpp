@@ -358,8 +358,19 @@ class ClientCommandExecutor final : public ava::tools::CommandExecutor
   {
     if (request.argv.empty() || request.argv.front().empty())
       return std::unexpected(dto_error("terminal/create", "terminal/create requires a parsed command argv"));
+    if (request.plan_metadata && request.plan_metadata->executor_identity_verified)
+      return std::unexpected(dto_error("terminal/create", "delegated terminal execution must not receive verified local execution authority"));
+    if (request.environment_profile && request.environment_profile->local_execution_authority)
+      return std::unexpected(dto_error("terminal/create", "delegated terminal execution must not receive reusable local environment authority"));
     if (cancel_requested(request.cancel_requested))
-      return ava::tools::CommandExecutionResult{.exit_code = -1, .timed_out = false, .canceled = true, .truncated = false, .output = {}};
+      return ava::tools::CommandExecutionResult{.exit_code = -1,
+                                                .timed_out = false,
+                                                .canceled = true,
+                                                .truncated = false,
+                                                .output = {},
+                                                .containment_applied = false,
+                                                .containment_profile_id = {},
+                                                .containment_network_mode = {}};
     if (!request.cwd.is_absolute())
       return std::unexpected(dto_error("terminal/create", "terminal/create cwd must be absolute"));
     if (request.timeout <= 0ms || request.timeout > kMaxCommandTimeout)

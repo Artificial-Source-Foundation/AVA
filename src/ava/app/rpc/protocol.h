@@ -28,6 +28,8 @@ struct RpcCommand
   std::optional<long long> protocol_version;
   std::optional<std::string> message;
   std::optional<std::string> session_id;
+  std::optional<std::string> job_id;
+  std::optional<long long> timeout_ms;
   std::optional<std::string> provider;
   std::optional<std::string> model;
   std::optional<std::string> instructions;
@@ -65,6 +67,9 @@ struct RpcCommand
   std::optional<std::string> target_path;
   std::optional<std::string> command;
   std::optional<std::string> tool_name;
+  std::optional<std::string> command_recipe_key;
+  std::optional<std::string> recipe_display;
+  std::optional<bool> critical_acknowledged;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

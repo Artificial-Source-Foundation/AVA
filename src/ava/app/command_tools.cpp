@@ -2,10 +2,12 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_tools.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/agent/tool_result.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/search_tools.h"
 #include "ava/session/session_store.h"
+#include "ava/permissions/permission_rules.h"
 #include "ava/lsp/configured_provider.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -169,7 +171,8 @@ ava::agent::ToolTimelineEntry command_result_entry(std::string const& call_id, s
   };
 }
 
-ava::core::VoidResult record_tool_event(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result, ava::agent::ToolTimelineEntry entry)
+ava::core::VoidResult record_tool_event(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result,
+                                        ava::agent::ToolTimelineEntry entry)
 {
   if (auto emitted = emit_tool_event(session, sink, entry); !emitted)
     return std::unexpected(std::move(emitted.error()));
@@ -199,6 +202,7 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
       .global_config_file = session.paths.ava_config_dir / "lsp.json",
       .project_config_file = include_project_resources ? session.workspace_dir / ".ava" / "lsp.json" : std::filesystem::path{},
       .workspace_root = session.workspace_dir,
+      .anchor_set = session.anchor_set,
       .mode = session.mode,
       .permission_resolver = permission_resolver,
   });
@@ -206,6 +210,7 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
                                  .spill_dir = session.store.session_path().parent_path() / "spill",
                                  .mode = session.mode,
                                  .permission_resolver = std::move(permission_resolver),
+                                 .command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(permission_rule_store_for_session(session)),
                                  .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
                                    auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                            .parent_id = "",
@@ -214,6 +219,8 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
                                                                            .data_json = ava::tools::permission_audit_data_json(event)};
                                    return session.append_owned(std::move(entry));
                                  },
+                                 .anchor_set = session.anchor_set,
+                                 .ava_authority_roots = command_authority_roots_for_session(session),
                                  .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
                                  .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
                                  .plugin_project_plugins_dir = include_project_resources ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{},
@@ -517,11 +524,12 @@ ava::core::Result<CommandResult> run_tool_command(runtime::Session& session, Com
   {
     auto const command = line.substr(6);
     auto const call_id = ava::core::make_id("cmd");
-    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "bash", command); !recorded)
+    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "bash", "<redacted one-shot command>"); !recorded)
     {
       return std::unexpected(std::move(recorded.error()));
     }
-    auto const bash = ava::tools::run_bash(context, command);
+    auto const bash = ava::tools::run_bash(
+        context, command, ava::tools::BashOptions{.invocation_source = ava::tools::BashOptions::InvocationSource::UserRawShell});
     if (!bash)
     {
       auto const text = bash.error().format();

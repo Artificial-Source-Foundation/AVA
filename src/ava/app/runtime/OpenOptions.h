@@ -3,14 +3,29 @@
 #include "PromptOverrides.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/agent/mode.h"
+#include "ava/agent/subagent_coordinator.h"
 #include "ava/agent/tool_visibility.h"
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/session/session_metadata.h"
 
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
+
+namespace ava::core {
+class AnchorSet;
+}
+
+namespace ava::diagnostics {
+class RuntimeDiagnostics;
+}
+
+namespace ava::app {
+class SessionTitleCoordinator;
+class SubagentDeliveryManager;
+}  // namespace ava::app
 
 namespace ava::app::runtime {
 
@@ -26,6 +41,9 @@ struct OpenOptions
   // session storage). These are opened as anchor descriptors at startup and
   // made available to tools via ToolContext::anchor_set.
   std::vector<std::filesystem::path> additional_writable_dirs = {};
+  // Long-lived adapters may supply one immutable descriptor authority shared
+  // by every session and application-scoped background service.
+  std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
   std::optional<std::string> requested_session_id;
   std::optional<std::string> fork_session_id;
   std::optional<std::string> initial_session_name;
@@ -46,6 +64,17 @@ struct OpenOptions
   std::optional<ava::session::SessionReadLimits> session_read_limits = std::nullopt;
   // Strict adapters may pin the persisted cwd while retaining lease acquisition inside the protocol-neutral runtime ownership boundary.
   std::optional<std::filesystem::path> expected_original_cwd = std::nullopt;
+  // Long-lived frontends supply one shared coordinator across every runtime
+  // session they open. Null creates the initial application coordinator.
+  std::shared_ptr<ava::agent::SubagentCoordinator> subagent_coordinator = nullptr;
+  // Application-scoped automatic parent-summary delivery. When supplied it
+  // also owns the coordinator used by every navigated runtime session.
+  std::shared_ptr<ava::app::SubagentDeliveryManager> subagent_delivery_manager = nullptr;
+  // Application-scoped asynchronous root-session title generation.
+  std::shared_ptr<ava::app::SessionTitleCoordinator> session_title_coordinator = nullptr;
+  // Application-lifetime private diagnostics owner shared by visible,
+  // retained, and protocol-managed runtime sessions.
+  std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/app/clipboard_image.h"
+#include "ava/app/command_jobs.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/commands.h"
 #include "ava/app/display_settings.h"
@@ -9,6 +10,7 @@
 #include "ava/app/project_trust.h"
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/rpc/runtime_navigation.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
@@ -36,6 +38,7 @@
 #include <iomanip>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -51,6 +54,9 @@
 namespace {
 
 namespace version = ava::core::version;
+
+// Delegate to the single app-owned helper so path logic is not duplicated.
+using ava::app::permission_rule_store_for_session;
 
 constexpr std::uintmax_t kExternalEditorMaxBytes = 1024 * 1024;
 
@@ -395,11 +401,12 @@ bool is_display_settings_command(std::string_view line) noexcept
 
 void add_token_component(std::optional<long long>& total, std::optional<long long> value)
 {
-  if (!value)
+  if (!value || *value < 0)
     return;
   if (!total)
     total = 0;
-  *total += *value;
+  constexpr auto maximum = std::numeric_limits<long long>::max();
+  *total = *total > maximum - *value ? maximum : *total + *value;
 }
 
 std::optional<long long> compact_token_total(ava::session::SessionStats const& stats)
@@ -474,7 +481,10 @@ std::optional<std::string> token_status_for_session(ava::app::runtime::Session c
   auto entries = read_authority->load();
   if (!entries)
     return std::nullopt;
-  return compact_token_status(ava::session::compute_session_stats(*entries), session.model.context_window_tokens);
+  auto stats = ava::session::compute_session_stats(*entries);
+  if (!stats)
+    return std::nullopt;
+  return compact_token_status(*stats, session.model.context_window_tokens);
 }
 
 std::string session_selector_footer_hint(ava::app::SessionSelectorSort sort, bool named_only, bool show_paths, bool show_archived, bool show_label_time)
@@ -692,15 +702,6 @@ ava::core::Result<std::string> save_scoped_model_cycle(ava::app::runtime::Sessio
   return std::string("scoped model cycle saved: ") + std::to_string(scope_to_save->size()) + " models enabled";
 }
 
-ava::permissions::PermissionRuleStore permission_rule_store_for_session(ava::app::runtime::Session const& session)
-{
-  return ava::permissions::PermissionRuleStore{
-      .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-      .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-      .workspace_dir = session.workspace_dir,
-  };
-}
-
 ava::permissions::PermissionRuleMode permission_rule_mode_for_agent_mode(ava::agent::Mode mode)
 {
   switch (mode)
@@ -718,16 +719,36 @@ ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rul
                                                                                              ava::permissions::PermissionAction action)
 {
   auto reason = prompt.reason.empty() ? std::string("remembered from TUI permission prompt") : prompt.reason;
-  auto added = ava::permissions::add_persistent_permission_rule(permission_rule_store_for_session(session),
-                                                                ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
-                                                                                                      .action = action,
-                                                                                                      .operation = prompt.operation,
-                                                                                                      .mode = permission_rule_mode_for_agent_mode(prompt.mode),
-                                                                                                      .tool_name = prompt.tool_name,
-                                                                                                      .target_path = prompt.target_path,
-                                                                                                      .command = prompt.command,
-                                                                                                      .reason = std::move(reason),
-                                                                                                      .actor = "tui_prompt"});
+  std::string recipe_key;
+  std::string recipe_display;
+  if (prompt.operation == ava::permissions::Operation::RunCommand)
+  {
+    auto const reusable = prompt.command_metadata && ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata);
+    if (action == ava::permissions::PermissionAction::Allow && !ava::permissions::command_prompt_allows_persistent_allow(prompt))
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
+                                              "this command cannot be remembered because no reusable sealed workspace recipe is available"));
+    }
+    if (reusable)
+    {
+      recipe_key = prompt.command_metadata->workspace_recipe_key;
+      recipe_display = prompt.command_metadata->recipe_display;
+    }
+  }
+  auto added = ava::permissions::add_persistent_permission_rule(
+      permission_rule_store_for_session(session),
+      ava::permissions::PermissionRuleDraft{
+          .scope = ava::permissions::PermissionRuleScope::Workspace,
+          .action = action,
+          .operation = prompt.operation,
+          .mode = permission_rule_mode_for_agent_mode(prompt.mode),
+          .tool_name = prompt.tool_name,
+          .target_path = prompt.target_path,
+          .command = prompt.operation == ava::permissions::Operation::RunCommand && !recipe_key.empty() ? std::string{} : prompt.command,
+          .command_recipe_key = std::move(recipe_key),
+          .recipe_display = std::move(recipe_display),
+          .reason = std::move(reason),
+          .actor = "tui_prompt"});
   if (!added)
     return std::unexpected(std::move(added.error()));
   return ava::tui::TuiRememberedPermissionRule{.rule_id = added->rule_id};
@@ -752,7 +773,7 @@ void add_output(LineResult& result, std::string text)
 }
 
 template <typename Callback>
-LineResult with_provider_runtime(ShellState& state, std::string_view offline_suffix, Callback callback)
+LineResult with_provider_runtime(ShellState& state, std::string_view offline_suffix, Callback callback, std::string_view provider_override = {})
 {
   LineResult line_result;
   if (state.session.offline)
@@ -760,8 +781,9 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
     add_output(line_result, ava::app::offline_provider_error("prompt").format() + std::string(offline_suffix));
     return line_result;
   }
+  auto const provider_id = provider_override.empty() ? std::string_view(state.session.model.provider_id) : provider_override;
   ava::provider::CurlCliTransport transport;
-  auto credential = ava::config::provider_credential_for_request(state.session.paths, state.session.model.provider_id, transport);
+  auto credential = ava::config::provider_credential_for_request(state.session.paths, provider_id, transport);
   if (!credential)
   {
     add_output(line_result, credential.error().format() + std::string(offline_suffix));
@@ -769,11 +791,19 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
   }
   if (!*credential)
   {
-    add_output(line_result, ava::app::provider_auth_required_message(state.session, offline_suffix));
+    if (provider_override.empty())
+    {
+      add_output(line_result, ava::app::provider_auth_required_message(state.session, offline_suffix));
+    }
+    else
+    {
+      add_output(line_result, "Auth is required for compaction provider `" + std::string(provider_id) + "`. Run `ava connect " + std::string(provider_id) +
+                                  "` or configure its API-key environment variable." + std::string(offline_suffix));
+    }
     return line_result;
   }
   auto registry = ava::provider::builtin_provider_registry();
-  auto provider = registry.create(state.session.model.provider_id);
+  auto provider = registry.create(provider_id);
   if (!provider)
   {
     add_output(line_result, provider.error().format() + std::string(offline_suffix));
@@ -801,6 +831,19 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
   {
     if (is_compact_command(line))
     {
+      auto loaded_config = ava::session::load_compaction_config(state.session.paths);
+      if (!loaded_config)
+      {
+        add_output(line_result, loaded_config.error().format());
+        return line_result;
+      }
+      auto config = ava::app::resolve_compaction_config(state.session, std::move(*loaded_config));
+      if (!config)
+      {
+        add_output(line_result, config.error().format());
+        return line_result;
+      }
+      auto const summary_provider_id = config->provider_id;
       return with_provider_runtime(
           state, "\nother slash tool commands still work offline.",
           [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
@@ -828,7 +871,8 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
             }
             return LineResult{
                 .quit = command_result->quit, .output = std::move(command_result->output), .tool_timeline = std::move(command_result->tool_timeline)};
-          });
+          },
+          summary_provider_id);
     }
     auto command_result = ava::app::run_command(state.session, ava::app::CommandRequest{.command = line,
                                                                                         .permission_resolver = permission_resolver,
@@ -845,31 +889,32 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
     line_result.tool_timeline = std::move(command_result->tool_timeline);
     if (command_result->prompt_message)
     {
-      return with_provider_runtime(state, "\nthis command expands to a prompt and needs provider auth.",
-                                   [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
-                                     run_options.permission_resolver = permission_resolver;
-                                     run_options.question_resolver = question_resolver;
-                                     run_options.event_sink = std::move(event_sink);
-                                     run_options.cancel_requested = std::move(cancel_requested);
-                                     run_options.take_steering_messages = std::move(take_steering_messages);
-                                     auto result = ava::app::run_prompt(state.session, *command_result->prompt_message, provider, transport, run_options);
-                                     LineResult prompt_result;
-                                     if (!result)
-                                     {
-                                       add_output(prompt_result, result.error().format());
-                                       return prompt_result;
-                                     }
-                                     prompt_result.tool_timeline = std::move(result->tool_timeline);
-                                     if (!result->final_text.empty())
-                                     {
-                                       add_output(prompt_result, result->final_text);
-                                     }
-                                     else
-                                     {
-                                       add_output(prompt_result, "done");
-                                     }
-                                     return prompt_result;
-                                   });
+      return with_provider_runtime(
+          state, "\nthis command expands to a prompt and needs provider auth.",
+          [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
+            run_options.permission_resolver = permission_resolver;
+            run_options.question_resolver = question_resolver;
+            run_options.event_sink = std::move(event_sink);
+            run_options.cancel_requested = std::move(cancel_requested);
+            run_options.take_steering_messages = std::move(take_steering_messages);
+            auto result = ava::app::run_prompt(state.session, *command_result->prompt_message, provider, transport, run_options);
+            LineResult prompt_result;
+            if (!result)
+            {
+              add_output(prompt_result, result.error().format());
+              return prompt_result;
+            }
+            prompt_result.tool_timeline = std::move(result->tool_timeline);
+            if (!result->final_text.empty())
+            {
+              add_output(prompt_result, result->final_text);
+            }
+            else
+            {
+              add_output(prompt_result, "done");
+            }
+            return prompt_result;
+          });
     }
     return line_result;
   }
@@ -1079,8 +1124,9 @@ int run_tui(ShellState state)
       .reasoning_status_provider = [&state]() { return ava::app::reasoning_status_for_session(state.session); },
       .create_active_run_queues =
           [&state](ava::app::EventEnvelopeSink event_sink) {
-            auto queue =
-                std::make_shared<ava::app::InteractiveRunQueue>(state.session.store.session_id(), ava::core::make_id("request"), std::move(event_sink));
+            auto const active_job_coordinator = state.session.subagent_coordinator;
+            auto const active_job_owner = state.session.store.session_id();
+            auto queue = std::make_shared<ava::app::InteractiveRunQueue>(active_job_owner, ava::core::make_id("request"), std::move(event_sink));
             return ava::tui::TuiActiveRunQueues{
                 .active_request_id = queue->active_request_id(),
                 .queue_steering = [queue](std::string message) { return queue->queue_steering(std::move(message)); },
@@ -1104,10 +1150,22 @@ int run_tui(ShellState state)
                     return std::unexpected(std::move(restored.error()));
                   return ava::tui::TuiRestoredQueuedMessage{.message = restored->message, .steering = restored->steering};
                 },
+                .run_nonblocking_command = [active_job_coordinator, active_job_owner](std::string const& submitted) -> std::optional<std::vector<std::string>> {
+                  auto arguments = ava::app::active_jobs_command_arguments(submitted);
+                  if (!arguments)
+                    return std::nullopt;
+                  auto command = ava::app::run_jobs_command(active_job_coordinator, active_job_owner, *arguments, true);
+                  if (!command)
+                    return std::vector<std::string>{command.error().format()};
+                  return std::move(command->output);
+                },
                 .finish = [queue](bool canceled) { return queue->finish(canceled); }};
           },
       .on_submit =
-          [&state, &hotkeys, &refresh_display_watch_state](std::string const& submitted, ava::tui::TuiSubmitContext context) {
+          [&state, &hotkeys, &refresh_display_watch_state, &state_snapshot](std::string const& submitted, ava::tui::TuiSubmitContext context) {
+            // Persistent rules resolve before the TUI fallback resolver in
+            // context, so an exact durable Deny never reaches the in-memory
+            // session-grant registry.
             auto permission_resolver =
                 ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(state.session), context.permission_resolver);
             auto line_result = handle_line(state, submitted, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
@@ -1154,7 +1212,8 @@ int run_tui(ShellState state)
             return ava::tui::TuiSubmitResult{.quit = line_result.quit,
                                              .output = line_result.output,
                                              .tool_timeline = tui_tool_timeline(line_result.tool_timeline),
-                                             .context_source_count = state.session.context_sources.size()};
+                                             .context_source_count = state.session.context_sources.size(),
+                                             .state_snapshot = state_snapshot({})};
           },
       .on_attach_image = [&state](std::string const& path) -> ava::core::Result<ava::session::ImageAttachmentRef> {
         auto source = std::filesystem::path(path);

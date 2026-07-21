@@ -5,9 +5,11 @@
 #include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
 #include "ava/core/error.h"
+#include "ava/core/AnchorSet.h"
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -33,8 +35,13 @@ class FailingStreambuf final : public std::streambuf
   std::streamsize xsputn(char const* s, std::streamsize count) override;
 };
 
-// Create an empty root. If the directory already exists it will be cleaned out.
+// Physical per-build test namespace used by security fixtures that need to
+// control ancestor permissions explicitly.
+std::filesystem::path temp_root();
+// Create an empty logical root. If the directory already exists it will be cleaned out.
 std::filesystem::path create_empty_root(std::filesystem::path root_name);
+std::shared_ptr<ava::core::AnchorSet> command_anchors_for_test(std::filesystem::path const& workspace,
+                                                               std::filesystem::path const& spill_dir);
 
 class ScopedEnvVar
 {
@@ -59,6 +66,7 @@ bool has_active_sgr_at_text(std::string_view line, std::string_view text, std::s
 // lease for the duration of one append; runtime tests instead use owner routes.
 ava::core::VoidResult append_session_entry_for_test(ava::session::SessionStore& store, ava::session::SessionEntry const& entry);
 std::function<ava::core::VoidResult(ava::session::SessionEntry const&)> append_route_for_test(ava::session::SessionStore const& store);
+std::function<ava::core::VoidResult(std::vector<ava::session::SessionEntry>)> append_batch_route_for_test(ava::session::SessionStore const& store);
 ava::session::SessionReadAuthority read_authority_for_test(ava::session::SessionStore const& store);
 ava::core::Result<ava::session::SessionMetadataView> append_session_metadata_for_test(ava::session::SessionStore& store,
                                                                                       ava::session::SessionMetadataUpdate update);

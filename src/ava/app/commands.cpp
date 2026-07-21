@@ -2,6 +2,7 @@
 #include "ava/app/command_connect.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_help.h"
+#include "ava/app/command_jobs.h"
 #include "ava/app/command_mcp.h"
 #include "ava/app/command_models.h"
 #include "ava/app/command_permissions.h"
@@ -903,6 +904,8 @@ ReloadReportRow reload_model_settings(runtime::Session& session)
   if (!registry)
     return reload_error_row("models", registry.error());
   session.scoped_model_cycle = registry->scoped_model_cycle;
+  if (auto refreshed = refresh_runtime_parent_configuration(session); !refreshed)
+    return reload_error_row("models", refreshed.error());
   ReloadReportRow row{.name = "models", .status = "loaded", .details = {}};
   append_reload_detail(row, "config", session.paths.models_file.string());
   append_reload_detail(row, "models", std::to_string(registry->models.size()));
@@ -917,7 +920,8 @@ ReloadReportRow reload_prompt_settings(runtime::Session& session)
                                                          project_resources_trusted(session.project_trust), session.prompt_overrides);
   if (!prompt_state)
     return reload_error_row("prompts", prompt_state.error());
-  apply_runtime_prompt_state(session, std::move(*prompt_state));
+  if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
+    return reload_error_row("prompts", refreshed.error());
   ReloadReportRow row{.name = "prompts", .status = "loaded", .details = {}};
   append_reload_detail(row, "project_resources", project_resources_trusted(session.project_trust) ? "enabled" : "skipped");
   append_reload_detail(row, "context_sources", std::to_string(session.context_sources.size()));
@@ -941,7 +945,8 @@ ReloadReportRow reload_trust_settings(runtime::Session& session)
     return row;
   }
   session.project_trust = std::move(next_trust);
-  apply_runtime_prompt_state(session, std::move(*prompt_state));
+  if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
+    return reload_error_row("trust", refreshed.error());
   ReloadReportRow row{.name = "trust", .status = "loaded", .details = {}};
   append_reload_detail(row, "trust_file", session.project_trust.trust_file.string());
   append_reload_detail(row, "decision", std::string(to_string(session.project_trust.decision)));
@@ -953,14 +958,22 @@ ReloadReportRow reload_trust_settings(runtime::Session& session)
 
 ReloadReportRow reload_compaction_settings(runtime::Session& session)
 {
-  auto config = ava::session::load_compaction_config(session.paths);
+  auto loaded_config = ava::session::load_compaction_config(session.paths);
+  if (!loaded_config)
+    return reload_error_row("compaction", loaded_config.error());
+  auto config = resolve_compaction_config(session, std::move(*loaded_config));
   if (!config)
     return reload_error_row("compaction", config.error());
   ReloadReportRow row{.name = "compaction", .status = "validated", .details = {}};
   append_reload_detail(row, "config", session.paths.compaction_file.string());
+  append_reload_detail(row, "provider", config->provider_id);
   append_reload_detail(row, "model", config->model_id);
   append_reload_detail(row, "auto_threshold_tokens", std::to_string(config->auto_threshold_tokens));
+  append_reload_detail(row, "auto_threshold_percent", std::to_string(config->auto_threshold_percent));
+  append_reload_detail(row, "effective_threshold_tokens",
+                       std::to_string(ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens)));
   append_reload_detail(row, "keep_recent_tokens", std::to_string(config->keep_recent_tokens));
+  append_reload_detail(row, "keep_recent_turns", std::to_string(config->keep_recent_turns));
   append_reload_detail(row, "keep_recent_messages", std::to_string(config->keep_recent_messages));
   append_reload_detail(row, "max_summary_bytes", std::to_string(config->max_summary_bytes));
   return row;
@@ -1076,7 +1089,8 @@ ava::core::Result<CommandResult> reload_project_trust_state(runtime::Session& se
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
   session.project_trust = std::move(next_trust);
-  apply_runtime_prompt_state(session, std::move(*prompt_state));
+  if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
+    return std::unexpected(std::move(refreshed.error()));
   return handled_text(std::move(prefix) + "\n" + project_trust_summary(session.project_trust));
 }
 
@@ -1470,6 +1484,10 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   if (starts_with_command(request.command, "/sessions"))
   {
     return run_sessions_command(session, command_argument(request.command, "/sessions"));
+  }
+  if (starts_with_command(request.command, "/jobs"))
+  {
+    return run_jobs_command(session, command_argument(request.command, "/jobs"));
   }
   if (request.command == "/recover-persistence")
   {

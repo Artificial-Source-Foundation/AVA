@@ -98,7 +98,7 @@ int main(int argc, char** argv)
     write_environment_marker(marker_path);
   if (mode == "stderr-noise")
   {
-    std::cerr << std::string(96, 'x') << "mcp-stderr-tail!";
+    std::cerr << std::string(96, 'x') << "CANARY_MCP_STDERR_19d4";
     std::cerr.flush();
   }
 
@@ -117,7 +117,7 @@ int main(int argc, char** argv)
     }
     if (mode == "exit-initialize" && *method == "initialize")
     {
-      std::cerr << "fake MCP exited during initialize";
+      std::cerr << "CANARY_MCP_STDERR_INIT_a138";
       std::cerr.flush();
       return 42;
     }
@@ -149,7 +149,7 @@ int main(int argc, char** argv)
     {
       if (mode == "exit-after-initialize")
       {
-        std::cerr << "fake MCP exited during tools/list";
+        std::cerr << "CANARY_MCP_STDERR_LIST_4b72";
         std::cerr.flush();
         return 43;
       }
@@ -196,19 +196,17 @@ int main(int argc, char** argv)
     {
       if (mode == "exit-tool")
       {
-        std::cerr << "fake MCP exited during tools/call";
+        std::cerr << "CANARY_MCP_STDERR_CALL_0c95";
         std::cerr.flush();
         return 44;
       }
       if (mode == "error-call")
       {
-        write_message(error_response(*id, "fake MCP JSON-RPC call failed"));
+        write_message(error_response(*id, "CANARY_MCP_RESPONSE_ERROR_f2a7"));
       }
       else if (mode == "tool-error")
       {
-        write_message(response(*id,
-                               "{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"MCP tool "
-                               "failed\"}]}"));
+        write_message(response(*id, "{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"CANARY_MCP_TOOL_CONTENT_682e\"}]}"));
       }
       else if (mode == "tool-error-canceled-text")
       {
@@ -274,7 +272,7 @@ int main(int argc, char** argv)
     {
       if (mode == "exit-resources-list")
       {
-        std::cerr << "fake MCP exited during resources/list";
+        std::cerr << "CANARY_MCP_STDERR_RESOURCES_31e6";
         std::cerr.flush();
         return 45;
       }

@@ -1,5 +1,4 @@
 #include "ava/core/json.h"
-#include "ava/core/path.h"      // ava::core::logical_cwd
 
 #include <algorithm>
 #include <cctype>
@@ -24,6 +23,19 @@ enum class Mode
   SleepInitializeMarker,
   DelayedInitialize,
   MalformedDiagnostics,
+  PublishDiagnostics,
+  PublishDuringRequest,
+  PublishUnrelatedFirst,
+  PublishTwoDocuments,
+  PublishDidChange,
+  PublishUnversionedDidChange,
+  PublishEmptyClear,
+  PublishDocumentOverflow,
+  PublishCacheOverflow,
+  PublishOutside,
+  MalformedPublishDiagnostics,
+  MalformedCapabilities,
+  ServerConfigurationRequest,
   CrashDiagnostics,
   SleepDiagnostics,
   SleepDiagnosticsMarker,
@@ -44,7 +56,18 @@ struct Options
   std::string descendant_marker_path;
   std::string launch_marker_path;
   std::string environment_marker_path;
+  bool builtin_clangd = false;
 };
+
+std::string current_logical_directory()
+{
+  if (auto const* pwd = std::getenv("PWD"); pwd != nullptr && *pwd != '\0' && *pwd == '/')
+    return pwd;
+  char buffer[4096]{};
+  if (getcwd(buffer, sizeof(buffer)) != nullptr)
+    return buffer;
+  return {};
+}
 
 ssize_t read_retry(char* data, std::size_t size)
 {
@@ -117,10 +140,38 @@ Options parse_options(int argc, char** argv)
   Options options;
   for (int index = 1; index < argc; ++index)
   {
+    if (std::strcmp(argv[index], "--background-index") == 0)
+      options.builtin_clangd = true;
     if (std::strcmp(argv[index], "--malformed-diagnostics") == 0)
       options.mode = Mode::MalformedDiagnostics;
     if (std::strcmp(argv[index], "--crash-diagnostics") == 0)
       options.mode = Mode::CrashDiagnostics;
+    if (std::strcmp(argv[index], "--publish-diagnostics") == 0)
+      options.mode = Mode::PublishDiagnostics;
+    if (std::strcmp(argv[index], "--publish-during-request") == 0)
+      options.mode = Mode::PublishDuringRequest;
+    if (std::strcmp(argv[index], "--publish-unrelated-first") == 0)
+      options.mode = Mode::PublishUnrelatedFirst;
+    if (std::strcmp(argv[index], "--publish-two-documents") == 0)
+      options.mode = Mode::PublishTwoDocuments;
+    if (std::strcmp(argv[index], "--publish-did-change") == 0)
+      options.mode = Mode::PublishDidChange;
+    if (std::strcmp(argv[index], "--publish-unversioned-did-change") == 0)
+      options.mode = Mode::PublishUnversionedDidChange;
+    if (std::strcmp(argv[index], "--publish-empty-clear") == 0)
+      options.mode = Mode::PublishEmptyClear;
+    if (std::strcmp(argv[index], "--publish-document-overflow") == 0)
+      options.mode = Mode::PublishDocumentOverflow;
+    if (std::strcmp(argv[index], "--publish-cache-overflow") == 0)
+      options.mode = Mode::PublishCacheOverflow;
+    if (std::strcmp(argv[index], "--publish-outside") == 0)
+      options.mode = Mode::PublishOutside;
+    if (std::strcmp(argv[index], "--malformed-publish-diagnostics") == 0)
+      options.mode = Mode::MalformedPublishDiagnostics;
+    if (std::strcmp(argv[index], "--malformed-capabilities") == 0)
+      options.mode = Mode::MalformedCapabilities;
+    if (std::strcmp(argv[index], "--server-configuration-request") == 0)
+      options.mode = Mode::ServerConfigurationRequest;
     if (std::strcmp(argv[index], "--echo-uri-diagnostics") == 0)
       options.mode = Mode::EchoUriDiagnostics;
     if (std::strcmp(argv[index], "--sleep-initialize") == 0)
@@ -212,6 +263,20 @@ void write_launch_marker(std::string const& path)
   file << "started\n";
 }
 
+void write_builtin_clangd_marker(Options const& options)
+{
+  if (!options.builtin_clangd)
+    return;
+  auto const* state_home = std::getenv("XDG_STATE_HOME");
+  if (state_home == nullptr || *state_home == '\0')
+    return;
+  auto const cwd = current_logical_directory();
+  if (cwd.empty())
+    return;
+  std::ofstream marker(std::string(state_home) + "/fake-clangd-launches.txt", std::ios::binary | std::ios::app);
+  marker << cwd << '\n';
+}
+
 void write_environment_marker(std::string const& path)
 {
   if (path.empty())
@@ -228,25 +293,61 @@ void write_cwd_marker(std::string const& path)
 {
   if (path.empty())
     return;
-  // Prefer $PWD (logical path preserved by the shell) over getcwd() (physical path).
-  auto cwd = ava::core::logical_cwd();
+  auto const cwd = current_logical_directory();
+  if (cwd.empty())
+    return;
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
-  file << cwd.string() << '\n';
+  file << cwd << '\n';
 }
 
-void respond_initialize(long long id)
+bool uses_push_diagnostics(Mode mode)
 {
-  std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
-                           ",\"result\":{\"capabilities\":{\"diagnosticProvider\":{\"interFileDependencies\":false,"
-                           "\"workspaceDiagnostics\":false},\"documentSymbolProvider\":true,"
+  switch (mode)
+  {
+    case Mode::PublishDiagnostics:
+    case Mode::PublishDuringRequest:
+    case Mode::PublishUnrelatedFirst:
+    case Mode::PublishTwoDocuments:
+    case Mode::PublishDidChange:
+    case Mode::PublishUnversionedDidChange:
+    case Mode::PublishEmptyClear:
+    case Mode::PublishDocumentOverflow:
+    case Mode::PublishCacheOverflow:
+    case Mode::PublishOutside:
+    case Mode::MalformedPublishDiagnostics:
+      return true;
+    default:
+      return false;
+  }
+}
+
+void respond_initialize(long long id, Options const& options)
+{
+  if (options.mode == Mode::MalformedCapabilities)
+  {
+    write_message("{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) + ",\"result\":{\"capabilities\":{\"diagnosticProvider\":\"invalid\"}}}");
+    return;
+  }
+  auto const diagnostic_capability = uses_push_diagnostics(options.mode)
+                                         ? std::string{}
+                                         : std::string("\"diagnosticProvider\":{\"interFileDependencies\":false,\"workspaceDiagnostics\":false},");
+  std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) + ",\"result\":{\"capabilities\":{" + diagnostic_capability +
+                           "\"documentSymbolProvider\":true,"
                            "\"workspaceSymbolProvider\":true,\"definitionProvider\":true,\"referencesProvider\":true}}}";
   write_message(body);
 }
 
+std::string workspace_uri(std::string_view filename)
+{
+  auto const cwd = current_logical_directory();
+  if (cwd.empty())
+    return "file:///workspace/" + std::string(filename);
+  return "file://" + cwd + "/" + std::string(filename);
+}
+
 std::string workspace_main_uri()
 {
-  auto cwd = ava::core::logical_cwd();
-  return "file://" + cwd.string() + "/main.cpp";
+  return workspace_uri("main.cpp");
 }
 
 std::string request_uri(std::string_view message)
@@ -255,6 +356,16 @@ std::string request_uri(std::string_view message)
   auto const document = params ? ava::core::json::object_field(*params, "textDocument") : std::nullopt;
   auto const uri = document ? ava::core::json::string_field(*document, "uri") : std::nullopt;
   return uri.value_or(std::string{});
+}
+
+std::optional<int> request_document_version(std::string_view message)
+{
+  auto const params = ava::core::json::object_field(message, "params");
+  auto const document = params ? ava::core::json::object_field(*params, "textDocument") : std::nullopt;
+  auto const version = document ? ava::core::json::integer_field(*document, "version") : std::nullopt;
+  if (!version)
+    return std::nullopt;
+  return static_cast<int>(*version);
 }
 
 void respond_diagnostics(long long id, Options const& options, std::string_view uri, bool initialized)
@@ -314,6 +425,51 @@ void respond_diagnostics(long long id, Options const& options, std::string_view 
                            "\"message\":\"" +
                            ava::core::json::escape(message) + "\"}]}}";
   write_message(body);
+}
+
+void publish_diagnostics_payload(std::string_view uri, std::string_view message, std::optional<int> version = std::nullopt, bool empty = false,
+                                 bool two_items = false)
+{
+  std::string diagnostics;
+  if (empty)
+  {
+    diagnostics = "[]";
+  }
+  else
+  {
+    auto const item =
+        "{\"range\":{\"start\":{\"line\":3,\"character\":2},\"end\":{\"line\":3,\"character\":7}},"
+        "\"severity\":2,\"code\":\"AVA_PUBLISH\",\"message\":\"" +
+        ava::core::json::escape(message) + "\"}";
+    diagnostics = "[" + item + (two_items ? "," + item : std::string{}) + "]";
+  }
+  std::string const version_field = version ? ",\"version\":" + std::to_string(*version) : std::string{};
+  write_message("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"" + ava::core::json::escape(uri) + "\"" +
+                version_field + ",\"diagnostics\":" + diagnostics + "}}");
+}
+
+void publish_cache_bound_notifications(Mode mode)
+{
+  auto const message = std::string(16 * 1024, 'x');
+  for (int index = 0; index < (mode == Mode::PublishDocumentOverflow ? 65 : 64); ++index)
+  {
+    publish_diagnostics_payload(workspace_uri("cached-" + std::to_string(index) + ".cpp"), message, std::nullopt, false, mode == Mode::PublishCacheOverflow);
+  }
+}
+
+void publish_diagnostics(std::string_view uri, Options const& options)
+{
+  if (options.mode == Mode::MalformedPublishDiagnostics)
+  {
+    write_message("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":42}}");
+    return;
+  }
+  if (options.mode == Mode::PublishOutside)
+  {
+    publish_diagnostics_payload("file:///outside-ava-workspace.cpp", "outside diagnostic");
+    return;
+  }
+  publish_diagnostics_payload(uri, "fake published diagnostic");
 }
 
 void respond_document_symbols(long long id, Options const& options)
@@ -378,6 +534,7 @@ void respond_references(long long id, bool did_open)
 int main(int argc, char** argv)
 {
   auto const options = parse_options(argc, argv);
+  write_builtin_clangd_marker(options);
   write_launch_marker(options.launch_marker_path);
   write_environment_marker(options.environment_marker_path);
   bool did_open = false;
@@ -400,7 +557,15 @@ int main(int argc, char** argv)
         usleep(500000);
       if (options.mode == Mode::CwdMarker)
         write_cwd_marker(options.marker_path);
-      respond_initialize(*id);
+      if (options.mode == Mode::ServerConfigurationRequest)
+      {
+        write_message(
+            "{\"jsonrpc\":\"2.0\",\"id\":900,\"method\":\"workspace/configuration\",\"params\":{\"items\":[{\"section\":\"one\"},{\"section\":\"two\"}]}}");
+        auto configuration = read_message(options);
+        if (!configuration || configuration->find("\"id\":900") == std::string::npos || configuration->find("\"result\":[null,null]") == std::string::npos)
+          return 2;
+      }
+      respond_initialize(*id, options);
     }
     else if (*method == "initialized")
     {
@@ -412,10 +577,16 @@ int main(int argc, char** argv)
     }
     else if (*method == "textDocument/documentSymbol" && id)
     {
+      if (options.mode == Mode::PublishDuringRequest)
+        publish_diagnostics_payload(request_uri(*message), "diagnostic published during document symbols");
+      if (options.mode == Mode::PublishEmptyClear)
+        publish_diagnostics_payload(request_uri(*message), {}, std::nullopt, true);
       respond_document_symbols(*id, options);
     }
     else if (*method == "workspace/symbol" && id)
     {
+      if (options.mode == Mode::PublishDocumentOverflow || options.mode == Mode::PublishCacheOverflow)
+        publish_cache_bound_notifications(options.mode);
       respond_workspace_symbols(*id);
     }
     else if (*method == "textDocument/definition" && id)
@@ -427,6 +598,29 @@ int main(int argc, char** argv)
       did_open = true;
       if (options.mode == Mode::SlowDidOpenDefinition)
         usleep(250000);
+      if (options.mode == Mode::PublishDiagnostics || options.mode == Mode::MalformedPublishDiagnostics || options.mode == Mode::PublishOutside)
+        publish_diagnostics(request_uri(*message), options);
+      if (options.mode == Mode::PublishUnrelatedFirst)
+      {
+        publish_diagnostics_payload(workspace_uri("other.cpp"), "unrelated diagnostic first");
+        publish_diagnostics_payload(request_uri(*message), "target diagnostic second");
+      }
+      if (options.mode == Mode::PublishTwoDocuments)
+        publish_diagnostics_payload(request_uri(*message), request_uri(*message));
+      if (options.mode == Mode::PublishDidChange || options.mode == Mode::PublishUnversionedDidChange)
+        publish_diagnostics_payload(request_uri(*message), "initial diagnostic", 1);
+      if (options.mode == Mode::PublishEmptyClear)
+        publish_diagnostics_payload(request_uri(*message), "diagnostic before clear");
+    }
+    else if (*method == "textDocument/didChange")
+    {
+      if (options.mode == Mode::PublishDidChange)
+      {
+        publish_diagnostics_payload(request_uri(*message), "stale diagnostic after didChange", 1);
+        publish_diagnostics_payload(request_uri(*message), "fresh diagnostic after didChange", request_document_version(*message));
+      }
+      if (options.mode == Mode::PublishUnversionedDidChange)
+        publish_diagnostics_payload(request_uri(*message), "fresh unversioned diagnostic after didChange");
     }
     else if (*method == "textDocument/references" && id)
     {

@@ -28,6 +28,7 @@ set(DRIVER_FILE "${TEST_ROOT}/driver.sh")
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
 file(MAKE_DIRECTORY "${WORKSPACE}" "${HOME_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}" "${DATA_DIR}")
+file(CHMOD "${CONFIG_DIR}/ava" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 file(WRITE "${TARGET_FILE}" "outside grant target\n")
 file(WRITE "${CONFIG_DIR}/ava/models.json"
      "{\"default_provider\":\"moonshot\",\"default_model\":\"ava-headless-fake\","

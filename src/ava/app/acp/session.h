@@ -96,6 +96,7 @@ class AcpSessionHost
     std::string workspace;
     std::string target;
     std::string command;
+    std::string command_recipe_key;
     std::string tool_name;
 
     friend bool operator==(PermissionGrantKey const&, PermissionGrantKey const&) = default;
@@ -181,6 +182,7 @@ class AcpSessionRegistry
   };
 
   AcpSessionOptions options_;
+  std::optional<ava::core::Error> coordinator_startup_error_ = std::nullopt;
   mutable std::mutex mutex_;
   bool closing_ = false;
   std::size_t pending_insertions_ = 0;

@@ -45,6 +45,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -1565,6 +1566,24 @@ void test_model_and_prompt_config()
                custom_typo.explicit_mapping && !custom_typo.supported,
            "model registry parses local capability, reasoning-level policy, and pricing metadata and calculates cost");
     expect(!ava::config::usage_cost_usd(ava::config::ModelPricing{}, usage), "usage cost remains unknown when pricing rates are absent");
+    auto const maximum_price = std::numeric_limits<long double>::max();
+    ava::config::ModelPricing const maximum_pricing{.input_per_million = maximum_price,
+                                                    .output_per_million = maximum_price,
+                                                    .cache_read_per_million = maximum_price,
+                                                    .cache_write_per_million = maximum_price,
+                                                    .reasoning_per_million = maximum_price};
+    ava::provider::TokenUsage const maximum_usage{.input_tokens = LLONG_MAX,
+                                                  .output_tokens = LLONG_MAX,
+                                                  .reasoning_tokens = LLONG_MAX,
+                                                  .cache_read_tokens = LLONG_MAX,
+                                                  .cache_write_tokens = LLONG_MAX,
+                                                  .total_tokens = LLONG_MAX,
+                                                  .estimated_input_bytes = std::nullopt,
+                                                  .estimated_output_bytes = std::nullopt,
+                                                  .estimated_total_bytes = std::nullopt,
+                                                  .estimated = false};
+    auto const maximum_cost = ava::config::usage_cost_usd(maximum_pricing, maximum_usage);
+    expect(maximum_cost && *maximum_cost == maximum_price, "usage cost calculation saturates overflowing token-price components and totals");
     ava::provider::TokenUsage const cached_usage{.input_tokens = 1000,
                                                  .output_tokens = 0,
                                                  .reasoning_tokens = std::nullopt,

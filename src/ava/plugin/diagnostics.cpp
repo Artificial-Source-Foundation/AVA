@@ -9,14 +9,23 @@
 namespace ava::plugin {
 namespace {
 
-PluginFailure make_failure(PluginScope scope, std::filesystem::path const& path, ava::core::Error const& error)
+PluginFailure make_failure(PluginScope scope, std::filesystem::path const& path, ava::core::Error const& error,
+                           PluginFailureKind kind = PluginFailureKind::Discovery)
 {
-  return PluginFailure{.scope = scope, .path = path, .message = error.message(), .details = error.format()};
+  auto const failure = ava::diagnostics::safe_failure_from_error(ava::diagnostics::ComponentClass::Plugin, error);
+  return PluginFailure{.scope = scope,
+                       .path = path,
+                       .kind = kind,
+                       .failure = failure,
+                       .message = ava::diagnostics::serialize_safe_failure_human(failure),
+                       .details = ava::diagnostics::serialize_safe_failure_json(failure)};
 }
 
-PluginFailure make_failure(PluginScope scope, std::filesystem::path const& path, std::string message, std::string details = {})
+PluginFailure make_failure(PluginScope scope, std::filesystem::path const& path, ava::core::ErrorCategory category,
+                           PluginFailureKind kind = PluginFailureKind::Discovery)
 {
-  return PluginFailure{.scope = scope, .path = path, .message = std::move(message), .details = std::move(details)};
+  auto const error = ava::core::Error(category, "plugin diagnostic failure");
+  return make_failure(scope, path, error, kind);
 }
 
 bool is_install_staging_directory(std::filesystem::path const& path)
@@ -33,7 +42,7 @@ void collect_from_dir(std::filesystem::path const& root, PluginScope scope, Plug
     return;
   if (exists_error)
   {
-    diagnostics.failures.push_back(make_failure(scope, root, "failed to inspect plugin directory", exists_error.message()));
+    diagnostics.failures.push_back(make_failure(scope, root, ava::core::ErrorCategory::Io));
     return;
   }
 
@@ -53,7 +62,7 @@ void collect_from_dir(std::filesystem::path const& root, PluginScope scope, Plug
       continue;
     if (manifest_error)
     {
-      diagnostics.failures.push_back(make_failure(scope, manifest_path, "failed to inspect plugin manifest", manifest_error.message()));
+      diagnostics.failures.push_back(make_failure(scope, manifest_path, ava::core::ErrorCategory::Io));
       continue;
     }
     auto manifest = load_plugin_manifest(manifest_path);
@@ -66,7 +75,7 @@ void collect_from_dir(std::filesystem::path const& root, PluginScope scope, Plug
   }
   if (iter_error)
   {
-    diagnostics.failures.push_back(make_failure(scope, root, "failed to iterate plugin directory", iter_error.message()));
+    diagnostics.failures.push_back(make_failure(scope, root, ava::core::ErrorCategory::Io));
   }
 }
 
@@ -97,7 +106,7 @@ void disable_duplicate_ids(PluginDiagnostics& diagnostics)
     if (std::ranges::find(duplicate_ids, status.plugin.manifest.id) == duplicate_ids.end())
       continue;
     diagnostics.failures.push_back(
-        make_failure(status.plugin.scope, status.plugin.manifest.path, "duplicate plugin id discovered", "plugin=" + status.plugin.manifest.id));
+        make_failure(status.plugin.scope, status.plugin.manifest.path, ava::core::ErrorCategory::InvalidArgument, PluginFailureKind::DuplicateId));
   }
   std::erase_if(diagnostics.plugins,
                 [&](PluginStatus const& status) { return std::ranges::find(duplicate_ids, status.plugin.manifest.id) != duplicate_ids.end(); });
@@ -108,8 +117,7 @@ void apply_enablement(std::filesystem::path const& enablement_file, std::filesys
   auto records = load_plugin_enablement(enablement_file);
   if (!records)
   {
-    diagnostics.failures.push_back(
-        PluginFailure{.scope = PluginScope::Project, .path = enablement_file, .message = records.error().message(), .details = records.error().format()});
+    diagnostics.failures.push_back(make_failure(PluginScope::Project, enablement_file, records.error(), PluginFailureKind::Enablement));
     return;
   }
   auto const workspace = canonical_workspace_key(workspace_root);

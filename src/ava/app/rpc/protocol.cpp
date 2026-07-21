@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "protocol.h"
+#include "ava/agent/job_control.h"
 #include "ava/session/session_store.h"
 #include "ava/core/json.h"
 #include "ava/core/strict_json.h"
@@ -17,6 +18,19 @@
 
 namespace ava::app::rpc {
 namespace {
+
+std::string supported_session_entry_versions_json()
+{
+  std::string versions = "[";
+  for (long long version = 0; version <= ava::session::kCurrentSessionEntryVersion; ++version)
+  {
+    if (version != 0)
+      versions += ',';
+    versions += std::to_string(version);
+  }
+  versions += ']';
+  return versions;
+}
 
 bool is_json_object_line(std::string_view line)
 {
@@ -105,6 +119,23 @@ ava::core::Result<std::optional<long long>> exact_optional_integer_field(std::st
   {
     return std::unexpected(invalid_rpc("RPC " + field_name + " is out of range"));
   }
+}
+
+ava::core::Result<std::optional<bool>> exact_optional_bool_field(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return std::optional<bool>{};
+  auto const tail = object.substr(*start);
+  auto token_ends = [&](std::size_t end) {
+    while (end < tail.size() && std::isspace(static_cast<unsigned char>(tail[end])) != 0) ++end;
+    return end == tail.size() || tail[end] == ',' || tail[end] == '}';
+  };
+  if (tail.starts_with("true") && token_ends(4))
+    return std::optional<bool>{true};
+  if (tail.starts_with("false") && token_ends(5))
+    return std::optional<bool>{false};
+  return std::unexpected(invalid_rpc("RPC " + std::string(key) + " must be a boolean"));
 }
 
 ava::core::Result<std::optional<std::string>> exact_optional_string_field(std::string_view object, std::string_view key)
@@ -605,9 +636,10 @@ std::string rpc_protocol_result_json()
   return "{\"protocol_version\":" + std::to_string(kRpcProtocolVersions.protocol) + ",\"supported_protocol_versions\":[" +
          std::to_string(kRpcProtocolVersions.protocol) + "],\"event_schema_version\":" + std::to_string(kRpcProtocolVersions.event_schema) +
          ",\"supported_event_schema_versions\":[" + std::to_string(kRpcProtocolVersions.event_schema) +
-         "],\"session_entry_version\":" + std::to_string(ava::session::kCurrentSessionEntryVersion) + ",\"supported_session_entry_versions\":[0,1,2," +
-         std::to_string(ava::session::kCurrentSessionEntryVersion) +
-         "],\"capabilities\":[\"direct_bash_rpc\"],\"direct_command_types\":[\"run_bash\",\"run_command\"]}";
+         "],\"session_entry_version\":" + std::to_string(ava::session::kCurrentSessionEntryVersion) +
+         ",\"supported_session_entry_versions\":" + supported_session_entry_versions_json() +
+         ",\"capabilities\":[\"direct_bash_rpc\",\"job_controls\"],\"direct_command_types\":[\"run_bash\",\"run_command\",\"list_jobs\","
+         "\"get_job\",\"wait_job\",\"get_job_result\",\"cancel_job\",\"promote_job\"]}";
 }
 
 std::string parse_error_response_id(std::string_view line)
@@ -826,6 +858,9 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   auto target_path = std::optional<std::string>{};
   auto command_text = std::optional<std::string>{};
   auto tool_name = std::optional<std::string>{};
+  auto command_recipe_key = std::optional<std::string>{};
+  auto recipe_display = std::optional<std::string>{};
+  auto critical_acknowledged = std::optional<bool>{};
   if (rpc::command_type_is(*type, {"run_command", "run_bash"}))
   {
     auto parsed_command = rpc::exact_optional_string_field(line, "command");
@@ -902,6 +937,22 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
     {
       return std::unexpected(std::move(valid.error()));
     }
+    auto parsed_recipe_key = rpc::exact_optional_string_field(line, "command_recipe_key");
+    if (!parsed_recipe_key)
+      return std::unexpected(std::move(parsed_recipe_key.error()));
+    command_recipe_key = std::move(*parsed_recipe_key);
+    if (auto valid = rpc::validate_optional_rpc_text(command_recipe_key, "command_recipe_key", 128); !valid)
+      return std::unexpected(std::move(valid.error()));
+    auto parsed_recipe_display = rpc::exact_optional_string_field(line, "recipe_display");
+    if (!parsed_recipe_display)
+      return std::unexpected(std::move(parsed_recipe_display.error()));
+    recipe_display = std::move(*parsed_recipe_display);
+    if (auto valid = rpc::validate_optional_rpc_text(recipe_display, "recipe_display", 1024); !valid)
+      return std::unexpected(std::move(valid.error()));
+    auto parsed_critical_acknowledged = rpc::exact_optional_bool_field(line, "critical_acknowledged");
+    if (!parsed_critical_acknowledged)
+      return std::unexpected(std::move(parsed_critical_acknowledged.error()));
+    critical_acknowledged = std::move(*parsed_critical_acknowledged);
   }
 
   auto reason = std::optional<std::string>{};
@@ -991,6 +1042,34 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
     if (auto valid = rpc::validate_optional_rpc_multiline_text(summary, "summary", rpc::kMaxRpcBranchSummaryBytes); !valid)
     {
       return std::unexpected(std::move(valid.error()));
+    }
+  }
+
+  auto job_id = std::optional<std::string>{};
+  auto timeout_ms = std::optional<long long>{};
+  if (rpc::command_type_is(*type, {"list_jobs", "get_job", "wait_job", "get_job_result", "cancel_job", "promote_job"}))
+  {
+    auto parsed_job_id = rpc::exact_optional_string_field(line, "job_id");
+    if (!parsed_job_id)
+      return std::unexpected(std::move(parsed_job_id.error()));
+    job_id = std::move(*parsed_job_id);
+    if (job_id)
+    {
+      if (job_id->empty())
+        return std::unexpected(rpc::invalid_rpc("RPC job_id must be non-empty when provided"));
+      if (job_id->size() > ava::agent::kMaxPublicJobIdBytes)
+        return std::unexpected(rpc::invalid_rpc("RPC job_id is too long"));
+      if (auto valid = rpc::validate_optional_rpc_identifier(job_id, "job_id"); !valid)
+        return std::unexpected(std::move(valid.error()));
+    }
+    if (*type == "wait_job")
+    {
+      auto parsed_timeout = rpc::exact_optional_integer_field(line, "timeout_ms");
+      if (!parsed_timeout)
+        return std::unexpected(std::move(parsed_timeout.error()));
+      timeout_ms = std::move(*parsed_timeout);
+      if (timeout_ms && *timeout_ms <= 0)
+        return std::unexpected(rpc::invalid_rpc("RPC timeout_ms must be a positive integer"));
     }
   }
 
@@ -1087,6 +1166,8 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
                     .protocol_version = std::move(*protocol_version),
                     .message = std::move(*message),
                     .session_id = std::move(session_id),
+                    .job_id = std::move(job_id),
+                    .timeout_ms = std::move(timeout_ms),
                     .provider = std::move(*provider),
                     .model = std::move(*model),
                     .instructions = std::move(*instructions),
@@ -1123,7 +1204,10 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
                     .path = std::move(*path),
                     .target_path = std::move(target_path),
                     .command = std::move(command_text),
-                    .tool_name = std::move(tool_name)};
+                    .tool_name = std::move(tool_name),
+                    .command_recipe_key = std::move(command_recipe_key),
+                    .recipe_display = std::move(recipe_display),
+                    .critical_acknowledged = std::move(critical_acknowledged)};
 }
 
 std::string serialize_rpc_success_jsonl(std::string_view id, std::string_view result_json)

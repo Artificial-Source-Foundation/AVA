@@ -33,10 +33,12 @@ A request may contain integer `protocol_version:1`. Omission means legacy v1 and
 `get_protocol` returns:
 
 ```json
-{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":3,"supported_session_entry_versions":[0,1,2,3],"capabilities":["direct_bash_rpc"],"direct_command_types":["run_bash","run_command"]}
+{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":4,"supported_session_entry_versions":[0,1,2,3,4],"capabilities":["direct_bash_rpc","job_controls"],"direct_command_types":["run_bash","run_command","list_jobs","get_job","wait_job","get_job_result","cancel_job","promote_job"]}
 ```
 
-Protocol, event-envelope, and session-entry versions are independent. Unknown additive object fields and unknown future event names must be ignored. A client must not infer support for another protocol version from an event or session version.
+Protocol, event-envelope, and session-entry versions are independent. The supported session-version array is generated from the reader's accepted contiguous range `0..kCurrentSessionEntryVersion`; clients must use that field rather than hard-code a historical list. Unknown additive object fields and unknown future event names must be ignored. A client must not infer support for another protocol version from an event or session version.
+
+Session entry v4 adds private physical ordered-output records (`assistant_output_item` and `assistant_turn_commit`). RPC public callbacks and `get_messages` use the compatibility projection: existing assistant `text`, `tool_calls`, and usage fields remain, while a committed v4 assistant message may add a private-free `ordered_output` array. Its text elements carry additive `assistant_phase`; reasoning elements carry only visible text/format/redaction and omission-presence booleans; function elements carry call id/name/arguments. Legacy-compatible entry selection and the established 8 KiB per-entry/1 MiB response caps are applied before this additive detail. If ordered detail is omitted, the response adds `ordered_output_truncated:true` and `ordered_output_omitted_count`; its legacy `messages` and `message_count` remain unchanged. It never exposes staging fields, provider item IDs/output indexes, native reasoning replay payloads, signatures, redacted payloads, or exact tool-result bindings. A valid final incomplete staging suffix is ignored by public reads; every other v4 classifier diagnostic is returned as an error. Portable JSONL is separately import-valid and preserves committed v4 physical order/bindings after sanitization.
 
 ## Message Categories And Envelopes
 
@@ -66,7 +68,7 @@ Every stdout record is either a response (`type:"response"`) or an event (`schem
 
 `error.code` is the stable machine branch. `category` remains the AVA error category, `message` is short human text, and `details` is diagnostic and may grow context lines. Do not branch on `message` or `details`.
 
-Stable v1 codes are `invalid_request`, `active_run`, `canceled`, `follow_up_skipped`, `io_error`, `not_found`, `permission_denied`, `provider_error`, `session_error`, `tool_error`, and `internal_error`. More codes may be added. A client must preserve an unknown code and fall back to `category`/generic handling.
+Stable v1 codes are `invalid_request`, `active_run`, `canceled`, `follow_up_skipped`, `job_not_ready`, `io_error`, `not_found`, `permission_denied`, `provider_error`, `session_error`, `tool_error`, and `internal_error`. More codes may be added. A client must preserve an unknown code and fall back to `category`/generic handling.
 
 Malformed records without a valid parseable ID use `id:""`. Unsupported commands are `invalid_request`. Request-level errors are recoverable; the process continues unless stdin/stdout itself fails.
 
@@ -88,9 +90,12 @@ Client request IDs and resolver `request_id`/`correlation_id` values are non-emp
 - Resolver `payload.resolver_request_id`: AVA-owned ephemeral resolver ID used in `permission_reply`/`question_reply`.
 - Permission `payload.permission_request_id`: durable audit identity; it is not the resolver ID.
 - Session-grant `grant_id`: a new process-local revocation handle generated when `allow_session` is accepted. It is neither the resolver ID nor the durable `permission_request_id`; the grant object carries that originating `permission_request_id` as a separate field.
+- Automatic subagent delivery uses an AVA-owned `automatic_delivery_...` run request identity distinct from both the journal `delivery_attempt_...` identity and every client prompt request ID.
 - `event_id`, `session_id`, `run_id`, `turn_id`, `message_id`, and tool `call_id` are AVA-owned.
 
 Prompt success contains `session_id`, `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, and optional `tool_timeline`. Command-dispatch success contains `handled`, `quit`, `output`, `text`, and optional `tool_timeline`. State results contain protocol/session/workspace/mode/model/cancel/reasoning/context metadata. Lists and session/model results are bounded and additive.
+
+Session title queries use one effective-title rule: a manual `name` wins whenever any manual name has been persisted, including explicit empty suppression; otherwise `generated_title` is used. `list_sessions.sessions[].title` and each `session_tree.sessions[].title` serialize that effective title. Tree nodes and `session_metadata` additionally serialize `name`, `generated_title`, and `has_manual_name`, allowing clients to distinguish untitled sessions from manual-empty suppression. Automatic fallback/refinement metadata is observable through these existing query commands; protocol v1 defines no live automatic-title event.
 
 ## Shared Payload Shapes
 
@@ -98,9 +103,41 @@ Prompt success contains `session_id`, `final_text`, `stop_reason`, `provider_ite
 
 Tool records use `status` (`running`, `success`, `error`, or `canceled` as applicable), `call_id`, `tool`, optional safe summaries, optional object `args`/`result` (or `args_json`/`result_json` fallback), and optional `structured_result`. Additive fields include `content_type`, error metadata, `diff`, `changed_paths`, `permission_request_ids`, truncation/spill flags and paths, byte/line/match counters. `structured_result` v1 has `schema_version:1`, identity, status, `ok`, content type/content, optional error, and related metadata.
 
+### Subagent job snapshot
+
+All model-tool, slash-command, and RPC job controls use the same bounded `schema_version:1` snapshot. It exposes `job_id`, `task_id`, `parent_session_id`, `child_session_id`, `delivery_id`, mode, execution/delivery states, start/update and optional terminal/promotion/cancel/delivery timestamps, cancellation/promotion flags, delivery attempt/accounting counters, and truncation metadata. Wait responses add `timed_out`; list responses add bounded list truncation/count fields.
+
+List and status omit terminal `summary`, `error`, and `message`. Result requests include a bounded completed `summary`; failed results include only stable `status`, sanitized `message`, and `error_category`; canceled/interrupted results include only stable status and a sanitized message. Snapshots never expose filesystem paths, coordinator state/errors, provider bodies, commands/arguments, credentials, or formatted error context. An unfinished result returns stable `job_not_ready`.
+
 ### Permission request/reply
 
-`permission_requested.payload` includes `resolver_request_id`, optional durable `permission_request_id`, `operation`, `mode`, `target_path`, `command`, `tool_name`, `reason`, `risk`, and optional `diff_preview`/`diff_truncated`. Reply with `decision` equal to `allow`, `allow_session`, or `deny`; optional `reason` is at most 1024 bytes. `allow_session` creates an in-memory exact-match grant for this RPC process. Persistent allow/deny rules are separate commands and never override built-in hard denies.
+`permission_requested.payload` includes `resolver_request_id`, optional durable `permission_request_id`, `operation`, `mode`, `target_path`, `command`, `tool_name`, `reason`, `risk`, and optional `diff_preview`/`diff_truncated`. Reply with `decision` equal to `allow`, `allow_session`, or `deny`; optional `reason` is at most 1024 bytes. `allow_session` creates an in-memory exact-match grant for this RPC process. Sealed commands bind that grant to the stable workspace recipe key supplied by backend metadata rather than raw command text; commands whose backend scope is one-shot cannot create a reusable grant. Persistent allow/deny rules are separate commands and never override built-in hard denies.
+
+When `operation` is `bash` and the request originates from a sealed command plan, `permission_requested.payload` includes an optional `command_metadata` object with the following additive fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `level` | string | Command risk level: `standard`, `sensitive`, or `critical`. |
+| `family` | string | Command family (e.g. `inspection`, `cmake_build`, `interpreter_inline`, `raw_shell`). |
+| `fingerprint` | string | Instantaneous integrity binding for the sealed plan (`sha256:ava-command-plan-v4:...`); never a durable grant identity. |
+| `execution_domain` | string | `direct_argv` or `raw_shell`. |
+| `resolved_executable` | string | Preserved logical spelling of the resolved executable; physical identity remains descriptor-bound internally. |
+| `origin` | string | Executable provenance: `system`, `user`, or `workspace`. |
+| `cwd` | string | Preserved logical working-directory identity. |
+| `containment_available` | boolean | Whether verified local process containment is available for this plan. |
+| `containment_status` | string | `not_required`, `available`, `active`, `unavailable`, or `unverified_delegated_executor` as applicable. |
+| `backend_maximum_scope` | string | Maximum reusable scope: `once`, `session`, or `workspace`. Critical/raw/unverified commands are always `once`. |
+| `recipe_payload_version` | string | Version of the typed durable recipe payload. |
+| `global_recipe_key` / `workspace_recipe_key` | string | Stable typed recipe keys; empty when the plan is not reusable. |
+| `recipe_display` | string | Secret-screened display summary; never matching authority. |
+| `effective_allowed_scopes` | string array | Scopes actually available after backend/policy intersection. |
+| `containment_profile_id` | string | Bound containment policy profile. |
+| `containment_network_allowed` | boolean | Whether the sealed plan permits network access. |
+| `environment_profile_id` | string | Synthetic environment profile identifier. |
+| `environment_digest` | string | Synthetic environment digest (no environment values). |
+| `executor_identity_verified` | boolean | `true` for AVA's descriptor-bound local executor; `false` for delegated ACP execution. |
+
+Session grant serialization (`permission_grants` result) includes additive `command_recipe_key` and `recipe_display` fields for reusable sealed commands. Grant matching uses the workspace recipe key, not raw command text or the instantaneous fingerprint. If policy/backend scope is `once`, an `allow_session` reply is downgraded to one-shot `allow`. Legacy v1 persistent command Allows are ignored; authoritative Denies remain active.
 
 ### Question request/reply
 
@@ -139,12 +176,18 @@ The payload column defines recognized fields. Unless marked required, listed fie
 | `permission_grant_revoke` | Required string `grant_id`. Returns and emits the revoked grant. |
 | `permission_grants_clear` | No payload. Returns/emits cleared count. |
 | `permission_rules` | No payload. Lists persistent global/workspace rules and files. |
-| `permission_rule_add` | Required strings `action`, `operation`, `reason`; optional `scope`, `mode`, `tool_name`, `target_path`/`path`, `command`. Adds/emits a rule. |
+| `permission_rule_add` | Required strings `action`, `operation`, `reason`; optional `scope`, `mode`, `tool_name`, `target_path`/`path`, `command`, `command_recipe_key`, `recipe_display`, and boolean `critical_acknowledged`. Adds/emits a rule under backend validation. |
 | `permission_rule_remove` | Required string `rule_id`. Removes/emits a persistent rule. |
 | `get_messages` | No payload. Returns bounded visible message-like entries; hides internal replay and secrets/signatures. |
 | `get_session_stats` | No payload. Returns bounded entry/usage/cost/type statistics. |
 | `validate_session` | No payload. Returns replay validation issues and counts. |
 | `list_sessions` | No payload. Lists workspace sessions. |
+| `list_jobs` | No payload. Returns owner-scoped bounded public job snapshots without terminal content. |
+| `get_job` | Required string `job_id`. Returns one owner-scoped public status snapshot without terminal content. |
+| `wait_job` | Required string `job_id`; optional positive integer `timeout_ms`, capped at 30000 (default 1000). Returns a snapshot with `timed_out:true` when still running. |
+| `get_job_result` | Required string `job_id`. Returns bounded safe terminal content, or stable `job_not_ready`. |
+| `cancel_job` | Required string `job_id`. Requests cooperative cancellation and returns status. |
+| `promote_job` | Required string `job_id`. Promotes a running foreground child and returns status. |
 | `session_tree` | No payload. Returns roots, leaves, current path, and session nodes. |
 | `session_metadata` | No payload. Returns current append-only metadata view. |
 | `set_session_name` | Required string `session_name` (max 256 bytes). Appends metadata. |
@@ -189,7 +232,7 @@ The payload column defines recognized fields. Unless marked required, listed fie
 
 ### Active-safe commands
 
-While a run is active, `get_protocol`, `get_state`, `list_models`, `list_sessions`, `session_tree`, `session_metadata`, `permission_grants`, `permission_grant_revoke`, and `permission_grants_clear` remain available. The grant revoke/clear exceptions are genuinely concurrent-safe: they mutate only the separately mutex-protected process-local grant collection and do not mutate the active session/run controller. Persistent permission-rule commands are not active-safe. Other materializing/mutating commands are rejected. Resolver replies and `cancel` remain available because they settle active work.
+While a run is active, `get_protocol`, `get_state`, `list_models`, `list_sessions`, `list_jobs`, `get_job`, `wait_job`, `get_job_result`, `cancel_job`, `promote_job`, `session_tree`, `session_metadata`, `permission_grants`, `permission_grant_revoke`, and `permission_grants_clear` remain available. The grant revoke/clear exceptions are genuinely concurrent-safe: they mutate only the separately mutex-protected process-local grant collection and do not mutate the active session/run controller. Persistent permission-rule commands are not active-safe. Other materializing/mutating commands are rejected. Resolver replies and `cancel` remain available because they settle active work.
 
 ## Event Catalog
 
@@ -200,7 +243,7 @@ Runtime events:
 - Session/message: `session_start`, `user_message`, `message_update`, `message_end`, `assistant_message`. `session_start` has `payload_type:"session"`; its payload contains string `mode`, `provider`, and `model` (plus any additive common fields emitted by a future runtime).
 - Provider/reasoning: `provider_event`, `reasoning_start`, `reasoning_delta`, `reasoning_end`. `provider_event` has `payload_type:"provider"`; its currently populated generic payload fields may include string `text`, `status`, `trigger`, `reason`, error metadata, and retry/counter metadata. Clients must accept an empty payload and additive provider-specific fields.
 - Tools: `tool_start`, `tool_progress`, `tool_result`.
-- Compaction/retry: `compaction_start`, `compaction_end`, `retry`, `retry_tick`.
+- Compaction/retry: `compaction_start`, `compaction_end`, `retry`, `retry_tick`. Compaction payloads add privacy-safe `trigger` plus normalized `reason` (`manual`, `automatic`, or `overflow`), selected `provider`/`model`, active `estimated_tokens`, effective `threshold_tokens`, `retained_tokens`, and `post_compaction_tokens` when known. Overflow retry remains bounded to one replay. The immutable checkpoint marks that replay as `scheduled`; the subsequent terminal runtime event reports whether the retried run completed or failed, rather than rewriting the checkpoint. Raw provider payloads and private reasoning metadata are never included.
 - Terminal: `canceled`, `error`, `done`.
 
 RPC control/resolver events:
@@ -218,7 +261,7 @@ Protocol discovery:
 
 ```text
 > {"id":"protocol","type":"get_protocol","protocol_version":1}\n
-< {"id":"protocol","type":"response","success":true,"result":{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":3,"supported_session_entry_versions":[0,1,2,3],"capabilities":["direct_bash_rpc"],"direct_command_types":["run_bash","run_command"]}}\n
+< {"id":"protocol","type":"response","success":true,"result":{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":4,"supported_session_entry_versions":[0,1,2,3,4],"capabilities":["direct_bash_rpc","job_controls"],"direct_command_types":["run_bash","run_command","list_jobs","get_job","wait_job","get_job_result","cancel_job","promote_job"]}}\n
 ```
 
 Prompt success with tool summary/timeline (events for this run may appear before the response):

@@ -6,16 +6,31 @@
 #include <fstream>
 #include <ranges>
 #include <utility>
+#include <sys/stat.h>
 
 namespace ava::tests {
 
 ava::config::XdgPaths app_test_paths(std::filesystem::path const& root)
 {
+  std::filesystem::create_directories(root);
+  ::chmod(root.c_str(), S_IRWXU);
   auto const config_home = root / "config";
   auto const state_home = root / "state";
   auto const data_home = root / "data";
   auto const ava_config = config_home / "ava";
   auto const ava_state = state_home / "ava";
+  auto const sessions = ava_state / "sessions";
+  for (auto const& directory : {config_home, state_home, data_home, ava_config, ava_state, sessions})
+  {
+    std::filesystem::create_directories(directory);
+    ::chmod(directory.c_str(), S_IRWXU);
+  }
+  // Ordinary runtime tests must never make incidental provider calls. Focused
+  // title tests inject their own bounded coordinator and fake generator.
+  {
+    std::ofstream titles(ava_config / "session-titles.json", std::ios::binary | std::ios::trunc);
+    titles << "{\"schema_version\":1,\"enabled\":false}\n";
+  }
   return ava::config::XdgPaths{.config_home = config_home,
                                .state_home = state_home,
                                .data_home = data_home,
@@ -26,7 +41,7 @@ ava::config::XdgPaths app_test_paths(std::filesystem::path const& root)
                                .global_agents_file = ava_config / "AGENTS.md",
                                .models_file = ava_config / "models.json",
                                .prompts_dir = ava_config / "prompts",
-                               .sessions_dir = ava_state / "sessions"};
+                               .sessions_dir = sessions};
 }
 
 std::string app_test_plugin_manifest_json(std::string_view id, std::string_view name)
@@ -235,9 +250,9 @@ ava::provider::HttpResponse sse_response(std::string body)
 std::string read_file_call_sse(std::string_view path, std::string_view call_id)
 {
   auto const escaped_id = ava::core::json::escape(call_id);
-  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"" + escaped_id +
+  return "data: {\"type\":\"response.function_call.added\",\"call_id\":\"" + escaped_id +
          "\",\"name\":\"read_file\"}\n\n"
-         "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"" +
+         "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"" +
          escaped_id + "\",\"delta\":\"{\\\"path\\\":\\\"" + ava::core::json::escape(path) +
          "\\\"}\"}\n\n"
          "data: [DONE]\n\n";
@@ -246,9 +261,9 @@ std::string read_file_call_sse(std::string_view path, std::string_view call_id)
 std::string write_file_call_sse(std::string_view path, std::string_view content)
 {
   auto const args = "{\"path\":\"" + ava::core::json::escape(path) + "\",\"content\":\"" + ava::core::json::escape(content) + "\"}";
-  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_write\",\"name\":\"write_file\"}\n\n"
+  return "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_write\",\"name\":\"write_file\"}\n\n"
          "data: "
-         "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_write\",\"delta\":\"" +
+         "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_write\",\"delta\":\"" +
          ava::core::json::escape(args) +
          "\"}\n\n"
          "data: [DONE]\n\n";
@@ -256,9 +271,9 @@ std::string write_file_call_sse(std::string_view path, std::string_view content)
 
 std::string question_call_sse()
 {
-  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_question\",\"name\":\"question\"}\n\n"
+  return "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_question\",\"name\":\"question\"}\n\n"
          "data: "
-         "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_question\",\"delta\":\"{"
+         "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_question\",\"delta\":\"{"
          "\\\"header\\\":\\\"Pick\\\",\\\"question\\\":\\\"Continue?\\\",\\\"options\\\":[{\\\"value\\\":\\\"yes\\\","
          "\\\"label\\\":\\\"Yes\\\"}],\\\"allow_custom\\\":true}\"}\n\n"
          "data: [DONE]\n\n";
@@ -266,9 +281,9 @@ std::string question_call_sse()
 
 std::string multi_question_call_sse()
 {
-  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_question\",\"name\":\"question\"}\n\n"
+  return "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_question\",\"name\":\"question\"}\n\n"
          "data: "
-         "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_question\",\"delta\":\"{"
+         "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_question\",\"delta\":\"{"
          "\\\"header\\\":\\\"Pick\\\",\\\"question\\\":\\\"Choose providers\\\",\\\"options\\\":[{"
          "\\\"value\\\":\\\"alpha\\\",\\\"label\\\":\\\"Alpha\\\"},{\\\"value\\\":\\\"beta\\\","
          "\\\"label\\\":\\\"Beta\\\"}],\\\"multiple\\\":true,\\\"allow_custom\\\":true}\"}\n\n"

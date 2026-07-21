@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/diagnostics/safe_failure.h"
 #include "ava/mcp/protocol.h"
 #include "ava/mcp/stdio_client.h"
 #include "ava/mcp/stdio_client_support.h"
@@ -20,6 +21,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <unistd.h>
+#include "debug.h"
 
 namespace ava::mcp {
 namespace {
@@ -73,16 +75,14 @@ std::string compact_json_line(std::string_view message)
   return compact;
 }
 
-ava::core::Result<std::optional<std::string>> pagination_cursor(std::string_view result_json, std::string_view method, McpServerConfig const& server)
+ava::core::Result<std::optional<std::string>> pagination_cursor(std::string_view result_json, McpServerConfig const& server)
 {
   if (!ava::core::json::field_value_start(result_json, "nextCursor"))
     return std::optional<std::string>{};
   auto cursor = ava::core::json::string_field(result_json, "nextCursor");
   if (!cursor || cursor->size() > kMaxMcpPaginationCursorBytes)
   {
-    auto error = protocol_error("MCP list result has invalid nextCursor", server);
-    error.with_context("method", std::string(method));
-    return std::unexpected(std::move(error));
+    return std::unexpected(protocol_error("MCP list result has invalid nextCursor", server));
   }
   return std::optional<std::string>(std::move(*cursor));
 }
@@ -302,19 +302,19 @@ ava::core::VoidResult McpStdioClient::launch()
   stdout_fd_ = stdout_read.release();
   stderr_fd_ = stderr_read.release();
 
-  if (auto nonblocking = set_pipe_nonblocking(stdin_fd_, "stdin"); !nonblocking)
+  if (auto nonblocking = set_pipe_nonblocking(stdin_fd_); !nonblocking)
   {
     terminate_child();
     close_fds();
     return std::unexpected(std::move(nonblocking.error()));
   }
-  if (auto nonblocking = set_pipe_nonblocking(stdout_fd_, "stdout"); !nonblocking)
+  if (auto nonblocking = set_pipe_nonblocking(stdout_fd_); !nonblocking)
   {
     terminate_child();
     close_fds();
     return std::unexpected(std::move(nonblocking.error()));
   }
-  if (auto nonblocking = set_pipe_nonblocking(stderr_fd_, "stderr"); !nonblocking)
+  if (auto nonblocking = set_pipe_nonblocking(stderr_fd_); !nonblocking)
   {
     terminate_child();
     close_fds();
@@ -338,7 +338,7 @@ ava::core::VoidResult McpStdioClient::initialize(CancelCallback cancel_requested
   if (!protocol_version || *protocol_version != "2024-11-05" || !server_info || !capabilities || !ava::core::json::is_valid_object(*capabilities))
   {
     auto error = protocol_error("MCP initialize response is malformed", server_);
-    error.with_context("response", response->raw_json.substr(0, 512));
+    error.with_context("response_bytes", std::to_string(response->raw_json.size()));
     return std::unexpected(std::move(error));
   }
   initialization_ = McpInitialization{.server_name = ava::core::json::string_field(*server_info, "name").value_or(server_.id),
@@ -370,7 +370,7 @@ ava::core::Result<std::vector<McpToolDescription>> McpStdioClient::list_tools(Ca
     if (!tools_start || *tools_start >= response->result_json.size() || response->result_json[*tools_start] != '[')
     {
       auto error = protocol_error("MCP tools/list result has invalid tools field", server_);
-      error.with_context("response", response->raw_json.substr(0, 512));
+      error.with_context("response_bytes", std::to_string(response->raw_json.size()));
       return std::unexpected(std::move(error));
     }
 
@@ -380,21 +380,19 @@ ava::core::Result<std::vector<McpToolDescription>> McpStdioClient::list_tools(Ca
       if (!name || !ava::mcp::is_valid_mcp_tool_name(*name))
       {
         auto error = protocol_error("MCP tool has invalid name", server_);
-        error.with_context("response", tool_json.substr(0, 512));
+        error.with_context("response_bytes", std::to_string(tool_json.size()));
         return std::unexpected(std::move(error));
       }
       auto input_schema = ava::core::json::object_field(tool_json, "inputSchema").value_or("{\"type\":\"object\"}");
       if (!ava::core::json::is_valid_object(input_schema))
       {
-        auto error = protocol_error("MCP tool inputSchema is invalid", server_);
-        error.with_context("tool", *name);
-        return std::unexpected(std::move(error));
+        return std::unexpected(protocol_error("MCP tool inputSchema is invalid", server_));
       }
       tools.push_back(McpToolDescription{.name = std::move(*name),
                                          .description = ava::core::json::string_field(tool_json, "description").value_or(""),
                                          .input_schema_json = std::move(input_schema)});
     }
-    auto next_cursor = pagination_cursor(response->result_json, "tools/list", server_);
+    auto next_cursor = pagination_cursor(response->result_json, server_);
     if (!next_cursor)
       return std::unexpected(std::move(next_cursor.error()));
     if (!*next_cursor)
@@ -414,23 +412,24 @@ ava::core::Result<McpToolCallResult> McpStdioClient::call_tool(std::string_view 
   }
   if (!ava::core::json::is_valid_object(arguments_json))
   {
-    auto error = mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP tool arguments must be a JSON object", server_);
-    error.with_context("tool", std::string(tool_name));
-    return std::unexpected(std::move(error));
+    return std::unexpected(mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP tool arguments must be a JSON object", server_));
   }
   if (is_canceled(cancel_requested))
   {
-    auto error = canceled_error("MCP tools/call canceled", server_);
-    error.with_context("tool", std::string(tool_name));
-    return std::unexpected(std::move(error));
+    return std::unexpected(canceled_error("MCP tools/call canceled", server_));
   }
   std::string const params = "{\"name\":" + json_string(tool_name) + ",\"arguments\":" + std::string(arguments_json) + "}";
   auto response = request("tools/call", params, options_.request_timeout, "timed out waiting for MCP tools/call", cancel_requested);
   if (!response)
     return std::unexpected(std::move(response.error()));
-  return McpToolCallResult{.is_error = mcp_bool_field(response->result_json, "isError").value_or(false),
-                           .content = mcp_text_content_from_result(response->result_json),
-                           .raw_json = response->raw_json};
+  bool const is_error = mcp_bool_field(response->result_json, "isError").value_or(false);
+  if (is_error)
+  {
+    Dout(dc::mcp, "operation=tool_call state=remote_failure response_bytes=" << response->raw_json.size());
+    auto const failure = ava::diagnostics::external_failure(ava::diagnostics::ComponentClass::Mcp);
+    return McpToolCallResult{.is_error = true, .content = ava::diagnostics::serialize_safe_failure_json(failure), .raw_json = {}};
+  }
+  return McpToolCallResult{.is_error = false, .content = mcp_text_content_from_result(response->result_json), .raw_json = response->raw_json};
 }
 
 ava::core::Result<std::vector<McpPromptDescription>> McpStdioClient::list_prompts(CancelCallback cancel_requested)
@@ -450,7 +449,7 @@ ava::core::Result<std::vector<McpPromptDescription>> McpStdioClient::list_prompt
     if (!prompts_start || *prompts_start >= response->result_json.size() || response->result_json[*prompts_start] != '[')
     {
       auto error = protocol_error("MCP prompts/list result has invalid prompts field", server_);
-      error.with_context("response", response->raw_json.substr(0, 512));
+      error.with_context("response_bytes", std::to_string(response->raw_json.size()));
       return std::unexpected(std::move(error));
     }
 
@@ -460,7 +459,7 @@ ava::core::Result<std::vector<McpPromptDescription>> McpStdioClient::list_prompt
       if (!name || !ava::mcp::is_valid_mcp_tool_name(*name))
       {
         auto error = protocol_error("MCP prompt has invalid name", server_);
-        error.with_context("response", prompt_json.substr(0, 512));
+        error.with_context("response_bytes", std::to_string(prompt_json.size()));
         return std::unexpected(std::move(error));
       }
       McpPromptDescription prompt{
@@ -471,8 +470,7 @@ ava::core::Result<std::vector<McpPromptDescription>> McpStdioClient::list_prompt
         if (!argument_name || !ava::mcp::is_valid_mcp_tool_name(*argument_name))
         {
           auto error = protocol_error("MCP prompt argument has invalid name", server_);
-          error.with_context("prompt", prompt.name);
-          error.with_context("response", argument_json.substr(0, 512));
+          error.with_context("response_bytes", std::to_string(argument_json.size()));
           return std::unexpected(std::move(error));
         }
         prompt.arguments.push_back(McpPromptArgumentDescription{.name = std::move(*argument_name),
@@ -482,7 +480,7 @@ ava::core::Result<std::vector<McpPromptDescription>> McpStdioClient::list_prompt
       prompts.push_back(std::move(prompt));
     }
 
-    auto next_cursor = pagination_cursor(response->result_json, "prompts/list", server_);
+    auto next_cursor = pagination_cursor(response->result_json, server_);
     if (!next_cursor)
       return std::unexpected(std::move(next_cursor.error()));
     if (!*next_cursor)
@@ -502,15 +500,11 @@ ava::core::Result<McpPromptGetResult> McpStdioClient::get_prompt(std::string_vie
   }
   if (!ava::core::json::is_valid_object(arguments_json))
   {
-    auto error = mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP prompt arguments must be a JSON object", server_);
-    error.with_context("prompt", std::string(prompt_name));
-    return std::unexpected(std::move(error));
+    return std::unexpected(mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP prompt arguments must be a JSON object", server_));
   }
   if (is_canceled(cancel_requested))
   {
-    auto error = canceled_error("MCP prompts/get canceled", server_);
-    error.with_context("prompt", std::string(prompt_name));
-    return std::unexpected(std::move(error));
+    return std::unexpected(canceled_error("MCP prompts/get canceled", server_));
   }
   std::string const params = "{\"name\":" + json_string(prompt_name) + ",\"arguments\":" + std::string(arguments_json) + "}";
   auto response = request("prompts/get", params, options_.request_timeout, "timed out waiting for MCP prompts/get", cancel_requested);
@@ -538,7 +532,7 @@ ava::core::Result<std::vector<McpResourceDescription>> McpStdioClient::list_reso
     if (!resources_start || *resources_start >= response->result_json.size() || response->result_json[*resources_start] != '[')
     {
       auto error = protocol_error("MCP resources/list result has invalid resources field", server_);
-      error.with_context("response", response->raw_json.substr(0, 512));
+      error.with_context("response_bytes", std::to_string(response->raw_json.size()));
       return std::unexpected(std::move(error));
     }
     for (auto const& resource_json : ava::core::json::objects_in_array_field(response->result_json, "resources"))
@@ -547,7 +541,7 @@ ava::core::Result<std::vector<McpResourceDescription>> McpStdioClient::list_reso
       if (!uri || !ava::mcp::is_valid_mcp_resource_uri(*uri))
       {
         auto error = protocol_error("MCP resource has invalid uri", server_);
-        error.with_context("response", resource_json.substr(0, 512));
+        error.with_context("response_bytes", std::to_string(resource_json.size()));
         return std::unexpected(std::move(error));
       }
       resources.push_back(McpResourceDescription{.uri = std::move(*uri),
@@ -555,7 +549,7 @@ ava::core::Result<std::vector<McpResourceDescription>> McpStdioClient::list_reso
                                                  .description = ava::core::json::string_field(resource_json, "description").value_or(""),
                                                  .mime_type = ava::core::json::string_field(resource_json, "mimeType").value_or("")});
     }
-    auto next_cursor = pagination_cursor(response->result_json, "resources/list", server_);
+    auto next_cursor = pagination_cursor(response->result_json, server_);
     if (!next_cursor)
       return std::unexpected(std::move(next_cursor.error()));
     if (!*next_cursor)
@@ -573,7 +567,7 @@ ava::core::Result<McpResourceReadResult> parse_resource_read_result(std::string_
   if (!contents_start || *contents_start >= result_json.size() || result_json[*contents_start] != '[')
   {
     auto error = protocol_error("MCP resources/read result has invalid contents field", server);
-    error.with_context("response", std::string(raw_json.substr(0, 512)));
+    error.with_context("response_bytes", std::to_string(raw_json.size()));
     return std::unexpected(std::move(error));
   }
 
@@ -600,7 +594,7 @@ ava::core::Result<McpResourceReadResult> parse_resource_read_result(std::string_
   if (!saw_text)
   {
     auto error = protocol_error("MCP resources/read returned no text content", server);
-    error.with_context("response", std::string(raw_json.substr(0, 512)));
+    error.with_context("response_bytes", std::to_string(raw_json.size()));
     return std::unexpected(std::move(error));
   }
   return result;
@@ -614,9 +608,7 @@ ava::core::Result<McpResourceReadResult> McpStdioClient::read_resource(std::stri
   }
   if (is_canceled(cancel_requested))
   {
-    auto error = canceled_error("MCP resources/read canceled", server_);
-    error.with_context("uri", std::string(uri));
-    return std::unexpected(std::move(error));
+    return std::unexpected(canceled_error("MCP resources/read canceled", server_));
   }
   std::string const params = "{\"uri\":" + json_string(uri) + "}";
   auto response = request("resources/read", params, options_.request_timeout, "timed out waiting for MCP resources/read", cancel_requested);
@@ -633,6 +625,7 @@ ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::
   auto const request_id = "ava_mcp_" + std::to_string(next_request_id_++);
   std::string const request_json =
       "{\"jsonrpc\":\"2.0\",\"id\":" + json_string(request_id) + ",\"method\":" + json_string(method) + ",\"params\":" + std::string(params_json) + "}";
+  Dout(dc::mcp, "operation=request state=write request_bytes=" << request_json.size());
   if (auto written = write_message(request_json, deadline, timeout, "timed out writing MCP request", cancel_requested); !written)
   {
     return std::unexpected(std::move(written.error()));
@@ -643,11 +636,12 @@ ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::
     auto message = read_message(deadline, timeout, timeout_message, "MCP server closed stdout before response", cancel_requested);
     if (!message)
       return std::unexpected(std::move(message.error()));
+    Dout(dc::mcp, "operation=request state=read response_bytes=" << message->size());
     if (!mcp_json_depth_within_limit(*message, kMaxMcpJsonDepth) ||
         ava::core::validate_strict_json(*message, kMaxMcpJsonDepth) != ava::core::StrictJsonStatus::Valid || !ava::core::json::is_valid_object(*message))
     {
       auto error = protocol_error("MCP response is not a valid JSON object with strict bounds", server_);
-      error.with_context("response", message->substr(0, 512));
+      error.with_context("response_bytes", std::to_string(message->size()));
       return std::unexpected(std::move(error));
     }
     auto const id = mcp_response_id(*message);
@@ -656,23 +650,22 @@ ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::
     if (*id != request_id)
     {
       auto error = protocol_error("MCP response id did not match request", server_);
-      error.with_context("expected", request_id);
-      error.with_context("actual", *id);
+      error.with_context("response_bytes", std::to_string(message->size()));
       return std::unexpected(std::move(error));
     }
     if (auto error_json = ava::core::json::object_field(*message, "error"))
     {
-      auto error = protocol_error(mcp_error_message_from_response(*error_json).value_or("MCP request failed"), server_);
-      error.with_context("method", std::string(method));
-      error.with_context("mcp_error", error_json->substr(0, 512));
+      Dout(dc::mcp, "operation=request state=remote_error error_bytes=" << error_json->size());
+      auto error = protocol_error("MCP request returned a remote protocol error", server_);
+      error.with_context("response_bytes", std::to_string(message->size()));
+      error.with_context("error_bytes", std::to_string(error_json->size()));
       return std::unexpected(std::move(error));
     }
     auto result_json = ava::core::json::object_field(*message, "result");
     if (!result_json)
     {
       auto error = protocol_error("MCP response is missing result object", server_);
-      error.with_context("method", std::string(method));
-      error.with_context("response", message->substr(0, 512));
+      error.with_context("response_bytes", std::to_string(message->size()));
       return std::unexpected(std::move(error));
     }
     return JsonRpcResponse{.result_json = std::move(*result_json), .raw_json = std::move(*message)};
@@ -779,8 +772,9 @@ ava::core::Result<std::string> McpStdioClient::read_message(std::chrono::steady_
       auto error = protocol_error(stdout_buffer_.empty() ? std::string(closed_message) : "MCP protocol message ended before newline", server_);
       if (child_exited_)
         error.with_context("status", exit_detail(child_status_));
-      if (!stderr_tail_.empty())
-        error.with_context("stderr_tail", stderr_tail_);
+      error.with_context("response_bytes", std::to_string(stdout_buffer_.size()));
+      error.with_context("stderr_bytes", std::to_string(stderr_tail_.size()));
+      error.with_context("stderr_truncated", stderr_truncated_ ? "true" : "false");
       return std::unexpected(std::move(error));
     }
     if (auto reaped = reap_child(); !reaped)
@@ -789,8 +783,9 @@ ava::core::Result<std::string> McpStdioClient::read_message(std::chrono::steady_
     {
       auto error = protocol_error(std::string(timeout_message), server_);
       error.with_context("timeout_ms", std::to_string(timeout.count()));
-      if (!stderr_tail_.empty())
-        error.with_context("stderr_tail", stderr_tail_);
+      error.with_context("response_bytes", std::to_string(stdout_buffer_.size()));
+      error.with_context("stderr_bytes", std::to_string(stderr_tail_.size()));
+      error.with_context("stderr_truncated", stderr_truncated_ ? "true" : "false");
       terminate_child();
       return std::unexpected(std::move(error));
     }
@@ -859,8 +854,8 @@ ava::core::VoidResult McpStdioClient::wait_for_writable(std::chrono::steady_cloc
       auto error = protocol_error("MCP request pipe closed", server_);
       if (child_exited_)
         error.with_context("status", exit_detail(child_status_));
-      if (!stderr_tail_.empty())
-        error.with_context("stderr_tail", stderr_tail_);
+      error.with_context("stderr_bytes", std::to_string(stderr_tail_.size()));
+      error.with_context("stderr_truncated", stderr_truncated_ ? "true" : "false");
       return std::unexpected(std::move(error));
     }
   }
@@ -877,6 +872,7 @@ ava::core::VoidResult McpStdioClient::drain_stdout()
     auto const bytes = read_retry(stdout_fd_, buffer.data(), buffer.size());
     if (bytes > 0)
     {
+      Dout(dc::mcp, "operation=stdout state=read bytes=" << bytes);
       stdout_buffer_.append(buffer.data(), static_cast<std::size_t>(bytes));
       if (++reads >= kMaxDrainReadsPerPoll)
         return {};
@@ -904,6 +900,7 @@ ava::core::VoidResult McpStdioClient::drain_stderr()
     auto const bytes = read_retry(stderr_fd_, buffer.data(), buffer.size());
     if (bytes > 0)
     {
+      Dout(dc::mcp, "operation=stderr state=read bytes=" << bytes << " retained_bytes=" << stderr_tail_.size());
       append_stderr(std::string_view(buffer.data(), static_cast<std::size_t>(bytes)));
       if (++reads >= kMaxDrainReadsPerPoll)
         return {};
@@ -944,17 +941,13 @@ ava::core::VoidResult McpStdioClient::reap_child()
   return {};
 }
 
-ava::core::VoidResult McpStdioClient::set_pipe_nonblocking(int fd, std::string_view pipe_name)
+ava::core::VoidResult McpStdioClient::set_pipe_nonblocking(int fd)
 {
   int const flags = fcntl(fd, F_GETFL, 0);
   if (flags < 0)
     return std::unexpected(errno_error("failed to inspect MCP pipe flags", server_));
   if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0)
-  {
-    auto error = errno_error("failed to set MCP pipe nonblocking", server_);
-    error.with_context("pipe", std::string(pipe_name));
-    return std::unexpected(std::move(error));
-  }
+    return std::unexpected(errno_error("failed to set MCP pipe nonblocking", server_));
   return {};
 }
 

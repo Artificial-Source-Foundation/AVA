@@ -170,7 +170,7 @@ foreach(NEEDLE
         "\"id\":\"validate-after\""
         "\"ok\":true"
         "\"id\":\"messages-after\""
-        "\"type\":\"tool_call\""
+        "\"name\":\"tool_start\""
         "\"type\":\"tool_result\""
         "\"id\":\"sessions-after\""
         "\"sessions\":[")
@@ -216,10 +216,8 @@ foreach(NEEDLE
         "\"ok\":true"
         "\"id\":\"replay-messages\""
         "search for needle through grep"
-        "after grep tool"
         "needle alpha"
         "needle beta"
-        "\"type\":\"tool_call\""
         "\"type\":\"tool_result\""
         "\"id\":\"replay-sessions\""
         "\"sessions\":[")

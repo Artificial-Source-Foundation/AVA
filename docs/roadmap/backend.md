@@ -3,7 +3,7 @@
 This roadmap defines the backend work needed for AVA 1.0 to feel capable enough for serious daily coding work while keeping AVA's product constraints: native C++23, one binary, terminal first, explicit safety boundaries, and inspectable local files.
 
 Frontend/TUI planning is Carlo-owned and intentionally not tracked here. Backend items should expose terminal-agnostic contracts for interactive and headless clients without planning UI layout, renderer, or modal work.
-The measurable backend maturity acceptance criteria and staged hardening gates live in `docs/roadmap/backend-maturity-baseline.md`.
+The measurable backend maturity acceptance criteria and staged hardening gates live in `docs/roadmap/backend-maturity-baseline.md`. The approved command-permission, background-job, diagnostics, compaction, and session-title usability decisions and their implementation status are recorded in `docs/roadmap/backend-usability.md`.
 
 External systems are behavior references for backend power, not architectures to copy directly. AVA should borrow the capability shape, then implement it with narrow C++ modules and clear permission boundaries.
 
@@ -36,8 +36,8 @@ Required for the MVP, as implemented and verified for the 1.0 release:
 
 Explicitly post-MVP or current-develop follow-up work still on the product roadmap:
 
-- Landed after the original 1.0 cut-line in current backend/RPC: persistent permission rules, session tree/fork/clone/labels/names/caller-supplied branch-summary APIs, full LSP symbols/definitions/references with bounded on-disk sync, backend multimodal/image attachment replay/storage/provider serialization, configurable `task` subagents, the runtime-owned background job registry, and base prompt metadata.
-- 1.1 candidates that remain active: unified settings and reload diagnostics, broader live-provider smoke automation, plugin core-service proxy expansion, frontend/TUI consumption of existing session-tree contracts, automatic LSP server recipes, unsaved-buffer/incremental LSP sync, and attachment UX beyond the implemented RPC path/inline-upload input. Provider-generated branch summaries and Anthropic interactive OAuth are deferred unless their product/API prerequisites become concrete; AVA keeps caller-supplied branch summaries, provider-generated compaction summaries, and API-key plus stored/env OAuth bearer support.
+- Landed after the original 1.0 cut-line in current backend/RPC: persistent permission rules, session tree/fork/clone/labels/names/caller-supplied branch-summary APIs, full LSP symbols/definitions/references with bounded on-disk sync and one exact-global-opt-in installed-only `clangd` recipe, backend multimodal/image attachment replay/storage/provider serialization, configurable `task` subagents, the runtime-owned background job registry, and base prompt metadata.
+- 1.1 candidates that remain active: unified settings and reload diagnostics, broader live-provider smoke automation, plugin core-service proxy expansion, frontend/TUI consumption of existing session-tree contracts, unsaved-buffer LSP sync, and attachment UX beyond the implemented RPC path/inline-upload input. Automatic `gopls` and `rust-analyzer` recipes require separate containment/offline approval. Provider-generated branch summaries and Anthropic interactive OAuth are deferred unless their product/API prerequisites become concrete; AVA keeps caller-supplied branch summaries, provider-generated compaction summaries, and API-key plus stored/env OAuth bearer support.
 - 1.2+ candidates: HTTP/server daemon mode, plugin marketplace/package manager/remote install, extension UI bridge, advanced MCP HTTP/OAuth/subscriptions/sampling/elicitation/pagination/resources, public/default parallel ordinary tool execution beyond the current internal read/search opt-in, OS-level plugin/shell sandboxing, dynamic custom-provider registration, and broader chained multi-agent orchestration beyond the native `task` slice.
 - Later research: in-process native plugin ABI only if AVA accepts the crash/memory/C++ ABI support burden.
 
@@ -76,7 +76,7 @@ AVA's backend is a version `1.0.0` local coding-agent backend baseline, not a to
 - Project/global `AGENTS.md`, prompt command, skill, and subagent loading in `src/ava/context/`, `src/ava/agent/`, and the unified command registry.
 - Out-of-process plugin and stdio MCP foundations with bounded protocols, enablement, diagnostics, permission/audit identity, and sample/fake-server coverage.
 
-The remaining gap is post-1.0 breadth and product depth: richer permission-rule UX/diagnostics, session tree workflow polish over the implemented backend/RPC fork/clone/tree/caller-supplied summary contracts, unified settings/reload, automatic LSP server recipes and unsaved-buffer sync, RPC upload/input flows for multimodal attachments, plugin core-service proxy expansion, advanced MCP, plugin marketplace flows, HTTP/server daemon mode, broader live-provider smoke automation, public/default parallel ordinary tool execution beyond the current internal read/search opt-in, and multi-agent orchestration beyond the native `task` subagent/background-job slice.
+The remaining gap is post-1.0 breadth and product depth: richer permission-rule UX/diagnostics, session tree workflow polish over the implemented backend/RPC fork/clone/tree/caller-supplied summary contracts, unified settings/reload, unsaved-buffer LSP sync and separately approved recipes beyond `clangd`, RPC upload/input flows for multimodal attachments, plugin core-service proxy expansion, advanced MCP, plugin marketplace flows, HTTP/server daemon mode, broader live-provider smoke automation, public/default parallel ordinary tool execution beyond the current internal read/search opt-in, and multi-agent orchestration beyond the native `task` subagent/background-job slice.
 
 ## Milestone Audit Summary
 
@@ -166,7 +166,7 @@ Missing or incomplete:
 - Search parity for unsupported `.gitignore` edge syntax such as bracket character classes; current native matcher documents its subset.
 - Broader process-tree cleanup proofs beyond the current bash timeout, plugin, MCP, and LSP process-group coverage.
 - RPC/headless upload plumbing for image attachments; backend replay/storage/provider serialization for existing AVA-managed image attachments is implemented.
-- LSP diagnostics, document symbols, workspace symbols, definitions, references, bounded on-disk `didOpen` sync, and explicit `lsp.json` server config are implemented. Remaining LSP maturity work is automatic server recipe discovery, richer capability negotiation, incremental/unsaved-buffer sync, and UI/RPC presentation polish.
+- LSP pull/publish diagnostics, document/workspace symbols, definitions, references, bounded full-text on-disk sync, explicit `lsp.json`, and one global exact-opt-in installed-only identity-bound `clangd` recipe are implemented. Automatic `gopls` and `rust-analyzer` remain deferred pending separate containment/offline approval. Remaining LSP maturity work is unsaved-buffer sync and UI/RPC presentation polish.
 - Delete/move tools, only after audit and permissions are stronger.
 
 1.0 target:

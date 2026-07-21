@@ -83,7 +83,7 @@ Preferred visual commands:
 
 ```sh
 ctest --test-dir build -R 'ava_tests\.tui_composer$' --output-on-failure
-AVA_TUI_TMUX_SMOKE=1 ctest --test-dir build -R '^ava_tui\.tmux_smoke$' --output-on-failure
+AVA_TUI_TMUX_SMOKE=1 ctest --test-dir build -j 13 -R '^ava_tui\.tmux_smoke_' --output-on-failure
 AVA_TUI_KITTY_IMAGE_SMOKE=1 ctest --test-dir build -R '^ava_tui\.kitty_image_smoke$' --output-on-failure
 AVA_TUI_OSC8_SMOKE=1 ctest --test-dir build -R '^ava_tui\.osc8_smoke$' --output-on-failure
 ```
@@ -133,7 +133,7 @@ Also run these full-goal focused checks when prerequisites exist:
 
 ```sh
 ctest --test-dir build -R 'ava_tests\.(config_context_auth_oauth|provider_openai|provider_anthropic|agent_loop|agent_loop_resilience|agent_tool_dispatcher|tools|permission_rules|plugin|mcp|lsp|session|app_runtime|app_rpc|app_command_registry|tui_composer)$' --output-on-failure
-AVA_TUI_TMUX_SMOKE=1 ctest --test-dir build -R '^ava_tui\.tmux_smoke$' --output-on-failure
+AVA_TUI_TMUX_SMOKE=1 ctest --test-dir build -j 13 -R '^ava_tui\.tmux_smoke_' --output-on-failure
 AVA_TUI_KITTY_IMAGE_SMOKE=1 ctest --test-dir build -R '^ava_tui\.kitty_image_smoke$' --output-on-failure
 AVA_TUI_OSC8_SMOKE=1 ctest --test-dir build -R '^ava_tui\.osc8_smoke$' --output-on-failure
 ```

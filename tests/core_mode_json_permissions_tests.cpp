@@ -25,6 +25,7 @@
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/openai_provider.h"
+#include "ava/provider/provider_utils.h"
 #include "ava/context/context_loader.h"
 #include "ava/core/atomic_file.h"
 #include "ava/core/ids.h"
@@ -67,6 +68,40 @@ void test_json_escape_control_characters()
 {
   auto const escaped = ava::session::json_escape(std::string("a\x01\b\f", 4));
   expect(escaped == "a\\u0001\\b\\f", "json_escape escapes all JSON control characters");
+}
+
+std::string nested_json_object(std::size_t depth)
+{
+  std::string json;
+  json.reserve(depth * 6 + 1);
+  for (std::size_t index = 0; index < depth; ++index) json += "{\"x\":";
+  json += '0';
+  json.append(depth, '}');
+  return json;
+}
+
+void test_core_json_nesting_limit()
+{
+  auto const below = nested_json_object(ava::core::json::kMaxNestingDepth - 1);
+  auto const at = nested_json_object(ava::core::json::kMaxNestingDepth);
+  auto const above = nested_json_object(ava::core::json::kMaxNestingDepth + 1);
+  auto const adversarial = nested_json_object(4096);
+  expect(ava::core::json::is_valid_object(below) && ava::core::json::is_valid_object(at) && !ava::core::json::is_valid_object(above) &&
+             !ava::core::json::is_valid_object(adversarial),
+         "core JSON validation accepts the documented nesting boundary and rejects deeper input before recursive parsing");
+  expect(ava::provider::is_valid_json_object(at) && !ava::provider::is_valid_json_object(above),
+         "provider strict object validation inherits the shared core JSON nesting limit");
+
+  std::string invalid_object = "{\"argument\":\"";
+  invalid_object.push_back(static_cast<char>(0xFF));
+  invalid_object += "\"}";
+  std::string invalid_array = "[{\"argument\":\"";
+  invalid_array.push_back(static_cast<char>(0xFF));
+  invalid_array += "\"}]";
+  expect(!ava::core::json::is_valid_object(invalid_object) && !ava::core::json::strict_objects_in_array_field("{\"items\":" + invalid_array + "}", "items") &&
+             !ava::provider::is_valid_json_object(invalid_object) && ava::core::json::is_valid_object("{\"unicode\":\"é\"}") &&
+             ava::core::json::is_valid_object("{\"pair\":\"\\uD834\\uDD1E\"}"),
+         "core object and array validation reject invalid UTF-8 while preserving valid Unicode and surrogate pairs");
 }
 
 void test_core_json_top_level_lookup()
@@ -303,6 +338,7 @@ void run_core_mode_tests()
 void run_core_json_permission_tests()
 {
   test_json_escape_control_characters();
+  test_core_json_nesting_limit();
   test_core_json_top_level_lookup();
   test_process_arg_workspace_relative_detection();
   test_atomic_text_file_write();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/diagnostics/safe_failure.h"
 #include "ava/plugin/discovery.h"
 
 #include <filesystem>
@@ -8,10 +9,19 @@
 
 namespace ava::plugin {
 
+enum class PluginFailureKind
+{
+  Discovery,
+  DuplicateId,
+  Enablement,
+};
+
 struct PluginFailure
 {
   PluginScope scope = PluginScope::Project;
   std::filesystem::path path;
+  PluginFailureKind kind = PluginFailureKind::Discovery;
+  ava::diagnostics::SafeFailure failure = ava::diagnostics::external_failure(ava::diagnostics::ComponentClass::Plugin);
   std::string message;
   std::string details;
 

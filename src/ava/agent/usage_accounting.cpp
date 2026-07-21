@@ -2,6 +2,7 @@
 #include "ava/agent/usage_accounting.h"
 
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -28,20 +29,44 @@ void append_optional_integer_field(std::string& json, std::string_view key, std:
   json += std::to_string(*value);
 }
 
+long long saturating_add(long long left, long long right) noexcept
+{
+  constexpr auto maximum = std::numeric_limits<long long>::max();
+  constexpr auto minimum = std::numeric_limits<long long>::min();
+  if (right > 0 && left > maximum - right)
+    return maximum;
+  if (right < 0 && left < minimum - right)
+    return minimum;
+  return left + right;
+}
+
+std::size_t saturating_add(std::size_t left, std::size_t right) noexcept
+{
+  constexpr auto maximum = std::numeric_limits<std::size_t>::max();
+  return right > maximum - left ? maximum : left + right;
+}
+
+long long clamped_byte_count(std::size_t value) noexcept
+{
+  constexpr auto maximum = std::numeric_limits<long long>::max();
+  return value > static_cast<std::size_t>(maximum) ? maximum : static_cast<long long>(value);
+}
+
 std::size_t output_estimate_bytes(ParsedAssistantTurn const& turn)
 {
   std::size_t bytes = turn.text.size();
   for (auto const& reasoning : turn.reasoning_blocks)
   {
-    bytes += reasoning.text.size();
-    bytes += reasoning.signature.size();
-    bytes += reasoning.redacted_data.size();
+    bytes = saturating_add(bytes, reasoning.text.size());
+    bytes = saturating_add(bytes, reasoning.signature.size());
+    bytes = saturating_add(bytes, reasoning.redacted_data.size());
+    bytes = saturating_add(bytes, reasoning.native_item_json.size());
   }
   for (auto const& call : turn.tool_calls)
   {
-    bytes += call.id.size();
-    bytes += call.name.size();
-    bytes += call.arguments_json.size();
+    bytes = saturating_add(bytes, call.id.size());
+    bytes = saturating_add(bytes, call.name.size());
+    bytes = saturating_add(bytes, call.arguments_json.size());
   }
   return bytes;
 }
@@ -52,7 +77,7 @@ void add_optional_usage_field(std::optional<long long>& total, std::optional<lon
     return;
   if (!total)
     total = 0;
-  *total += *value;
+  *total = saturating_add(*total, *value);
 }
 
 }  // namespace
@@ -96,15 +121,15 @@ ava::provider::TokenUsage with_total_tokens(ava::provider::TokenUsage usage)
 {
   if (!usage.total_tokens && usage.input_tokens && usage.output_tokens)
   {
-    usage.total_tokens = *usage.input_tokens + *usage.output_tokens;
+    usage.total_tokens = saturating_add(*usage.input_tokens, *usage.output_tokens);
   }
   return usage;
 }
 
 ava::provider::TokenUsage estimate_usage_from_turn(std::string_view request_body, ParsedAssistantTurn const& turn)
 {
-  auto const input_bytes = static_cast<long long>(request_body.size());
-  auto const output_bytes = static_cast<long long>(output_estimate_bytes(turn));
+  auto const input_bytes = clamped_byte_count(request_body.size());
+  auto const output_bytes = clamped_byte_count(output_estimate_bytes(turn));
   return ava::provider::TokenUsage{.input_tokens = std::nullopt,
                                    .output_tokens = std::nullopt,
                                    .reasoning_tokens = std::nullopt,
@@ -113,7 +138,7 @@ ava::provider::TokenUsage estimate_usage_from_turn(std::string_view request_body
                                    .total_tokens = std::nullopt,
                                    .estimated_input_bytes = input_bytes,
                                    .estimated_output_bytes = output_bytes,
-                                   .estimated_total_bytes = input_bytes + output_bytes,
+                                   .estimated_total_bytes = saturating_add(input_bytes, output_bytes),
                                    .estimated = true};
 }
 

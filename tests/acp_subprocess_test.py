@@ -8,6 +8,7 @@ from pathlib import Path
 import selectors
 import signal
 import subprocess
+import tempfile
 import time
 
 
@@ -32,6 +33,7 @@ def environment(root):
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "NO_COLOR": "1",
+        "AVA_SESSION_TITLES": "off",
         # Debug builds must remain protocol-quiet even when an isolated HOME
         # has no developer libcwd configuration.
         "LIBCWD_RCFILE_NAME": str(libcwd_rcfile),
@@ -117,7 +119,13 @@ def start_fake_provider(executable, root, delay_ms=0, scenario="text-three", tar
 
 def configure_fake_model(root, supports_tools=False, input_modalities=None):
     config = root / "config" / "ava"
+    session_root = root / "state" / "ava" / "sessions"
     config.mkdir(parents=True, exist_ok=True)
+    session_root.mkdir(parents=True, exist_ok=True)
+    # Local model commands seal both roots. Keep the subprocess fixture's
+    # config and session-parent hierarchy owner-private, like AVA requires.
+    for directory in (root, root / "config", config, root / "state", root / "state" / "ava", session_root):
+        os.chmod(directory, 0o700)
     (config / "models.json").write_text(json.dumps({
         "default_provider": "moonshot",
         "default_model": "acp-fake",
@@ -179,8 +187,9 @@ def main():
     parser.add_argument("--fake-mcp", required=True)
     parser.add_argument("--root", required=True)
     args = parser.parse_args()
-    root = Path(args.root)
-    root.mkdir(parents=True, exist_ok=True)
+    # Command plans validate workspace ancestry. Use a private /tmp root rather
+    # than the build tree, whose checkout ancestor can deliberately be shared.
+    root = Path(tempfile.mkdtemp(prefix="ava-acp-subprocess-"))
 
     conflict = subprocess.run([args.ava, "--acp", "--rpc"], input=b"", capture_output=True, env=environment(root), timeout=5)
     assert conflict.returncode != 0 and conflict.stdout == b"" and b"standalone" in conflict.stderr
@@ -308,6 +317,8 @@ def main():
     outside = root / "outside"
     nested.mkdir(parents=True, exist_ok=True)
     outside.mkdir(parents=True, exist_ok=True)
+    os.chmod(root, 0o700)
+    os.chmod(workspace, 0o700)
     configure_fake_model(lifecycle_root)
     server, port, request_log = start_fake_provider(args.fake_provider, root / "provider", delay_ms=250)
     lifecycle = start(

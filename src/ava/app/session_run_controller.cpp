@@ -140,6 +140,23 @@ ava::core::Result<std::size_t> entry_byte_count(ava::session::SessionEntry const
   return bytes;
 }
 
+ava::core::Result<std::size_t> batch_entry_byte_count(std::vector<ava::session::SessionEntry> const& entries)
+{
+  if (entries.empty())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session append batch must not be empty"));
+  std::size_t bytes = 0;
+  for (auto const& entry : entries)
+  {
+    auto entry_bytes = entry_byte_count(entry);
+    if (!entry_bytes)
+      return std::unexpected(std::move(entry_bytes.error()));
+    if (*entry_bytes > std::numeric_limits<std::size_t>::max() - bytes)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session append batch byte accounting overflow"));
+    bytes += *entry_bytes;
+  }
+  return bytes;
+}
+
 }  // namespace
 
 struct ActiveRunGuard::State
@@ -154,7 +171,7 @@ struct ActiveRunGuard::State
       Closing,
     };
 
-    ava::session::SessionEntry entry;
+    std::vector<ava::session::SessionEntry> entries;
     std::size_t bytes = 0;
     Completion completion = Completion::Pending;
     std::shared_ptr<ava::core::Error const> failure;
@@ -391,7 +408,7 @@ RunSnapshot SessionRunController::snapshot() const
 }
 
 ava::core::VoidResult SessionRunController::append_for_generation(std::shared_ptr<ActiveRunGuard::State> const& state, std::uint64_t generation,
-                                                                  ava::session::SessionEntry entry, bool owner_route)
+                                                                  std::vector<ava::session::SessionEntry> entries, bool owner_route)
 {
   if (!state)
     return std::unexpected(inactive_error());
@@ -404,13 +421,13 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
   if (ava::observability::in_run_observer_callback() && !driver_lock.try_lock())
     return std::unexpected(reentrant_append_error());
 
-  auto bytes = entry_byte_count(entry);
+  auto bytes = batch_entry_byte_count(entries);
   if (!bytes)
     return std::unexpected(std::move(bytes.error()));
 
   auto item = std::make_shared<ActiveRunGuard::State::AppendItem>();
   item->bytes = *bytes;
-  item->entry = std::move(entry);
+  item->entries = std::move(entries);
   {
     std::lock_guard lock(state->mutex);
     if (state->persistence_failure)
@@ -481,7 +498,7 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
     std::shared_ptr<ava::core::Error const> failure;
     try
     {
-      auto persisted = target->append(head->entry);
+      auto persisted = head->entries.size() == 1 ? target->append(head->entries.front()) : target->append_batch(std::move(head->entries));
       if (!persisted)
       {
         try
@@ -629,13 +646,24 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
 
 ava::core::VoidResult SessionRunController::append(ava::session::SessionEntry entry)
 {
-  return append_for_generation(state_, 0, std::move(entry), true);
+  return append_for_generation(state_, 0, {std::move(entry)}, true);
 }
 
-std::function<ava::core::VoidResult(ava::session::SessionEntry)> SessionRunController::owner_append_route() const
+ava::core::VoidResult SessionRunController::append_batch(std::vector<ava::session::SessionEntry> entries)
+{
+  return append_for_generation(state_, 0, std::move(entries), true);
+}
+
+ava::agent::SessionAppendSink SessionRunController::owner_append_route() const
 {
   auto state = state_;
-  return [state = std::move(state)](ava::session::SessionEntry entry) { return append_for_generation(state, 0, std::move(entry), true); };
+  return [state = std::move(state)](ava::session::SessionEntry entry) { return append_for_generation(state, 0, {std::move(entry)}, true); };
+}
+
+ava::agent::SessionAppendBatchSink SessionRunController::owner_append_batch_route() const
+{
+  auto state = state_;
+  return [state = std::move(state)](std::vector<ava::session::SessionEntry> entries) { return append_for_generation(state, 0, std::move(entries), true); };
 }
 
 ava::core::VoidResult SessionRunController::reset_persistence_failure()
@@ -817,12 +845,21 @@ bool ActiveRunGuard::active() const noexcept
   return state_->active && state_->generation == generation_;
 }
 
-std::function<ava::core::VoidResult(ava::session::SessionEntry)> ActiveRunGuard::append_route() const
+ava::agent::SessionAppendSink ActiveRunGuard::append_route() const
 {
   auto state = state_;
   auto generation = generation_;
   return [state = std::move(state), generation](ava::session::SessionEntry entry) {
-    return SessionRunController::append_for_generation(state, generation, std::move(entry), false);
+    return SessionRunController::append_for_generation(state, generation, {std::move(entry)}, false);
+  };
+}
+
+ava::agent::SessionAppendBatchSink ActiveRunGuard::append_batch_route() const
+{
+  auto state = state_;
+  auto generation = generation_;
+  return [state = std::move(state), generation](std::vector<ava::session::SessionEntry> entries) {
+    return SessionRunController::append_for_generation(state, generation, std::move(entries), false);
   };
 }
 

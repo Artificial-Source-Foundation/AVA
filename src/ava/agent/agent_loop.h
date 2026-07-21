@@ -8,6 +8,7 @@
 #include "ava/agent/question.h"
 #include "ava/agent/run_phase.h"
 #include "ava/agent/subagent_config.h"
+#include "ava/agent/subagent_coordinator.h"
 #include "ava/agent/tool_visibility.h"
 #include "ava/config/model_config.h"
 #include "ava/session/attachments.h"
@@ -15,9 +16,9 @@
 #include "ava/permissions/permission.h"
 #include "ava/provider/provider.h"
 #include "ava/lsp/lsp_client.h"
+#include "ava/core/AnchorSet.h"
 #include "ava/core/result.h"
 #include "ava/core/runtime_outcome.h"
-#include "ava/core/AnchorSet.h"
 
 #include <cstddef>
 #include <filesystem>
@@ -135,6 +136,9 @@ struct AgentLoopOptions
   bool announce_execution_after_permission = false;
   bool redact_permission_audit_arguments = false;
   bool require_explicit_file_permissions = false;
+  // Runtime-owned AVA config/state/session directories that command sealing
+  // must keep disjoint from the model command workspace.
+  std::vector<std::filesystem::path> ava_authority_roots = {};
   std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
   std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
   std::vector<SubagentDefinition> subagents = {};
@@ -146,6 +150,11 @@ struct AgentLoopOptions
   std::function<ava::core::VoidResult(ToolProgressEntry const&)> on_tool_progress = nullptr;
   std::function<ava::core::VoidResult(ava::provider::StreamEvent const&)> on_stream_event = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
+  // Deny-only, non-interactive policy check used before a model-initiated
+  // command's backend auto-Allow. Mirrors ToolContext::command_deny_preflight
+  // so model tool calls receive the same persistent-Deny enforcement as direct
+  // app commands. It must never prompt or return reusable authority.
+  ava::permissions::PermissionResolver command_deny_preflight = nullptr;
   QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
@@ -154,15 +163,24 @@ struct AgentLoopOptions
       compact_context = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Provider>>()> background_provider_factory = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Transport>>()> background_transport_factory = nullptr;
+  // Production uses one application-scoped coordinator. The raw registry is
+  // retained only as an explicit standalone AgentLoop test seam.
+  std::shared_ptr<SubagentCoordinator> subagent_coordinator = nullptr;
   std::shared_ptr<BackgroundJobRegistry> background_jobs = nullptr;
   std::mutex* session_mutex = nullptr;
-  // Immutable generation route for records produced by this run.
+  // Immutable generation routes for records produced by this run. Persistent
+  // provider assistant turns require the batch route so v4 staging and its
+  // commit are appended through one guarded authority.
   SessionAppendSink append_entry = nullptr;
+  SessionAppendBatchSink append_batch = nullptr;
   // Copyable exact-lease (or in-memory) authority used for every history read.
   std::optional<ava::session::SessionReadAuthority> session_read_authority = std::nullopt;
-  // Stable session-owner route for parent notices produced by background
-  // children. Unlike append_entry it remains valid between generations.
-  SessionAppendSink parent_notification_sink = nullptr;
+  // Must match the policy established when the runtime session was opened.
+  // Direct unit construction retains historical unbounded behavior.
+  ava::session::SessionReadLimits session_read_limits = ava::session::legacy_unbounded_session_read_limits();
+  // Backend-only provenance for an application-generated synthetic delivery
+  // user entry. Ordinary frontend text never derives or populates this field.
+  std::optional<ava::session::SyntheticDeliveryProvenance> synthetic_user_message_provenance = std::nullopt;
   // Called at real loop boundaries; errors abort the loop rather than being
   // swallowed as observer-only state.
   std::function<ava::core::VoidResult(RunPhase)> on_phase = nullptr;
@@ -183,6 +201,8 @@ struct AgentLoopOptions
 struct AgentLoopResult
 {
   std::string final_text;
+  // Exact id of the final durably committed v4 assistant transaction.
+  std::optional<std::string> committed_turn_id = std::nullopt;
   std::optional<ava::provider::TokenUsage> usage = std::nullopt;
   std::optional<long double> cost_usd = std::nullopt;
   std::size_t provider_iterations = 0;
@@ -217,6 +237,7 @@ class AgentLoop
                                                                  ava::provider::Transport& transport, ava::observability::TraceContext const& trace_context);
 
   AgentLoopOptions options_;
+  bool ava_authority_roots_over_limit_ = false;
 };
 
 }  // namespace ava::agent

@@ -1,11 +1,12 @@
 #pragma once
 
 #include "ava/permissions/permission.h"
-
+#include "ava/core/AnchorSet.h"
 #include "ava/core/result.h"
 
 #include <filesystem>
 #include <optional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -13,22 +14,25 @@
 namespace ava::permissions {
 
 // Durable permission rules are intentionally small and inspectable.  AVA stores
-// one JSON object per scope (`schema_version: 1`, `rules: [...]`): global rules
+// one JSON object per scope (`schema_version: 2`, `rules: [...]`): global rules
 // live under the caller-provided config path and enforceable workspace rules are
 // stored next to AVA config under a workspace-keyed directory rather than inside
 // the model-writable workspace.  A rule matches exact operation plus all
 // non-empty target fields (path, command, tool name) and, for workspace rules,
-// the normalized workspace directory.  Persistent rules are consulted only after
-// the built-in policy has produced an Ask decision, but before session grants and
-// resolver prompts; built-in hard Deny decisions are never upgraded by durable
-// allow rules. Persistent allow rules cannot authorize repository-controlled
-// ctest or cmake --build commands; only a matching in-memory session grant or
-// one-shot resolver approval can do so. Matching deny rules always win over
+// the normalized workspace directory. Persistent rules are consulted before
+// session grants and resolver prompts; matching denies also receive a dedicated
+// non-interactive preflight before backend command auto-Allow decisions. Built-in
+// hard Deny decisions are never upgraded by durable allow rules. Schema-v2
+// RunCommand Allows are exact stable recipe-key grants; schema-v1 command
+// Allows remain inspectable but are non-authoritative, while exact v1 Denies
+// remain authoritative. An exact Critical Allow is an advanced manual-only
+// exception requiring explicit acknowledgement. Matching deny rules always win over
 // matching allow rules, and malformed or unsupported storage fails closed by
 // returning an authoritative deny
 // instead of falling through to a resolver prompt.
 
-inline constexpr long long kCurrentPermissionRulesSchemaVersion = 1;
+inline constexpr long long kCurrentPermissionRulesSchemaVersion = 2;
+inline constexpr long long kLegacyPermissionRulesSchemaVersion = 1;
 
 enum class PermissionRuleScope
 {
@@ -48,6 +52,10 @@ struct PermissionRuleStore
   std::filesystem::path global_rules_file;
   std::filesystem::path workspace_rules_file;
   std::filesystem::path workspace_dir;
+  // Session-lifetime descriptor authority for the configured storage roots.
+  // Logical path spelling remains public; secure storage walks are relative to
+  // the matching pre-opened anchor when one is supplied.
+  std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -63,6 +71,10 @@ struct PersistentPermissionRule
   std::string tool_name;
   std::filesystem::path target_path;
   std::string command;
+  std::string command_recipe_key;
+  std::string recipe_display;
+  bool critical_acknowledged = false;
+  long long schema_version = kCurrentPermissionRulesSchemaVersion;
   std::string reason;
   std::string actor;
   std::string created_at;
@@ -79,6 +91,10 @@ struct PermissionRuleDraft
   std::string tool_name;
   std::filesystem::path target_path;
   std::string command;
+  // RunCommand recipe keys must originate in sealed prompt/audit metadata.
+  std::string command_recipe_key;
+  std::string recipe_display;
+  bool critical_acknowledged = false;
   std::string reason;
   std::string actor = "rpc";
 
@@ -101,6 +117,10 @@ void register_enforceable_permission_rule_files(PermissionRuleStore const& store
                                                                                                           PermissionPrompt const& prompt);
 
 [[nodiscard]] PermissionResolver build_persistent_permission_rule_resolver(PermissionRuleStore store, PermissionResolver fallback);
+// Non-interactive deny-only preflight for backend auto-Allow decisions. A
+// matching deny or malformed store is authoritative; allows are deliberately
+// ignored and absence of a deny returns Allow without prompting.
+[[nodiscard]] PermissionResolver build_persistent_permission_deny_preflight(PermissionRuleStore store);
 
 [[nodiscard]] std::string permission_rule_json(PersistentPermissionRule const& rule);
 [[nodiscard]] std::string permission_rules_result_json(PermissionRuleStore const& store, std::vector<PersistentPermissionRule> const& rules);

@@ -16,6 +16,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <sys/stat.h>
 
 namespace {
 
@@ -634,6 +635,8 @@ void test_app_rpc_direct_command_rejects_prompt_only_queue_commands()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "RPC direct queue workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;

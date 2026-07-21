@@ -6,6 +6,7 @@
 #include "ava/app/runtime_reasoning.h"
 #include "ava/app/runtime_retry.h"
 #include "ava/app/runtime_sessions.h"
+#include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/tools/file_tools.h"
@@ -717,13 +718,19 @@ ava::core::Error offline_provider_error(std::string_view action)
   return error;
 }
 
-void apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state)
+ava::core::VoidResult refresh_runtime_parent_configuration(runtime::Session const& session)
+{
+  return session.subagent_delivery_manager ? session.subagent_delivery_manager->refresh_parent_configuration(session) : ava::core::VoidResult{};
+}
+
+ava::core::VoidResult apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state)
 {
   session.mode = prompt_state.mode;
   session.base_prompt = std::move(prompt_state.base_prompt);
   session.context_sources = std::move(prompt_state.context_sources);
   session.freshness_sources = std::move(prompt_state.freshness_sources);
   session.system_prompt = std::move(prompt_state.system_prompt);
+  return refresh_runtime_parent_configuration(session);
 }
 
 ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message, ava::provider::Provider const& provider,
@@ -775,6 +782,24 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       return std::unexpected(*completed->error);
     return std::unexpected(std::move(error));
   };
+  struct ParentRefresh final
+  {
+    std::shared_ptr<SubagentDeliveryManager> manager;
+    std::string session_id;
+    std::optional<SubagentDeliveryManager::CapsuleGeneration> generation = std::nullopt;
+    ~ParentRefresh()
+    {
+      if (manager && generation)
+        manager->release_parent_if_unused(session_id, *generation);
+    }
+  } refresh{options.synthetic_subagent_delivery ? nullptr : session.subagent_delivery_manager, session.store.session_id()};
+  if (refresh.manager)
+  {
+    auto retained = refresh.manager->refresh_parent(session, options);
+    if (!retained)
+      return fail_run(std::move(retained.error()));
+    refresh.generation = *retained;
+  }
   if (session.offline || options.offline)
     return fail_run(offline_provider_error("prompt"));
   if (!session.run_controller)
@@ -914,7 +939,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
                                         ? session.workspace_dir / ".ava" / "plugins"
                                         : std::filesystem::path{},
       .plugin_enablement_file = runtime_options.isolate_project_resources ? std::filesystem::path{} : session.paths.ava_state_dir / "plugin-enablement.json",
-      .session_mcp_config = session.mcp_config,
+      .session_mcp_config = runtime_options.disable_session_mcp ? std::make_shared<ava::mcp::McpConfig const>() : session.mcp_config,
       .exact_builtin_tool_names = runtime_options.exact_builtin_tool_names,
       .require_descriptor_secure_workspace = runtime_options.require_descriptor_secure_workspace,
       .announce_execution_after_permission = runtime_options.announce_execution_after_permission,
@@ -1046,13 +1071,13 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
         std::unique_ptr<ava::provider::Transport> transport = std::make_unique<ava::provider::CurlCliTransport>();
         return transport;
       },
-      .background_jobs = session.background_jobs,
+      .subagent_coordinator = session.subagent_coordinator,
       .session_mutex = runtime_options.session_mutex,
       .append_entry = append_route,
       .append_batch = std::move(append_batch_route),
       .session_read_authority = std::move(*session_read_authority),
       .session_read_limits = session.session_read_limits,
-      .parent_notification_sink = session.owner_append_route(),
+      .synthetic_user_message_provenance = runtime_options.synthetic_subagent_delivery ? runtime_options.synthetic_user_message_provenance : std::nullopt,
       .on_phase = [&guard, &runtime_options](ava::agent::RunPhase phase) -> ava::core::VoidResult {
         if (phase == ava::agent::RunPhase::Completing && runtime_options.on_terminal_commit)
         {

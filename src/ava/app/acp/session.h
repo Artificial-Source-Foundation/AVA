@@ -181,6 +181,7 @@ class AcpSessionRegistry
   };
 
   AcpSessionOptions options_;
+  std::optional<ava::core::Error> coordinator_startup_error_ = std::nullopt;
   mutable std::mutex mutex_;
   bool closing_ = false;
   std::size_t pending_insertions_ = 0;

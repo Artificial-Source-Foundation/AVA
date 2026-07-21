@@ -7,9 +7,12 @@
 #include "session_operators.h"
 #include "ava/app/EventEnvelope.h"
 #include "ava/app/runtime_sessions.h"
+#include "ava/agent/job_control.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 
+#include <algorithm>
+#include <chrono>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -136,6 +139,8 @@ runtime::OpenOptions owned_replacement_options(runtime::Session const& current, 
   options.prompt_overrides = current.prompt_overrides;
   options.initial_reasoning_level = std::nullopt;
   options.offline = current.offline;
+  options.subagent_coordinator = current.subagent_coordinator;
+  options.subagent_delivery_manager = current.subagent_delivery_manager;
   return options;
 }
 
@@ -223,6 +228,14 @@ std::string permission_rule_removed_json(ava::permissions::PersistentPermissionR
   return std::string("{\"removed\":true,\"rule\":") + ava::permissions::permission_rule_json(rule) + "}";
 }
 
+ava::core::Error safe_job_rpc_error(ava::core::Error const& source)
+{
+  auto safe = ava::core::Error(source.category(), source.message());
+  if (std::ranges::any_of(source.context(), [](ava::core::ErrorContext const& item) { return item.key == "job_error_code" && item.value == "job_not_ready"; }))
+    safe.with_context("rpc_error_code", "job_not_ready");
+  return safe;
+}
+
 std::string branch_summary_result_json(ava::session::BranchSummaryResult const& result)
 {
   std::string json = "{";
@@ -269,6 +282,51 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!sessions_json)
       return handled(write_error(context.output, command.id, sessions_json.error()));
     return handled(write_success(context.output, command.id, *sessions_json));
+  }
+
+  if (command.type == "list_jobs" || command.type == "get_job" || command.type == "wait_job" || command.type == "get_job_result" ||
+      command.type == "cancel_job" || command.type == "promote_job")
+  {
+    std::shared_ptr<ava::agent::SubagentCoordinator> coordinator;
+    std::string owner;
+    {
+      std::lock_guard lock(context.session_mutex);
+      coordinator = context.session.subagent_coordinator;
+      owner = context.session.store.session_id();
+    }
+    if (!coordinator)
+      return handled(write_error(context.output, command.id, invalid_rpc("job controls are unavailable")));
+    if (command.type == "list_jobs")
+    {
+      if (command.job_id || command.timeout_ms)
+        return handled(write_error(context.output, command.id, invalid_rpc("list_jobs accepts no job payload fields")));
+      return handled(write_success(context.output, command.id, ava::agent::public_job_list_json(coordinator->list(owner))));
+    }
+    if (!command.job_id)
+      return handled(write_error(context.output, command.id, invalid_rpc(command.type + " requires job_id")));
+
+    ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot> snapshot =
+        std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "job RPC action was not dispatched"));
+    auto content = ava::agent::PublicJobContent::OmitTerminalContent;
+    if (command.type == "get_job")
+      snapshot = coordinator->snapshot(owner, *command.job_id);
+    else if (command.type == "wait_job")
+    {
+      auto const timeout_ms = std::min(command.timeout_ms.value_or(ava::agent::kDefaultPublicJobWaitTimeoutMs), ava::agent::kMaxPublicJobWaitTimeoutMs);
+      snapshot = coordinator->wait(owner, *command.job_id, std::chrono::milliseconds(timeout_ms));
+    }
+    else if (command.type == "get_job_result")
+    {
+      snapshot = coordinator->result(owner, *command.job_id);
+      content = ava::agent::PublicJobContent::IncludeTerminalResult;
+    }
+    else if (command.type == "cancel_job")
+      snapshot = coordinator->cancel(owner, *command.job_id);
+    else if (command.type == "promote_job")
+      snapshot = coordinator->promote(owner, *command.job_id);
+    if (!snapshot)
+      return handled(write_error(context.output, command.id, safe_job_rpc_error(snapshot.error())));
+    return handled(write_success(context.output, command.id, ava::agent::public_job_snapshot_json(*snapshot, content)));
   }
 
   if (command.type == "session_tree")

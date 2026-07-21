@@ -101,7 +101,6 @@ void test_session_store_round_trip()
 {
   auto const root = create_empty_root("test_session_store_round_trip");
 
-
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   expect(store.has_value(), "session store creates");
   if (!store)
@@ -4337,6 +4336,38 @@ void test_image_attachment_message_reconstruction_and_validation()
          "provider image validation rejects storage paths outside attachments namespace");
 }
 
+void test_synthetic_delivery_provenance_validation()
+{
+  ava::session::SessionEntry legacy{.id = "legacy_user",
+                                    .parent_id = "",
+                                    .type = ava::session::EntryType::UserMessage,
+                                    .timestamp = "2026-07-20T00:00:00Z",
+                                    .data_json = R"({"text":"ordinary legacy message"})"};
+  auto legacy_provenance = ava::session::parse_synthetic_delivery_provenance(legacy);
+  expect(legacy_provenance && !*legacy_provenance, "legacy ordinary user messages remain compatible without synthetic provenance");
+
+  auto synthetic = legacy;
+  synthetic.id = "synthetic_user";
+  synthetic.data_json =
+      R"({"text":"backend delivery","provenance":{"source":"synthetic_subagent_delivery","delivery_id":"delivery_1","prompt_fingerprint":"0123456789abcdef"}})";
+  auto parsed = ava::session::parse_synthetic_delivery_provenance(synthetic);
+  auto valid_replay = ava::session::validate_session_replay({synthetic});
+  expect(parsed && *parsed && (*parsed)->delivery_id == "delivery_1" && (*parsed)->prompt_fingerprint == "0123456789abcdef" && valid_replay.ok(),
+         "session-v4 parsing retains strict bounded backend-only delivery provenance");
+
+  auto malformed = synthetic;
+  malformed.id = "malformed_synthetic_user";
+  malformed.data_json =
+      R"({"text":"bad","provenance":{"source":"synthetic_subagent_delivery","delivery_id":"delivery_1","prompt_fingerprint":"0123456789abcdef","forged":true}})";
+  auto malformed_replay = ava::session::validate_session_replay({malformed});
+  auto oversized = synthetic;
+  oversized.id = "oversized_synthetic_user";
+  oversized.data_json = "{\"text\":\"bad\",\"provenance\":{\"source\":\"synthetic_subagent_delivery\",\"delivery_id\":\"" +
+                        std::string(ava::session::kMaxSyntheticDeliveryProvenanceIdBytes + 1, 'x') + "\",\"prompt_fingerprint\":\"0123456789abcdef\"}}";
+  auto oversized_replay = ava::session::validate_session_replay({oversized});
+  expect(!malformed_replay.ok() && !oversized_replay.ok(), "session-v4 parsing rejects unknown and unbounded synthetic provenance fields");
+}
+
 void test_image_attachment_storage_boundary()
 {
   auto const root = create_empty_root("image-attachment-storage");
@@ -6042,6 +6073,7 @@ void run_session_tests()
   test_tool_content_parts_reconstruction();
   test_portable_omitted_reasoning_reconstructs_as_safe_text();
   test_image_attachment_message_reconstruction_and_validation();
+  test_synthetic_delivery_provenance_validation();
   test_image_attachment_storage_boundary();
   test_image_attachment_import();
   test_created_session_rollback_is_identity_safe_and_preserves_attachments();

@@ -46,12 +46,19 @@ struct BackgroundJobSnapshot
   bool final_text_truncated = false;
   std::string stop_reason = {};
   std::optional<std::string> error = std::nullopt;
+  std::size_t provider_iterations = 0;
+  std::size_t tool_calls = 0;
+  std::size_t tool_iterations = 0;
+  bool timed_out = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct BackgroundJobStartOptions
 {
+  // Coordinators supply a durable identity before publication. Standalone
+  // registry callers may leave this empty to retain generated IDs.
+  std::string job_id = {};
   std::string title = {};
   std::string description = {};
   std::string subagent_type = {};
@@ -77,6 +84,9 @@ struct BackgroundJobCompletion
   std::string final_text;
   std::string stop_reason;
   std::optional<ava::core::Error> error = std::nullopt;
+  std::size_t provider_iterations = 0;
+  std::size_t tool_calls = 0;
+  std::size_t tool_iterations = 0;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -89,6 +99,9 @@ struct BackgroundJobRegistryOptions
   std::size_t max_retained_finished_jobs = 64;
   std::size_t max_description_bytes = 8 * 1024;
   std::size_t max_final_text_bytes = 64 * 1024;
+  // Deterministic test seam for the otherwise platform-dependent jthread
+  // construction failure path. Production leaves this empty.
+  std::function<ava::core::VoidResult()> thread_start_preflight = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -109,8 +122,12 @@ class BackgroundJobRegistry final
   [[nodiscard]] ava::core::Result<BackgroundJobSnapshot> snapshot(std::string_view job_id) const;
   [[nodiscard]] ava::core::Result<BackgroundJobSnapshot> cancel(std::string_view job_id);
   [[nodiscard]] ava::core::Result<BackgroundJobSnapshot> wait(std::string_view job_id, std::chrono::milliseconds timeout);
+  // Coordinator-only timeout shape; standalone wait() retains its historical
+  // timeout error contract.
+  [[nodiscard]] ava::core::Result<BackgroundJobSnapshot> wait_snapshot(std::string_view job_id, std::chrono::milliseconds timeout);
   std::size_t join_finished();
   void request_stop_all();
+  void shutdown();
 
  private:
   struct JobRecord;
@@ -124,6 +141,7 @@ class BackgroundJobRegistry final
   mutable std::mutex mutex_;
   std::condition_variable changed_;
   BackgroundJobRegistryOptions options_;
+  bool accepting_ = true;
   std::unordered_map<std::string, std::shared_ptr<JobRecord>> jobs_;
 
   // BackgroundJobRegistry owns synchronization primitives (mutex, condition

@@ -27,6 +27,10 @@ using SessionAppendBatchSink = std::function<ava::core::VoidResult(std::vector<a
 // provider's logical call ID.
 struct PersistedAssistantTurn
 {
+  // Exact SessionEntry id of the trailing AssistantTurnCommit. Consumers use
+  // this durable transaction identity rather than inferring completion from
+  // streamed text.
+  std::string committed_turn_id;
   std::unordered_map<std::string, std::string> function_output_entry_ids_by_call_id;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
@@ -46,7 +50,8 @@ struct PersistedAssistantTurn
 
 [[nodiscard]] ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text);
 [[nodiscard]] ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text,
-                                                                 std::vector<ava::session::ImageAttachmentRef> const& attachments);
+                                                                 std::vector<ava::session::ImageAttachmentRef> const& attachments,
+                                                                 std::optional<ava::session::SyntheticDeliveryProvenance> const& provenance = std::nullopt);
 [[nodiscard]] ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, std::string const& text, std::string const& replay_of);
 [[nodiscard]] ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, std::string const& text,
                                                                std::vector<ava::session::ImageAttachmentRef> const& attachments, std::string const& replay_of);
@@ -64,7 +69,8 @@ struct PersistedAssistantTurn
 // M2 active-session adapter. A null sink retains direct SessionStore behavior for
 // inactive legacy import/export and explicitly detached background persistence.
 [[nodiscard]] ava::core::Result<std::string> append_user_message(SessionAppendSink const& sink, std::string const& text,
-                                                                 std::vector<ava::session::ImageAttachmentRef> const& attachments = {});
+                                                                 std::vector<ava::session::ImageAttachmentRef> const& attachments = {},
+                                                                 std::optional<ava::session::SyntheticDeliveryProvenance> const& provenance = std::nullopt);
 [[nodiscard]] ava::core::VoidResult append_replay_user_message(SessionAppendSink const& sink, std::string const& text,
                                                                std::vector<ava::session::ImageAttachmentRef> const& attachments, std::string const& replay_of);
 [[nodiscard]] ava::core::VoidResult append_assistant_message(SessionAppendSink const& sink, std::string const& text, std::size_t tool_call_count,

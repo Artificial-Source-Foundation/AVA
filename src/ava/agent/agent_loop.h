@@ -8,6 +8,7 @@
 #include "ava/agent/question.h"
 #include "ava/agent/run_phase.h"
 #include "ava/agent/subagent_config.h"
+#include "ava/agent/subagent_coordinator.h"
 #include "ava/agent/tool_visibility.h"
 #include "ava/config/model_config.h"
 #include "ava/session/attachments.h"
@@ -15,9 +16,9 @@
 #include "ava/permissions/permission.h"
 #include "ava/provider/provider.h"
 #include "ava/lsp/lsp_client.h"
+#include "ava/core/AnchorSet.h"
 #include "ava/core/result.h"
 #include "ava/core/runtime_outcome.h"
-#include "ava/core/AnchorSet.h"
 
 #include <cstddef>
 #include <filesystem>
@@ -162,6 +163,9 @@ struct AgentLoopOptions
       compact_context = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Provider>>()> background_provider_factory = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Transport>>()> background_transport_factory = nullptr;
+  // Production uses one application-scoped coordinator. The raw registry is
+  // retained only as an explicit standalone AgentLoop test seam.
+  std::shared_ptr<SubagentCoordinator> subagent_coordinator = nullptr;
   std::shared_ptr<BackgroundJobRegistry> background_jobs = nullptr;
   std::mutex* session_mutex = nullptr;
   // Immutable generation routes for records produced by this run. Persistent
@@ -174,9 +178,9 @@ struct AgentLoopOptions
   // Must match the policy established when the runtime session was opened.
   // Direct unit construction retains historical unbounded behavior.
   ava::session::SessionReadLimits session_read_limits = ava::session::legacy_unbounded_session_read_limits();
-  // Stable session-owner route for parent notices produced by background
-  // children. Unlike append_entry it remains valid between generations.
-  SessionAppendSink parent_notification_sink = nullptr;
+  // Backend-only provenance for an application-generated synthetic delivery
+  // user entry. Ordinary frontend text never derives or populates this field.
+  std::optional<ava::session::SyntheticDeliveryProvenance> synthetic_user_message_provenance = std::nullopt;
   // Called at real loop boundaries; errors abort the loop rather than being
   // swallowed as observer-only state.
   std::function<ava::core::VoidResult(RunPhase)> on_phase = nullptr;
@@ -197,6 +201,8 @@ struct AgentLoopOptions
 struct AgentLoopResult
 {
   std::string final_text;
+  // Exact id of the final durably committed v4 assistant transaction.
+  std::optional<std::string> committed_turn_id = std::nullopt;
   std::optional<ava::provider::TokenUsage> usage = std::nullopt;
   std::optional<long double> cost_usd = std::nullopt;
   std::size_t provider_iterations = 0;

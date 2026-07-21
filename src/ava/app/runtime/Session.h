@@ -23,6 +23,10 @@
 #include <utility>
 #include <vector>
 
+namespace ava::app {
+class SubagentDeliveryManager;
+}
+
 namespace ava::app::runtime {
 
 // Hold the mutable application state associated with an open runtime session.
@@ -58,9 +62,15 @@ struct Session
   std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
   bool created = false;
   bool sessionless = false;
-  // Declare before workers so reverse destruction stops background work before destroying store routes.
-  std::unique_ptr<SessionRunController> run_controller = nullptr;
-  std::shared_ptr<ava::agent::BackgroundJobRegistry> background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>();
+  std::shared_ptr<SessionRunController> run_controller = nullptr;
+  // Detached retained capsules bind reads to the exact original leased inode
+  // without reacquiring the pathname. Ordinary visible sessions leave this
+  // empty and derive an authority from their owned lease.
+  std::optional<ava::session::SessionReadAuthority> bound_read_authority = std::nullopt;
+  // Shared application process state. Direct coordinator injection remains a
+  // compatibility seam; production sessions use the delivery manager.
+  std::shared_ptr<ava::agent::SubagentCoordinator> subagent_coordinator = nullptr;
+  std::shared_ptr<ava::app::SubagentDeliveryManager> subagent_delivery_manager = nullptr;
   // Null uses normal global/project discovery; non-null is immutable session-local MCP composition.
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;
   bool offline = false;
@@ -69,6 +79,8 @@ struct Session
   // (or to its shared in-memory state in sessionless mode).
   [[nodiscard]] ava::core::Result<ava::session::SessionReadAuthority> read_authority() const
   {
+    if (bound_read_authority)
+      return *bound_read_authority;
     return sessionless ? ava::session::SessionReadAuthority::create_ephemeral(store, session_read_limits)
                        : ava::session::SessionReadAuthority::create_persistent(store, lease, session_read_limits);
   }

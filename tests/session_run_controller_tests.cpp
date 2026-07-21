@@ -186,61 +186,52 @@ void test_session_run_controller_owner_and_generation_routes()
     expect(entries->at(0).id == "inactive-owner" && entries->at(4).id == "during-B-owner", "owner append FIFO order is durable");
 }
 
-void test_runtime_session_destroys_background_before_owner_route()
+void test_runtime_session_destruction_does_not_own_background_coordinator()
 {
   auto const root = create_empty_root("session-run-controller-teardown");
-
-  auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
-  expect(store.has_value(), "teardown fixture store creates");
-  if (!store)
+  auto const state = root / "state";
+  std::filesystem::create_directories(state);
+  std::filesystem::permissions(state, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+  auto state_anchor = ava::core::AnchorSet::open({state});
+  expect(state_anchor.has_value(), "application coordinator opens the logical state root as startup authority");
+  if (!state_anchor)
     return;
-
-  auto lease = ava::session::SessionLease::create_and_acquire(store->session_path());
-  expect(lease.has_value(), "teardown fixture acquires a lease");
-  if (!lease)
+  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = state, .anchor_set = *state_anchor});
+  expect(coordinator_result.has_value(), "application coordinator creates for runtime teardown fixture");
+  if (!coordinator_result)
     return;
-  auto target = persistent_controller_target(*store, *lease);
-  expect(target.has_value(), "teardown fixture creates append target");
-  if (!target)
-    return;
-  std::atomic<bool> worker_started = false;
-  std::atomic<bool> owner_append_succeeded = false;
+  auto coordinator = *coordinator_result;
+  std::mutex mutex;
+  std::condition_variable changed;
+  bool worker_started = false;
+  bool worker_canceled = false;
   {
-    ava::app::runtime::Session session{.store = std::move(*store),
-                                       .lease = std::move(*lease),
-                                       .mode = ava::agent::Mode::Build,
-                                       .model = {},
-                                       .base_prompt = {},
-                                       .paths = {},
-                                       .workspace_dir = {},
-                                       .current_dir = {},
-                                       .project_trust = {},
-                                       .prompt_overrides = {},
-                                       .tool_visibility = {},
-                                       .context_sources = {},
-                                       .freshness_sources = {},
-                                       .system_prompt = {},
-                                       .reasoning = std::nullopt,
-                                       .scoped_model_cycle = std::nullopt,
-                                       .created = false,
-                                       .sessionless = false,
-                                       .run_controller = std::make_unique<ava::app::SessionRunController>(std::move(*target)),
-                                       .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>(),
-                                       .offline = false};
-    auto owner = session.owner_append_route();
-    auto started = session.background_jobs->start(
-        {.title = "blocked", .description = "blocked"},
-        [owner = std::move(owner), &worker_started, &owner_append_succeeded](ava::agent::BackgroundJobContext const& context) {
-          worker_started.store(true, std::memory_order_release);
-          while (!context.stop_token.stop_requested()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-          owner_append_succeeded.store(owner(append_entry("teardown-owner")).has_value(), std::memory_order_release);
+    auto visible_session_coordinator = coordinator;
+    auto started = visible_session_coordinator->start_background(
+        "parent_teardown", {.title = "blocked", .description = "blocked", .child_session_id = "child_teardown"},
+        [&](ava::agent::BackgroundJobContext const& context) {
+          std::stop_callback wake_on_stop(context.stop_token, [&] { changed.notify_all(); });
+          std::unique_lock lock(mutex);
+          worker_started = true;
+          changed.notify_all();
+          changed.wait(lock, [&] { return context.stop_token.stop_requested(); });
+          worker_canceled = true;
+          changed.notify_all();
           return ava::agent::BackgroundJobCompletion{
               .state = ava::agent::BackgroundJobState::Canceled, .final_text = {}, .stop_reason = "canceled", .error = std::nullopt};
         });
-    expect(started.has_value(), "blocked teardown worker starts");
-    while (!worker_started.load(std::memory_order_acquire)) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    expect(started.has_value(), "application coordinator starts blocked worker");
+    std::unique_lock lock(mutex);
+    expect(changed.wait_for(lock, std::chrono::seconds(1), [&] { return worker_started; }), "blocked worker starts before visible session destruction");
+    visible_session_coordinator.reset();
   }
-  expect(owner_append_succeeded.load(std::memory_order_acquire), "background teardown can use owner route before controller/store destruction");
+  {
+    std::lock_guard lock(mutex);
+    expect(!worker_canceled, "visible runtime session destruction does not cancel application-owned worker");
+  }
+  coordinator->shutdown();
+  std::lock_guard lock(mutex);
+  expect(worker_canceled, "application coordinator shutdown cancels and joins worker");
 }
 
 void test_session_run_controller_admission_inspection_and_join()
@@ -630,7 +621,6 @@ void test_session_run_controller_cross_thread_observer_shutdown_is_nonblocking()
 
   auto const root = create_empty_root("session-run-controller-observer-shutdown");
 
-
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
                      : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
@@ -796,7 +786,6 @@ void test_session_run_controller_observer_reset_is_immediate_for_unrelated_obser
   };
 
   auto const root = create_empty_root("session-run-controller-observer-reset");
-
 
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
@@ -987,7 +976,6 @@ void test_session_run_controller_unrelated_observer_shutdown_without_active_appe
   };
 
   auto const root = create_empty_root("session-run-controller-unrelated-observer-shutdown");
-
 
   auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
   auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
@@ -1314,7 +1302,7 @@ void run_session_run_controller_tests()
   test_session_run_controller_concurrent_admit_wake_stop();
   test_session_run_controller_generation_and_cancel_precedence();
   test_session_run_controller_owner_and_generation_routes();
-  test_runtime_session_destroys_background_before_owner_route();
+  test_runtime_session_destruction_does_not_own_background_coordinator();
   test_session_run_controller_admission_inspection_and_join();
   test_session_run_controller_stable_join_and_command_kinds();
   test_session_run_controller_effective_failure_and_stop_reentry();

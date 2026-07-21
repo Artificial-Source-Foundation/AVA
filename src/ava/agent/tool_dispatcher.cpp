@@ -1,5 +1,7 @@
 #include "sys.h"
+#include "ava/agent/job_control.h"
 #include "ava/agent/question.h"
+#include "ava/agent/subagent_coordinator.h"
 #include "ava/agent/tool_dispatch_common.h"
 #include "ava/agent/tool_dispatch_patch.h"
 #include "ava/agent/tool_dispatcher.h"
@@ -20,8 +22,10 @@
 #include "ava/mcp/tool_broker.h"
 #include "ava/context/skill_loader.h"
 #include "ava/core/json.h"
+#include "ava/core/strict_json.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -30,6 +34,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <nlohmann/json.hpp>
 
 namespace ava::agent {
 namespace {
@@ -47,6 +52,7 @@ constexpr std::size_t kMaxTaskSubagentTypeBytes = 128;
 constexpr std::size_t kMaxTaskIdBytes = 256;
 constexpr std::size_t kMaxTaskCommandBytes = 1024;
 
+using Json = nlohmann::json;
 using namespace ava::agent::tool_dispatch;
 
 bool is_lsp_diagnostics_metadata(ToolMetadata const& tool)
@@ -215,7 +221,7 @@ ava::core::Result<std::optional<std::string>> optional_task_string_arg(std::stri
                                                                        std::string_view tool_name)
 {
   auto value = ava::core::json::string_field(arguments, field);
-  if (!value)
+  if (!value || value->empty())
     return std::optional<std::string>{};
   if (auto safe = reject_control_arg(*value, field, tool_name); !safe)
     return std::unexpected(std::move(safe.error()));
@@ -224,6 +230,121 @@ ava::core::Result<std::optional<std::string>> optional_task_string_arg(std::stri
     return std::unexpected(std::move(bounded.error()));
   }
   return std::optional<std::string>{std::move(*value)};
+}
+
+ava::core::Result<bool> task_background_mode(std::string_view arguments, std::string_view tool_name)
+{
+  auto background = optional_bool_arg(arguments, "background", false, tool_name);
+  if (!background)
+    return std::unexpected(std::move(background.error()));
+  bool const has_background = ava::core::json::field_value_start(arguments, "background").has_value();
+  auto const mode_start = ava::core::json::field_value_start(arguments, "mode");
+  if (!mode_start)
+    return *background;
+  auto mode = ava::core::json::string_field(arguments, "mode");
+  if (!mode)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "task mode must be foreground or background");
+    error.with_context("tool", std::string(tool_name)).with_context("argument", "mode");
+    return std::unexpected(std::move(error));
+  }
+  if (*mode != "foreground" && *mode != "background")
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "task mode must be foreground or background");
+    error.with_context("tool", std::string(tool_name)).with_context("argument", "mode");
+    return std::unexpected(std::move(error));
+  }
+  bool const mode_background = *mode == "background";
+  if (has_background && *background != mode_background)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "task mode conflicts with legacy background flag");
+    error.with_context("tool", std::string(tool_name));
+    return std::unexpected(std::move(error));
+  }
+  return mode_background;
+}
+
+struct JobToolRequest
+{
+  std::string action;
+  std::string job_id;
+  std::chrono::milliseconds timeout{std::chrono::milliseconds(kDefaultPublicJobWaitTimeoutMs)};
+};
+
+ava::core::Result<JobToolRequest> parse_job_tool_request(std::string_view arguments, std::string_view tool_name)
+{
+  auto const strict = ava::core::validate_strict_json(arguments, ava::core::json::kMaxNestingDepth);
+  if (strict == ava::core::StrictJsonStatus::DuplicateObjectKey)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "job arguments contain duplicate member names"));
+  if (strict != ava::core::StrictJsonStatus::Valid)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "job arguments must be one valid JSON object"));
+  auto root = Json::parse(arguments.begin(), arguments.end(), nullptr, false, true);
+  if (root.is_discarded() || !root.is_object())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "job arguments must be one valid JSON object"));
+  for (auto const& [key, _] : root.items())
+  {
+    if (key != "action" && key != "job_id" && key != "timeout_ms")
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "job arguments contain an unknown field");
+      error.with_context("tool", std::string(tool_name)).with_context("argument", key);
+      return std::unexpected(std::move(error));
+    }
+  }
+  if (!root.contains("action") || !root["action"].is_string())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "job action is required"));
+  JobToolRequest request;
+  request.action = root["action"].get<std::string>();
+  if (request.action != "list" && request.action != "status" && request.action != "wait" && request.action != "result" && request.action != "cancel")
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "job action is unsupported"));
+  if (root.contains("job_id"))
+  {
+    if (!root["job_id"].is_string())
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "job_id must be a string"));
+    request.job_id = root["job_id"].get<std::string>();
+  }
+  if (request.action == "list")
+  {
+    if (!request.job_id.empty() || root.contains("timeout_ms"))
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "job list accepts only action"));
+    return request;
+  }
+  if (request.job_id.empty())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "job_id is required for this action"));
+  if (request.job_id.size() > kMaxPublicJobIdBytes)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "job_id is too long"));
+  if (auto safe = reject_control_arg(request.job_id, "job_id", tool_name); !safe)
+    return std::unexpected(std::move(safe.error()));
+  if (root.contains("timeout_ms"))
+  {
+    if (request.action != "wait")
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "timeout_ms is accepted only for job wait"));
+    if (!root["timeout_ms"].is_number_integer())
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "timeout_ms must be a positive integer"));
+    long long timeout_ms = 0;
+    try
+    {
+      timeout_ms = root["timeout_ms"].get<long long>();
+    }
+    catch (...)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "timeout_ms is out of range"));
+    }
+    if (timeout_ms <= 0)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "timeout_ms must be a positive integer"));
+    request.timeout = std::chrono::milliseconds(std::min(timeout_ms, kMaxPublicJobWaitTimeoutMs));
+  }
+  return request;
+}
+
+ToolDispatchResult job_control_error(ProviderToolCall const& call, ava::core::Error const& source)
+{
+  auto const code =
+      std::ranges::any_of(source.context(), [](ava::core::ErrorContext const& item) { return item.key == "job_error_code" && item.value == "job_not_ready"; })
+          ? std::string_view("job_not_ready")
+          : std::string_view("job_error");
+  std::string text = "{\"tool\":\"job\",\"ok\":false,\"error\":{\"category\":\"" + ava::core::json::escape(ava::core::to_string(source.category())) +
+                     "\",\"code\":\"" + std::string(code) + "\",\"message\":\"" + ava::core::json::escape(source.message()) + "\"}}";
+  return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = std::move(text)};
 }
 
 ava::core::Result<SubagentDefinition> selected_subagent_definition(ava::tools::ToolContext const& context, std::string_view subagent_type,
@@ -727,7 +848,7 @@ ToolDispatchResult task_result(ava::tools::ToolContext const& context, ProviderT
   auto command = optional_task_string_arg(call.arguments_json, "command", kMaxTaskCommandBytes, call.name);
   if (!command)
     return tool_error_result(call, command.error());
-  auto background = optional_bool_arg(call.arguments_json, "background", false, call.name);
+  auto background = task_background_mode(call.arguments_json, call.name);
   if (!background)
     return tool_error_result(call, background.error());
   if (!context.task_subagent_runner)
@@ -767,6 +888,38 @@ ToolDispatchResult task_result(ava::tools::ToolContext const& context, ProviderT
                      ",\"tool_calls\":" + std::to_string(run->tool_calls) + ",\"tool_iterations\":" + std::to_string(run->tool_iterations) +
                      ",\"task_result\":\"" + ava::core::json::escape(run->final_text) + "\",\"content\":\"" + ava::core::json::escape(content) + "\"}";
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
+}
+
+ToolDispatchResult job_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto request = parse_job_tool_request(call.arguments_json, call.name);
+  if (!request)
+    return job_control_error(call, request.error());
+  if (!context.subagent_coordinator || context.session_id.empty())
+    return job_control_error(call, ava::core::Error(ava::core::ErrorCategory::Tool, "job controls are unavailable"));
+  if (request->action == "list")
+  {
+    return ToolDispatchResult{
+        .call_id = call.id, .name = call.name, .success = true, .result_text = public_job_list_json(context.subagent_coordinator->list(context.session_id))};
+  }
+
+  ava::core::Result<SubagentCoordinatorJobSnapshot> snapshot =
+      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "job action was not dispatched"));
+  PublicJobContent content = PublicJobContent::OmitTerminalContent;
+  if (request->action == "status")
+    snapshot = context.subagent_coordinator->snapshot(context.session_id, request->job_id);
+  else if (request->action == "wait")
+    snapshot = context.subagent_coordinator->wait(context.session_id, request->job_id, request->timeout);
+  else if (request->action == "result")
+  {
+    snapshot = context.subagent_coordinator->result(context.session_id, request->job_id);
+    content = PublicJobContent::IncludeTerminalResult;
+  }
+  else if (request->action == "cancel")
+    snapshot = context.subagent_coordinator->cancel(context.session_id, request->job_id);
+  if (!snapshot)
+    return job_control_error(call, snapshot.error());
+  return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = public_job_snapshot_json(*snapshot, content)};
 }
 
 ToolDispatchResult lsp_diagnostics_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
@@ -965,6 +1118,8 @@ ToolExecutor builtin_tool_executor(std::string_view name)
     return skill_result;
   if (name == "task")
     return task_result;
+  if (name == "job")
+    return job_result;
   if (name == "lsp_diagnostics")
     return lsp_diagnostics_result;
   if (name == "lsp_document_symbols")

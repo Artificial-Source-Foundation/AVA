@@ -19,6 +19,10 @@
 #include <string>
 #include <vector>
 
+namespace ava::agent {
+class SubagentCoordinator;
+}
+
 namespace ava::lsp {
 class DiagnosticsProvider;
 }  // namespace ava::lsp
@@ -123,6 +127,9 @@ struct ToolContext
   std::function<bool()> cancel_requested = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   TaskSubagentRunner task_subagent_runner = nullptr;
+  // Exact coordinator/owner pair for public job controls. Child loops clear
+  // both this coordinator and the task runner, then hide both schemas.
+  std::shared_ptr<ava::agent::SubagentCoordinator> subagent_coordinator = nullptr;
   std::vector<ava::agent::SubagentDefinition> subagents = {};
   std::string permission_tool_name = {};
   std::string permission_actor = {};

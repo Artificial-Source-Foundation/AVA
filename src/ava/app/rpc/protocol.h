@@ -28,6 +28,8 @@ struct RpcCommand
   std::optional<long long> protocol_version;
   std::optional<std::string> message;
   std::optional<std::string> session_id;
+  std::optional<std::string> job_id;
+  std::optional<long long> timeout_ms;
   std::optional<std::string> provider;
   std::optional<std::string> model;
   std::optional<std::string> instructions;

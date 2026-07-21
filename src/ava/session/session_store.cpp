@@ -3337,6 +3337,16 @@ bool SessionLease::active() const noexcept
   return fd_ >= 0;
 }
 
+ava::core::Result<SessionLease> SessionLease::duplicate() const
+{
+  if (fd_ < 0)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot duplicate an inactive session lease"));
+  int const duplicate_fd = fcntl(fd_, F_DUPFD_CLOEXEC, 3);
+  if (duplicate_fd < 0)
+    return std::unexpected(path_io_error("failed to duplicate exact session lease with CLOEXEC", canonical_path_, errno));
+  return SessionLease(duplicate_fd, canonical_path_, created_);
+}
+
 std::filesystem::path const& SessionLease::canonical_path() const noexcept
 {
   return canonical_path_;
@@ -3896,6 +3906,68 @@ ava::core::Result<EntryType> parse_entry_type(std::string_view value)
   auto error = ava::core::Error(ava::core::ErrorCategory::Session, "unknown session entry type");
   error.with_context("type", std::string(value));
   return std::unexpected(std::move(error));
+}
+
+ava::core::Result<std::optional<SyntheticDeliveryProvenance>> parse_synthetic_delivery_provenance(SessionEntry const& entry)
+{
+  if (entry.type != EntryType::UserMessage)
+    return std::optional<SyntheticDeliveryProvenance>{};
+  if (ava::core::validate_strict_json(entry.data_json, ava::core::json::kMaxNestingDepth) != ava::core::StrictJsonStatus::Valid)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "user message provenance requires strict JSON"));
+  auto const provenance_start = ava::core::json::field_value_start(entry.data_json, "provenance");
+  if (!provenance_start)
+    return std::optional<SyntheticDeliveryProvenance>{};
+  if (*provenance_start >= entry.data_json.size() || entry.data_json[*provenance_start] != '{')
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "synthetic delivery provenance must be an object"));
+  std::size_t end = *provenance_start;
+  std::size_t depth = 0;
+  std::size_t member_count = 0;
+  bool in_string = false;
+  bool escaped = false;
+  for (; end < entry.data_json.size(); ++end)
+  {
+    char const ch = entry.data_json[end];
+    if (in_string)
+    {
+      if (escaped)
+        escaped = false;
+      else if (ch == '\\')
+        escaped = true;
+      else if (ch == '"')
+        in_string = false;
+      continue;
+    }
+    if (ch == '"')
+      in_string = true;
+    else if (ch == '{')
+      ++depth;
+    else if (ch == '}')
+    {
+      if (--depth == 0)
+        break;
+    }
+    else if (ch == ':' && depth == 1)
+      ++member_count;
+  }
+  if (end >= entry.data_json.size() || member_count != 3)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "synthetic delivery provenance has missing or unknown fields"));
+  auto const provenance = std::string_view(entry.data_json).substr(*provenance_start, end - *provenance_start + 1);
+  auto source = ava::core::json::string_field(provenance, "source");
+  auto delivery_id = ava::core::json::string_field(provenance, "delivery_id");
+  auto prompt_fingerprint = ava::core::json::string_field(provenance, "prompt_fingerprint");
+  if (!source || !delivery_id || !prompt_fingerprint)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "synthetic delivery provenance fields must be strings"));
+  SyntheticDeliveryProvenance parsed{
+      .delivery_id = std::move(*delivery_id), .prompt_fingerprint = std::move(*prompt_fingerprint), .source = std::move(*source)};
+  auto valid_id = [](std::string_view value) {
+    return !value.empty() && value.size() <= kMaxSyntheticDeliveryProvenanceIdBytes && std::ranges::all_of(value, [](char ch) {
+      auto const byte = static_cast<unsigned char>(ch);
+      return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') || ch == '_' || ch == '-' || ch == '.' || ch == ':';
+    });
+  };
+  if (parsed.source != kSyntheticSubagentDeliverySource || !valid_id(parsed.delivery_id) || !valid_id(parsed.prompt_fingerprint))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "synthetic delivery provenance is unsupported or exceeds its bounds"));
+  return std::optional<SyntheticDeliveryProvenance>(std::move(parsed));
 }
 
 bool is_internal_replay_user_message(SessionEntry const& entry)

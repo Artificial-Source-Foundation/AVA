@@ -321,7 +321,7 @@ ToolScheduleClassification classify_tool_for_scheduling(ProviderToolCall const& 
     return classification(ToolScheduleEligibility::Barrier, "user_interaction");
   }
   if (metadata->permission_category == std::string_view("task") || metadata->execution_mode == std::string_view("subagent") ||
-      metadata->name == std::string_view("task"))
+      metadata->name == std::string_view("task") || metadata->name == std::string_view("job"))
   {
     return classification(ToolScheduleEligibility::Barrier, "subagent");
   }

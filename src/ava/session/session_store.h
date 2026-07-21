@@ -43,6 +43,18 @@ enum class EntryType
   Cancel,
 };
 
+inline constexpr std::string_view kSyntheticSubagentDeliverySource = "synthetic_subagent_delivery";
+inline constexpr std::size_t kMaxSyntheticDeliveryProvenanceIdBytes = 96;
+
+struct SyntheticDeliveryProvenance
+{
+  std::string delivery_id;
+  std::string prompt_fingerprint;
+  std::string source = std::string(kSyntheticSubagentDeliverySource);
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct SessionEntry
 {
   std::string id;
@@ -100,6 +112,11 @@ using SessionEntryVisitor = std::function<ava::core::Result<bool>(SessionEntry c
 // while still enforcing the hard session-line and strict JSON nesting bounds.
 [[nodiscard]] SessionReadLimits legacy_unbounded_session_read_limits();
 
+// Legacy ordinary user messages have no provenance. When present, synthetic
+// delivery provenance is strict, bounded backend metadata and malformed
+// objects are rejected rather than interpreted as user text markers.
+[[nodiscard]] ava::core::Result<std::optional<SyntheticDeliveryProvenance>> parse_synthetic_delivery_provenance(SessionEntry const& entry);
+
 struct SessionSummary
 {
   std::string session_id = {};
@@ -131,6 +148,10 @@ class SessionLease
   [[nodiscard]] static ava::core::Result<SessionLease> create_and_acquire(std::filesystem::path const& session_path);
   [[nodiscard]] static ava::core::Result<SessionLease> acquire(std::filesystem::path const& session_path);
   [[nodiscard]] bool active() const noexcept;
+  // Duplicates the already locked open-file description with CLOEXEC. This
+  // never reacquires by pathname and therefore preserves exact inode/lease
+  // identity for detached runtime ownership.
+  [[nodiscard]] ava::core::Result<SessionLease> duplicate() const;
   [[nodiscard]] std::filesystem::path const& canonical_path() const noexcept;
   // Test-only observation used to prove lease-bound pread snapshots do not
   // mutate the shared open-file-description offset.

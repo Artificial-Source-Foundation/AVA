@@ -98,9 +98,9 @@ std::optional<ReasoningSelection> latest_persisted_reasoning(std::vector<ava::se
       continue;
     }
     latest = ReasoningSelection{.level = std::move(level),
-                                       .provider_level = std::nullopt,
-                                       .budget_tokens = ava::core::json::integer_field(entry.data_json, "budget_tokens"),
-                                       .display = ava::core::json::string_field(entry.data_json, "display").value_or("")};
+                                .provider_level = std::nullopt,
+                                .budget_tokens = ava::core::json::integer_field(entry.data_json, "budget_tokens"),
+                                .display = ava::core::json::string_field(entry.data_json, "display").value_or("")};
   }
   if (!saw_change || !latest)
     return std::nullopt;
@@ -134,6 +134,8 @@ ava::core::Result<bool> set_runtime_reasoning(runtime::Session& session, std::op
   if (!appended)
     return std::unexpected(std::move(appended.error()));
   session.reasoning = std::move(selection);
+  if (auto refreshed = refresh_runtime_parent_configuration(session); !refreshed)
+    return std::unexpected(std::move(refreshed.error()));
   return true;
 }
 

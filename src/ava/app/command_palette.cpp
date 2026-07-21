@@ -718,6 +718,21 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
   add_session_completions_for("/sessions");
   add_session_completions_for("/resume");
 
+  if (auto index = find_item_index(items, "/jobs"))
+  {
+    auto& item = items[*index];
+    for (auto const& action : {"show", "wait", "result", "cancel", "promote"}) add_completion(item, 0, action, "Subagent job control", "Sessions");
+    if (session.subagent_coordinator)
+    {
+      for (auto const& job : session.subagent_coordinator->list(session.store.session_id()))
+      {
+        auto const description = std::string(ava::agent::to_string(job.job.execution)) + " · " + std::string(ava::agent::to_string(job.job.mode));
+        for (auto const& action : {"show", "wait", "result", "cancel", "promote"})
+          add_completion(item, 1, job.job.identity.job_id, description, "Jobs", {action}, false);
+      }
+    }
+  }
+
   if (auto index = find_item_index(items, "/permissions"))
   {
     auto& item = items[*index];

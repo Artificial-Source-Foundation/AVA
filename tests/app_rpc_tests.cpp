@@ -620,6 +620,14 @@ void test_app_rpc_parsing_and_response_serialization()
   expect(!non_object_plugin_command_args && non_object_plugin_command_args.error().message() == "RPC arguments must be an object",
          "RPC parser rejects non-object plugin command arguments instead of silently defaulting");
 
+  auto wait_job = ava::app::parse_rpc_command_line(R"JSON({"id":"wait-job","type":"wait_job","job_id":"job_123","timeout_ms":45000})JSON");
+  expect(wait_job && wait_job->job_id == "job_123" && wait_job->timeout_ms == 45000, "RPC parser preserves strict job wait fields for handler clamping");
+  auto invalid_job_id = ava::app::parse_rpc_command_line(R"JSON({"id":"job","type":"get_job","job_id":42})JSON");
+  expect(!invalid_job_id && invalid_job_id.error().message() == "RPC job_id must be a string", "RPC parser rejects wrong-typed job identifiers");
+  auto invalid_job_timeout = ava::app::parse_rpc_command_line(R"JSON({"id":"job","type":"wait_job","job_id":"job_123","timeout_ms":"1"})JSON");
+  expect(!invalid_job_timeout && invalid_job_timeout.error().message() == "RPC timeout_ms must be an integer",
+         "RPC parser rejects wrong-typed job wait timeouts");
+
   auto direct_run_command = ava::app::parse_rpc_command_line(R"JSON({"id":"cmd","type":"run_command","command":"printf rpc-direct"})JSON");
   expect(direct_run_command && direct_run_command->command && *direct_run_command->command == "printf rpc-direct",
          "RPC parser preserves direct command execution payloads");
@@ -742,8 +750,9 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello rpc\"}\n");
   bool const completed = output_buffer.wait_contains("rpc answer", std::chrono::seconds(2));
   input_buffer.close();
@@ -787,8 +796,9 @@ void test_app_rpc_offline_allows_local_protocol_and_rejects_prompt_before_provid
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
   input_buffer.push("{\"id\":\"proto\",\"type\":\"get_protocol\"}\n");
   bool const protocol_completed = output_buffer.wait_contains("\"id\":\"proto\"", std::chrono::seconds(2));
   input_buffer.push("{\"id\":\"p-offline\",\"type\":\"prompt\",\"message\":\"hello offline rpc\"}\n");
@@ -840,8 +850,9 @@ void test_app_rpc_prompt_imports_image_attachments()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
   input_buffer.push("{\"id\":\"p-img\",\"type\":\"prompt\",\"message\":\"describe\",\"attachments\":[\"" + ava::core::json::escape(image_path.string()) +
                     "\"]}\n");
   bool const completed = output_buffer.wait_contains("rpc image answer", std::chrono::seconds(2));
@@ -896,8 +907,9 @@ void test_app_rpc_prompt_imports_inline_image_uploads()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
   input_buffer.push("{\"id\":\"p-upload\",\"type\":\"prompt\",\"message\":\"describe\",\"images\":[{\"type\":\"image\",\"data\":\"" +
                     ava::provider::base64_encode(rpc_tiny_png_bytes()) + "\",\"mimeType\":\"image/png\"}]}\n");
   bool const completed = output_buffer.wait_contains("rpc upload answer", std::chrono::seconds(2));
@@ -985,8 +997,9 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello rpc stream\"}\n");
   bool const completed = output_buffer.wait_contains("\"success\":true", std::chrono::seconds(2));
   input_buffer.close();
@@ -1033,8 +1046,9 @@ void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
   input_buffer.push("{\"id\":\"p-cancel\",\"type\":\"prompt\",\"message\":\"cancel during retry\"}\n");
   bool const retry_started = output_buffer.wait_contains("\"name\":\"retry\"", std::chrono::seconds(2));
   input_buffer.push("{\"id\":\"cancel\",\"type\":\"cancel\"}\n");
@@ -1085,8 +1099,9 @@ void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
   input_buffer.push("{\"id\":\"cancel-idle\",\"type\":\"cancel\"}\n");
   bool const canceled = output_buffer.wait_contains("\"id\":\"cancel-idle\"", std::chrono::seconds(2));
   input_buffer.push("{\"id\":\"p-after\",\"type\":\"prompt\",\"message\":\"run after idle cancel\"}\n");
@@ -1148,8 +1163,8 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result =
-        ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out,
+                                    [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello refreshed rpc\"}\n");
   bool const completed = output_buffer.wait_contains("\"success\":true", std::chrono::seconds(2));
@@ -1192,7 +1207,8 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command()
       "{\"id\":\"u1\",\"type\":\"unknown\"}\n");
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto result =
+      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC loop continues after malformed and unknown commands");
   expect(std::count(jsonl.begin(), jsonl.end(), '\n') == 3 && jsonl.find("\"id\":\"\"") != std::string::npos &&
@@ -1232,7 +1248,8 @@ void test_app_rpc_state_list_sessions_and_open_session()
       first_id + "\"}\n");
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_second(std::move(*second));
-  auto result = ava::app::run_rpc_loop(unlocked_second, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto result =
+      ava::app::run_rpc_loop(unlocked_second, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC state/list/open loop completes successfully");
   expect(jsonl.find("\"id\":\"state\"") != std::string::npos && jsonl.find(second_id) != std::string::npos &&
@@ -1240,6 +1257,131 @@ void test_app_rpc_state_list_sessions_and_open_session()
              jsonl.find("\"id\":\"open\"") != std::string::npos,
          "RPC state, list_sessions, and open_session return session metadata");
   expect(ava::app::runtime::session_ts::rat(unlocked_second)->store.session_id() == first_id, "RPC open_session switches the active runtime session");
+}
+
+void test_app_rpc_job_controls_are_active_safe_and_redacted()
+{
+  auto const root = temp_root() / "app-rpc-job-controls";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC job fixture opens runtime session");
+  if (!session || !session->subagent_coordinator)
+    return;
+
+  struct WorkerState
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool started = false;
+    bool release = false;
+    ava::agent::BackgroundJobCompletion run(ava::agent::BackgroundJobContext const& context)
+    {
+      std::stop_callback wake(context.stop_token, [&] { changed.notify_all(); });
+      std::unique_lock lock(mutex);
+      started = true;
+      changed.notify_all();
+      changed.wait(lock, [&] { return release || context.stop_token.stop_requested(); });
+      if (context.stop_token.stop_requested())
+        return {.state = ava::agent::BackgroundJobState::Canceled,
+                .final_text = {},
+                .stop_reason = "canceled",
+                .error = std::nullopt,
+                .provider_iterations = 0,
+                .tool_calls = 0,
+                .tool_iterations = 0};
+      return {.state = ava::agent::BackgroundJobState::Completed,
+              .final_text = "bounded RPC result",
+              .stop_reason = "completed",
+              .error = std::nullopt,
+              .provider_iterations = 0,
+              .tool_calls = 0,
+              .tool_iterations = 0};
+    }
+    bool wait_started()
+    {
+      std::unique_lock lock(mutex);
+      return changed.wait_for(lock, std::chrono::seconds(1), [&] { return started; });
+    }
+    void finish()
+    {
+      std::lock_guard lock(mutex);
+      release = true;
+      changed.notify_all();
+    }
+  };
+
+  auto coordinator = session->subagent_coordinator;
+  auto const owner = session->store.session_id();
+  auto promoted_state = std::make_shared<WorkerState>();
+  auto canceled_state = std::make_shared<WorkerState>();
+  auto promotable = coordinator->start(owner, ava::agent::SubagentJobMode::Foreground, {.child_session_id = "rpc_promotable"},
+                                       [promoted_state](auto const& context) { return promoted_state->run(context); });
+  auto cancelable = coordinator->start(owner, ava::agent::SubagentJobMode::Foreground, {.child_session_id = "rpc_cancelable"},
+                                       [canceled_state](auto const& context) { return canceled_state->run(context); });
+  auto failed = coordinator->start(owner, ava::agent::SubagentJobMode::Foreground, {.child_session_id = "rpc_failed"}, [](auto const&) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "credential=rpc-secret raw provider body");
+    error.with_context("command", "curl --token rpc-secret");
+    return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Failed,
+                                               .final_text = {},
+                                               .stop_reason = "failed",
+                                               .error = std::move(error),
+                                               .provider_iterations = 0,
+                                               .tool_calls = 0,
+                                               .tool_iterations = 0};
+  });
+  expect(promotable && cancelable && failed && promoted_state->wait_started() && canceled_state->wait_started(), "RPC job fixture starts controlled jobs");
+  if (!promotable || !cancelable || !failed)
+    return;
+  static_cast<void>(coordinator->wait(owner, failed->job.identity.job_id, std::chrono::seconds(1)));
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  BlockingResponseTransport transport(sse_response(final_text_sse("parent terminal")));
+  ava::app::runtime::RunOptions runtime_options;
+  runtime_options.access_token = "token";
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult rpc_result;
+  ava::app::runtime::session_ts unlocked_session(std::move(*session));
+  std::jthread rpc_thread([&] {
+    rpc_result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
+  input_buffer.push("{\"id\":\"prompt\",\"type\":\"prompt\",\"message\":\"keep active\"}\n");
+  expect(transport.wait_for_request(std::chrono::seconds(2)), "RPC job fixture has an active parent prompt");
+  auto const promotable_id = promotable->job.identity.job_id;
+  auto const cancelable_id = cancelable->job.identity.job_id;
+  auto const failed_id = failed->job.identity.job_id;
+  input_buffer.push("{\"id\":\"jobs\",\"type\":\"list_jobs\"}\n");
+  input_buffer.push("{\"id\":\"status\",\"type\":\"get_job\",\"job_id\":\"" + promotable_id + "\"}\n");
+  input_buffer.push("{\"id\":\"wait\",\"type\":\"wait_job\",\"job_id\":\"" + promotable_id + "\",\"timeout_ms\":1}\n");
+  input_buffer.push("{\"id\":\"not-ready\",\"type\":\"get_job_result\",\"job_id\":\"" + promotable_id + "\"}\n");
+  input_buffer.push("{\"id\":\"promote\",\"type\":\"promote_job\",\"job_id\":\"" + promotable_id + "\"}\n");
+  input_buffer.push("{\"id\":\"cancel-job\",\"type\":\"cancel_job\",\"job_id\":\"" + cancelable_id + "\"}\n");
+  input_buffer.push("{\"id\":\"failed-result\",\"type\":\"get_job_result\",\"job_id\":\"" + failed_id + "\"}\n");
+  bool const controls_completed = output_buffer.wait_contains("\"id\":\"failed-result\"", std::chrono::seconds(2));
+  auto active_output = output_buffer.str();
+  expect(controls_completed && active_output.find("\"id\":\"promote\"") != std::string::npos &&
+             active_output.find("\"was_promoted\":true") != std::string::npos && active_output.find("\"id\":\"cancel-job\"") != std::string::npos &&
+             active_output.find("\"timed_out\":true") != std::string::npos && active_output.find("\"code\":\"job_not_ready\"") != std::string::npos &&
+             active_output.find("\"message\":\"subagent job failed\"") != std::string::npos && active_output.find("rpc-secret") == std::string::npos &&
+             active_output.find("raw provider body") == std::string::npos && active_output.find("\"code\":\"active_run\"") == std::string::npos,
+         "RPC job status, wait, result, cancel, and promote remain active-safe and redact provider/error context");
+
+  promoted_state->finish();
+  static_cast<void>(coordinator->wait(owner, promotable_id, std::chrono::seconds(1)));
+  transport.release();
+  input_buffer.close();
+  rpc_thread.join();
+  expect(rpc_result.has_value(), "RPC job active-safe loop shuts down cleanly");
 }
 
 void test_app_rpc_current_session_reads_reject_path_replacement()
@@ -1294,7 +1436,8 @@ void test_app_rpc_current_session_reads_reject_path_replacement()
       "{\"id\":\"validate\",\"type\":\"validate_session\"}\n");
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto result =
+      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto pathname_entries = ava::app::runtime::session_ts::rat(unlocked_session)->store.load();
   expect(result && replaced && jsonl.find("replaced") != std::string::npos && jsonl.find("RPC_REPLACEMENT_CANARY") == std::string::npos && pathname_entries &&
@@ -1329,7 +1472,8 @@ void test_app_rpc_session_metadata_name_and_labels()
       "{\"id\":\"bad\",\"type\":\"set_session_labels\",\"labels\":[\"dup\",\"dup\"]}\n");
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto result =
+      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto metadata = ava::session::load_session_metadata(ava::app::runtime::session_ts::rat(unlocked_session)->store);
   auto entries = ava::app::runtime::session_ts::rat(unlocked_session)->store.load();
@@ -1396,7 +1540,8 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   std::istringstream in(requests);
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_child(std::move(*child));
-  auto result = ava::app::run_rpc_loop(unlocked_child, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto result =
+      ava::app::run_rpc_loop(unlocked_child, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC session_tree loop completes successfully");
   expect(jsonl.find("\"id\":\"tree\"") != std::string::npos && jsonl.find("\"current_session_id\":\"" + child_id + "\"") != std::string::npos &&
@@ -1455,7 +1600,8 @@ void test_app_rpc_session_fork_and_clone_commands()
   std::istringstream in(requests);
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto result =
+      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
   bool source_unchanged = false;
@@ -1524,7 +1670,8 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
   std::istringstream in("{\"id\":\"fork-rollback\",\"type\":\"fork_session\"}\n");
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_source(std::move(*source));
-  auto result = ava::app::run_rpc_loop(unlocked_source, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto result =
+      ava::app::run_rpc_loop(unlocked_source, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto const marker = std::string("created_session_id: ");
   auto const marker_offset = jsonl.find(marker);
@@ -1548,8 +1695,8 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
   auto source_contender = ava::session::SessionLease::acquire(source_path);
   expect(result && created_id && jsonl.find("\"id\":\"fork-rollback\"") != std::string::npos && jsonl.find("\"success\":false") != std::string::npos &&
              jsonl.find("rollback_attachment_disposition: preserved") != std::string::npos && destination_jsonl_removed && destination_attachment_retained &&
-             ava::app::runtime::session_ts::rat(unlocked_source)->store.session_id() == source_id &&
-             !source_contender && source_contender.error().message().find("already owned") != std::string::npos,
+             ava::app::runtime::session_ts::rat(unlocked_source)->store.session_id() == source_id && !source_contender &&
+             source_contender.error().message().find("already owned") != std::string::npos,
          "RPC branch runtime-construction failure preserves the primary error, removes only destination JSONL, retains copied attachments, and leaves the "
          "source active");
 }
@@ -1589,7 +1736,8 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   std::istringstream in("{\"id\":\"clone\",\"type\":\"clone_session\",\"session_id\":\"" + source_id + "\"}\n");
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_current(std::move(*current));
-  auto result = ava::app::run_rpc_loop(unlocked_current, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto result =
+      ava::app::run_rpc_loop(unlocked_current, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   ava::app::runtime::session_ts::rat current_r(unlocked_current);
   auto cloned_entries = current_r->store.load();
   auto cloned_metadata = ava::session::load_session_metadata(current_r->store);
@@ -1639,7 +1787,8 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
   ava::core::VoidResult latched;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   {
-    auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+    auto result =
+        ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
     ava::app::runtime::session_ts::rat session_r(unlocked_session);
     auto const jsonl = out.str();
     auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
@@ -1657,11 +1806,11 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
                jsonl.find("\"branch_summary\":1") != std::string::npos,
            "RPC summarize_branch returns the persisted branch summary entry and updated stats expose the count");
 
-  auto invalid = ava::session::SessionEntry{
-      .id = "summary-route-latch", .parent_id = "", .type = ava::session::EntryType::Error, .timestamp = ava::session::now_timestamp(), .data_json = ""};
-  latched = session_r->run_controller
-    ? session_r->run_controller->append(std::move(invalid))
-    : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "missing summary route controller")));
+    auto invalid = ava::session::SessionEntry{
+        .id = "summary-route-latch", .parent_id = "", .type = ava::session::EntryType::Error, .timestamp = ava::session::now_timestamp(), .data_json = ""};
+    latched = session_r->run_controller
+                  ? session_r->run_controller->append(std::move(invalid))
+                  : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "missing summary route controller")));
   }
   std::istringstream blocked_in(std::string("{\"id\":\"blocked-summary\",\"type\":\"summarize_branch\",") + "\"branch_root_entry_id\":\"" + root_entry_id +
                                 "\",\"branch_tip_entry_id\":\"" + tip_entry_id +
@@ -1704,7 +1853,8 @@ void test_app_rpc_model_commands()
       "{\"id\":\"cycle\",\"type\":\"cycle_model\"}\n");
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto result =
+      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC model command loop completes successfully");
   expect(jsonl.find("\"id\":\"list\"") != std::string::npos && jsonl.find("\"models\"") != std::string::npos &&
@@ -1766,7 +1916,8 @@ void test_app_rpc_reasoning_commands()
       "{\"id\":\"clear\",\"type\":\"clear_reasoning\"}\n");
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto result =
+      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   ava::app::runtime::session_ts::rat session_r(unlocked_session);
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC reasoning command loop completes successfully");
@@ -1819,7 +1970,8 @@ void test_app_rpc_reasoning_model_serialization_exposes_resolved_maps()
       "{\"id\":\"state\",\"type\":\"get_state\"}\n");
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto result =
+      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   ava::app::runtime::session_ts::rat session_r(unlocked_session);
   auto const jsonl = out.str();
 
@@ -2024,9 +2176,9 @@ void test_app_rpc_protocol_version_and_session_commands()
              jsonl.find("\"supported_protocol_versions\":[1]") != std::string::npos &&
              jsonl.find("\"session_entry_version\":" + std::to_string(ava::session::kCurrentSessionEntryVersion)) != std::string::npos &&
              jsonl.find("\"supported_session_entry_versions\":[0,1,2,3,4]") != std::string::npos &&
-             jsonl.find("\"capabilities\":[\"direct_bash_rpc\"]") != std::string::npos &&
-             jsonl.find("\"direct_command_types\":[\"run_bash\",\"run_command\"]") != std::string::npos,
-         "RPC get_protocol reports supported protocol, session entry versions, and direct bash capabilities");
+             jsonl.find("\"capabilities\":[\"direct_bash_rpc\",\"job_controls\"]") != std::string::npos &&
+             jsonl.find("\"direct_command_types\":[\"run_bash\",\"run_command\",\"list_jobs\"") != std::string::npos,
+         "RPC get_protocol reports supported protocol, session entry versions, and direct job capabilities");
   expect(jsonl.find("\"id\":\"messages\"") != std::string::npos && jsonl.find("\"messages\"") != std::string::npos &&
              jsonl.find(current_entry_version) != std::string::npos && jsonl.find("hello") != std::string::npos && jsonl.find("answer") != std::string::npos &&
              jsonl.find("visible reasoning") != std::string::npos && jsonl.find("hidden redacted rpc reasoning") == std::string::npos &&
@@ -2065,6 +2217,7 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
   auto const root = create_empty_root("app-rpc-messages-ordered-output-caps");
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
+  std::filesystem::permissions(root, std::filesystem::perms::owner_all);
 
   auto open_session = [&](std::string_view name) {
     ava::app::runtime::OpenOptions options;
@@ -2165,7 +2318,8 @@ void test_app_rpc_protocol_version_and_resolver_reply_errors()
   std::istringstream in(input);
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  auto result =
+      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC protocol error loop recovers after unsupported commands");
   expect(jsonl.find("unsupported RPC protocol version") != std::string::npos && jsonl.find("RPC protocol_version must be an integer") != std::string::npos &&
@@ -2183,7 +2337,6 @@ void test_app_rpc_mcp_command_responses()
     return;
 
   auto const root = create_empty_root("app-rpc-mcp-commands");
-
 
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
@@ -2283,8 +2436,9 @@ void test_app_rpc_command_responses_for_context_compact_export()
   };
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
   input_buffer.push(std::string("{\"id\":\"plugins\",\"type\":\"list_plugins\"}\n") +
                     "{\"id\":\"plugin-enable\",\"type\":\"enable_plugin\",\"plugin_id\":\"com.example.rpc\"}\n"
                     "{\"id\":\"plugin-inspect\",\"type\":\"inspect_plugin\",\"plugin_id\":\"com.example.rpc\"}\n"
@@ -2359,8 +2513,8 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result =
-        ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out,
+                                    [&] noexcept { input_buffer.close(); });
   });
 
   input_buffer.push(R"JSON({"id":"cmd-allow","type":"run_command","command":"printf rpc-direct"})JSON"
@@ -2423,8 +2577,8 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result =
-        ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out,
+                                    [&] noexcept { input_buffer.close(); });
   });
 
   input_buffer.push(R"JSON({"id":"cmd-deny","type":"run_bash","command":"touch denied.txt"})JSON"
@@ -2444,12 +2598,12 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
   ava::app::runtime::session_ts::rat session_r(unlocked_session);
   auto const jsonl = output_buffer.str();
   auto entries = session_r->store.load();
-  auto const audited_deny =
-      entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
-        return entry.type == ava::session::EntryType::PermissionDecision && entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
-               entry.data_json.find("\"command\":\"<redacted one-shot command>\"") != std::string::npos &&
-               entry.data_json.find("\"resolution\":\"deny\"") != std::string::npos;
-      });
+  auto const audited_deny = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+                              return entry.type == ava::session::EntryType::PermissionDecision &&
+                                     entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
+                                     entry.data_json.find("\"command\":\"<redacted one-shot command>\"") != std::string::npos &&
+                                     entry.data_json.find("\"resolution\":\"deny\"") != std::string::npos;
+                            });
   expect(result.has_value(), "RPC direct command denial loop completes successfully");
   expect(denied && jsonl.find("\"id\":\"cmd-deny\"") != std::string::npos && jsonl.find("\"tool\":\"bash\"") != std::string::npos,
          "RPC direct command denial returns a structured bash tool error");
@@ -2488,8 +2642,9 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
     return ava::permissions::PermissionResolution::Allow;
   };
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
 
   auto const sleep_marker = workspace / "sleep-started";
   auto const sleep_command = "/bin/sh -c 'touch " + sleep_marker.string() + "; sleep 5'";
@@ -2544,8 +2699,9 @@ void test_app_rpc_compact_provider_failure_is_error_response()
 
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
   input_buffer.push("{\"id\":\"cmp-fail\",\"type\":\"compact\"}\n");
   bool const failed = output_buffer.wait_contains("compaction summary request failed with status 500", std::chrono::seconds(2));
   input_buffer.close();
@@ -2700,7 +2856,6 @@ void test_app_rpc_utf8_recovery_and_framing()
 
   auto const root = create_empty_root("app-rpc-invalid-utf8-recovery");
 
-
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
@@ -2781,8 +2936,9 @@ void test_app_rpc_terminal_publication_gates_prompt_id_reuse()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
 
   input_buffer.push("{\"id\":\"same\",\"type\":\"prompt\",\"message\":\"first\"}\n");
   bool const terminal_observable = output_buffer.wait_until_terminal(std::chrono::seconds(2));
@@ -2828,8 +2984,9 @@ void test_app_rpc_parent_terminal_precedes_queued_follow_up_start()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
 
   input_buffer.push("{\"id\":\"parent\",\"type\":\"prompt\",\"message\":\"parent\"}\n");
   bool const permission_requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
@@ -2881,7 +3038,8 @@ void test_app_rpc_eof_during_blocked_parent_publication_skips_follow_up()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, transport, runtime_options, input, out); });
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, transport, runtime_options, input, out); });
 
   input_buffer.push("{\"id\":\"parent\",\"type\":\"prompt\",\"message\":\"parent\"}\n");
   bool const parent_requested = transport.wait_for_request(std::chrono::seconds(2));
@@ -3026,7 +3184,8 @@ void test_app_rpc_worker_output_failure_wakes_blocked_input()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, transport, runtime_options, in, out,
+                                    [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"fail output\"}\n");
   bool const request_started = transport.wait_for_request(std::chrono::seconds(2));
@@ -3338,6 +3497,7 @@ void run_app_rpc_tests()
   test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request();
   test_app_rpc_malformed_line_recovery_and_unknown_command();
   test_app_rpc_state_list_sessions_and_open_session();
+  test_app_rpc_job_controls_are_active_safe_and_redacted();
   test_app_rpc_current_session_reads_reject_path_replacement();
   test_app_rpc_session_metadata_name_and_labels();
   test_app_rpc_session_tree_command_and_switch_navigation();

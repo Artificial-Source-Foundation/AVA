@@ -1505,8 +1505,8 @@ struct Info
   bool crosses_boundary;                // True if this contains a symbol link that crosses a boundary.
   std::string content;                  // The content of the file that opening this path reads.
 
-  void print_on(std::ostream& os) const;
 #ifdef CWDEBUG
+  void print_on(std::ostream& os) const;
   [[maybe_unused]] friend std::ostream& operator<<(std::ostream& os, Info const& info)
   {
     info.print_on(os);
@@ -1515,11 +1515,13 @@ struct Info
 #endif
 };
 
+#ifdef CWDEBUG
 void Info::print_on(std::ostream& os) const
 {
   os << std::boolalpha << "{path:" << path << ", writable_root:" << writable_root << ", target_path:" << target_path <<
     ", is_link:" << is_link << ", crosses_boundary:" << crosses_boundary << ", content:\"" << content << "\"}";
 }
+#endif
 
 // Verify the AnchorOpen entry points (open_writable / open_readable). These are
 // the single, orthogonal point through which tools open paths against the anchor

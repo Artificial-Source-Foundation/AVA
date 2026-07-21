@@ -62,6 +62,30 @@ bool is_json_value_delimiter(char ch)
   return ch == ',' || ch == '}' || std::isspace(static_cast<unsigned char>(ch)) != 0;
 }
 
+bool requires_session_v4(EntryType type) noexcept
+{
+  return type == EntryType::AssistantOutputItem || type == EntryType::AssistantTurnCommit;
+}
+
+ava::core::VoidResult validate_entry_type_version(EntryType type, long long version)
+{
+  if (version < 0 || version > kCurrentSessionEntryVersion)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "unsupported session entry version");
+    error.with_context("entry_type", std::string(to_string(type)));
+    error.with_context("version", std::to_string(version));
+    error.with_context("supported_version", std::to_string(kCurrentSessionEntryVersion));
+    return std::unexpected(std::move(error));
+  }
+  if (!requires_session_v4(type) || version >= 4)
+    return {};
+
+  auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session entry type requires version 4");
+  error.with_context("entry_type", std::string(to_string(type)));
+  error.with_context("version", std::to_string(version));
+  return std::unexpected(std::move(error));
+}
+
 ava::core::Result<std::optional<long long>> extract_entry_version(std::string_view line)
 {
   auto const start = ava::core::json::field_value_start(line, "version");
@@ -79,7 +103,7 @@ ava::core::Result<std::optional<long long>> extract_entry_version(std::string_vi
     ++index;
   auto const digits_start = index;
   while (index < line.size() && std::isdigit(static_cast<unsigned char>(line[index])) != 0) ++index;
-  if (index == digits_start || (index < line.size() && !is_json_value_delimiter(line[index])))
+  if (index == digits_start || (index - digits_start > 1 && line[digits_start] == '0') || (index < line.size() && !is_json_value_delimiter(line[index])))
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Session, "invalid session entry version");
     error.with_context("reason", "version must be an integer");
@@ -392,7 +416,15 @@ bool is_unsupported_session_version_error(ava::core::Error const& error)
 
 ava::core::Result<std::string> serialize_session_entry_line(SessionEntry const& entry)
 {
-  std::string line = "{\"version\":" + std::to_string(entry.version) + ",";
+  if (auto valid_type_version = validate_entry_type_version(entry.type, entry.version); !valid_type_version)
+    return std::unexpected(std::move(valid_type_version.error()));
+
+  // Version 0 is represented canonically by an absent member. Older session
+  // readers reject an explicit `version: 0`, so preserve the wire form when
+  // copying, branching, or exporting a parsed legacy entry.
+  std::string line = "{";
+  if (entry.version != 0)
+    line += "\"version\":" + std::to_string(entry.version) + ",";
   line += "\"id\":\"" + json_escape(entry.id) + "\",";
   line += "\"parent_id\":\"" + json_escape(entry.parent_id) + "\",";
   line += "\"type\":\"" + std::string(to_string(entry.type)) + "\",";
@@ -410,6 +442,14 @@ ava::core::Result<std::string> serialize_session_entry_line(SessionEntry const& 
 
 ava::core::Result<SessionEntry> parse_session_entry_line(std::string_view line, std::filesystem::path const& path)
 {
+  // Direct import/compatibility callers must not bypass the strict snapshot
+  // reader's UTF-8 gate before field extraction.
+  if (!ava::core::json::is_valid_utf8(line))
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session entry is not valid UTF-8");
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
   auto version = read_supported_entry_version(line, path);
   if (!version)
   {
@@ -435,6 +475,12 @@ ava::core::Result<SessionEntry> parse_session_entry_line(std::string_view line, 
   if (!type)
   {
     return std::unexpected(type.error());
+  }
+  if (auto valid_type_version = validate_entry_type_version(*type, *version); !valid_type_version)
+  {
+    auto error = std::move(valid_type_version.error());
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
   }
   auto const parent_id = extract_json_string(line, "parent_id");
   if (auto valid_parent_id = validate_parent_id(parent_id, id); !valid_parent_id)

@@ -2,9 +2,21 @@
 
 #include "ava/app/commands.h"
 
+#include <cstddef>
+#include <functional>
 #include <string_view>
 
 namespace ava::app {
+
+// `/import` is intentionally bounded independently of legacy runtime reads:
+// files are at most 8 MiB, records are strictly less than 1 MiB, and archives
+// contain at most 16,384 entries.
+inline constexpr std::size_t kMaxSessionImportFileBytes = 8U * 1024U * 1024U;
+inline constexpr std::size_t kMaxSessionImportLineBytes = 1024U * 1024U;
+inline constexpr std::size_t kMaxSessionImportEntries = 16384;
+
+// Narrow deterministic race seam for descriptor-anchoring tests only.
+void set_after_session_import_open_for_test(std::function<void()> hook);
 
 [[nodiscard]] ava::core::Result<CommandResult> run_sessions_command(runtime::Session& session, std::string_view query = {});
 [[nodiscard]] ava::core::Result<CommandResult> run_fork_command(runtime::Session& session, std::string_view name = {});

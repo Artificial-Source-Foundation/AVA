@@ -1584,7 +1584,7 @@ void test_acp_cancel_terminal_arbitration_and_provider_setup_paths()
     std::size_t assistant_entries = 0;
     if (entries)
       assistant_entries = static_cast<std::size_t>(
-          std::count_if(entries->begin(), entries->end(), [](auto const& entry) { return entry.type == ava::session::EntryType::AssistantMessage; }));
+          std::count_if(entries->begin(), entries->end(), [](auto const& entry) { return entry.type == ava::session::EntryType::AssistantTurnCommit; }));
 
     if (expect_cancel)
     {
@@ -2538,7 +2538,7 @@ void test_acp_peer_prompt_terminal_commit_arbitration()
     auto store = ava::session::SessionStore::open(workspace, *session_id, options.paths.sessions_dir);
     auto entries = store ? store->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(store.error()));
     auto const assistant_count =
-        entries ? std::count_if(entries->begin(), entries->end(), [](auto const& entry) { return entry.type == ava::session::EntryType::AssistantMessage; })
+        entries ? std::count_if(entries->begin(), entries->end(), [](auto const& entry) { return entry.type == ava::session::EntryType::AssistantTurnCommit; })
                 : 0;
     if (cancel_wins)
     {

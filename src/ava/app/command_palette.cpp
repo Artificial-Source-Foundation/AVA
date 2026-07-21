@@ -674,7 +674,7 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     auto& item = items[*index];
     add_completion(item, 0, "markdown", "Return or write a Markdown session export", "Sessions", {}, false);
     add_completion(item, 0, "html", "Return or write a self-contained HTML session export", "Sessions", {}, false);
-    add_completion(item, 0, "jsonl", "Return or write a raw AVA JSONL session archive", "Sessions", {}, false);
+    add_completion(item, 0, "jsonl", "Return or write a sanitized portable AVA JSONL archive", "Sessions", {}, false);
   }
 
   if (auto index = find_item_index(items, "/import"))

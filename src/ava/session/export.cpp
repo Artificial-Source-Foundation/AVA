@@ -1,13 +1,14 @@
 #include "sys.h"
 #include "ava/session/export.h"
-
+#include "ava/session/logical_projection.h"
+#include "ava/session/record.h"
 #include "ava/session/validation.h"
-
 #include "ava/core/json.h"
 
 #include <algorithm>
 #include <optional>
 #include <string_view>
+#include <utility>
 
 namespace ava::session {
 namespace {
@@ -21,8 +22,10 @@ std::string html_escape(std::string_view value)
 {
   std::string escaped;
   escaped.reserve(value.size());
-  for (char const ch : value) {
-    switch (ch) {
+  for (char const ch : value)
+  {
+    switch (ch)
+    {
       case '&':
         escaped += "&amp;";
         break;
@@ -50,11 +53,15 @@ std::size_t longest_backtick_run(std::string_view text) noexcept
 {
   std::size_t longest = 0;
   std::size_t current = 0;
-  for (char const ch : text) {
-    if (ch == '`') {
+  for (char const ch : text)
+  {
+    if (ch == '`')
+    {
       ++current;
       longest = std::max(longest, current);
-    } else {
+    }
+    else
+    {
       current = 0;
     }
   }
@@ -71,13 +78,17 @@ std::string sanitize_fenced_content(std::string_view content)
   std::string sanitized;
   sanitized.reserve(content.size());
   constexpr char kHex[] = "0123456789ABCDEF";
-  for (char const ch : content) {
+  for (char const ch : content)
+  {
     auto const byte = static_cast<unsigned char>(ch);
-    if ((byte < 0x20 && ch != '\n' && ch != '\t') || byte == 0x7F) {
+    if ((byte < 0x20 && ch != '\n' && ch != '\t') || byte == 0x7F)
+    {
       sanitized += "\\u00";
       sanitized.push_back(kHex[(byte >> 4U) & 0x0FU]);
       sanitized.push_back(kHex[byte & 0x0FU]);
-    } else {
+    }
+    else
+    {
       sanitized.push_back(ch);
     }
   }
@@ -91,37 +102,39 @@ void append_heading(std::string& out, std::string_view heading)
   out += "\n\n";
 }
 
-void append_fenced_block(std::string& out, std::string_view label, std::string_view content,
-                         std::string_view language = "text")
+void append_fenced_block(std::string& out, std::string_view label, std::string_view content, std::string_view language = "text")
 {
   out += label;
   out += ":\n\n";
   auto const sanitized_content = sanitize_fenced_content(content);
   auto const fence = fence_for(sanitized_content);
   out += fence;
-  if (!language.empty()) out += language;
+  if (!language.empty())
+    out += language;
   out += '\n';
   out += sanitized_content;
-  if (!sanitized_content.empty() && sanitized_content.back() != '\n') out += '\n';
+  if (!sanitized_content.empty() && sanitized_content.back() != '\n')
+    out += '\n';
   out += fence;
   out += "\n\n";
 }
 
-void append_optional_fenced_block(std::string& out, std::string_view label, std::optional<std::string> const& content,
-                                  std::string_view language = "text")
+void append_optional_fenced_block(std::string& out, std::string_view label, std::optional<std::string> const& content, std::string_view language = "text")
 {
-  if (content && !content->empty()) append_fenced_block(out, label, *content, language);
+  if (content && !content->empty())
+    append_fenced_block(out, label, *content, language);
 }
 
 std::string metadata_json(SessionEntry const& entry)
 {
-  return "{\"id\":" + json_string(entry.id) + ",\"parent_id\":" + json_string(entry.parent_id) +
-         ",\"type\":" + json_string(to_string(entry.type)) + ",\"timestamp\":" + json_string(entry.timestamp) + "}";
+  return "{\"id\":" + json_string(entry.id) + ",\"parent_id\":" + json_string(entry.parent_id) + ",\"type\":" + json_string(to_string(entry.type)) +
+         ",\"timestamp\":" + json_string(entry.timestamp) + "}";
 }
 
 void append_metadata(std::string& out, SessionEntry const& entry, ExportOptions const& options)
 {
-  if (!options.include_metadata) return;
+  if (!options.include_metadata)
+    return;
   append_fenced_block(out, "Metadata", metadata_json(entry), "json");
 }
 
@@ -149,24 +162,31 @@ bool bool_field_is_true(SessionEntry const& entry, std::string_view key)
 std::string success_text(SessionEntry const& entry)
 {
   auto const start = ava::core::json::field_value_start(entry.data_json, "success");
-  if (!start) return "unknown";
-  if (entry.data_json.substr(*start, 4) == "true") return "true";
-  if (entry.data_json.substr(*start, 5) == "false") return "false";
+  if (!start)
+    return "unknown";
+  if (entry.data_json.substr(*start, 4) == "true")
+    return "true";
+  if (entry.data_json.substr(*start, 5) == "false")
+    return "false";
   return "unknown";
 }
 
 std::string image_attachment_export_text(std::string_view data_json)
 {
   std::string text;
-  for (auto const& attachment : ava::core::json::objects_in_array_field(data_json, "attachments")) {
+  for (auto const& attachment : ava::core::json::objects_in_array_field(data_json, "attachments"))
+  {
     auto const id = ava::core::json::string_field(attachment, "id").value_or("");
     auto const mime_type = ava::core::json::string_field(attachment, "mime_type").value_or("");
     auto const byte_size = ava::core::json::integer_field(attachment, "byte_size").value_or(0);
-    if (id.empty() || mime_type.empty() || byte_size <= 0) continue;
-    if (!text.empty()) text += '\n';
+    if (id.empty() || mime_type.empty() || byte_size <= 0)
+      continue;
+    if (!text.empty())
+      text += '\n';
     text += "[image attachment: id=" + id + " mime=" + mime_type + " bytes=" + std::to_string(byte_size);
     auto const redacted_start = ava::core::json::field_value_start(attachment, "redacted");
-    if (redacted_start && attachment.substr(*redacted_start, 4) == "true") text += " redacted=true";
+    if (redacted_start && attachment.substr(*redacted_start, 4) == "true")
+      text += " redacted=true";
     text += ']';
   }
   return text;
@@ -237,7 +257,8 @@ void append_reasoning_block(std::string& out, SessionEntry const& entry, ExportO
   bool const redacted = bool_field_is_true(entry, "redacted");
   append_fenced_block(out, "Redacted", redacted ? "true" : "false");
   append_fenced_block(out, "Signature present", string_field(entry, "signature").has_value() ? "true" : "false");
-  if (!redacted) append_optional_fenced_block(out, "Text", string_field(entry, "text"));
+  if (!redacted)
+    append_optional_fenced_block(out, "Text", string_field(entry, "text"));
 }
 
 void append_reasoning_change(std::string& out, SessionEntry const& entry, ExportOptions const& options)
@@ -248,7 +269,8 @@ void append_reasoning_change(std::string& out, SessionEntry const& entry, Export
   append_optional_fenced_block(out, "Model", string_field(entry, "model"));
   append_optional_fenced_block(out, "Format", string_field(entry, "format"));
   append_optional_fenced_block(out, "Level", string_field(entry, "level"));
-  if (auto const budget_tokens = integer_field(entry, "budget_tokens")) {
+  if (auto const budget_tokens = integer_field(entry, "budget_tokens"))
+  {
     append_fenced_block(out, "Budget tokens", std::to_string(*budget_tokens));
   }
   append_optional_fenced_block(out, "Display", string_field(entry, "display"));
@@ -276,23 +298,23 @@ void append_session_metadata(std::string& out, SessionEntry const& entry, Export
 
 void append_compaction_number(std::string& out, SessionEntry const& entry, std::string_view label, std::string_view key)
 {
-  if (auto const value = integer_field(entry, key)) append_fenced_block(out, label, std::to_string(*value));
+  if (auto const value = integer_field(entry, key))
+    append_fenced_block(out, label, std::to_string(*value));
 }
 
 void append_compaction(std::string& out, SessionEntry const& entry, ExportOptions const& options)
 {
   append_heading(out, "Compaction");
   append_metadata(out, entry, options);
-  auto const summary =
-      string_field(entry, "summary").value_or("Prior context was compacted, but the summary is unavailable.");
+  auto const summary = string_field(entry, "summary").value_or("Prior context was compacted, but the summary is unavailable.");
   append_fenced_block(out, "Summary", summary);
   append_optional_fenced_block(out, "Carry-forward instructions", string_field(entry, "instructions"));
-  if (options.include_metadata) {
+  if (options.include_metadata)
+  {
     append_optional_fenced_block(out, "Trigger", string_field(entry, "trigger"));
     append_optional_fenced_block(out, "Status", string_field(entry, "status"));
     append_optional_fenced_block(out, "Model", string_field(entry, "model"));
-    append_fenced_block(out, "Summary unavailable",
-                        bool_field_is_true(entry, "summary_unavailable") ? "true" : "false");
+    append_fenced_block(out, "Summary unavailable", bool_field_is_true(entry, "summary_unavailable") ? "true" : "false");
     append_compaction_number(out, entry, "Estimated tokens", "estimated_tokens");
     append_compaction_number(out, entry, "Threshold tokens", "threshold_tokens");
     append_compaction_number(out, entry, "Keep recent tokens", "keep_recent_tokens");
@@ -305,7 +327,8 @@ void append_branch_summary(std::string& out, SessionEntry const& entry, ExportOp
   append_heading(out, "Branch Summary");
   append_metadata(out, entry, options);
   append_fenced_block(out, "Summary", string_field(entry, "summary").value_or(""));
-  if (options.include_metadata) append_fenced_block(out, "Data", entry.data_json, "json");
+  if (options.include_metadata)
+    append_fenced_block(out, "Data", entry.data_json, "json");
 }
 
 void append_error(std::string& out, SessionEntry const& entry, ExportOptions const& options)
@@ -331,15 +354,16 @@ void append_cancel(std::string& out, SessionEntry const& entry, ExportOptions co
   append_fenced_block(out, "Data", entry.data_json, "json");
 }
 
-}  // namespace
-
-std::string format_session_markdown(std::vector<SessionEntry> const& entries, ExportOptions const& options)
+std::string format_projected_session_markdown(std::vector<SessionEntry> const& entries, ExportOptions const& options)
 {
   std::string out = "# AVA Session Export\n\n";
 
-  for (auto const& entry : entries) {
-    if (is_internal_replay_user_message(entry)) continue;
-    switch (entry.type) {
+  for (auto const& entry : entries)
+  {
+    if (is_internal_replay_user_message(entry))
+      continue;
+    switch (entry.type)
+    {
       case EntryType::SessionStart:
         append_session_start(out, entry, options);
         break;
@@ -353,10 +377,12 @@ std::string format_session_markdown(std::vector<SessionEntry> const& entries, Ex
         append_assistant_message(out, entry, options);
         break;
       case EntryType::ToolCall:
-        if (options.include_tool_details) append_tool_call(out, entry, options);
+        if (options.include_tool_details)
+          append_tool_call(out, entry, options);
         break;
       case EntryType::ToolResult:
-        if (options.include_tool_details) append_tool_result(out, entry, options);
+        if (options.include_tool_details)
+          append_tool_result(out, entry, options);
         break;
       case EntryType::PermissionDecision:
         append_permission_decision(out, entry, options);
@@ -373,8 +399,14 @@ std::string format_session_markdown(std::vector<SessionEntry> const& entries, Ex
       case EntryType::ReasoningChange:
         append_reasoning_change(out, entry, options);
         break;
+      // Shared logical projection removes physical v4 records before this
+      // renderer; retain this defense in depth for direct internal callers.
+      case EntryType::AssistantOutputItem:
+      case EntryType::AssistantTurnCommit:
+        break;
       case EntryType::Compaction:
-        if (options.include_compactions) append_compaction(out, entry, options);
+        if (options.include_compactions)
+          append_compaction(out, entry, options);
         break;
       case EntryType::BranchSummary:
         append_branch_summary(out, entry, options);
@@ -391,9 +423,9 @@ std::string format_session_markdown(std::vector<SessionEntry> const& entries, Ex
   return out;
 }
 
-std::string format_session_html(std::vector<SessionEntry> const& entries, ExportOptions const& options)
+std::string format_projected_session_html(std::vector<SessionEntry> const& entries, ExportOptions const& options)
 {
-  auto const markdown = format_session_markdown(entries, options);
+  auto const markdown = format_projected_session_markdown(entries, options);
   std::string out;
   out.reserve(markdown.size() + 1024);
   out += "<!doctype html>\n";
@@ -403,13 +435,14 @@ std::string format_session_html(std::vector<SessionEntry> const& entries, Export
   out += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n";
   out += "<title>AVA Session Export</title>\n";
   out += "<style>\n";
-  out += ":root{color-scheme:light dark;font-family:ui-sans-serif,system-ui,sans-serif;}"
-         "body{margin:0;padding:2rem;background:Canvas;color:CanvasText;}"
-         "main{max-width:72rem;margin:0 auto;}"
-         "pre{white-space:pre-wrap;word-break:break-word;border:1px solid color-mix(in srgb,CanvasText 18%,transparent);"
-         "border-radius:6px;padding:1rem;background:color-mix(in srgb,CanvasText 4%,Canvas);line-height:1.45;}"
-         "h1{font-size:1.5rem;margin:0 0 1rem;}"
-         ".meta{color:color-mix(in srgb,CanvasText 65%,transparent);font-size:.875rem;margin-bottom:1rem;}\n";
+  out +=
+      ":root{color-scheme:light dark;font-family:ui-sans-serif,system-ui,sans-serif;}"
+      "body{margin:0;padding:2rem;background:Canvas;color:CanvasText;}"
+      "main{max-width:72rem;margin:0 auto;}"
+      "pre{white-space:pre-wrap;word-break:break-word;border:1px solid color-mix(in srgb,CanvasText 18%,transparent);"
+      "border-radius:6px;padding:1rem;background:color-mix(in srgb,CanvasText 4%,Canvas);line-height:1.45;}"
+      "h1{font-size:1.5rem;margin:0 0 1rem;}"
+      ".meta{color:color-mix(in srgb,CanvasText 65%,transparent);font-size:.875rem;margin-bottom:1rem;}\n";
   out += "</style>\n";
   out += "</head>\n";
   out += "<body>\n";
@@ -423,6 +456,67 @@ std::string format_session_html(std::vector<SessionEntry> const& entries, Export
   out += "</body>\n";
   out += "</html>\n";
   return out;
+}
+
+}  // namespace
+
+ava::core::Result<std::string> format_session_portable_jsonl_checked(std::vector<SessionEntry> const& entries)
+{
+  auto projected = project_portable_session_history(entries);
+  if (!projected)
+    return std::unexpected(std::move(projected.error()));
+  auto const validation = validate_session_replay(*projected);
+  if (!validation.ok())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "portable session archive is not independently replay-valid");
+    error.with_context("errors", std::to_string(validation.error_count));
+    auto const issue =
+        std::ranges::find_if(validation.issues, [](SessionReplayIssue const& issue) { return issue.severity == SessionReplayIssueSeverity::Error; });
+    if (issue != validation.issues.end())
+    {
+      error.with_context("issue_kind", std::string(to_string(issue->kind))).with_context("entry_id", issue->entry_id).with_context("issue", issue->message);
+    }
+    return std::unexpected(std::move(error));
+  }
+
+  std::string out;
+  for (auto const& entry : *projected)
+  {
+    auto line = serialize_session_entry_line(entry);
+    if (!line)
+      return std::unexpected(std::move(line.error()));
+    out += *line;
+    out += '\n';
+  }
+  return out;
+}
+
+ava::core::Result<std::string> format_session_markdown_checked(std::vector<SessionEntry> const& entries, ExportOptions const& options)
+{
+  auto projected = project_ordered_public_session_history(entries);
+  if (!projected)
+    return std::unexpected(std::move(projected.error()));
+  return format_projected_session_markdown(*projected, options);
+}
+
+ava::core::Result<std::string> format_session_html_checked(std::vector<SessionEntry> const& entries, ExportOptions const& options)
+{
+  auto projected = project_ordered_public_session_history(entries);
+  if (!projected)
+    return std::unexpected(std::move(projected.error()));
+  return format_projected_session_html(*projected, options);
+}
+
+std::string format_session_markdown(std::vector<SessionEntry> const& entries, ExportOptions const& options)
+{
+  auto formatted = format_session_markdown_checked(entries, options);
+  return formatted ? std::move(*formatted) : std::string{};
+}
+
+std::string format_session_html(std::vector<SessionEntry> const& entries, ExportOptions const& options)
+{
+  auto formatted = format_session_html_checked(entries, options);
+  return formatted ? std::move(*formatted) : std::string{};
 }
 
 }  // namespace ava::session

@@ -420,8 +420,9 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
   std::ostringstream error_err;
   auto error_result = ava::app::run_print_prompt(*error_session, "bad terminal sanitize", provider, error_transport, run_options, error_out, error_err);
   expect(!error_result && error_out.str().empty() && error_err.str().find('\x1b') == std::string::npos &&
-             error_err.str().find("?]52;c;RElBRw==? diagnostic") != std::string::npos,
-         "print text mode strips terminal controls from tty-bound diagnostics");
+             error_err.str().find("provider streaming diagnostic omitted") != std::string::npos && error_err.str().find("RElBRw==") == std::string::npos &&
+             error_err.str().find('\a') == std::string::npos,
+         "print diagnostics use fixed local provider errors without terminal-control or payload leakage");
 }
 
 void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
@@ -518,11 +519,11 @@ void test_app_print_mode_uses_headless_permission_policy()
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
-                                           .body = "data: {\"type\":\"response.function_call.added\",\"item_id\":"
+                                           .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
                                                    "\"call_outside\",\"name\":\"read_file\"}\n\n"
                                                    "data: "
                                                    "{\"type\":\"response.function_call_arguments.delta\","
-                                                   "\"item_id\":\"call_outside\",\"delta\":\"{"
+                                                   "\"call_id\":\"call_outside\",\"delta\":\"{"
                                                    "\\\"path\\\":\\\"" +
                                                    ava::core::json::escape(outside_path.generic_string()) +
                                                    "\\\"}\"}\n\n"
@@ -578,11 +579,11 @@ void test_app_print_mode_default_permission_denial_is_actionable()
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
-                                           .body = "data: {\"type\":\"response.function_call.added\",\"item_id\":"
+                                           .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
                                                    "\"call_outside\",\"name\":\"read_file\"}\n\n"
                                                    "data: "
                                                    "{\"type\":\"response.function_call_arguments.delta\","
-                                                   "\"item_id\":\"call_outside\",\"delta\":\"{"
+                                                   "\"call_id\":\"call_outside\",\"delta\":\"{"
                                                    "\\\"path\\\":\\\"" +
                                                    ava::core::json::escape(outside_path.generic_string()) +
                                                    "\\\"}\"}\n\n"
@@ -977,7 +978,8 @@ void test_app_print_json_mode_outputs_runtime_events()
   ava::tests::FakeTransport error_transport({ava::provider::HttpResponse{
       .status_code = 500,
       .headers = {},
-      .body = "upstream failure",
+      .body =
+          R"({"error":{"message":"safe upstream failure","unknown":{"private":"CLI_HTTP_NESTED_CANARY"}},"unknown":"CLI_HTTP_OUTER_CANARY","authorization":"Bearer CLI_HTTP_BEARER_CANARY"})",
   }});
   std::ostringstream error_out;
   std::ostringstream error_err;
@@ -985,8 +987,15 @@ void test_app_print_json_mode_outputs_runtime_events()
   auto const error_jsonl = error_out.str();
   auto const error_last_break = error_jsonl.size() > 1 ? error_jsonl.rfind('\n', error_jsonl.size() - 2) : std::string::npos;
   auto const error_last_line = error_jsonl.substr(error_last_break == std::string::npos ? 0 : error_last_break + 1);
-  expect(!error_result && error_err.str().empty() && error_last_line.find("\"name\":\"error\"") != std::string::npos,
-         "print json mode writes failed turns as JSONL envelopes ending in error");
+  auto const formatted_error = error_result ? std::string{} : error_result.error().format();
+  auto const combined_error_output = error_jsonl + error_err.str() + formatted_error;
+  expect(!error_result && error_err.str().empty() && error_last_line.find("\"name\":\"error\"") != std::string::npos &&
+             combined_error_output.find("OpenAI HTTP request failed with status 500") != std::string::npos &&
+             combined_error_output.find("safe upstream failure") == std::string::npos &&
+             combined_error_output.find("CLI_HTTP_NESTED_CANARY") == std::string::npos &&
+             combined_error_output.find("CLI_HTTP_OUTER_CANARY") == std::string::npos &&
+             combined_error_output.find("CLI_HTTP_BEARER_CANARY") == std::string::npos,
+         "print JSON CLI errors expose fixed status diagnostics without provider-controlled payload fields");
 }
 
 void test_app_print_json_mode_streams_provider_deltas_before_final_message()

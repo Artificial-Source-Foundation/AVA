@@ -788,6 +788,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   // immutable route rather than the legacy direct store callback. Isolated
   // runs bypass ambient plugin event hooks entirely.
   auto append_route = guard.append_route();
+  auto append_batch_route = guard.append_batch_route();
   runtime::EventSink event_sink = options.event_sink;
   if (!options.isolate_project_resources)
   {
@@ -800,6 +801,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   }
   auto runtime_options = options;
   runtime_options.active_append_route = append_route;
+  runtime_options.active_append_batch_route = append_batch_route;
   auto const caller_cancel_requested = runtime_options.cancel_requested;
   runtime_options.cancel_requested = [guard_token = guard.stop_token(), caller_cancel_requested] {
     return guard_token.stop_requested() || (caller_cancel_requested && caller_cancel_requested());
@@ -1045,7 +1047,9 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .background_jobs = session.background_jobs,
       .session_mutex = runtime_options.session_mutex,
       .append_entry = append_route,
+      .append_batch = std::move(append_batch_route),
       .session_read_authority = std::move(*session_read_authority),
+      .session_read_limits = session.session_read_limits,
       .parent_notification_sink = session.owner_append_route(),
       .on_phase = [&guard, &runtime_options](ava::agent::RunPhase phase) -> ava::core::VoidResult {
         if (phase == ava::agent::RunPhase::Completing && runtime_options.on_terminal_commit)

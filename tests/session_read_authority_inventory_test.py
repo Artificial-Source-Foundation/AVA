@@ -7,7 +7,7 @@ Intentional pathname reads are limited to observational/noncurrent surfaces:
   * the legacy load_session_metadata(SessionStore) compatibility adapter used by
     that tree builder; and
   * the unused generic project_transcript_bounded(SessionStore) compatibility
-    adapter.
+    adapter, which obtains one bounded vector before logical projection.
 
 Current runtime, provider, compaction, model-validation, permission, and RPC
 code must instead consume SessionReadAuthority.
@@ -63,7 +63,7 @@ def main() -> int:
     # Keep the small observational pathname inventory visible and intentional.
     require_text(source, "src/ava/session/session_tree.cpp", "load_session_metadata(*store)", failures)
     require_text(source, "src/ava/session/session_metadata.cpp", "auto entries = store.load();", failures)
-    require_text(source, "src/ava/session/transcript.cpp", "auto visited = store.visit_entries(", failures)
+    require_text(source, "src/ava/session/transcript.cpp", "auto entries = store.load_bounded(", failures)
     require_text(source, "src/ava/session/session_store.cpp", "inspect_bounded_for_listing", failures)
 
     if failures:

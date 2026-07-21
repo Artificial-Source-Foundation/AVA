@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/session/compaction.h"
+#include "ava/session/logical_projection.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
@@ -167,10 +168,14 @@ std::size_t estimate_tokens(std::string_view text) noexcept
   return (text.size() + 3) / 4;
 }
 
-std::size_t estimate_session_tokens(std::vector<SessionEntry> const& entries) noexcept
+ava::core::Result<std::size_t> estimate_session_tokens(std::vector<SessionEntry> const& entries)
 {
+  auto projected = project_ordered_public_session_history(entries);
+  if (!projected)
+    return std::unexpected(std::move(projected.error()));
+
   std::size_t tokens = 0;
-  for (auto const& entry : entries)
+  for (auto const& entry : *projected)
   {
     if (entry.type == EntryType::UserMessage || entry.type == EntryType::AssistantMessage || entry.type == EntryType::ReasoningBlock ||
         entry.type == EntryType::ToolCall || entry.type == EntryType::ToolResult)
@@ -193,10 +198,14 @@ std::size_t effective_auto_threshold_tokens(CompactionConfig const& config, std:
   return std::max<std::size_t>(1, (window * 4) / 5);
 }
 
-std::size_t estimate_active_context_tokens(std::vector<SessionEntry> const& entries) noexcept
+ava::core::Result<std::size_t> estimate_active_context_tokens(std::vector<SessionEntry> const& entries)
 {
+  auto projected = project_ordered_public_session_history(entries);
+  if (!projected)
+    return std::unexpected(std::move(projected.error()));
+
   std::size_t tokens = 0;
-  for (auto const& entry : entries)
+  for (auto const& entry : *projected)
   {
     if (entry.type == EntryType::Compaction)
     {
@@ -211,17 +220,19 @@ std::size_t estimate_active_context_tokens(std::vector<SessionEntry> const& entr
   return tokens;
 }
 
-CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries, CompactionConfig const& config) noexcept
+ava::core::Result<CompactionDecision> should_auto_compact(std::vector<SessionEntry> const& entries, CompactionConfig const& config)
 {
   return should_auto_compact(entries, config, std::nullopt);
 }
 
-CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries, CompactionConfig const& config,
-                                       std::optional<long long> context_window_tokens) noexcept
+ava::core::Result<CompactionDecision> should_auto_compact(std::vector<SessionEntry> const& entries, CompactionConfig const& config,
+                                                          std::optional<long long> context_window_tokens)
 {
-  auto const estimated = estimate_active_context_tokens(entries);
+  auto estimated = estimate_active_context_tokens(entries);
+  if (!estimated)
+    return std::unexpected(std::move(estimated.error()));
   auto const threshold = effective_auto_threshold_tokens(config, context_window_tokens);
-  return CompactionDecision{.should_compact = threshold > 0 && estimated >= threshold, .estimated_tokens = estimated, .threshold_tokens = threshold};
+  return CompactionDecision{.should_compact = threshold > 0 && *estimated >= threshold, .estimated_tokens = *estimated, .threshold_tokens = threshold};
 }
 
 ava::core::Result<SessionEntry> make_manual_compaction_entry(ManualCompactionRequest request)

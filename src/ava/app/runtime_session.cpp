@@ -6,6 +6,7 @@
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_prompt.h"
 #include "ava/app/runtime_reasoning.h"
+#include "ava/agent/agent_loop_session.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 #include "ava/core/ids.h"
@@ -120,10 +121,21 @@ ava::core::Result<std::pair<std::filesystem::path, std::filesystem::path>> resol
 }
 
 ava::core::Result<ava::session::SessionReadAuthority> bind_runtime_read_authority(ava::session::SessionStore const& store,
-                                                                                  ava::session::SessionLease const& lease)
+                                                                                  ava::session::SessionLease const& lease,
+                                                                                  ava::session::SessionReadLimits read_limits)
 {
-  return store.is_ephemeral() ? ava::session::SessionReadAuthority::create_ephemeral(store)
-                              : ava::session::SessionReadAuthority::create_persistent(store, lease);
+  return store.is_ephemeral() ? ava::session::SessionReadAuthority::create_ephemeral(store, read_limits)
+                              : ava::session::SessionReadAuthority::create_persistent(store, lease, read_limits);
+}
+
+ava::core::VoidResult reconcile_committed_function_calls(std::shared_ptr<ava::session::SessionAppendTarget> const& append_target,
+                                                         ava::session::SessionReadLimits limits)
+{
+  auto read_authority = append_target->read_authority();
+  if (!read_authority)
+    return std::unexpected(std::move(read_authority.error()));
+  return ava::agent::reconcile_unresolved_committed_function_calls(
+      *read_authority, [append_target](ava::session::SessionEntry entry) { return append_target->append(entry); }, limits);
 }
 
 ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptions const& options, ava::session::SessionStore& store,
@@ -160,10 +172,10 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
   std::optional<std::vector<ava::session::SessionEntry>> loaded_entries;
   if (load_existing_entries)
   {
-    auto read_authority = bind_runtime_read_authority(store, lease);
+    auto read_authority = bind_runtime_read_authority(store, lease, session_read_limits);
     if (!read_authority)
       return std::unexpected(std::move(read_authority.error()));
-    auto entries = read_authority->load_bounded(session_read_limits);
+    auto entries = read_authority->load();
     if (!entries)
       return std::unexpected(std::move(entries.error()));
     if (!options.pin_model_override)
@@ -214,9 +226,20 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
       return std::unexpected(std::move(appended.error()));
   }
 
+  bool const sessionless = store.is_ephemeral();
+  auto append_target = sessionless ? ava::session::SessionAppendTarget::create_ephemeral(store, session_read_limits)
+                                   : ava::session::SessionAppendTarget::create_persistent(store, lease, session_read_limits);
+  if (!append_target)
+    return std::unexpected(std::move(append_target.error()));
+  // Opening/resuming is the durable recovery boundary: the append target is
+  // already authority-checked, so any committed function call left without an
+  // exact result is closed without re-executing its tool.
+  if (auto reconciled = reconcile_committed_function_calls(*append_target, session_read_limits); !reconciled)
+    return std::unexpected(std::move(reconciled.error()));
+
   if (append_initial_session_name && options.initial_session_name)
   {
-    auto read_authority = bind_runtime_read_authority(store, lease);
+    auto read_authority = (*append_target)->read_authority();
     if (!read_authority)
       return std::unexpected(std::move(read_authority.error()));
     auto entries = read_authority->load();
@@ -226,8 +249,7 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
                                                            entries->empty() ? std::string{} : entries->back().id);
     if (!entry)
       return std::unexpected(std::move(entry.error()));
-    auto appended = store.is_ephemeral() ? store.append_ephemeral(*entry) : store.append(lease, *entry);
-    if (!appended)
+    if (auto appended = (*append_target)->append(*entry); !appended)
       return std::unexpected(std::move(appended.error()));
   }
 
@@ -252,17 +274,13 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
       anchor_set = std::move(*opened);
   }
 
-  bool const sessionless = store.is_ephemeral();
-  auto append_target =
-      sessionless ? ava::session::SessionAppendTarget::create_ephemeral(store) : ava::session::SessionAppendTarget::create_persistent(store, lease);
-  if (!append_target)
-    return std::unexpected(std::move(append_target.error()));
   runtime::Session session{.store = std::move(store),
                            .lease = std::move(lease),
                            .mode = options.mode,
                            .model = std::move(model),
                            .base_prompt = std::move(prompt_state->base_prompt),
                            .paths = options.paths,
+                           .session_read_limits = session_read_limits,
                            .workspace_dir = workspace_dir,
                            .current_dir = current_dir,
                            .additional_writable_dirs = options.additional_writable_dirs,
@@ -335,6 +353,9 @@ ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions co
     auto recovered = source->recover_torn_tail(*source_lease, session_read_limits);
     if (!recovered)
       return std::unexpected(std::move(recovered.error()));
+    auto staged_recovery = source->recover_incomplete_assistant_output_suffix(*source_lease, session_read_limits);
+    if (!staged_recovery)
+      return std::unexpected(std::move(staged_recovery.error()));
     auto branch = ava::session::create_session_branch(ava::session::SessionBranchOptions{.workspace_dir = workspace_dir,
                                                                                          .root_dir = options.paths.sessions_dir,
                                                                                          .source_session_id = *resolved,
@@ -401,6 +422,9 @@ ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions co
     auto recovered = store->recover_torn_tail(lease, session_read_limits);
     if (!recovered)
       return std::unexpected(std::move(recovered.error()));
+    auto staged_recovery = store->recover_incomplete_assistant_output_suffix(lease, session_read_limits);
+    if (!staged_recovery)
+      return std::unexpected(std::move(staged_recovery.error()));
   }
 
   auto session = construct_runtime_session(options, *store, lease, created, load_existing_entries, created && append_session_start,
@@ -432,6 +456,9 @@ ava::core::Result<runtime::Session> open_owned_runtime_session(runtime::OpenOpti
   auto recovered = store.recover_torn_tail(lease, session_read_limits);
   if (!recovered)
     return std::unexpected(std::move(recovered.error()));
+  auto staged_recovery = store.recover_incomplete_assistant_output_suffix(lease, session_read_limits);
+  if (!staged_recovery)
+    return std::unexpected(std::move(staged_recovery.error()));
   return construct_runtime_session(options, store, lease, created, true, false, false);
 }
 

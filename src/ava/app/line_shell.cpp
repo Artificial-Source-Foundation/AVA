@@ -36,6 +36,7 @@
 #include <iomanip>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -395,11 +396,12 @@ bool is_display_settings_command(std::string_view line) noexcept
 
 void add_token_component(std::optional<long long>& total, std::optional<long long> value)
 {
-  if (!value)
+  if (!value || *value < 0)
     return;
   if (!total)
     total = 0;
-  *total += *value;
+  constexpr auto maximum = std::numeric_limits<long long>::max();
+  *total = *total > maximum - *value ? maximum : *total + *value;
 }
 
 std::optional<long long> compact_token_total(ava::session::SessionStats const& stats)
@@ -474,7 +476,10 @@ std::optional<std::string> token_status_for_session(ava::app::runtime::Session c
   auto entries = read_authority->load();
   if (!entries)
     return std::nullopt;
-  return compact_token_status(ava::session::compute_session_stats(*entries), session.model.context_window_tokens);
+  auto stats = ava::session::compute_session_stats(*entries);
+  if (!stats)
+    return std::nullopt;
+  return compact_token_status(*stats, session.model.context_window_tokens);
 }
 
 std::string session_selector_footer_hint(ava::app::SessionSelectorSort sort, bool named_only, bool show_paths, bool show_archived, bool show_label_time)

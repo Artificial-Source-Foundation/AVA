@@ -1,13 +1,13 @@
 # Session Versioning Policy
 
-AVA sessions are append-only JSONL files. The storage format is intentionally inspectable and conservative: normal operation does not rewrite validated records. The sole startup mutation exception is the narrow, exclusively leased final-record framing recovery described below; migration work remains explicit, test-backed, and copy-forward.
+AVA sessions are append-only JSONL files. The storage format is intentionally inspectable and conservative: normal operation does not rewrite validated records. The only startup mutation exceptions are narrow, exclusively leased recovery of a final torn record and of a proven complete-line uncommitted v4 staging suffix; migration work remains explicit, test-backed, and copy-forward.
 
 ## Current Contract
 
-- Session entries use the top-level `version` field. The current writer version is `3` (`kCurrentSessionEntryVersion`).
+- Session entries use the top-level `version` field. The current writer version is `4` (`kCurrentSessionEntryVersion`).
 - Entries without a `version` field are treated as legacy version `0` for read compatibility. New files should not write explicit `version:0` entries.
 - Readers accept missing-version legacy entries and explicit versions `1..kCurrentSessionEntryVersion`, then reject future versions with an actionable session error. Replay validation also treats legacy version `0` as supported.
-- Payloads that need independent evolution use `data.schema_version`. Today, session metadata and branch summary payloads use `schema_version:1`. Tool-result `structured_result` objects also use `schema_version:1` inside their parent entry.
+- Payloads that need independent evolution use `data.schema_version`. Session metadata, branch summary, `assistant_output_item`, and `assistant_turn_commit` payloads use `schema_version:1`. Tool-result `structured_result` objects also use `schema_version:1` inside their parent entry.
 - Compaction payloads predate this payload-versioning convention and do not currently carry `data.schema_version`; a future incompatible compaction payload change should add and validate a schema version before relying on this policy.
 - Unknown or unsupported payload schema versions are replay-validation errors, not silent best-effort reads.
 
@@ -18,6 +18,16 @@ AVA sessions are append-only JSONL files. The storage format is intentionally in
 - Bump `data.schema_version` for one payload type when only that payload changes incompatibly.
 - Bump `kCurrentSessionEntryVersion` only when the common entry envelope, parent/id semantics, replay ordering, or provider-replay meaning changes for multiple entry types.
 - A version bump must update protocol/docs text, replay validation, session export if affected, and focused session tests before release.
+
+## Version 4 Ordered Assistant Output
+
+Version 4 adds two private physical entry types: `assistant_output_item` and `assistant_turn_commit`. Both require envelope version `4` and strict payload `schema_version:1`; unknown, duplicate, variant-incompatible, leading-zero integer, or out-of-bound fields are rejected. Items are staged in contiguous order and a matching commit makes them visible. The commit alone carries provider/model, finish metadata, and optional usage/cost; its `item_count` must match dense item sequences `0..item_count-1` (maximum 4096 items/indexes).
+
+A complete final staged suffix is not a migration shortcut: it is an incomplete-turn warning and has no logical replay, stats, compaction, or public-export meaning. A v4 function result is valid only in its immediate post-commit window: after that turn's commit and before the next user message, assistant message, v4 item/commit, or compaction boundary (audit/bookkeeping entries may intervene). Any non-final staged group, malformed commit, sparse/duplicate identity, or other classifier diagnostic is an error. Import rejects even the warning with source-recovery guidance. Branch/fork/clone classify the selected prefix before copying and reject every v4 diagnostic, preventing a target from ending inside either a staged or committed group while still permitting an explicit earlier target before a later staged suffix.
+
+Readers support mixed v0–v3/v4 files without rewriting old records. A valid committed v4 turn projects to the legacy logical shape for stats: one assistant message plus its reasoning/function items, with accounting read once from the commit. A v4 function result must bind the exact `assistant_output_entry_id` and occur after the commit; this remains strict even when legacy v3 tool-result pairing is configured leniently.
+
+AgentLoop writes v4 transactions additively while provider replay reconstructs their ordered private items. Read-side consumers deliberately have three views: RPC history uses the legacy-compatible assistant/reasoning/tool projection with additive private-free `ordered_output` and text phase; Markdown/HTML, transcript, compaction, and token estimation use a per-item ordered public projection; portable JSONL retains committed physical v4 item/commit records and exact tool-result bindings. The portable view strips provider IDs/output indexes and native/signature/redacted values, validates before return, and remains importable without claiming provider-native lossless replay. Incomplete final staging is ignored by these read views and every other classifier diagnostic fails closed; mixed v0–v3 records remain compatible.
 
 ## Narrow Torn-Tail Recovery
 
@@ -36,9 +46,13 @@ The quarantine is an operator recovery aid, not an automatically replayed entry.
 
 Cooperating AVA writers share the existing per-path append mutex, and append refuses a nonempty file whose last byte is not LF. Advisory leases and the in-process mutex cannot stop an uncooperative external process from modifying bytes during recovery or between the append framing check and write. Closing that residual external-writer race requires future descriptor-pinned writer hardening; the current policy must not be described as a sandbox or as durability against arbitrary writers.
 
+## Complete Staged-Suffix Recovery
+
+After torn-tail handling, opening/resuming under the same exact active lease also inspects the complete v4 assistant-output suffix. Only a structurally valid final contiguous `assistant_output_item` group with no commit is recoverable. Persistent recovery first quarantines its exact complete-line bytes in a unique owner-only sibling, syncs that artifact and its directory, then truncates and syncs only that proven suffix. Ephemeral recovery removes only the corresponding in-memory suffix. A committed turn, an interior group, an invalid item/commit, sparse sequence, duplicate identity, or any unrelated boundary is never removed and fails closed unchanged. This is recovery, not migration, and it is distinct from torn-tail framing repair.
+
 ## Migration Expectations
 
-- Normal AVA startup opens old supported sessions in place and appends new entries with the current writer version, subject only to the leased final-record recovery above.
+- Normal AVA startup opens old supported sessions in place and appends new entries with the current writer version, subject only to leased torn-tail framing recovery followed by leased complete staged-suffix recovery.
 - Outside that narrow recovery, AVA does not destructively rewrite session JSONL during list, export, tree, fork, clone, compact, or migration.
 - If a future change needs migration, prefer a copy-forward flow: read the source session, validate it, write a new session or backup file with upgraded entries, and keep the original file untouched unless the user explicitly requests replacement.
 - Repair or migration tools must reject symlinked, oversized, malformed, duplicate-key, over-nested, semantic-invalid, or future-version input except for the one quarantined `Invalid` final suffix case above.

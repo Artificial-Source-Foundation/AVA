@@ -8,6 +8,7 @@
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/agent/agent_loop.h"
+#include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/bash_tool.h"
@@ -20,17 +21,21 @@
 #include "ava/config/openai_oauth.h"
 #include "ava/config/prompt_config.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/session/assistant_output.h"
 #include "ava/session/attachments.h"
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
+#include "ava/session/logical_projection.h"
 #include "ava/session/record.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_store.h"
 #include "ava/session/session_tree.h"
 #include "ava/session/stats.h"
+#include "ava/session/transcript.h"
 #include "ava/session/validation.h"
 #include "ava/session/validation_fields.h"
 #include "ava/permissions/permission.h"
+#include "ava/provider/anthropic_provider.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/context/context_loader.h"
@@ -38,15 +43,20 @@
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <barrier>
 #include <chrono>
 #include <climits>
+#include <cmath>
 #include <cstdlib>
 #include <cwchar>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
+#include <iomanip>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -462,6 +472,14 @@ void test_session_record_round_trip()
       "/tmp/session.jsonl");
   expect(!malformed && malformed.error().format().find("parent_id") != std::string::npos, "session record parser rejects unsafe parent ids");
 
+  std::string invalid_utf8_record =
+      "{\"version\":2,\"id\":\"entry\",\"parent_id\":\"\",\"type\":\"user_message\",\"timestamp\":\"2026-04-27T00:00:00Z\",\"data\":{\"text\":\"";
+  invalid_utf8_record.push_back(static_cast<char>(0xFF));
+  invalid_utf8_record += "\"}}";
+  auto invalid_utf8 = ava::session::parse_session_entry_line(invalid_utf8_record, "/tmp/session.jsonl");
+  expect(!invalid_utf8 && invalid_utf8.error().message() == "session entry is not valid UTF-8",
+         "session persistence parsing rejects invalid UTF-8 before semantic field extraction");
+
   auto too_large = ava::session::serialize_session_entry_line(ava::session::SessionEntry{
       .id = std::string(600000, '"'),
       .parent_id = "",
@@ -830,7 +848,8 @@ void test_session_branch_fork_and_clone_copy_source_safely()
                                                       .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-test\","
                                                                    "\"context_sources\":0,\"context_window_tokens\":128000,\"max_output_tokens\":4096,"
                                                                    "\"prompt_override\":false,\"supports_tools\":true,\"supports_streaming\":true,"
-                                                                   "\"supports_reasoning\":true,\"reports_usage\":true}"}) &&
+                                                                   "\"supports_reasoning\":true,\"reports_usage\":true}",
+                                                      .version = 0}) &&
              append_session_entry_for_test(
                  source_store, ava::session::SessionEntry{.id = "entry_user",
                                                           .parent_id = "entry_start",
@@ -893,11 +912,12 @@ void test_session_branch_fork_and_clone_copy_source_safely()
   expect(!fork_contender && fork_contender.error().message().find("already owned") != std::string::npos,
          "session branch retains destination ownership after all copied records and metadata are published");
   auto fork_entries = forked->store.load();
-  expect(fork_entries && forked->copied_entry_count == 2 && fork_entries->size() == 3 && (*fork_entries)[1].version == 2 &&
-             fork_entries->back().type == ava::session::EntryType::SessionMetadata && forked->metadata.name == "Forked" &&
-             forked->metadata.labels.size() == 1 && forked->metadata.labels[0] == "forked" && forked->metadata.parent_session_id == "session_source" &&
-             forked->metadata.source_session_id == "session_source" && forked->metadata.branch_from_entry_id == "entry_user" &&
-             forked->metadata.branch_origin == "fork",
+  auto const fork_bytes = read_binary_file(forked->store.session_path());
+  expect(fork_entries && forked->copied_entry_count == 2 && fork_entries->size() == 3 && (*fork_entries)[0].version == 0 && (*fork_entries)[1].version == 2 &&
+             fork_bytes.starts_with("{\"id\":\"entry_start\"") && fork_entries->back().type == ava::session::EntryType::SessionMetadata &&
+             forked->metadata.name == "Forked" && forked->metadata.labels.size() == 1 && forked->metadata.labels[0] == "forked" &&
+             forked->metadata.parent_session_id == "session_source" && forked->metadata.source_session_id == "session_source" &&
+             forked->metadata.branch_from_entry_id == "entry_user" && forked->metadata.branch_origin == "fork",
          "session fork preserves copied entry versions and appends provenance metadata");
   auto fork_attachment = ava::session::load_image_attachment(
       forked->store, ava::session::ImageAttachmentRef{.id = "branch_img",
@@ -933,9 +953,10 @@ void test_session_branch_fork_and_clone_copy_source_safely()
   auto source_entries_after = source_store.load();
   expect(clone_entries && source_entries_after && source_entries_after->size() == source_entries_before->size() &&
              cloned->copied_entry_count == source_entries_before->size() && clone_entries->size() == source_entries_before->size() + 1 &&
-             cloned->metadata.name == "Cloned" && cloned->metadata.labels.size() == 1 && cloned->metadata.labels[0] == "source" &&
-             cloned->metadata.parent_session_id == "session_source" && cloned->metadata.branch_from_entry_id == source_entries_before->back().id &&
-             cloned->metadata.branch_origin == "clone" && cloned->metadata.actor == "test",
+             (*clone_entries)[0].version == 0 && cloned->metadata.name == "Cloned" && cloned->metadata.labels.size() == 1 &&
+             cloned->metadata.labels[0] == "source" && cloned->metadata.parent_session_id == "session_source" &&
+             cloned->metadata.branch_from_entry_id == source_entries_before->back().id && cloned->metadata.branch_origin == "clone" &&
+             cloned->metadata.actor == "test",
          "session clone copies the full source session without modifying the source file and exposes actor");
   auto clone_attachment = ava::session::load_image_attachment(
       cloned->store, ava::session::ImageAttachmentRef{.id = "branch_img",
@@ -954,6 +975,61 @@ void test_session_branch_fork_and_clone_copy_source_safely()
                                                                                         .mode = ava::session::SessionBranchMode::Fork,
                                                                                         .actor = "test"});
   expect(!missing && missing.error().category() == ava::core::ErrorCategory::NotFound, "session fork rejects missing branch source entries");
+
+  auto v4_source =
+      ava::session::SessionStore(ava::session::SessionStoreOptions{.root_dir = sessions_dir, .workspace_dir = workspace, .session_id = "session_v4_prefix"});
+  expect(append_session_entry_for_test(v4_source, ava::session::SessionEntry{.id = "v4_safe_prefix",
+                                                                             .parent_id = "",
+                                                                             .type = ava::session::EntryType::UserMessage,
+                                                                             .timestamp = "2026-07-18T00:00:00Z",
+                                                                             .data_json = "{\"text\":\"safe\"}",
+                                                                             .version = 3}) &&
+             append_session_entry_for_test(
+                 v4_source, ava::session::SessionEntry{.id = "v4_committed_item",
+                                                       .parent_id = "v4_safe_prefix",
+                                                       .type = ava::session::EntryType::AssistantOutputItem,
+                                                       .timestamp = "2026-07-18T00:00:01Z",
+                                                       .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"turn_committed\",\"sequence\":0,\"kind\":"
+                                                                    "\"text\",\"text\":\"committed\",\"assistant_phase\":\"commentary\"}"}) &&
+             append_session_entry_for_test(
+                 v4_source, ava::session::SessionEntry{.id = "v4_committed_commit",
+                                                       .parent_id = "v4_committed_item",
+                                                       .type = ava::session::EntryType::AssistantTurnCommit,
+                                                       .timestamp = "2026-07-18T00:00:02Z",
+                                                       .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"turn_committed\",\"item_count\":1,"
+                                                                    "\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"finish_reason\":\"completed\"}"}) &&
+             append_session_entry_for_test(
+                 v4_source, ava::session::SessionEntry{.id = "v4_staged_item",
+                                                       .parent_id = "v4_committed_commit",
+                                                       .type = ava::session::EntryType::AssistantOutputItem,
+                                                       .timestamp = "2026-07-18T00:00:03Z",
+                                                       .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"turn_staged\",\"sequence\":0,\"kind\":"
+                                                                    "\"text\",\"text\":\"staged\",\"assistant_phase\":\"final_answer\"}"}),
+         "session branch test writes committed and staged v4 prefix fixtures");
+  auto branch_options = [&](std::string branch_from_entry_id, ava::session::SessionBranchMode mode = ava::session::SessionBranchMode::Fork) {
+    return ava::session::SessionBranchOptions{.workspace_dir = workspace,
+                                              .root_dir = sessions_dir,
+                                              .source_session_id = "session_v4_prefix",
+                                              .branch_from_entry_id = std::move(branch_from_entry_id),
+                                              .name = std::nullopt,
+                                              .labels = std::nullopt,
+                                              .mode = mode,
+                                              .actor = "test"};
+  };
+  auto before_staged = ava::session::create_session_branch(branch_options("v4_safe_prefix"));
+  auto inside_committed = ava::session::create_session_branch(branch_options("v4_committed_item"));
+  auto at_committed_boundary = ava::session::create_session_branch(branch_options("v4_committed_commit"));
+  auto inside_staged = ava::session::create_session_branch(branch_options("v4_staged_item"));
+  auto clone_with_staged_suffix = ava::session::create_session_branch(branch_options({}, ava::session::SessionBranchMode::Clone));
+  expect(before_staged && before_staged->copied_entry_count == 1 && at_committed_boundary && at_committed_boundary->copied_entry_count == 3 &&
+             !inside_committed && !inside_staged && !clone_with_staged_suffix &&
+             inside_committed.error().message() ==
+                 "branch prefix contains an assistant-output diagnostic; choose a committed boundary or recover the source session" &&
+             inside_staged.error().message() ==
+                 "branch prefix contains an assistant-output diagnostic; choose a committed boundary or recover the source session" &&
+             clone_with_staged_suffix.error().message() ==
+                 "branch prefix contains an assistant-output diagnostic; choose a committed boundary or recover the source session",
+         "fork and clone accept only v4 logical boundaries and allow an explicit target before a later staged suffix");
 }
 
 void test_session_branch_summary_appends_to_source_session()
@@ -1022,7 +1098,7 @@ void test_session_branch_summary_appends_to_source_session()
     validation_message += validation.issues.front().message;
   }
   expect(validation.ok(), validation_message);
-  expect(stats.counts.branch_summary == 1, "branch summary entries count in source session stats");
+  expect(stats->counts.branch_summary == 1, "branch summary entries count in source session stats");
   expect(exported.find("Abandoned branch explored the alternate answer.") != std::string::npos, "branch summary entries export from the source session");
 
   auto root_after_tip = ava::session::append_branch_summary(ava::session::BranchSummaryOptions{.workspace_dir = workspace,
@@ -1062,6 +1138,39 @@ void test_session_branch_summary_appends_to_source_session()
                                                                                              .actor = "test"});
   expect(!bad_provider && bad_provider.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "branch summary rejects control bytes in provider metadata while allowing summary newlines");
+
+  auto staged = append_session_entry_for_test(
+      source_store, ava::session::SessionEntry{
+                        .id = "entry_staged",
+                        .parent_id = source_entries_after->back().id,
+                        .type = ava::session::EntryType::AssistantOutputItem,
+                        .timestamp = "2026-04-27T00:00:03Z",
+                        .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"summary_staged\",\"sequence\":0,\"kind\":\"text\",\"text\":\"staged\","
+                                     "\"assistant_phase\":\"commentary\"}"});
+  auto incomplete_source = ava::session::append_branch_summary(ava::session::BranchSummaryOptions{.workspace_dir = workspace,
+                                                                                                  .root_dir = sessions_dir,
+                                                                                                  .source_session_id = "session_source",
+                                                                                                  .branch_root_entry_id = "entry_user",
+                                                                                                  .branch_tip_entry_id = "entry_assistant",
+                                                                                                  .summary = "must not append after a staged output",
+                                                                                                  .provider = "openai",
+                                                                                                  .model = "gpt-test",
+                                                                                                  .reason = "test",
+                                                                                                  .actor = "test"});
+  auto after_incomplete = source_store.load();
+  auto incomplete_summary_message =
+      std::string("direct branch summary appends refuse even an incomplete assistant-output suffix without adding an interior record");
+  if (!staged)
+    incomplete_summary_message += ": staged fixture append failed: " + staged.error().format();
+  else if (incomplete_source)
+    incomplete_summary_message += ": branch summary unexpectedly appended";
+  else if (incomplete_source.error().category() != ava::core::ErrorCategory::Session)
+    incomplete_summary_message += ": branch summary error: " + incomplete_source.error().format();
+  else if (!after_incomplete)
+    incomplete_summary_message += ": source reload failed: " + after_incomplete.error().format();
+  expect(staged && !incomplete_source && incomplete_source.error().category() == ava::core::ErrorCategory::Session && after_incomplete &&
+             after_incomplete->size() == source_entries_after->size() + 1 && after_incomplete->back().id == "entry_staged",
+         incomplete_summary_message);
 }
 
 void test_session_stats_helper()
@@ -1121,25 +1230,49 @@ void test_session_stats_helper()
   };
 
   auto const stats = ava::session::compute_session_stats(entries);
-  expect(stats.entry_count == entries.size() && stats.first_timestamp == "2026-04-29T00:00:00Z" && stats.last_timestamp == "2026-04-29T00:00:06Z",
+  expect(stats->entry_count == entries.size() && stats->first_timestamp == "2026-04-29T00:00:00Z" && stats->last_timestamp == "2026-04-29T00:00:06Z",
          "session stats helper reports entry count and timestamps");
-  expect(stats.counts.session_start == 1 && stats.counts.user_message == 1 && stats.counts.assistant_message == 1 && stats.counts.reasoning_block == 1 &&
-             stats.counts.reasoning_change == 1 && stats.counts.mode_change == 1 && stats.counts.compaction == 1 && stats.counts.cancel == 1 &&
-             stats.counts.error == 1,
+  expect(stats->counts.session_start == 1 && stats->counts.user_message == 1 && stats->counts.assistant_message == 1 && stats->counts.reasoning_block == 1 &&
+             stats->counts.reasoning_change == 1 && stats->counts.mode_change == 1 && stats->counts.compaction == 1 && stats->counts.cancel == 1 &&
+             stats->counts.error == 1,
          "session stats helper reports current counts without durable internal replay user messages");
-  expect(stats.input_tokens && *stats.input_tokens == 3 && stats.output_tokens && *stats.output_tokens == 2 && stats.total_tokens && *stats.total_tokens == 5,
+  expect(stats->input_tokens && *stats->input_tokens == 3 && stats->output_tokens && *stats->output_tokens == 2 && stats->total_tokens &&
+             *stats->total_tokens == 5,
          "session stats helper aggregates exact token fields only from provider usage");
-  expect(stats.reasoning_tokens && *stats.reasoning_tokens == 1 && stats.cache_read_tokens && *stats.cache_read_tokens == 2 && !stats.cache_write_tokens,
+  expect(stats->reasoning_tokens && *stats->reasoning_tokens == 1 && stats->cache_read_tokens && *stats->cache_read_tokens == 2 && !stats->cache_write_tokens,
          "session stats helper keeps estimated cache token fields out of exact totals");
-  expect(stats.estimated_input_bytes && *stats.estimated_input_bytes == 10 && stats.estimated_output_bytes && *stats.estimated_output_bytes == 20 &&
-             stats.estimated_total_bytes && *stats.estimated_total_bytes == 30,
+  expect(stats->estimated_input_bytes && *stats->estimated_input_bytes == 10 && stats->estimated_output_bytes && *stats->estimated_output_bytes == 20 &&
+             stats->estimated_total_bytes && *stats->estimated_total_bytes == 30,
          "session stats helper aggregates separate estimated byte totals");
-  expect(stats.total_cost_usd && *stats.total_cost_usd > 0.0009L && *stats.total_cost_usd < 0.0011L,
+  expect(stats->total_cost_usd && *stats->total_cost_usd > 0.0009L && *stats->total_cost_usd < 0.0011L,
          "session stats helper aggregates exact cost fields without estimated fallback cost");
-  expect(stats.exact_usage_entries == 1 && stats.estimated_usage_entries == 1, "session stats helper counts exact and estimated usage entries");
+  expect(stats->exact_usage_entries == 1 && stats->estimated_usage_entries == 1, "session stats helper counts exact and estimated usage entries");
 
   auto const empty_stats = ava::session::compute_session_stats({});
-  expect(!empty_stats.input_tokens && !empty_stats.total_cost_usd, "session stats helper leaves token and cost totals absent when no entry JSON supplies them");
+  expect(!empty_stats->input_tokens && !empty_stats->total_cost_usd,
+         "session stats helper leaves token and cost totals absent when no entry JSON supplies them");
+}
+
+void test_session_stats_saturates_large_usage_and_costs()
+{
+  std::ostringstream maximum_cost;
+  maximum_cost << std::scientific << std::setprecision(std::numeric_limits<long double>::max_digits10) << std::numeric_limits<long double>::max();
+  auto make_usage_entry = [&](std::string id, std::string parent, long long input_tokens, long long total_tokens, std::string cost) {
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = std::move(parent),
+                                      .type = ava::session::EntryType::AssistantMessage,
+                                      .timestamp = "2026-04-29T00:00:00Z",
+                                      .data_json = "{\"usage\":{\"input_tokens\":" + std::to_string(input_tokens) + ",\"total_tokens\":" +
+                                                   std::to_string(total_tokens) + ",\"cost_usd\":" + cost + ",\"source\":\"provider\"}}"};
+  };
+  std::vector<ava::session::SessionEntry> const entries = {
+      make_usage_entry("large_usage_1", "", LLONG_MAX - 2, LLONG_MAX - 1, maximum_cost.str()),
+      make_usage_entry("large_usage_2", "large_usage_1", 9, 7, "1.0"),
+  };
+  auto const stats = ava::session::compute_session_stats(entries);
+  expect(stats && stats->input_tokens && *stats->input_tokens == LLONG_MAX && stats->total_tokens && *stats->total_tokens == LLONG_MAX &&
+             stats->known_cost_usd && std::isfinite(*stats->known_cost_usd) && *stats->known_cost_usd == std::numeric_limits<long double>::max(),
+         "session stats saturates near-LLONG_MAX token totals and overflowing finite cost aggregates");
 }
 
 void test_session_stats_omits_incomplete_cost_total()
@@ -1161,10 +1294,10 @@ void test_session_stats_omits_incomplete_cost_total()
   };
 
   auto const stats = ava::session::compute_session_stats(entries);
-  expect(stats.exact_usage_entries == 2 && stats.estimated_usage_entries == 0, "session stats counts mixed exact usage entries");
-  expect(stats.known_cost_usd && *stats.known_cost_usd > 0.0009L && *stats.known_cost_usd < 0.0011L,
+  expect(stats->exact_usage_entries == 2 && stats->estimated_usage_entries == 0, "session stats counts mixed exact usage entries");
+  expect(stats->known_cost_usd && *stats->known_cost_usd > 0.0009L && *stats->known_cost_usd < 0.0011L,
          "session stats preserves the known portion of incomplete cost totals");
-  expect(!stats.total_cost_usd && !stats.cost_complete && stats.unknown_cost_entries == 1,
+  expect(!stats->total_cost_usd && !stats->cost_complete && stats->unknown_cost_entries == 1,
          "session stats omits total cost when exact billable usage has unknown cost");
 }
 
@@ -1180,11 +1313,539 @@ void test_session_stats_flags_legacy_assistant_tokens_without_cost()
   };
 
   auto const stats = ava::session::compute_session_stats(entries);
-  expect(stats.input_tokens && *stats.input_tokens == 7 && stats.output_tokens && *stats.output_tokens == 3 && stats.total_tokens && *stats.total_tokens == 10,
+  expect(stats->input_tokens && *stats->input_tokens == 7 && stats->output_tokens && *stats->output_tokens == 3 && stats->total_tokens &&
+             *stats->total_tokens == 10,
          "session stats still aggregates legacy top-level assistant token totals");
-  expect(stats.exact_usage_entries == 0 && stats.estimated_usage_entries == 0, "legacy top-level assistant token stats do not masquerade as usage objects");
-  expect(!stats.total_cost_usd && !stats.cost_complete && stats.unknown_cost_entries == 1,
+  expect(stats->exact_usage_entries == 0 && stats->estimated_usage_entries == 0, "legacy top-level assistant token stats do not masquerade as usage objects");
+  expect(!stats->total_cost_usd && !stats->cost_complete && stats->unknown_cost_entries == 1,
          "legacy top-level assistant tokens without cost make cost stats incomplete");
+}
+
+void test_assistant_output_v4_session_schema_and_replay()
+{
+  using ava::session::AssistantOutputFunctionCall;
+  using ava::session::AssistantOutputItem;
+  using ava::session::AssistantOutputItemKind;
+  using ava::session::AssistantOutputReasoning;
+  using ava::session::AssistantOutputText;
+  using ava::session::AssistantOutputTextPhase;
+  using ava::session::AssistantTurnCommit;
+  using ava::session::EntryType;
+  using ava::session::SessionEntry;
+
+  auto make_entry = [](std::string id, EntryType type, std::string data_json, long long version = 4) {
+    return SessionEntry{
+        .id = std::move(id), .parent_id = "", .type = type, .timestamp = "2026-07-18T00:00:00Z", .data_json = std::move(data_json), .version = version};
+  };
+  auto make_item = [&](std::string id, AssistantOutputItem item) {
+    auto data = ava::session::serialize_assistant_output_item_data_json(item);
+    expect(data.has_value(), "v4 assistant output item codec serializes a strict item variant");
+    return make_entry(std::move(id), EntryType::AssistantOutputItem, data ? *data : "{}");
+  };
+  auto make_text = [&](std::string id, std::string turn_id, std::size_t sequence, std::string provider_item_id, std::size_t output_index,
+                       std::string text = "text") {
+    return make_item(std::move(id),
+                     AssistantOutputItem{.assistant_turn_id = std::move(turn_id),
+                                         .sequence = sequence,
+                                         .kind = AssistantOutputItemKind::Text,
+                                         .provider_item_id = std::move(provider_item_id),
+                                         .provider_output_index = output_index,
+                                         .payload = AssistantOutputText{.text = std::move(text), .assistant_phase = AssistantOutputTextPhase::Commentary}});
+  };
+  auto make_reasoning = [&](std::string id, std::string turn_id, std::size_t sequence, std::string provider_item_id, std::size_t output_index) {
+    return make_item(std::move(id), AssistantOutputItem{.assistant_turn_id = std::move(turn_id),
+                                                        .sequence = sequence,
+                                                        .kind = AssistantOutputItemKind::Reasoning,
+                                                        .provider_item_id = std::move(provider_item_id),
+                                                        .provider_output_index = output_index,
+                                                        .payload = AssistantOutputReasoning{
+                                                            .text = "reasoning",
+                                                            .format = "openai_responses",
+                                                            .redacted = false,
+                                                            .signature = "PRIVATE_SIGNATURE_CANARY",
+                                                            .redacted_data = "PRIVATE_REDACTED_CANARY",
+                                                            .native_item_json = "{\"id\":\"rs_schema\",\"type\":\"reasoning\",\"summary\":[]}"}});
+  };
+  auto make_function = [&](std::string id, std::string turn_id, std::size_t sequence, std::string provider_item_id, std::size_t output_index,
+                           std::string call_id = "call_schema", std::string name = "read_file") {
+    return make_item(std::move(id),
+                     AssistantOutputItem{.assistant_turn_id = std::move(turn_id),
+                                         .sequence = sequence,
+                                         .kind = AssistantOutputItemKind::FunctionCall,
+                                         .provider_item_id = std::move(provider_item_id),
+                                         .provider_output_index = output_index,
+                                         .payload = AssistantOutputFunctionCall{
+                                             .call_id = std::move(call_id), .name = std::move(name), .arguments_json = "{\"path\":\"note.txt\"}"}});
+  };
+  auto make_commit = [&](std::string id, std::string turn_id, std::size_t item_count, std::string finish_reason = "completed") {
+    auto data = ava::session::serialize_assistant_turn_commit_data_json(AssistantTurnCommit{
+        .assistant_turn_id = std::move(turn_id),
+        .item_count = item_count,
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .finish_reason = std::move(finish_reason),
+        .usage_json = "{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3,\"estimated\":false,\"source\":\"provider\",\"cost_usd\":0.01}"});
+    expect(data.has_value(), "v4 assistant turn commit codec serializes valid bounded usage metadata");
+    return make_entry(std::move(id), EntryType::AssistantTurnCommit, data ? *data : "{}");
+  };
+
+  auto const text = make_text("out_text", "turn_codec", 0, "msg_codec", 0);
+  auto const reasoning = make_reasoning("out_reasoning", "turn_codec", 1, "rs_codec", 1);
+  auto const function = make_function("out_function", "turn_codec", 2, "fc_codec", 2);
+  auto const parsed_text = ava::session::parse_assistant_output_item(text);
+  auto const parsed_reasoning = ava::session::parse_assistant_output_item(reasoning);
+  auto const parsed_function = ava::session::parse_assistant_output_item(function);
+  expect(parsed_text && parsed_reasoning && parsed_function && std::holds_alternative<AssistantOutputText>(parsed_text->payload) &&
+             std::holds_alternative<AssistantOutputReasoning>(parsed_reasoning->payload) &&
+             std::holds_alternative<AssistantOutputFunctionCall>(parsed_function->payload),
+         "v4 codecs round-trip text, reasoning, and function_call item variants");
+  if (parsed_reasoning)
+  {
+    auto const* private_reasoning = std::get_if<AssistantOutputReasoning>(&parsed_reasoning->payload);
+    expect(private_reasoning && private_reasoning->signature == "PRIVATE_SIGNATURE_CANARY" && private_reasoning->redacted_data == "PRIVATE_REDACTED_CANARY",
+           "v4 reasoning codec preserves private-field canaries for later dedicated sanitization work");
+  }
+
+  auto portable_reasoning = *parsed_reasoning;
+  auto* portable_reasoning_payload = std::get_if<AssistantOutputReasoning>(&portable_reasoning.payload);
+  if (portable_reasoning_payload)
+  {
+    portable_reasoning_payload->signature.reset();
+    portable_reasoning_payload->redacted_data.reset();
+    portable_reasoning_payload->native_item_json.reset();
+    portable_reasoning_payload->private_replay_metadata_omitted = true;
+  }
+  auto portable_reasoning_data = ava::session::serialize_assistant_output_item_data_json(portable_reasoning);
+  auto portable_reasoning_entry = make_entry("portable_reasoning", EntryType::AssistantOutputItem, portable_reasoning_data.value_or("{}"));
+  auto contradictory_portable_reasoning = portable_reasoning_entry;
+  contradictory_portable_reasoning.data_json.pop_back();
+  contradictory_portable_reasoning.data_json += ",\"signature\":\"PRIVATE_CONTRADICTION\"}";
+  auto false_portable_marker = portable_reasoning_entry;
+  false_portable_marker.data_json.replace(false_portable_marker.data_json.find("\"private_replay_metadata_omitted\":true"),
+                                          std::string("\"private_replay_metadata_omitted\":true").size(), "\"private_replay_metadata_omitted\":false");
+  expect(portable_reasoning_data && ava::session::parse_assistant_output_item(portable_reasoning_entry) &&
+             !ava::session::parse_assistant_output_item(contradictory_portable_reasoning) && !ava::session::parse_assistant_output_item(false_portable_marker),
+         "v4 portable reasoning marker is canonical, strict, and forbids retained private replay fields");
+
+  auto line = ava::session::serialize_session_entry_line(text);
+  auto round_trip = line ? ava::session::parse_session_entry_line(*line, "v4-round-trip.jsonl") : ava::core::Result<SessionEntry>{};
+  auto legacy_v3_item = text;
+  legacy_v3_item.version = 3;
+  auto v3_item_line = line;
+  if (v3_item_line)
+    v3_item_line->replace(v3_item_line->find("\"version\":4"), std::string("\"version\":4").size(), "\"version\":3");
+  expect(line && round_trip && round_trip->type == EntryType::AssistantOutputItem && round_trip->version == 4 &&
+             !ava::session::serialize_session_entry_line(legacy_v3_item) &&
+             (!v3_item_line || !ava::session::parse_session_entry_line(*v3_item_line, "v3-output-item.jsonl")),
+         "v4 assistant output entry type round-trips only at version 4 or newer");
+
+  auto incompatible_text = text;
+  incompatible_text.data_json.pop_back();
+  incompatible_text.data_json += ",\"format\":\"not-text\"}";
+  auto duplicate_key = text;
+  duplicate_key.data_json.pop_back();
+  duplicate_key.data_json += ",\"sequence\":0}";
+  auto invalid_arguments = function;
+  invalid_arguments.data_json =
+      "{\"schema_version\":1,\"assistant_turn_id\":\"turn_codec\",\"sequence\":2,\"kind\":\"function_call\","
+      "\"call_id\":\"call_schema\",\"name\":\"read_file\",\"arguments\":\"[]\"}";
+  auto invalid_native = reasoning;
+  invalid_native.data_json =
+      "{\"schema_version\":1,\"assistant_turn_id\":\"turn_codec\",\"sequence\":1,\"kind\":\"reasoning\","
+      "\"text\":\"reasoning\",\"format\":\"openai_responses\",\"redacted\":false,\"native_item_json\":\"{}\"}";
+  auto invalid_commit = make_commit("commit_invalid", "turn_codec", 3, "completed");
+  invalid_commit.data_json =
+      "{\"schema_version\":1,\"assistant_turn_id\":\"turn_codec\",\"item_count\":3,\"provider\":\"openai\","
+      "\"model\":\"gpt-5.5\",\"finish_reason\":\"not_normalized\"}";
+  auto maximum_usage_commit = make_commit("commit_max_usage", "turn_max_usage", 0);
+  maximum_usage_commit.data_json =
+      "{\"schema_version\":1,\"assistant_turn_id\":\"turn_max_usage\",\"item_count\":0,\"provider\":\"openai\",\"model\":\"gpt-5.5\","
+      "\"finish_reason\":\"completed\",\"usage\":{\"input_tokens\":9223372036854775807,\"total_tokens\":9223372036854775807}}";
+  auto overflowing_usage_commit = maximum_usage_commit;
+  overflowing_usage_commit.id = "commit_overflowing_usage";
+  overflowing_usage_commit.data_json.replace(overflowing_usage_commit.data_json.find("9223372036854775807"), std::string("9223372036854775807").size(),
+                                             "9223372036854775808");
+  auto leading_zero_sequence = text;
+  leading_zero_sequence.data_json.replace(leading_zero_sequence.data_json.find("\"sequence\":0"), std::string("\"sequence\":0").size(), "\"sequence\":00");
+  auto over_limit_sequence = text;
+  over_limit_sequence.data_json.replace(over_limit_sequence.data_json.find("\"sequence\":0"), std::string("\"sequence\":0").size(), "\"sequence\":4096");
+  auto over_limit_provider_index = text;
+  over_limit_provider_index.data_json.replace(over_limit_provider_index.data_json.find("\"provider_output_index\":0"),
+                                              std::string("\"provider_output_index\":0").size(), "\"provider_output_index\":4096");
+  auto empty_reasoning = reasoning;
+  empty_reasoning.data_json =
+      "{\"schema_version\":1,\"assistant_turn_id\":\"turn_codec\",\"sequence\":1,\"kind\":\"reasoning\","
+      "\"text\":\"\",\"format\":\"openai_responses\",\"redacted\":false}";
+  auto const invalid_item_validation = ava::session::validate_session_replay({incompatible_text});
+  auto const invalid_commit_validation = ava::session::validate_session_replay({invalid_commit});
+  expect(ava::session::kCurrentAssistantOutputSchemaVersion == 1 && ava::session::to_string(static_cast<AssistantOutputItemKind>(999)) == "unknown" &&
+             !ava::session::parse_assistant_output_item(incompatible_text) && !ava::session::parse_assistant_output_item(duplicate_key) &&
+             !ava::session::parse_assistant_output_item(invalid_arguments) && !ava::session::parse_assistant_output_item(invalid_native) &&
+             !ava::session::parse_assistant_output_item(leading_zero_sequence) && !ava::session::parse_assistant_output_item(over_limit_sequence) &&
+             !ava::session::parse_assistant_output_item(over_limit_provider_index) && !ava::session::parse_assistant_output_item(empty_reasoning) &&
+             !ava::session::parse_assistant_turn_commit(invalid_commit) && ava::session::parse_assistant_turn_commit(maximum_usage_commit) &&
+             !ava::session::parse_assistant_turn_commit(overflowing_usage_commit) &&
+             has_replay_issue(invalid_item_validation, ava::session::SessionReplayIssueKind::InvalidAssistantOutputItem) &&
+             has_replay_issue(invalid_commit_validation, ava::session::SessionReplayIssueKind::InvalidAssistantTurnCommit),
+         "v4 codecs and replay diagnostics reject duplicate keys, incompatible variants, invalid arguments/native reasoning, and commits");
+
+  auto nested_object = [](std::size_t depth) {
+    std::string json;
+    for (std::size_t index = 0; index < depth; ++index) json += "{\"x\":";
+    json += '0';
+    json.append(depth, '}');
+    return json;
+  };
+  auto function_at_depth = [&](std::size_t depth) {
+    auto candidate = function;
+    candidate.data_json =
+        "{\"schema_version\":1,\"assistant_turn_id\":\"turn_codec\",\"sequence\":2,\"kind\":\"function_call\","
+        "\"call_id\":\"call_schema\",\"name\":\"read_file\",\"arguments\":\"" +
+        ava::core::json::escape(nested_object(depth)) + "\"}";
+    return ava::session::parse_assistant_output_item(candidate).has_value();
+  };
+  auto reasoning_at_depth = [&](std::size_t depth) {
+    auto candidate = reasoning;
+    auto const native_item = std::string("{\"id\":\"rs_depth\",\"type\":\"reasoning\",\"summary\":[],\"unknown\":") + nested_object(depth - 1) + "}";
+    candidate.data_json =
+        "{\"schema_version\":1,\"assistant_turn_id\":\"turn_codec\",\"sequence\":1,\"kind\":\"reasoning\","
+        "\"text\":\"reasoning\",\"format\":\"openai_responses\",\"redacted\":false,\"native_item_json\":\"" +
+        ava::core::json::escape(native_item) + "\"}";
+    return ava::session::parse_assistant_output_item(candidate).has_value();
+  };
+  expect(function_at_depth(ava::core::json::kMaxNestingDepth - 1) && function_at_depth(ava::core::json::kMaxNestingDepth) &&
+             !function_at_depth(ava::core::json::kMaxNestingDepth + 1) && reasoning_at_depth(ava::core::json::kMaxNestingDepth - 1) &&
+             reasoning_at_depth(ava::core::json::kMaxNestingDepth) && !reasoning_at_depth(ava::core::json::kMaxNestingDepth + 1),
+         "v4 function arguments and native reasoning enforce the shared JSON nesting boundary");
+
+  auto zero_commit = make_commit("commit_zero", "turn_zero", 0);
+  auto commit = make_commit("commit_codec", "turn_codec", 3);
+  auto const complete = ava::session::classify_assistant_output({text, reasoning, function, commit, zero_commit});
+  auto const projected_stats = ava::session::compute_session_stats({text, reasoning, function, commit, zero_commit});
+  expect(complete.diagnostics.empty() && complete.turns.size() == 2 && complete.turns[0].start_index == 0 && complete.turns[0].commit_index == 3 &&
+             complete.turns[0].items.size() == 3 && complete.turns[1].items.empty() && complete.find_turn_by_commit_index(3) == &complete.turns[0] &&
+             complete.find_item_by_output_entry_id("out_function") != nullptr && projected_stats->entry_count == 4 &&
+             projected_stats->counts.assistant_message == 2 && projected_stats->counts.reasoning_block == 1 && projected_stats->counts.tool_call == 1 &&
+             projected_stats->input_tokens && *projected_stats->input_tokens == 2 && projected_stats->known_cost_usd &&
+             *projected_stats->known_cost_usd > 0.019L,
+         "v4 classifier projects committed turns into legacy-equivalent stats without counting physical staging records");
+
+  for (std::size_t prefix_size = 1; prefix_size <= 4; ++prefix_size)
+  {
+    std::vector<SessionEntry> prefix{text, reasoning, function, commit};
+    prefix.resize(prefix_size);
+    auto const projection = ava::session::classify_assistant_output(prefix);
+    bool const complete_prefix = prefix_size == 4;
+    expect((complete_prefix && projection.turns.size() == 1 && projection.diagnostics.empty()) ||
+               (!complete_prefix && projection.turns.empty() && projection.diagnostics.size() == 1 &&
+                projection.diagnostics.front().kind == ava::session::AssistantOutputDiagnosticKind::IncompleteAssistantTurn &&
+                projection.diagnostics.front().severity == ava::session::AssistantOutputDiagnosticSeverity::Warning),
+           "every complete-line prefix keeps staged assistant output invisible until its trailing commit");
+  }
+
+  auto sparse = reasoning;
+  auto sparse_item = ava::session::parse_assistant_output_item(sparse);
+  if (sparse_item)
+  {
+    sparse_item->sequence = 2;
+    sparse.data_json = ava::session::serialize_assistant_output_item_data_json(*sparse_item).value_or("{}");
+  }
+  auto bad_count = make_commit("commit_bad_count", "turn_codec", 1);
+  auto mismatched_turn = make_commit("commit_mismatch", "other_turn", 2);
+  auto unrelated = make_entry("user_interleave", EntryType::UserMessage, "{\"text\":\"interleaved\"}");
+  auto has_malformed = [](ava::session::AssistantOutputProjection const& projection) {
+    return std::ranges::any_of(projection.diagnostics,
+                               [](auto const& diagnostic) { return diagnostic.kind == ava::session::AssistantOutputDiagnosticKind::MalformedAssistantTurn; });
+  };
+  auto const final_sparse_projection = ava::session::classify_assistant_output({text, sparse});
+  auto const final_invalid_projection = ava::session::classify_assistant_output({incompatible_text});
+  expect(has_malformed(ava::session::classify_assistant_output({text, sparse, make_commit("commit_sparse", "turn_codec", 2)})) &&
+             has_malformed(final_sparse_projection) && has_malformed(final_invalid_projection) &&
+             std::ranges::none_of(
+                 final_invalid_projection.diagnostics,
+                 [](auto const& diagnostic) { return diagnostic.kind == ava::session::AssistantOutputDiagnosticKind::IncompleteAssistantTurn; }) &&
+             std::ranges::none_of(
+                 final_sparse_projection.diagnostics,
+                 [](auto const& diagnostic) { return diagnostic.kind == ava::session::AssistantOutputDiagnosticKind::IncompleteAssistantTurn; }) &&
+             has_malformed(ava::session::classify_assistant_output({text, reasoning, bad_count})) &&
+             has_malformed(ava::session::classify_assistant_output({text, reasoning, mismatched_turn})) &&
+             has_malformed(ava::session::classify_assistant_output({text, unrelated})),
+         "v4 classifier rejects sparse sequences, count/turn mismatches, and unrelated interleaving");
+
+  std::vector<SessionEntry> over_limit_staging;
+  over_limit_staging.reserve(ava::session::kMaxAssistantOutputItemsPerTurn + 1);
+  for (std::size_t index = 0; index <= ava::session::kMaxAssistantOutputItemsPerTurn; ++index)
+  {
+    over_limit_staging.push_back(
+        make_item("out_over_limit_" + std::to_string(index),
+                  AssistantOutputItem{.assistant_turn_id = "turn_over_limit",
+                                      .sequence = index % ava::session::kMaxAssistantOutputItemsPerTurn,
+                                      .kind = AssistantOutputItemKind::Text,
+                                      .provider_item_id = std::nullopt,
+                                      .provider_output_index = std::nullopt,
+                                      .payload = AssistantOutputText{.text = "x", .assistant_phase = AssistantOutputTextPhase::Commentary}}));
+  }
+  auto const over_limit_projection = ava::session::classify_assistant_output(over_limit_staging);
+  expect(
+      std::ranges::any_of(over_limit_projection.diagnostics,
+                          [](auto const& diagnostic) {
+                            return diagnostic.severity == ava::session::AssistantOutputDiagnosticSeverity::Error &&
+                                   diagnostic.message == "staged assistant turn exceeds 4096 output items";
+                          }) &&
+          std::ranges::none_of(over_limit_projection.diagnostics,
+                               [](auto const& diagnostic) { return diagnostic.kind == ava::session::AssistantOutputDiagnosticKind::IncompleteAssistantTurn; }),
+      "v4 classifier treats staging beyond 4096 items as an error rather than an incomplete suffix");
+
+  auto duplicate_turn = make_commit("commit_duplicate_turn", "turn_codec", 0);
+  auto duplicate_item_id = reasoning;
+  auto duplicate_item_id_payload = ava::session::parse_assistant_output_item(duplicate_item_id);
+  if (duplicate_item_id_payload)
+  {
+    duplicate_item_id_payload->provider_item_id = "msg_codec";
+    duplicate_item_id.data_json = ava::session::serialize_assistant_output_item_data_json(*duplicate_item_id_payload).value_or("{}");
+  }
+  auto duplicate_item_index = reasoning;
+  auto duplicate_item_index_payload = ava::session::parse_assistant_output_item(duplicate_item_index);
+  if (duplicate_item_index_payload)
+  {
+    duplicate_item_index_payload->provider_output_index = 0;
+    duplicate_item_index.data_json = ava::session::serialize_assistant_output_item_data_json(*duplicate_item_index_payload).value_or("{}");
+  }
+  auto const final_duplicate_id_projection = ava::session::classify_assistant_output({text, duplicate_item_id});
+  auto const final_duplicate_index_projection = ava::session::classify_assistant_output({text, duplicate_item_index});
+  expect(
+      has_malformed(ava::session::classify_assistant_output({text, reasoning, function, commit, duplicate_turn})) &&
+          has_malformed(ava::session::classify_assistant_output({text, duplicate_item_id, make_commit("commit_duplicate_id", "turn_codec", 2)})) &&
+          has_malformed(ava::session::classify_assistant_output({text, duplicate_item_index, make_commit("commit_duplicate_index", "turn_codec", 2)})) &&
+          has_malformed(final_duplicate_id_projection) && has_malformed(final_duplicate_index_projection) &&
+          std::ranges::none_of(
+              final_duplicate_id_projection.diagnostics,
+              [](auto const& diagnostic) { return diagnostic.kind == ava::session::AssistantOutputDiagnosticKind::IncompleteAssistantTurn; }) &&
+          std::ranges::none_of(final_duplicate_index_projection.diagnostics,
+                               [](auto const& diagnostic) { return diagnostic.kind == ava::session::AssistantOutputDiagnosticKind::IncompleteAssistantTurn; }),
+      "v4 classifier rejects duplicate committed and final-staged provider item IDs or indexes");
+
+  auto const reused_committed_turn_item = make_text("out_reused_committed_turn", "turn_codec", 0, "msg_reused_committed_turn", 0);
+  auto const reused_committed_turn_projection = ava::session::classify_assistant_output({text, reasoning, function, commit, reused_committed_turn_item});
+  auto const reused_committed_turn_replay = ava::session::validate_session_replay({text, reasoning, function, commit, reused_committed_turn_item});
+  expect(has_malformed(reused_committed_turn_projection) &&
+             std::ranges::none_of(
+                 reused_committed_turn_projection.diagnostics,
+                 [](auto const& diagnostic) { return diagnostic.kind == ava::session::AssistantOutputDiagnosticKind::IncompleteAssistantTurn; }) &&
+             has_replay_issue(reused_committed_turn_replay, ava::session::SessionReplayIssueKind::MalformedAssistantTurn),
+         "a final staged v4 item cannot reuse a committed assistant turn id as an incomplete warning");
+
+  auto legacy_user = make_entry("legacy_user", EntryType::UserMessage, "{\"text\":\"legacy\"}", 3);
+  auto const mixed = ava::session::validate_session_replay({legacy_user, zero_commit});
+  expect(mixed.ok() && mixed.issues.empty(), "mixed v3 and v4 histories remain replay-valid");
+
+  auto bound_function = make_function("out_bound_function", "turn_bound", 0, "fc_bound", 0, "call_bound", "read_file");
+  auto bound_commit = make_commit("commit_bound", "turn_bound", 1, "tool_calls");
+  auto bound_result = make_entry("result_bound", EntryType::ToolResult,
+                                 "{\"assistant_output_entry_id\":\"out_bound_function\",\"call_id\":\"call_bound\","
+                                 "\"name\":\"read_file\",\"success\":true,\"result\":\"ok\"}");
+  auto const exact_binding = ava::session::validate_session_replay({bound_function, bound_commit, bound_result});
+  auto missing_binding = bound_result;
+  missing_binding.data_json = "{\"call_id\":\"call_bound\",\"name\":\"read_file\",\"success\":true,\"result\":\"ok\"}";
+  auto wrong_binding = bound_result;
+  wrong_binding.data_json = "{\"assistant_output_entry_id\":\"out_text\",\"call_id\":\"call_bound\",\"name\":\"read_file\",\"success\":true,\"result\":\"ok\"}";
+  auto wrong_name_binding = bound_result;
+  wrong_name_binding.data_json =
+      "{\"assistant_output_entry_id\":\"out_bound_function\",\"call_id\":\"call_bound\",\"name\":\"bash\",\"success\":true,\"result\":\"ok\"}";
+  auto const missing_binding_validation = ava::session::validate_session_replay({bound_function, bound_commit, missing_binding});
+  auto const wrong_binding_validation = ava::session::validate_session_replay({bound_function, bound_commit, wrong_binding});
+  auto const wrong_name_binding_validation = ava::session::validate_session_replay({bound_function, bound_commit, wrong_name_binding});
+  auto const duplicate_result_validation = ava::session::validate_session_replay({bound_function, bound_commit, bound_result, bound_result});
+  auto const uncommitted_function = ava::session::validate_session_replay({bound_function});
+  auto const unresolved_function = ava::session::validate_session_replay({bound_function, bound_commit});
+  auto const lenient_missing_binding = ava::session::validate_session_replay(
+      {bound_function, bound_commit, missing_binding}, ava::session::SessionReplayValidationOptions{.require_tool_result_pairing = false});
+  auto const result_before_commit = ava::session::validate_session_replay({bound_function, bound_result, bound_commit});
+  auto const lenient_legacy_result = ava::session::validate_session_replay(
+      {make_entry("legacy_result", EntryType::ToolResult, "{\"call_id\":\"legacy\",\"name\":\"read_file\",\"success\":true,\"result\":\"ok\"}", 3)},
+      ava::session::SessionReplayValidationOptions{.require_tool_result_pairing = false});
+  auto v3_private_binding = bound_result;
+  v3_private_binding.id = "v3_private_binding";
+  v3_private_binding.version = 3;
+  auto const v3_private_binding_validation = ava::session::validate_session_replay({v3_private_binding});
+  auto const mixed_private_projection = ava::session::project_logical_session_history({bound_function, bound_commit, v3_private_binding});
+  expect(exact_binding.ok() && has_replay_issue(missing_binding_validation, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             has_replay_issue(wrong_binding_validation, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             has_replay_issue(wrong_name_binding_validation, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             has_replay_issue(duplicate_result_validation, ava::session::SessionReplayIssueKind::DuplicateToolResult) && uncommitted_function.ok() &&
+             has_replay_issue(uncommitted_function, ava::session::SessionReplayIssueKind::IncompleteAssistantTurn) &&
+             has_replay_issue(unresolved_function, ava::session::SessionReplayIssueKind::UnresolvedToolCall) &&
+             has_replay_issue(lenient_missing_binding, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             has_replay_issue(result_before_commit, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) && lenient_legacy_result.ok() &&
+             has_replay_issue(v3_private_binding_validation, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) && mixed_private_projection &&
+             mixed_private_projection->back().data_json.find("assistant_output_entry_id") == std::string::npos,
+         "v4 tool results require exact committed bindings while every public projection strips v3/v4 private bindings");
+
+  auto permission_audit = make_entry("permission_audit", EntryType::PermissionDecision,
+                                     "{\"operation\":\"read\",\"mode\":\"build\",\"tool_name\":\"read_file\",\"action\":\"allow\",\"reason\":\"test\","
+                                     "\"permission_request_id\":\"permission-window\",\"resolution\":\"allow\",\"resolution_source\":\"policy\"}");
+  auto const allowed_window = ava::session::validate_session_replay(
+      {bound_function, bound_commit, make_entry("window_error", EntryType::Error, "{\"message\":\"audit\"}"), permission_audit, bound_result});
+  auto const after_user = ava::session::validate_session_replay(
+      {bound_function, bound_commit, make_entry("window_user", EntryType::UserMessage, "{\"text\":\"next\"}"), bound_result});
+  auto const after_assistant = ava::session::validate_session_replay(
+      {bound_function, bound_commit, make_entry("window_assistant", EntryType::AssistantMessage, "{\"text\":\"next\"}"), bound_result});
+  auto const after_output_item = ava::session::validate_session_replay(
+      {bound_function, bound_commit, make_text("window_output_item", "window-next-turn", 0, "window-msg", 0), bound_result});
+  auto const after_turn_commit =
+      ava::session::validate_session_replay({bound_function, bound_commit, make_commit("window_turn_commit", "window-next-turn", 0), bound_result});
+  auto const after_compaction = ava::session::validate_session_replay(
+      {bound_function, bound_commit, make_entry("window_compaction", EntryType::Compaction, "{\"summary\":\"next\"}"), bound_result});
+  expect(allowed_window.ok() && has_replay_issue(after_user, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             has_replay_issue(after_assistant, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             has_replay_issue(after_output_item, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             has_replay_issue(after_turn_commit, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             has_replay_issue(after_compaction, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch),
+         "v4 tool results remain valid across bookkeeping but must stay in their committed turn's immediate post-commit window");
+
+  auto reconciliation_rejects = [](std::vector<SessionEntry> const& entries) { return !ava::session::find_unresolved_committed_function_calls(entries); };
+  auto const next_unresolved_function =
+      make_function("out_current_unresolved", "turn_current_unresolved", 0, "fc_current_unresolved", 0, "call_current_unresolved", "read_file");
+  auto const next_unresolved_commit = make_commit("commit_current_unresolved", "turn_current_unresolved", 1, "tool_calls");
+  auto const closed_then_current_unresolved = ava::session::find_unresolved_committed_function_calls(
+      {bound_function, bound_commit, make_entry("closed_window_user", EntryType::UserMessage, "{\"text\":\"later\"}"), next_unresolved_function,
+       next_unresolved_commit});
+  auto missing_output_binding = bound_result;
+  missing_output_binding.id = "missing-output-binding";
+  missing_output_binding.data_json =
+      "{\"assistant_output_entry_id\":\"unknown-output\",\"call_id\":\"call_bound\",\"name\":\"read_file\",\"success\":true,\"result\":\"ok\"}";
+  auto empty_output_binding = missing_output_binding;
+  empty_output_binding.id = "empty-output-binding";
+  empty_output_binding.data_json = "{\"assistant_output_entry_id\":\"\",\"call_id\":\"call_bound\",\"name\":\"read_file\",\"success\":true,\"result\":\"ok\"}";
+  auto wrong_type_output_binding = missing_output_binding;
+  wrong_type_output_binding.id = "wrong-type-output-binding";
+  wrong_type_output_binding.data_json =
+      "{\"assistant_output_entry_id\":false,\"call_id\":\"call_bound\",\"name\":\"read_file\",\"success\":true,\"result\":\"ok\"}";
+  auto nonfunction_output = make_text("nonfunction-output", "nonfunction-turn", 0, "nonfunction-msg", 0);
+  auto nonfunction_commit = make_commit("nonfunction-commit", "nonfunction-turn", 1);
+  auto nonfunction_binding = missing_output_binding;
+  nonfunction_binding.id = "nonfunction-binding";
+  nonfunction_binding.data_json =
+      "{\"assistant_output_entry_id\":\"nonfunction-output\",\"call_id\":\"call_bound\",\"name\":\"read_file\",\"success\":true,\"result\":\"ok\"}";
+  auto out_of_window_binding = bound_result;
+  out_of_window_binding.id = "out-of-window-binding";
+  auto missing_binding_for_function = bound_result;
+  missing_binding_for_function.id = "missing-binding-for-function";
+  missing_binding_for_function.data_json = "{\"call_id\":\"call_bound\",\"name\":\"read_file\",\"success\":true,\"result\":\"ok\"}";
+  auto wrong_call_binding = bound_result;
+  wrong_call_binding.id = "wrong-call-binding";
+  wrong_call_binding.data_json =
+      "{\"assistant_output_entry_id\":\"out_bound_function\",\"call_id\":\"other\",\"name\":\"read_file\",\"success\":true,\"result\":\"ok\"}";
+  auto future_bound_function = make_function("future-bound-function", "future-bound-turn", 0, "future-fc", 0, "future-call", "read_file");
+  auto future_bound_commit = make_commit("future-bound-commit", "future-bound-turn", 1, "tool_calls");
+  auto future_binding = make_entry("future-binding", EntryType::ToolResult,
+                                   "{\"assistant_output_entry_id\":\"future-bound-function\",\"call_id\":\"future-call\",\"name\":\"read_file\","
+                                   "\"success\":true,\"result\":\"ok\"}");
+  auto duplicate_bound_result = bound_result;
+  duplicate_bound_result.id = "duplicate-bound-result";
+  auto exact_reconciled = ava::session::find_unresolved_committed_function_calls({bound_function, bound_commit, bound_result});
+  expect(exact_reconciled && exact_reconciled->empty() && !closed_then_current_unresolved &&
+             closed_then_current_unresolved.error().message().find("active EOF tool-result window") != std::string::npos &&
+             reconciliation_rejects({bound_function, bound_commit, missing_output_binding}) &&
+             reconciliation_rejects({bound_function, bound_commit, empty_output_binding}) &&
+             reconciliation_rejects({bound_function, bound_commit, wrong_type_output_binding}) &&
+             reconciliation_rejects({bound_function, bound_commit, nonfunction_output, nonfunction_commit, nonfunction_binding}) &&
+             reconciliation_rejects({bound_function, bound_commit, make_entry("window-user-for-reconcile", EntryType::UserMessage, "{\"text\":\"next\"}"),
+                                     out_of_window_binding}) &&
+             reconciliation_rejects({bound_function, bound_commit, missing_binding_for_function}) &&
+             reconciliation_rejects({bound_function, bound_commit, wrong_call_binding}) &&
+             reconciliation_rejects({future_binding, future_bound_function, future_bound_commit}) &&
+             reconciliation_rejects({bound_function, bound_commit, bound_result, duplicate_bound_result}),
+         "reconciliation rejects closed unresolved windows before synthetic append, including histories with a later current call");
+
+  auto const compaction_after_unresolved = ava::session::validate_session_replay(
+      {bound_function, bound_commit, make_entry("compact_pending", EntryType::Compaction, "{\"summary\":\"pending tool\"}")});
+  expect(has_replay_issue(compaction_after_unresolved, ava::session::SessionReplayIssueKind::CompactionWithUnresolvedToolCall),
+         "committed v4 function calls participate in compaction unresolved-call boundaries");
+
+  auto v3_native_reasoning =
+      make_entry("v3_native_reasoning", EntryType::ReasoningBlock,
+                 "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+                 "\"native_item_json\":\"{\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[]}\"}",
+                 3);
+  auto const v3_native_validation = ava::session::validate_session_replay({v3_native_reasoning});
+  auto const public_markdown = ava::session::format_session_markdown({reasoning, commit});
+  expect(has_replay_issue(v3_native_validation, ava::session::SessionReplayIssueKind::InvalidReasoningEntry) &&
+             public_markdown.find("PRIVATE_SIGNATURE_CANARY") == std::string::npos && public_markdown.find("PRIVATE_REDACTED_CANARY") == std::string::npos,
+         "native OpenAI reasoning remains strict from v3 and private v4 physical records stay out of public export");
+
+  auto future_item = text;
+  future_item.version = 5;
+  auto future_line = line;
+  if (future_line)
+  {
+    auto future = *future_line;
+    future.replace(future.find("\"version\":4"), std::string("\"version\":4").size(), "\"version\":5");
+    auto const future_projection = ava::session::classify_assistant_output({future_item});
+    expect(!ava::session::parse_session_entry_line(future, "future-v4.jsonl") && future_projection.turns.empty() && !future_projection.diagnostics.empty() &&
+               future_projection.diagnostics.front().kind == ava::session::AssistantOutputDiagnosticKind::InvalidAssistantOutputItem,
+           "record and v4 classifier reject future entry versions after the v4 bump");
+  }
+}
+
+void test_session_stats_projects_mixed_v3_v4_history()
+{
+  using ava::session::EntryType;
+  using ava::session::SessionEntry;
+  std::vector<SessionEntry> const entries = {
+      SessionEntry{
+          .id = "legacy_assistant",
+          .parent_id = "",
+          .type = EntryType::AssistantMessage,
+          .timestamp = "2026-07-18T00:00:00Z",
+          .data_json = "{\"text\":\"legacy\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3,\"source\":\"provider\",\"cost_usd\":0.1}}",
+          .version = 3},
+      SessionEntry{.id = "v4_text",
+                   .parent_id = "legacy_assistant",
+                   .type = EntryType::AssistantOutputItem,
+                   .timestamp = "2026-07-18T00:00:01Z",
+                   .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"turn_stats\",\"sequence\":0,\"kind\":\"text\",\"text\":\"one\",\"assistant_"
+                                "phase\":\"commentary\"}"},
+      SessionEntry{.id = "v4_reasoning",
+                   .parent_id = "v4_text",
+                   .type = EntryType::AssistantOutputItem,
+                   .timestamp = "2026-07-18T00:00:02Z",
+                   .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"turn_stats\",\"sequence\":1,\"kind\":\"reasoning\",\"text\":\"think\","
+                                "\"format\":\"openai_responses\",\"redacted\":false}"},
+      SessionEntry{.id = "v4_function",
+                   .parent_id = "v4_reasoning",
+                   .type = EntryType::AssistantOutputItem,
+                   .timestamp = "2026-07-18T00:00:03Z",
+                   .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"turn_stats\",\"sequence\":2,\"kind\":\"function_call\",\"call_id\":\"call_"
+                                "stats\",\"name\":\"read_file\",\"arguments\":\"{}\"}"},
+      SessionEntry{.id = "v4_commit",
+                   .parent_id = "v4_function",
+                   .type = EntryType::AssistantTurnCommit,
+                   .timestamp = "2026-07-18T00:00:04Z",
+                   .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"turn_stats\",\"item_count\":3,\"provider\":\"openai\",\"model\":\"gpt-5.5\","
+                                "\"finish_reason\":\"tool_calls\",\"usage\":{\"input_tokens\":5,\"output_tokens\":6,\"reasoning_tokens\":4,\"total_tokens\":11,"
+                                "\"source\":\"provider\",\"cost_usd\":0.2}}"},
+      SessionEntry{.id = "v4_incomplete",
+                   .parent_id = "v4_commit",
+                   .type = EntryType::AssistantOutputItem,
+                   .timestamp = "2026-07-18T00:00:05Z",
+                   .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"turn_incomplete\",\"sequence\":0,\"kind\":\"text\",\"text\":\"must stay "
+                                "invisible\",\"assistant_phase\":\"final_answer\"}"},
+  };
+
+  auto const stats = ava::session::compute_session_stats(entries);
+  expect(stats && stats->entry_count == 4 && stats->first_timestamp == "2026-07-18T00:00:00Z" && stats->last_timestamp == "2026-07-18T00:00:04Z" &&
+             stats->counts.assistant_message == 2 && stats->counts.reasoning_block == 1 && stats->counts.tool_call == 1 && stats->input_tokens &&
+             *stats->input_tokens == 6 && stats->output_tokens && *stats->output_tokens == 8 && stats->reasoning_tokens && *stats->reasoning_tokens == 4 &&
+             stats->total_tokens && *stats->total_tokens == 14 && stats->exact_usage_entries == 2 && stats->estimated_usage_entries == 0 &&
+             stats->cost_complete && stats->total_cost_usd && *stats->total_cost_usd > 0.299L && *stats->total_cost_usd < 0.301L,
+         "session stats project mixed v3/v4 committed turns once and exclude incomplete v4 staging");
+
+  auto malformed_v4 = entries[1];
+  malformed_v4.data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"turn_stats\",\"sequence\":0,\"kind\":\"text\"}";
+  auto malformed_stats = ava::session::compute_session_stats({malformed_v4});
+  expect(!malformed_stats && malformed_stats.error().message().find("malformed assistant-output") != std::string::npos,
+         "session stats fail closed on malformed v4 classifier diagnostics instead of silently omitting them");
 }
 
 void test_session_replay_validation()
@@ -1236,6 +1897,26 @@ void test_session_replay_validation()
   auto const valid =
       ava::session::validate_session_replay(valid_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
   expect(valid.ok() && valid.issues.empty(), "session replay validator accepts paired structured tool history");
+
+  auto nested_structured_value = [](std::size_t depth) {
+    std::string value;
+    value.reserve(depth * 6 + 1);
+    for (std::size_t index = 0; index < depth; ++index) value += "{\"x\":";
+    value += '0';
+    value.append(depth, '}');
+    return value;
+  };
+  auto over_depth_structured_entries = valid_entries;
+  over_depth_structured_entries.back().data_json =
+      "{\"call_id\":\"call_read\",\"name\":\"read_file\",\"success\":true,\"status\":\"success\",\"result\":\"note contents\","
+      "\"structured_result\":{\"schema_version\":1,\"call_id\":\"call_read\",\"tool\":\"read_file\",\"status\":\"success\",\"ok\":true,"
+      "\"content_type\":\"application/json\",\"content\":" +
+      nested_structured_value(ava::core::json::kMaxNestingDepth + 1) + "}}";
+  auto const over_depth_structured = ava::session::validate_session_replay(
+      over_depth_structured_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
+  expect(!over_depth_structured.ok() && has_replay_issue(over_depth_structured, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult) &&
+             std::ranges::any_of(over_depth_structured.issues, [](auto const& issue) { return issue.message.find("not valid JSON") != std::string::npos; }),
+         "session replay rejects over-depth structured tool results through the shared JSON nesting boundary");
 
   auto unsupported_version_entries = valid_entries;
   unsupported_version_entries[1].version = ava::session::kCurrentSessionEntryVersion + 1;
@@ -1620,6 +2301,84 @@ void test_session_replay_validation()
   };
   auto const valid_model_reasoning = ava::session::validate_session_replay(valid_model_reasoning_entries);
   expect(valid_model_reasoning.ok() && valid_model_reasoning.issues.empty(), "session replay validator accepts durable model and reasoning metadata");
+
+  auto valid_native_reasoning_item_entries = valid_model_reasoning_entries;
+  valid_native_reasoning_item_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"id\\\":\\\"rs_session\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[],\\\"encrypted_content\\\":\\\"cipher-"
+      "session\\\"}\"}";
+  auto const valid_native_reasoning_item = ava::session::validate_session_replay(valid_native_reasoning_item_entries);
+  expect(valid_native_reasoning_item.ok(), "session replay validator accepts optional private native reasoning item objects");
+
+  auto invalid_native_reasoning_item_entries = valid_native_reasoning_item_entries;
+  invalid_native_reasoning_item_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"type\\\":\\\"message\\\"}\"}";
+  auto const invalid_native_reasoning_item = ava::session::validate_session_replay(invalid_native_reasoning_item_entries);
+  expect(!invalid_native_reasoning_item.ok() && has_replay_issue(invalid_native_reasoning_item, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+         "session replay validator rejects private native items that are not reasoning objects");
+
+  auto missing_native_reasoning_id_entries = valid_native_reasoning_item_entries;
+  missing_native_reasoning_id_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[]}\"}";
+  auto const missing_native_reasoning_id = ava::session::validate_session_replay(missing_native_reasoning_id_entries);
+  expect(!missing_native_reasoning_id.ok() && has_replay_issue(missing_native_reasoning_id, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+         "current-version sessions reject native reasoning metadata without an id");
+
+  auto empty_native_reasoning_id_entries = valid_native_reasoning_item_entries;
+  empty_native_reasoning_id_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"id\\\":\\\"\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[]}\"}";
+  auto const empty_native_reasoning_id = ava::session::validate_session_replay(empty_native_reasoning_id_entries);
+  expect(!empty_native_reasoning_id.ok() && has_replay_issue(empty_native_reasoning_id, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+         "current-version sessions reject native reasoning metadata with an empty id");
+
+  auto missing_native_reasoning_summary_entries = valid_native_reasoning_item_entries;
+  missing_native_reasoning_summary_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"id\\\":\\\"rs_missing_summary\\\",\\\"type\\\":\\\"reasoning\\\"}\"}";
+  auto const missing_native_reasoning_summary = ava::session::validate_session_replay(missing_native_reasoning_summary_entries);
+  expect(
+      !missing_native_reasoning_summary.ok() && has_replay_issue(missing_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+      "current-version sessions reject native reasoning metadata without a summary array");
+
+  auto scalar_native_reasoning_summary_entries = valid_native_reasoning_item_entries;
+  scalar_native_reasoning_summary_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"id\\\":\\\"rs_scalar_summary\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[\\\"not-an-object\\\"]}\"}";
+  auto const scalar_native_reasoning_summary = ava::session::validate_session_replay(scalar_native_reasoning_summary_entries);
+  expect(
+      !scalar_native_reasoning_summary.ok() && has_replay_issue(scalar_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+      "current-version sessions reject native reasoning summary arrays with scalar items");
+
+  auto malformed_native_reasoning_summary_entries = valid_native_reasoning_item_entries;
+  malformed_native_reasoning_summary_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"{\\\"id\\\":\\\"rs_malformed_summary\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[{\\\"type\\\":\\\"summary_text\\\"}]}"
+      "\"}";
+  auto const malformed_native_reasoning_summary = ava::session::validate_session_replay(malformed_native_reasoning_summary_entries);
+  expect(!malformed_native_reasoning_summary.ok() &&
+             has_replay_issue(malformed_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+         "current-version sessions reject native reasoning summary items without summary_text text");
+
+  auto oversized_native_reasoning_item_entries = valid_native_reasoning_item_entries;
+  auto const oversized_native_item =
+      std::string("{\"id\":\"rs_oversized\",\"type\":\"reasoning\",\"summary\":[],\"opaque\":\"") + std::string(64U * 1024U, 'x') + "\"}";
+  oversized_native_reasoning_item_entries[3].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
+      "\"native_item_json\":\"" +
+      ava::core::json::escape(oversized_native_item) + "\"}";
+  auto const oversized_native_reasoning_item = ava::session::validate_session_replay(oversized_native_reasoning_item_entries);
+  expect(
+      !oversized_native_reasoning_item.ok() && has_replay_issue(oversized_native_reasoning_item, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+      "current-version sessions reject native reasoning metadata beyond the provider-private byte bound");
+
+  auto legacy_native_reasoning_item_entries = missing_native_reasoning_summary_entries;
+  legacy_native_reasoning_item_entries[3].version = 0;
+  auto const legacy_native_reasoning_item = ava::session::validate_session_replay(legacy_native_reasoning_item_entries);
+  expect(legacy_native_reasoning_item.ok(),
+         "legacy sessions retain readable fallback compatibility when explicitly present native reasoning metadata is malformed");
 
   std::vector<ava::session::SessionEntry> const invalid_model_start_entries = {
       ava::session::SessionEntry{.id = "bad_start",
@@ -2132,6 +2891,48 @@ void test_session_torn_tail_recovery()
              recovery_files_for(prepublication_store.session_path()).empty(),
          "a prepublication cancellation removes the temporary quarantine and leaves no final-looking artifact");
 
+  ava::session::SessionStore quarantine_swap_store(
+      ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "quarantine_temp_swap"});
+  auto const quarantine_swap_bytes = valid_prefix + idempotent_suffix;
+  write_binary_file(quarantine_swap_store.session_path(), quarantine_swap_bytes);
+  auto quarantine_swap_lease = ava::session::SessionLease::acquire(quarantine_swap_store.session_path());
+  std::filesystem::path attacker_temporary_path;
+  std::filesystem::path validated_stash_path;
+  struct stat attacker_status_before{};
+  bool quarantine_temporary_swapped = false;
+  quarantine_swap_store.set_before_recovery_quarantine_publication_for_test([&](std::filesystem::path const& temporary_path) {
+    attacker_temporary_path = temporary_path;
+    validated_stash_path = temporary_path.string() + ".validated-stash";
+    std::filesystem::rename(temporary_path, validated_stash_path);
+    write_binary_file(temporary_path, "ATTACKER_QUARANTINE_INODE_CANARY");
+    quarantine_temporary_swapped = ::stat(temporary_path.c_str(), &attacker_status_before) == 0;
+  });
+  auto quarantine_swap_recovery = quarantine_swap_lease
+                                      ? quarantine_swap_store.recover_torn_tail(*quarantine_swap_lease, ava::session::legacy_unbounded_session_read_limits())
+                                      : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(quarantine_swap_lease.error())));
+  std::vector<std::filesystem::path> exact_swap_quarantines;
+  std::error_code swap_iter_error;
+  auto const swap_final_prefix = quarantine_swap_store.session_path().filename().string() + ".torn-tail.";
+  for (std::filesystem::directory_iterator iterator(quarantine_swap_store.session_path().parent_path(), swap_iter_error), end;
+       !swap_iter_error && iterator != end; iterator.increment(swap_iter_error))
+  {
+    if (iterator->path().filename().string().starts_with(swap_final_prefix))
+      exact_swap_quarantines.push_back(iterator->path());
+  }
+  struct stat attacker_status_after{};
+  struct stat published_status{};
+  bool const attacker_preserved = quarantine_temporary_swapped && ::stat(attacker_temporary_path.c_str(), &attacker_status_after) == 0 &&
+                                  attacker_status_before.st_dev == attacker_status_after.st_dev &&
+                                  attacker_status_before.st_ino == attacker_status_after.st_ino &&
+                                  read_binary_file(attacker_temporary_path) == "ATTACKER_QUARANTINE_INODE_CANARY";
+  bool const exact_descriptor_published = exact_swap_quarantines.size() == 1 && ::stat(exact_swap_quarantines.front().c_str(), &published_status) == 0 &&
+                                          read_binary_file(exact_swap_quarantines.front()) == idempotent_suffix &&
+                                          read_binary_file(validated_stash_path) == idempotent_suffix &&
+                                          (published_status.st_dev != attacker_status_after.st_dev || published_status.st_ino != attacker_status_after.st_ino);
+  expect(!quarantine_swap_recovery && quarantine_swap_recovery.error().message().find("temporary name was replaced") != std::string::npos &&
+             read_binary_file(quarantine_swap_store.session_path()) == quarantine_swap_bytes && attacker_preserved && exact_descriptor_published,
+         "quarantine publication links the validated descriptor, preserves a swapped attacker inode, and fails before source recovery");
+
   ava::session::SessionStore committed_cancellation_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "committed_cancellation"});
   auto const committed_cancellation_bytes = valid_prefix + idempotent_suffix;
@@ -2552,7 +3353,9 @@ void test_session_markdown_export()
                                  .data_json = "{\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-5\","
                                               "\"format\":\"anthropic_thinking\","
                                               "\"text\":\"visible reasoning summary\","
-                                              "\"signature\":\"super-secret-signature\"}"},
+                                              "\"signature\":\"super-secret-signature\","
+                                              "\"native_item_json\":\"{\\\"id\\\":\\\"rs_export\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[],"
+                                              "\\\"encrypted_content\\\":\\\"export-private-cipher\\\"}\"}"},
       ava::session::SessionEntry{.id = "reasoning_change_1",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ReasoningChange,
@@ -2586,11 +3389,12 @@ void test_session_markdown_export()
                                  .type = ava::session::EntryType::ModeChange,
                                  .timestamp = "2026-04-29T00:00:06Z",
                                  .data_json = "{\"mode\":\"plan\"}"},
-      ava::session::SessionEntry{.id = "error_1",
-                                 .parent_id = "",
-                                 .type = ava::session::EntryType::Error,
-                                 .timestamp = "2026-04-29T00:00:07Z",
-                                 .data_json = "{\"category\":\"tool\",\"message\":\"failed\",\"details\":\"tool: failed\"}"},
+      ava::session::SessionEntry{
+          .id = "error_1",
+          .parent_id = "",
+          .type = ava::session::EntryType::Error,
+          .timestamp = "2026-04-29T00:00:07Z",
+          .data_json = "{\"category\":\"provider\",\"message\":\"SESSION_PROVIDER_MESSAGE_CANARY\",\"details\":\"SESSION_PROVIDER_DETAILS_CANARY\"}"},
       ava::session::SessionEntry{.id = "backticks_1",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::UserMessage,
@@ -2604,14 +3408,19 @@ void test_session_markdown_export()
   };
 
   auto const basic = ava::session::format_session_markdown(entries);
+  auto const physical_error = std::ranges::find_if(entries, [](ava::session::SessionEntry const& entry) { return entry.id == "error_1"; });
+  expect(physical_error != entries.end() && physical_error->data_json.find("SESSION_PROVIDER_MESSAGE_CANARY") != std::string::npos &&
+             physical_error->data_json.find("SESSION_PROVIDER_DETAILS_CANARY") != std::string::npos,
+         "public session projections leave the local physical error record unchanged");
   expect(basic.find("# AVA Session Export") != std::string::npos, "markdown export has deterministic title");
   expect(basic.find("## User") != std::string::npos && basic.find("Hello AVA") != std::string::npos, "markdown export renders user messages");
   expect(basic.find("internal_replay") == std::string::npos && basic.find("replay_of") == std::string::npos,
          "markdown export hides internal replay user messages");
   expect(basic.find("## Assistant") != std::string::npos && basic.find("Hello human") != std::string::npos, "markdown export renders assistant messages");
   expect(basic.find("## Reasoning") != std::string::npos && basic.find("visible reasoning summary") != std::string::npos &&
-             basic.find("Signature present") != std::string::npos && basic.find("super-secret-signature") == std::string::npos,
-         "markdown export renders reasoning blocks without leaking provider-private signatures");
+             basic.find("Signature present") != std::string::npos && basic.find("super-secret-signature") == std::string::npos &&
+             basic.find("export-private-cipher") == std::string::npos,
+         "markdown export renders reasoning blocks without leaking provider-private replay metadata");
   expect(basic.find("## Reasoning Change") != std::string::npos && basic.find("Budget tokens") != std::string::npos && basic.find("4096") != std::string::npos,
          "markdown export renders reasoning-change budget tokens when present");
   expect(basic.find("Usage:") != std::string::npos && basic.find("input_tokens") != std::string::npos, "markdown export renders assistant usage when present");
@@ -2619,7 +3428,10 @@ void test_session_markdown_export()
   expect(basic.find("## Compaction") != std::string::npos && basic.find("Prior summary") != std::string::npos &&
              basic.find("Keep this constraint") != std::string::npos,
          "markdown export renders compactions by default");
-  expect(basic.find("## Mode Change") != std::string::npos && basic.find("## Error") != std::string::npos, "markdown export renders mode changes and errors");
+  expect(basic.find("## Mode Change") != std::string::npos && basic.find("## Error") != std::string::npos &&
+             basic.find(ava::session::kPublicSessionErrorOmission) != std::string::npos && basic.find("SESSION_PROVIDER_MESSAGE_CANARY") == std::string::npos &&
+             basic.find("SESSION_PROVIDER_DETAILS_CANARY") == std::string::npos,
+         "markdown export renders only a fixed omission for historical provider error diagnostics");
   expect(basic.find("Metadata:") == std::string::npos && basic.find("\"id\":\"user_1\"") == std::string::npos, "markdown export omits metadata by default");
   expect(basic.find("`````text\nbefore ``` after ```` done\n`````") != std::string::npos, "markdown export expands fences around backtick content");
   std::string const escaped_control_markdown = std::string("first\nsecond\tindent") + "\\u0000\\u001B\\u007F\\u000D";
@@ -2650,6 +3462,67 @@ void test_session_markdown_export()
          "html export wraps the session markdown in a self-contained document");
   expect(html.find("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt; &amp; raw") != std::string::npos && html.find("<script>alert") == std::string::npos,
          "html export escapes user and model text instead of emitting executable markup");
+}
+
+void test_session_portable_jsonl_sanitizer()
+{
+  auto const redacted_with_private = ava::session::sanitize_session_entry_for_portable_jsonl_export(
+      ava::session::SessionEntry{.id = "portable_redacted_private",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ReasoningBlock,
+                                 .timestamp = "2026-05-11T00:00:00Z",
+                                 .data_json = "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\","
+                                              "\"text\":\"redacted secret text\",\"redacted\":true,\"signature\":\"secret-signature\","
+                                              "\"native_item_json\":\"{\\\"id\\\":\\\"rs_portable\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[]}\","
+                                              "\"redacted_data\":\"secret-redacted-data\",\"unknown_provider_canary\":\"must-not-export\"}"});
+  expect(redacted_with_private.data_json.find("redacted secret text") == std::string::npos &&
+             redacted_with_private.data_json.find("secret-signature") == std::string::npos &&
+             redacted_with_private.data_json.find("secret-redacted-data") == std::string::npos &&
+             redacted_with_private.data_json.find("must-not-export") == std::string::npos &&
+             redacted_with_private.data_json.find("[Provider-private reasoning metadata omitted from portable export.]") != std::string::npos &&
+             redacted_with_private.data_json.find("\"redacted\":true") != std::string::npos &&
+             redacted_with_private.data_json.find("\"native_item_json\":true") != std::string::npos &&
+             redacted_with_private.data_json.find("\"signature\":true") != std::string::npos &&
+             redacted_with_private.data_json.find("\"redacted_data\":true") != std::string::npos,
+         "portable JSONL rebuilds redacted reasoning with a neutral placeholder and private-field presence metadata");
+
+  auto const redacted_without_private = ava::session::sanitize_session_entry_for_portable_jsonl_export(
+      ava::session::SessionEntry{.id = "portable_redacted_plain",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ReasoningBlock,
+                                 .timestamp = "2026-05-11T00:00:01Z",
+                                 .data_json = "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\","
+                                              "\"text\":\"redacted text without known private fields\",\"redacted\":true,"
+                                              "\"unknown_provider_canary\":\"must-not-export\"}"});
+  expect(redacted_without_private.data_json.find("redacted text without known private fields") == std::string::npos &&
+             redacted_without_private.data_json.find("must-not-export") == std::string::npos &&
+             redacted_without_private.data_json.find("[Provider-private reasoning metadata omitted from portable export.]") != std::string::npos &&
+             redacted_without_private.data_json.find("\"native_item_json\":false") != std::string::npos &&
+             redacted_without_private.data_json.find("\"signature\":false") != std::string::npos &&
+             redacted_without_private.data_json.find("\"redacted_data\":false") != std::string::npos,
+         "portable JSONL redacts reasoning text and additive canaries even without known private fields");
+
+  auto const portable_error = ava::session::sanitize_session_entry_for_portable_jsonl_export(ava::session::SessionEntry{
+      .id = "portable_provider_error",
+      .parent_id = "",
+      .type = ava::session::EntryType::Error,
+      .timestamp = "2026-05-11T00:00:02Z",
+      .data_json = "{\"category\":\"provider\",\"message\":\"PORTABLE_PROVIDER_MESSAGE_CANARY\",\"details\":\"PORTABLE_PROVIDER_DETAILS_CANARY\"}"});
+  expect(portable_error.data_json.find("PORTABLE_PROVIDER_MESSAGE_CANARY") == std::string::npos &&
+             portable_error.data_json.find("PORTABLE_PROVIDER_DETAILS_CANARY") == std::string::npos &&
+             portable_error.data_json.find(ava::session::kPublicSessionErrorOmission) != std::string::npos,
+         "portable JSONL exports replace historical Error diagnostics with a fixed omission");
+
+  auto const visible_without_private = ava::session::sanitize_session_entry_for_portable_jsonl_export(
+      ava::session::SessionEntry{.id = "portable_visible_plain",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ReasoningBlock,
+                                 .timestamp = "2026-05-11T00:00:02Z",
+                                 .data_json = "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\","
+                                              "\"text\":\"visible safe summary\",\"redacted\":false,\"unknown_provider_canary\":\"must-not-export\"}"});
+  expect(visible_without_private.data_json.find("visible safe summary") != std::string::npos &&
+             visible_without_private.data_json.find("must-not-export") == std::string::npos,
+         "portable JSONL retains only visible non-redacted reasoning text from its explicit allowlist");
 }
 
 void test_compaction_config_and_thresholds()
@@ -2689,18 +3562,21 @@ void test_compaction_config_and_thresholds()
                                                                                       .data_json = "{\"text\":\"abcdefgh\"}"},
                                                            ava::session::SessionEntry{.id = "ignored",
                                                                                       .parent_id = "",
-                                                                                      .type = ava::session::EntryType::SessionStart,
+                                                                                      .type = ava::session::EntryType::ModeChange,
                                                                                       .timestamp = "2026-04-27T00:00:00Z",
                                                                                       .data_json = "{\"mode\":\"build\"}"}};
   auto config = ava::session::default_compaction_config();
-  config.auto_threshold_tokens = ava::session::estimate_session_tokens(entries);
-  auto const decision = ava::session::should_auto_compact(entries, config);
-  expect(decision.should_compact && decision.estimated_tokens == config.auto_threshold_tokens,
+  auto estimated = ava::session::estimate_session_tokens(entries);
+  config.auto_threshold_tokens = estimated.value_or(0);
+  auto decision = ava::session::should_auto_compact(entries, config);
+  expect(estimated && decision && decision->should_compact && decision->estimated_tokens == config.auto_threshold_tokens,
          "auto compaction triggers when estimated tokens reach threshold");
-  config.auto_threshold_tokens = decision.estimated_tokens + 1;
-  expect(!ava::session::should_auto_compact(entries, config).should_compact, "auto compaction does not trigger below threshold");
+  config.auto_threshold_tokens = decision ? decision->estimated_tokens + 1 : 1;
+  auto below_threshold = ava::session::should_auto_compact(entries, config);
+  expect(below_threshold && !below_threshold->should_compact, "auto compaction does not trigger below threshold");
   config.auto_threshold_tokens = 0;
-  expect(!ava::session::should_auto_compact(entries, config).should_compact, "auto compaction threshold zero disables automatic compaction");
+  auto disabled = ava::session::should_auto_compact(entries, config);
+  expect(disabled && !disabled->should_compact, "auto compaction threshold zero disables automatic compaction");
   config.auto_threshold_tokens_explicit = false;
   std::vector<ava::session::SessionEntry> const fallback_entries = {
       ava::session::SessionEntry{.id = "fallback_big",
@@ -2708,11 +3584,11 @@ void test_compaction_config_and_thresholds()
                                  .type = ava::session::EntryType::UserMessage,
                                  .timestamp = "2026-04-27T00:00:00Z",
                                  .data_json = "{\"text\":\"" + std::string(fallback_threshold * 4, 'x') + "\"}"}};
-  expect(ava::session::should_auto_compact(fallback_entries, config, std::nullopt).should_compact,
-         "default auto compaction can trigger when model context-window metadata is absent");
+  auto fallback_decision = ava::session::should_auto_compact(fallback_entries, config, std::nullopt);
+  expect(fallback_decision && fallback_decision->should_compact, "default auto compaction can trigger when model context-window metadata is absent");
   config.auto_threshold_tokens_explicit = true;
-  expect(!ava::session::should_auto_compact(fallback_entries, config, std::nullopt).should_compact,
-         "explicit auto_threshold_tokens zero remains disabled without model metadata");
+  auto explicitly_disabled = ava::session::should_auto_compact(fallback_entries, config, std::nullopt);
+  expect(explicitly_disabled && !explicitly_disabled->should_compact, "explicit auto_threshold_tokens zero remains disabled without model metadata");
 }
 
 void test_compaction_context_reconstruction()
@@ -3113,6 +3989,107 @@ void test_tool_content_parts_reconstruction()
     return;
   expect((*interrupted_messages)[0].content_parts.empty() && (*interrupted_messages)[2].content_parts.empty(),
          "non-contiguous tool-use/result history falls back to text-only native replay");
+}
+
+void test_portable_omitted_reasoning_reconstructs_as_safe_text()
+{
+  std::vector<ava::session::SessionEntry> const entries = {
+      ava::session::SessionEntry{.id = "portable_reasoning",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ReasoningBlock,
+                                 .timestamp = "2026-05-11T00:00:00Z",
+                                 .data_json = "{\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-5\",\"format\":\"anthropic_thinking\","
+                                              "\"text\":\"[Provider-private reasoning metadata omitted from portable export.]\",\"redacted\":true,"
+                                              "\"private_replay_metadata_omitted\":{\"native_item_json\":false,\"signature\":false,\"redacted_data\":true}}"},
+      ava::session::SessionEntry{.id = "portable_answer",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-05-11T00:00:01Z",
+                                 .data_json = "{\"text\":\"answer after portable import\",\"tool_calls\":0}"}};
+
+  auto messages = ava::agent::build_provider_messages_from_entries(entries);
+  expect(messages && messages->size() == 1 && (*messages)[0].content_parts.size() == 2 &&
+             (*messages)[0].content_parts[0].type == ava::provider::ContentPartType::Text && !(*messages)[0].content_parts[0].redacted &&
+             (*messages)[0].content_parts[0].text.find("metadata omitted") != std::string::npos,
+         "portable private-replay omission markers reconstruct as ordinary safe assistant text");
+  if (!messages)
+    return;
+
+  ava::provider::AnthropicProvider const provider("https://anthropic.example.test");
+  auto request = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic", .model_id = "claude-sonnet-4-5", .system_prompt = "system", .messages = *messages, .tools_json = {}, .stream = false},
+      "anthropic-key");
+  expect(request && request->body.find("metadata omitted") != std::string::npos && request->body.find("redacted_thinking") == std::string::npos,
+         "portable imported Anthropic reasoning builds a safe ordinary-text request without private redacted data");
+
+  auto const v4_reasoning_data = ava::session::serialize_assistant_output_item_data_json(
+      ava::session::AssistantOutputItem{.assistant_turn_id = "portable_v4_reasoning_turn",
+                                        .sequence = 0,
+                                        .kind = ava::session::AssistantOutputItemKind::Reasoning,
+                                        .provider_item_id = "PRIVATE_PORTABLE_V4_ITEM",
+                                        .provider_output_index = 0,
+                                        .payload = ava::session::AssistantOutputReasoning{.text = "PRIVATE_REDACTED_V4_TEXT",
+                                                                                          .format = "anthropic_thinking",
+                                                                                          .redacted = true,
+                                                                                          .signature = "PRIVATE_REDACTED_V4_SIGNATURE",
+                                                                                          .redacted_data = "PRIVATE_REDACTED_V4_DATA",
+                                                                                          .native_item_json = "{\"type\":\"reasoning\"}"}});
+  auto const v4_commit_data =
+      ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{.assistant_turn_id = "portable_v4_reasoning_turn",
+                                                                                                .item_count = 1,
+                                                                                                .provider = "anthropic",
+                                                                                                .model = "claude-sonnet-4-5",
+                                                                                                .finish_reason = "completed",
+                                                                                                .usage_json = std::nullopt});
+  std::vector<ava::session::SessionEntry> const private_v4_entries = {{.id = "portable_v4_reasoning",
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::AssistantOutputItem,
+                                                                       .timestamp = "2026-07-18T00:00:00Z",
+                                                                       .data_json = v4_reasoning_data.value_or("{}")},
+                                                                      {.id = "portable_v4_commit",
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::AssistantTurnCommit,
+                                                                       .timestamp = "2026-07-18T00:00:01Z",
+                                                                       .data_json = v4_commit_data.value_or("{}")}};
+  auto portable_v4_entries = ava::session::project_portable_session_history(private_v4_entries);
+  std::optional<std::vector<ava::provider::ChatMessage>> portable_v4_messages;
+  if (portable_v4_entries)
+  {
+    auto built_messages = ava::agent::build_provider_messages_from_entries(*portable_v4_entries);
+    if (built_messages)
+      portable_v4_messages = std::move(*built_messages);
+  }
+  std::optional<ava::provider::HttpRequest> portable_v4_anthropic_request;
+  std::optional<ava::provider::HttpRequest> portable_v4_openai_request;
+  if (portable_v4_messages)
+  {
+    auto anthropic = provider.build_request(ava::provider::ProviderRequest{.provider_id = "anthropic",
+                                                                           .model_id = "claude-sonnet-4-5",
+                                                                           .system_prompt = "system",
+                                                                           .messages = *portable_v4_messages,
+                                                                           .tools_json = {},
+                                                                           .stream = false},
+                                            "anthropic-key");
+    ava::provider::OpenAIProvider const openai_provider("https://api.example.test");
+    auto openai = openai_provider.build_request(
+        ava::provider::ProviderRequest{
+            .provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system", .messages = *portable_v4_messages, .tools_json = {}, .stream = false},
+        "openai-key");
+    if (anthropic)
+      portable_v4_anthropic_request = std::move(*anthropic);
+    if (openai)
+      portable_v4_openai_request = std::move(*openai);
+  }
+  expect(portable_v4_entries && portable_v4_entries->front().data_json.find("private_replay_metadata_omitted\":true") != std::string::npos &&
+             portable_v4_entries->front().data_json.find("PRIVATE_REDACTED_V4_SIGNATURE") == std::string::npos && portable_v4_messages &&
+             portable_v4_messages->size() == 1 && (*portable_v4_messages)[0].content_parts.size() == 1 &&
+             (*portable_v4_messages)[0].content_parts[0].type == ava::provider::ContentPartType::Text &&
+             !(*portable_v4_messages)[0].content_parts[0].redacted && portable_v4_anthropic_request && portable_v4_openai_request &&
+             portable_v4_anthropic_request->body.find("redacted_thinking") == std::string::npos &&
+             portable_v4_anthropic_request->body.find("PRIVATE_REDACTED_V4") == std::string::npos &&
+             portable_v4_openai_request->body.find("PRIVATE_REDACTED_V4") == std::string::npos,
+         "portable v4 signed/redacted reasoning replays only as safe ordered text for OpenAI and Anthropic");
 }
 
 void test_image_attachment_message_reconstruction_and_validation()
@@ -3667,6 +4644,698 @@ std::optional<std::string> error_context_value(ava::core::Error const& error, st
   return item == error.context().end() ? std::nullopt : std::optional<std::string>(item->value);
 }
 
+void test_assistant_output_append_target_state_and_batches()
+{
+  auto const root = create_empty_root("assistant-output-append-target");
+  auto const workspace = root / "workspace";
+  auto const sessions = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto item = [](std::string id, std::string turn_id, std::size_t sequence, std::string provider_item_id, std::size_t provider_output_index) {
+    auto data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+        .assistant_turn_id = std::move(turn_id),
+        .sequence = sequence,
+        .kind = ava::session::AssistantOutputItemKind::Text,
+        .provider_item_id = std::move(provider_item_id),
+        .provider_output_index = provider_output_index,
+        .payload = ava::session::AssistantOutputText{.text = "staged", .assistant_phase = ava::session::AssistantOutputTextPhase::Commentary}});
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::AssistantOutputItem,
+                                      .timestamp = ava::session::now_timestamp(),
+                                      .data_json = data.value_or("{}")};
+  };
+  auto commit = [](std::string id, std::string turn_id, std::size_t item_count) {
+    auto data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{.assistant_turn_id = std::move(turn_id),
+                                                                                                          .item_count = item_count,
+                                                                                                          .provider = "openai",
+                                                                                                          .model = "gpt-5.5",
+                                                                                                          .finish_reason = "completed",
+                                                                                                          .usage_json = std::nullopt});
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::AssistantTurnCommit,
+                                      .timestamp = ava::session::now_timestamp(),
+                                      .data_json = data.value_or("{}")};
+  };
+  auto ordinary = [](std::string id) {
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::UserMessage,
+                                      .timestamp = ava::session::now_timestamp(),
+                                      .data_json = "{\"text\":\"ordinary\"}"};
+  };
+
+  {
+    auto persistent = ava::session::SessionStore::create(workspace, sessions);
+    auto persistent_lease = persistent ? ava::session::SessionLease::create_and_acquire(persistent->session_path())
+                                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(persistent.error()));
+    auto ephemeral = ava::session::SessionStore::create_ephemeral(workspace / "raw-v4");
+    auto persistent_raw = persistent && persistent_lease ? persistent->append(*persistent_lease, item("raw-persistent", "raw-turn", 0, "raw-item", 0))
+                                                         : ava::core::VoidResult(std::unexpected(persistent.error()));
+    auto ephemeral_raw = ephemeral ? ephemeral->append_ephemeral(item("raw-ephemeral", "raw-ephemeral-turn", 0, "raw-ephemeral-item", 0))
+                                   : ava::core::VoidResult(std::unexpected(ephemeral.error()));
+    auto persistent_entries =
+        persistent ? persistent->load(*persistent_lease) : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(persistent.error()));
+    expect(!persistent_raw && !ephemeral_raw && persistent_entries && persistent_entries->empty(),
+           "public raw SessionStore append APIs reject all v4 assistant-output mutations without writing records");
+  }
+
+  {
+    auto destination = ava::session::SessionStore::create(workspace, sessions);
+    auto lease = destination ? ava::session::SessionLease::create_and_acquire(destination->session_path())
+                             : ava::core::Result<ava::session::SessionLease>(std::unexpected(destination.error()));
+    if (destination && lease)
+    {
+      std::vector<ava::session::SessionEntry> copied{ordinary("copy-user"), item("copy-output", "copy-turn", 0, "copy-provider-item", 0),
+                                                     commit("copy-commit", "copy-turn", 1)};
+      auto copied_once = destination->append_validated_copy(*lease, copied);
+      auto copied_twice = destination->append_validated_copy(*lease, copied);
+      auto entries = destination->load(*lease);
+      expect(copied_once && !copied_twice && entries && entries->size() == copied.size() && ava::session::classify_assistant_output(*entries).turns.size() == 1,
+             "validated copy preflights a complete v4 history and permits it only once into an empty creating destination");
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create(workspace, sessions);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      auto first_target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto stale_target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      if (first_target && stale_target)
+      {
+        auto first = (*first_target)->append_batch({commit("stale-first", "stale-turn", 0)});
+        auto stale = (*stale_target)->append_batch({commit("stale-duplicate", "stale-turn", 0)});
+        auto physical_first = first ? (*first_target)
+                                          ->append_batch({item("duplicate-physical-output", "physical-turn", 0, "physical-provider-item", 0),
+                                                          commit("physical-first-commit", "physical-turn", 1)})
+                                    : ava::core::VoidResult(std::unexpected(first.error()));
+        auto physical_duplicate = physical_first
+                                      ? (*stale_target)
+                                            ->append_batch({item("duplicate-physical-output", "physical-turn-two", 0, "physical-provider-item-two", 0),
+                                                            commit("physical-duplicate-commit", "physical-turn-two", 1)})
+                                      : ava::core::VoidResult(std::unexpected(physical_first.error()));
+        auto entries = store->load(*lease);
+        expect(first && !stale && physical_first && !physical_duplicate && entries && entries->size() == 3,
+               "persistent targets reload v4 state under shared append serialization and reject stale turns or duplicate physical output ids");
+      }
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create(workspace, sessions);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      bool fail_first_write = true;
+      std::size_t writes = 0;
+      store->set_append_write_for_test([&fail_first_write, &writes](int fd, std::string_view bytes) -> ssize_t {
+        if (fail_first_write && writes++ == 0)
+          return ::write(fd, bytes.data(), std::max<std::size_t>(1, bytes.size() / 2));
+        if (fail_first_write)
+        {
+          errno = EIO;
+          return -1;
+        }
+        return ::write(fd, bytes.data(), bytes.size());
+      });
+      auto first_target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto second_target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto partial = first_target ? (*first_target)->append(ordinary("partial-first-target")) : ava::core::VoidResult(std::unexpected(first_target.error()));
+      fail_first_write = false;
+      auto bypass = second_target ? (*second_target)->append(ordinary("partial-second-target")) : ava::core::VoidResult(std::unexpected(second_target.error()));
+      expect(first_target && second_target && !partial && !bypass,
+             "a second persistent append target cannot bypass a malformed partial tail before explicit recovery");
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create(workspace, sessions);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto staged = item("persistent-staged-0", "persistent-turn", 0, "persistent-item-0", 0);
+      auto seeded = target ? (*target)->append(staged) : ava::core::VoidResult(std::unexpected(target.error()));
+      if (target && seeded)
+      {
+        auto unrelated = (*target)->append(ordinary("persistent-unrelated"));
+        auto raw_unrelated = store->append(*lease, ordinary("persistent-raw-unrelated"));
+        auto zero_while_pending = (*target)->append(commit("persistent-wrong-zero", "persistent-turn", 0));
+        auto batch_while_pending = (*target)->append_batch(
+            {item("persistent-batch-staged-1", "persistent-turn", 1, "persistent-batch-item-1", 1), commit("persistent-batch-commit", "persistent-turn", 2)});
+        auto after_reject = store->load();
+        auto continued = (*target)->append(item("persistent-staged-1", "persistent-turn", 1, "persistent-item-1", 1));
+        auto committed =
+            continued ? (*target)->append(commit("persistent-commit", "persistent-turn", 2)) : ava::core::VoidResult(std::unexpected(continued.error()));
+        auto after_commit = committed ? (*target)->append(ordinary("persistent-after-commit")) : ava::core::VoidResult(std::unexpected(committed.error()));
+        auto final_entries = store->load();
+        expect(!unrelated && !raw_unrelated && !zero_while_pending && !batch_while_pending && after_reject && after_reject->size() == 1 && continued &&
+                   committed && after_commit && final_entries && final_entries->size() == 4 && final_entries->back().id == "persistent-after-commit",
+               "persistent target and raw ordinary appends preserve a valid staged suffix, require its exact continuation and commit, then reopen ordinary "
+               "appends");
+      }
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create_ephemeral(workspace / "ephemeral-racing-targets");
+    if (store)
+    {
+      auto first_target = ava::session::SessionAppendTarget::create_ephemeral(*store);
+      auto second_target = ava::session::SessionAppendTarget::create_ephemeral(*store);
+      if (first_target && second_target)
+      {
+        std::barrier start(2);
+        auto first_append = std::async(std::launch::async, [target = *first_target, &start, &commit] {
+          start.arrive_and_wait();
+          return target->append_batch({commit("ephemeral-race-first", "ephemeral-race-turn", 0)});
+        });
+        auto second_append = std::async(std::launch::async, [target = *second_target, &start, &commit] {
+          start.arrive_and_wait();
+          return target->append_batch({commit("ephemeral-race-second", "ephemeral-race-turn", 0)});
+        });
+        bool const completed = first_append.wait_for(std::chrono::seconds(2)) == std::future_status::ready &&
+                               second_append.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+        bool one_committed = false;
+        if (completed)
+        {
+          auto first = first_append.get();
+          auto second = second_append.get();
+          one_committed = static_cast<bool>(first) != static_cast<bool>(second);
+        }
+        auto entries = completed ? store->load()
+                                 : ava::core::Result<std::vector<ava::session::SessionEntry>>(
+                                       std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "append targets did not complete")));
+        expect(completed && one_committed && entries && entries->size() == 1,
+               "independent ephemeral targets serialize stale v4 batches through one shared mutation lock without deadlocking");
+      }
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create_ephemeral(workspace / "ephemeral");
+    if (store)
+    {
+      auto target = ava::session::SessionAppendTarget::create_ephemeral(*store);
+      auto seeded = target ? (*target)->append(item("ephemeral-staged-0", "ephemeral-turn", 0, "ephemeral-item-0", 0))
+                           : ava::core::VoidResult(std::unexpected(target.error()));
+      if (target && seeded)
+      {
+        auto unrelated = (*target)->append(ordinary("ephemeral-unrelated"));
+        auto raw_unrelated = store->append_ephemeral(ordinary("ephemeral-raw-unrelated"));
+        auto after_reject = store->load();
+        auto continued = (*target)->append(item("ephemeral-staged-1", "ephemeral-turn", 1, "ephemeral-item-1", 1));
+        auto committed =
+            continued ? (*target)->append(commit("ephemeral-commit", "ephemeral-turn", 2)) : ava::core::VoidResult(std::unexpected(continued.error()));
+        auto after_commit = committed ? (*target)->append(ordinary("ephemeral-after-commit")) : ava::core::VoidResult(std::unexpected(committed.error()));
+        auto zero = after_commit ? (*target)->append(commit("ephemeral-zero", "zero-turn", 0)) : ava::core::VoidResult(std::unexpected(after_commit.error()));
+        auto after_zero = zero ? (*target)->append(ordinary("ephemeral-after-zero")) : ava::core::VoidResult(std::unexpected(zero.error()));
+        auto final_entries = store->load();
+        expect(!unrelated && !raw_unrelated && after_reject && after_reject->size() == 1 && continued && committed && after_commit && zero && after_zero &&
+                   final_entries && final_entries->size() == 6 && final_entries->back().id == "ephemeral-after-zero",
+               "ephemeral target and raw ordinary appends preserve staged state and accept matching zero-item commits only from the closed state");
+
+        auto before_invalid_batch = final_entries ? final_entries->size() : 0;
+        auto invalid_batch = (*target)->append_batch({item("invalid-batch-item", "invalid-batch", 1, "invalid", 0)});
+        auto ordinary_batch = (*target)->append_batch({ordinary("ordinary-batch")});
+        auto multiple_transaction_batch =
+            (*target)->append_batch({commit("first-zero-commit", "first-zero-turn", 0), commit("second-zero-commit", "second-zero-turn", 0)});
+        std::vector<ava::session::SessionEntry> over_limit(ava::session::kMaxSessionAppendBatchEntries + 1, ordinary("over-limit"));
+        auto over_limit_batch = (*target)->append_batch(std::move(over_limit));
+        std::vector<ava::session::SessionEntry> oversize;
+        for (std::size_t index = 0; index < 5; ++index)
+        {
+          auto large = ordinary("oversize-" + std::to_string(index));
+          large.data_json = "{\"text\":\"" + std::string(900U * 1024U, 'x') + "\"}";
+          oversize.push_back(std::move(large));
+        }
+        auto oversize_batch = (*target)->append_batch(std::move(oversize));
+        auto after_invalid_batches = store->load();
+        expect(!invalid_batch && !ordinary_batch && !multiple_transaction_batch && !over_limit_batch && !oversize_batch && after_invalid_batches &&
+                   after_invalid_batches->size() == before_invalid_batch,
+               "assistant-output batch preflight rejects non-transaction, multiple-transaction, invalid, over-limit, and oversize shapes without writing any "
+               "record");
+      }
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create_ephemeral(workspace / "max-batch");
+    auto target = store ? ava::session::SessionAppendTarget::create_ephemeral(*store)
+                        : ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>>(std::unexpected(store.error()));
+    if (store && target)
+    {
+      std::vector<ava::session::SessionEntry> maximum_transaction;
+      maximum_transaction.reserve(ava::session::kMaxSessionAppendBatchEntries);
+      for (std::size_t index = 0; index < ava::session::kMaxAssistantOutputItemsPerTurn; ++index)
+      {
+        maximum_transaction.push_back(
+            item("maximum-item-" + std::to_string(index), "maximum-turn", index, "maximum-provider-item-" + std::to_string(index), index));
+      }
+      maximum_transaction.push_back(commit("maximum-commit", "maximum-turn", ava::session::kMaxAssistantOutputItemsPerTurn));
+      auto appended = (*target)->append_batch(std::move(maximum_transaction));
+      auto after_batch = store->load();
+      auto ordinary_after_batch = appended ? (*target)->append(ordinary("maximum-after-commit")) : ava::core::VoidResult(std::unexpected(appended.error()));
+      auto final_entries = store->load();
+      expect(appended && after_batch && after_batch->size() == ava::session::kMaxSessionAppendBatchEntries && ordinary_after_batch && final_entries &&
+                 final_entries->size() == ava::session::kMaxSessionAppendBatchEntries + 1,
+             "one maximum-size v4 assistant transaction preflights and commits with linear state growth before reopening ordinary appends");
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create(workspace, sessions);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      bool allow_writes = false;
+      store->set_append_write_for_test([&allow_writes](int fd, std::string_view bytes) -> ssize_t {
+        if (allow_writes)
+          return ::write(fd, bytes.data(), bytes.size());
+        errno = EIO;
+        return -1;
+      });
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      if (target)
+      {
+        auto first_failure = (*target)->append_batch({commit("no-durable-commit", "no-durable-turn", 0)});
+        auto after_failure = store->load();
+        allow_writes = true;
+        auto ordinary_after_failure = (*target)->append(ordinary("after-no-durable-failure"));
+        auto final_entries = store->load();
+        expect(!first_failure && after_failure && after_failure->empty() && ordinary_after_failure && final_entries && final_entries->size() == 1 &&
+                   final_entries->front().id == "after-no-durable-failure",
+               "a batch write failure before its first durable record leaves the ready append target usable");
+      }
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create(workspace, sessions);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      std::size_t writes = 0;
+      bool allow_later_writes = false;
+      store->set_append_write_for_test([&writes, &allow_later_writes](int fd, std::string_view bytes) -> ssize_t {
+        if (writes++ == 0)
+        {
+          auto const short_count = std::max<std::size_t>(1, bytes.size() / 2);
+          return ::write(fd, bytes.data(), short_count);
+        }
+        if (allow_later_writes)
+          return ::write(fd, bytes.data(), bytes.size());
+        errno = EIO;
+        return -1;
+      });
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      if (target)
+      {
+        auto partial = (*target)->append(ordinary("single-short-write"));
+        auto blocked = (*target)->append(ordinary("single-short-write-blocked"));
+        allow_later_writes = true;
+        auto recovered = (*target)->recover();
+        auto reopened = recovered ? (*target)->append(ordinary("single-short-write-reopened")) : ava::core::VoidResult(std::unexpected(recovered.error()));
+        auto final_entries = store->load();
+        expect(!partial && error_context_value(partial.error(), "append_commit_state") == "partial_or_unknown",
+               "a first-record single append short write reports partial_or_unknown");
+        expect(!blocked, "a first-record single append short write blocks later mutation before recovery");
+        expect(static_cast<bool>(recovered), "a first-record single append short write recovers its torn tail");
+        expect(static_cast<bool>(reopened), reopened ? "a recovered first-record single append short write accepts a new mutation" : reopened.error().format());
+        expect(final_entries && final_entries->size() == 1 && final_entries->front().id == "single-short-write-reopened",
+               "a recovered first-record single append short write retains only the new mutation");
+      }
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create(workspace, sessions);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      std::size_t writes = 0;
+      bool allow_later_writes = false;
+      store->set_append_write_for_test([&writes, &allow_later_writes](int fd, std::string_view bytes) -> ssize_t {
+        if (writes++ == 0)
+        {
+          auto const short_count = std::max<std::size_t>(1, bytes.size() / 2);
+          return ::write(fd, bytes.data(), short_count);
+        }
+        if (allow_later_writes)
+          return ::write(fd, bytes.data(), bytes.size());
+        errno = EIO;
+        return -1;
+      });
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      if (target)
+      {
+        auto partial = (*target)->append_batch({commit("batch-short-write", "batch-short-turn", 0)});
+        auto blocked = (*target)->append(ordinary("batch-short-write-blocked"));
+        allow_later_writes = true;
+        auto recovered = (*target)->recover();
+        auto reopened = recovered ? (*target)->append(ordinary("batch-short-write-reopened")) : ava::core::VoidResult(std::unexpected(recovered.error()));
+        auto final_entries = store->load();
+        expect(!partial && error_context_value(partial.error(), "append_commit_state") == "partial_or_unknown" &&
+                   error_context_value(partial.error(), "batch_persisted_entries") == "0",
+               "a first-record batch short write reports partial_or_unknown at zero completed records");
+        expect(!blocked, "a first-record batch short write blocks later mutation before recovery");
+        expect(static_cast<bool>(recovered), "a first-record batch short write recovers its torn tail");
+        expect(static_cast<bool>(reopened), reopened ? "a recovered first-record batch short write accepts a new mutation" : reopened.error().format());
+        expect(final_entries && final_entries->size() == 1 && final_entries->front().id == "batch-short-write-reopened",
+               "a recovered first-record batch short write retains only the new mutation");
+      }
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create(workspace, sessions);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      int writes = 0;
+      bool allow_later_writes = false;
+      store->set_append_write_for_test([&writes, &allow_later_writes](int fd, std::string_view bytes) -> ssize_t {
+        if (writes++ == 0 || allow_later_writes)
+          return ::write(fd, bytes.data(), bytes.size());
+        errno = EIO;
+        return -1;
+      });
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      if (target)
+      {
+        auto partial = (*target)->append_batch({item("batch-staged-0", "batch-turn", 0, "batch-item-0", 0),
+                                                item("batch-staged-1", "batch-turn", 1, "batch-item-1", 1), commit("batch-commit", "batch-turn", 2)});
+        auto persisted = store->load();
+        auto blocked_append = (*target)->append(ordinary("blocked-after-partial"));
+        auto blocked_batch = (*target)->append_batch({commit("blocked-zero-commit", "blocked-zero-turn", 0)});
+        allow_later_writes = true;
+        auto recovered = (*target)->recover();
+        auto recovered_entries = store->load();
+        auto reopened = recovered ? (*target)->append(ordinary("after-partial-recovery")) : ava::core::VoidResult(std::unexpected(recovered.error()));
+        auto final_entries = store->load();
+        expect(!partial && error_context_value(partial.error(), "append_commit_state") == "partial_or_unknown" &&
+                   error_context_value(partial.error(), "batch_persisted_entries") == "1" &&
+                   error_context_value(partial.error(), "staged_prefix_recovery").has_value() && persisted && persisted->size() == 1 &&
+                   persisted->front().id == "batch-staged-0" && !blocked_append && !blocked_batch && recovered && recovered_entries &&
+                   recovered_entries->empty() && reopened && final_entries && final_entries->size() == 1 &&
+                   final_entries->front().id == "after-partial-recovery",
+               "a partial v4 batch latches mutation until explicit recovery truncates its staged prefix and reopens ordinary appends");
+      }
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create(workspace, sessions);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      store->set_after_append_write_for_test([] { throw 1; });
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      if (target)
+      {
+        auto staged = (*target)->append(item("post-write-staged", "post-write-turn", 0, "post-write-item", 0));
+        store->set_after_append_write_for_test({});
+        auto ordinary_after_staged = (*target)->append(ordinary("post-write-ordinary"));
+        auto persisted = store->load();
+        expect(!staged && error_context_value(staged.error(), "append_commit_state") == "committed_to_leased_inode" && !ordinary_after_staged && persisted &&
+                   persisted->size() == 1 && persisted->front().id == "post-write-staged",
+               "a post-write failure publishes its durable staged state so ordinary appends remain rejected");
+      }
+    }
+  }
+
+  {
+    auto store = ava::session::SessionStore::create(workspace, sessions);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      std::size_t writes = 0;
+      store->set_after_append_write_for_test([&writes] {
+        if (++writes == 2)
+          throw 1;
+      });
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      if (target)
+      {
+        auto partial = (*target)->append_batch(
+            {item("post-write-batch-0", "post-write-batch", 0, "post-write-batch-item-0", 0), commit("post-write-batch-commit", "post-write-batch", 1)});
+        store->set_after_append_write_for_test({});
+        auto persisted = store->load();
+        auto blocked = (*target)->append(ordinary("blocked-after-known-commit"));
+        auto recovered = (*target)->recover();
+        auto recovered_entries = store->load();
+        auto reopened = recovered ? (*target)->append(ordinary("after-known-commit-recovery")) : ava::core::VoidResult(std::unexpected(recovered.error()));
+        auto final_entries = store->load();
+        auto projection = recovered_entries ? ava::session::classify_assistant_output(*recovered_entries) : ava::session::AssistantOutputProjection{};
+        expect(!partial && error_context_value(partial.error(), "append_commit_state") == "partial_or_unknown" &&
+                   error_context_value(partial.error(), "batch_persisted_entries") == "2" && error_context_value(partial.error(), "recovery").has_value() &&
+                   persisted && persisted->size() == 2 && persisted->back().id == "post-write-batch-commit" && !blocked && recovered && recovered_entries &&
+                   recovered_entries->size() == 2 && projection.turns.size() == 1 && reopened && final_entries && final_entries->size() == 3 &&
+                   final_entries->back().id == "after-known-commit-recovery",
+               "a final known-committed batch commit still requires explicit recovery but never truncates its completed turn");
+      }
+    }
+  }
+
+  {
+    auto malformed = ava::session::SessionStore::create_ephemeral(workspace / "malformed");
+    if (malformed)
+    {
+      auto sparse = item("malformed-sparse", "malformed-turn", 1, "malformed-item", 0);
+      auto seeded = malformed->append_ephemeral(std::move(sparse));
+      auto target = seeded ? ava::session::SessionAppendTarget::create_ephemeral(*malformed)
+                           : ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>>(std::unexpected(seeded.error()));
+      expect(!target, "structurally malformed v4 history cannot create an append target");
+    }
+  }
+}
+
+void test_incomplete_assistant_output_suffix_recovery()
+{
+  auto const root = create_empty_root("incomplete-assistant-output-suffix-recovery");
+  auto const workspace = root / "workspace";
+  auto const sessions = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto ordinary = [](std::string id, std::string text = "ordinary") {
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::UserMessage,
+                                      .timestamp = ava::session::now_timestamp(),
+                                      .data_json = "{\"text\":\"" + text + "\"}"};
+  };
+  auto staged = [](std::string id, std::string turn_id, std::size_t sequence) {
+    auto data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+        .assistant_turn_id = std::move(turn_id),
+        .sequence = sequence,
+        .kind = ava::session::AssistantOutputItemKind::Text,
+        .provider_item_id = "provider-item-" + std::to_string(sequence),
+        .provider_output_index = sequence,
+        .payload = ava::session::AssistantOutputText{.text = "staged", .assistant_phase = ava::session::AssistantOutputTextPhase::Commentary}});
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::AssistantOutputItem,
+                                      .timestamp = ava::session::now_timestamp(),
+                                      .data_json = data.value_or("{}")};
+  };
+  auto commit = [](std::string id, std::string turn_id, std::size_t item_count) {
+    auto data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{.assistant_turn_id = std::move(turn_id),
+                                                                                                          .item_count = item_count,
+                                                                                                          .provider = "openai",
+                                                                                                          .model = "gpt-5.5",
+                                                                                                          .finish_reason = "tool_calls",
+                                                                                                          .usage_json = std::nullopt});
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::AssistantTurnCommit,
+                                      .timestamp = ava::session::now_timestamp(),
+                                      .data_json = data.value_or("{}")};
+  };
+  auto exact_line = [](ava::session::SessionEntry const& entry) {
+    auto line = ava::session::serialize_session_entry_line(entry);
+    return line ? *line + "\n" : std::string{};
+  };
+  // Crash-recovery fixtures intentionally model physical v4 bytes that exist
+  // before an authority can finish the transaction. Do not route these through
+  // the public raw append API, which correctly rejects v4 mutations.
+  auto append_physical_v4_fixture = [&](ava::session::SessionStore const& store, ava::session::SessionEntry const& entry) {
+    auto const line = exact_line(entry);
+    if (line.empty())
+      return ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "fixture entry did not serialize")));
+    std::ofstream file(store.session_path(), std::ios::binary | std::ios::app);
+    if (!file)
+      return ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to append physical v4 fixture")));
+    file << line;
+    file.flush();
+    if (!file)
+      return ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to flush physical v4 fixture")));
+    return ava::core::VoidResult{};
+  };
+  auto recovery_artifact_count = [](std::filesystem::path const& path) {
+    std::size_t count = 0;
+    std::error_code iter_error;
+    auto const prefix = path.filename().string() + ".incomplete-assistant-output.";
+    for (std::filesystem::directory_iterator it(path.parent_path(), iter_error), end; !iter_error && it != end; it.increment(iter_error))
+      if (it->path().filename().string().starts_with(prefix))
+        ++count;
+    return count;
+  };
+
+  for (std::size_t count = 1; count <= 3; ++count)
+  {
+    auto store = ava::session::SessionStore::create(workspace, sessions);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (!store || !lease)
+      continue;
+    auto const session_id = store->session_id();
+    auto const path = store->session_path();
+    auto seeded = store->append(*lease, ordinary("seed-" + std::to_string(count)));
+    std::string expected_suffix;
+    for (std::size_t index = 0; seeded && index < count; ++index)
+    {
+      auto entry = staged("stage-" + std::to_string(count) + "-" + std::to_string(index), "turn-" + std::to_string(count), index);
+      expected_suffix += exact_line(entry);
+      seeded = append_physical_v4_fixture(*store, entry);
+    }
+    lease = ava::session::SessionLease{};
+    auto reopened = seeded ? ava::session::SessionStore::open(workspace, session_id, sessions)
+                           : ava::core::Result<ava::session::SessionStore>(std::unexpected(seeded.error()));
+    auto recovery_lease = reopened ? ava::session::SessionLease::acquire(reopened->session_path())
+                                   : ava::core::Result<ava::session::SessionLease>(std::unexpected(reopened.error()));
+    auto recovered = recovery_lease ? reopened->recover_incomplete_assistant_output_suffix(*recovery_lease, ava::session::SessionReadLimits{})
+                                    : ava::core::Result<std::optional<ava::session::AssistantOutputSuffixRecovery>>(std::unexpected(recovery_lease.error()));
+    auto entries = recovered && *recovered ? reopened->load(*recovery_lease)
+                                           : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(
+                                                 ava::core::Error(ava::core::ErrorCategory::Unknown, "staging recovery did not return metadata")));
+    auto target = entries ? ava::session::SessionAppendTarget::create_persistent(*reopened, *recovery_lease)
+                          : ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>>(std::unexpected(entries.error()));
+    auto next = target ? (*target)->append(ordinary("ordinary-after-" + std::to_string(count))) : ava::core::VoidResult(std::unexpected(target.error()));
+    struct stat quarantine_status{};
+    bool const quarantine_mode = recovered && *recovered && (*recovered)->quarantine_path &&
+                                 ::stat((*recovered)->quarantine_path->c_str(), &quarantine_status) == 0 && (quarantine_status.st_mode & 0777) == 0600;
+    expect(recovered && *recovered && (*recovered)->removed_entry_count == count && (*recovered)->removed_byte_count == expected_suffix.size() &&
+               (*recovered)->quarantine_path && read_binary_file(*(*recovered)->quarantine_path) == expected_suffix && quarantine_mode && entries &&
+               entries->size() == 1 && next && read_binary_file(path).ends_with("\n") && recovery_artifact_count(path) == 1,
+           "restart recovery quarantines and removes exactly each complete uncommitted assistant-output crash prefix before a normal append");
+  }
+
+  auto make_persistent_fixture = [&](std::string id) {
+    auto store = ava::session::SessionStore::create(workspace, sessions);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+      static_cast<void>(store->append(*lease, ordinary("seed-" + id)));
+    return std::pair(std::move(store), std::move(lease));
+  };
+
+  {
+    auto [store, lease] = make_persistent_fixture("malformed");
+    if (store && lease)
+    {
+      auto malformed = staged("malformed-stage", "malformed-turn", 1);
+      static_cast<void>(append_physical_v4_fixture(*store, malformed));
+      auto const before = read_binary_file(store->session_path());
+      auto recovered = store->recover_incomplete_assistant_output_suffix(*lease, ava::session::SessionReadLimits{});
+      expect(!recovered && read_binary_file(store->session_path()) == before && recovery_artifact_count(store->session_path()) == 0,
+             "malformed complete staged suffix fails closed without a truncate or quarantine");
+    }
+  }
+  {
+    auto [store, lease] = make_persistent_fixture("interior");
+    if (store && lease)
+    {
+      static_cast<void>(append_physical_v4_fixture(*store, staged("interior-stage", "interior-turn", 0)));
+      static_cast<void>(append_physical_v4_fixture(*store, ordinary("interior-unrelated")));
+      auto const before = read_binary_file(store->session_path());
+      auto recovered = store->recover_incomplete_assistant_output_suffix(*lease, ava::session::SessionReadLimits{});
+      expect(!recovered && read_binary_file(store->session_path()) == before && recovery_artifact_count(store->session_path()) == 0,
+             "an interior staged group followed by an unrelated entry fails closed unchanged");
+    }
+  }
+  {
+    auto [store, lease] = make_persistent_fixture("committed");
+    if (store && lease)
+    {
+      static_cast<void>(append_physical_v4_fixture(*store, staged("committed-stage", "committed-turn", 0)));
+      static_cast<void>(append_physical_v4_fixture(*store, commit("committed-commit", "committed-turn", 1)));
+      auto const before = read_binary_file(store->session_path());
+      auto recovered = store->recover_incomplete_assistant_output_suffix(*lease, ava::session::SessionReadLimits{});
+      expect(recovered && !*recovered && read_binary_file(store->session_path()) == before, "a committed assistant turn is never recovered or removed");
+    }
+  }
+  {
+    auto [store, lease] = make_persistent_fixture("limits-and-cancel");
+    if (store && lease)
+    {
+      static_cast<void>(append_physical_v4_fixture(*store, staged("limited-stage", "limited-turn", 0)));
+      auto const before = read_binary_file(store->session_path());
+      auto canceled = store->recover_incomplete_assistant_output_suffix(*lease, ava::session::SessionReadLimits{}, [] { return true; });
+      auto limited = store->recover_incomplete_assistant_output_suffix(
+          *lease, ava::session::SessionReadLimits{.max_file_bytes = before.size(), .max_line_bytes = before.size(), .max_entries = 1});
+      expect(!canceled && !limited && read_binary_file(store->session_path()) == before && recovery_artifact_count(store->session_path()) == 0,
+             "assistant-output suffix recovery honors cancellation and entry limits before mutation");
+    }
+  }
+  {
+    auto [left_store, left_lease] = make_persistent_fixture("lease-mismatch-left");
+    auto [right_store, right_lease] = make_persistent_fixture("lease-mismatch-right");
+    if (left_store && left_lease && right_store && right_lease)
+    {
+      static_cast<void>(append_physical_v4_fixture(*left_store, staged("mismatch-stage", "mismatch-turn", 0)));
+      auto const before = read_binary_file(left_store->session_path());
+      auto mismatch = left_store->recover_incomplete_assistant_output_suffix(*right_lease, ava::session::SessionReadLimits{});
+      expect(!mismatch && read_binary_file(left_store->session_path()) == before,
+             "assistant-output suffix recovery rejects a lease for another session without touching the target");
+    }
+  }
+  std::error_code remove_error;
+  for (std::string const replacement_kind : {"replacement", "symlink", "fifo"})
+  {
+    auto [store, lease] = make_persistent_fixture("unsafe-" + replacement_kind);
+    if (!store || !lease)
+      continue;
+    static_cast<void>(append_physical_v4_fixture(*store, staged("unsafe-stage-" + replacement_kind, "unsafe-turn-" + replacement_kind, 0)));
+    auto const path = store->session_path();
+    auto const parked = path.string() + ".parked";
+    std::filesystem::rename(path, parked, remove_error);
+    if (replacement_kind == "replacement")
+      write_binary_file(path, "replacement\\n");
+    else if (replacement_kind == "symlink")
+      std::filesystem::create_symlink(parked, path, remove_error);
+    else
+      ::mkfifo(path.c_str(), 0600);
+    auto recovered = store->recover_incomplete_assistant_output_suffix(*lease, ava::session::SessionReadLimits{});
+    expect(!recovered && read_binary_file(parked).find("unsafe-stage-") != std::string::npos,
+           "assistant-output suffix recovery rejects " + replacement_kind + " replacement without mutating the leased inode");
+  }
+  {
+    auto ephemeral = ava::session::SessionStore::create_ephemeral(workspace / "ephemeral");
+    if (ephemeral)
+    {
+      auto target = ava::session::SessionAppendTarget::create_ephemeral(*ephemeral);
+      auto staged_append = target ? (*target)->append(staged("ephemeral-stage", "ephemeral-turn", 0)) : ava::core::VoidResult(std::unexpected(target.error()));
+      auto recovered = staged_append && target ? (*target)->recover() : ava::core::VoidResult(std::unexpected(staged_append.error()));
+      auto next = recovered && target ? (*target)->append(ordinary("ephemeral-ordinary")) : ava::core::VoidResult(std::unexpected(recovered.error()));
+      auto entries = ephemeral->load();
+      expect(staged_append && recovered && next && entries && entries->size() == 1 && entries->front().id == "ephemeral-ordinary",
+             "ephemeral recovery erases only the proven trailing staging entries and rebuilds append state");
+    }
+  }
+}
+
 void test_lease_bound_session_reads_hold_exact_authority()
 {
   auto const root = create_empty_root("lease-bound-session-reads");
@@ -3895,6 +5564,50 @@ void test_session_read_authority_binding_and_descriptor_lifetime()
 #endif
 }
 
+void test_session_read_authority_retains_runtime_policy()
+{
+  auto const root = create_empty_root("session-read-authority-policy");
+  auto const workspace = root / "workspace";
+  auto const sessions = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto entry = [](std::string id) {
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::UserMessage,
+                                      .timestamp = ava::session::now_timestamp(),
+                                      .data_json = "{\"text\":\"policy\"}"};
+  };
+  auto const limits = ava::session::SessionReadLimits{.max_file_bytes = 4096, .max_line_bytes = 2048, .max_entries = 1};
+
+  auto store = ava::session::SessionStore::create(workspace, sessions);
+  auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                     : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+  if (!store || !lease)
+    return;
+
+  auto policy_authority = ava::session::SessionReadAuthority::create_persistent(*store, *lease, limits);
+  auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease, limits);
+  auto first = store->append(*lease, entry("first"));
+  auto first_load =
+      policy_authority ? policy_authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(policy_authority.error()));
+  auto second = first ? store->append(*lease, entry("second")) : ava::core::VoidResult(std::unexpected(first.error()));
+  auto provider_iteration_load =
+      second && policy_authority ? policy_authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(second.error()));
+  auto legacy_authority = ava::session::SessionReadAuthority::create_persistent(*store, *lease);
+  auto legacy_load =
+      legacy_authority ? legacy_authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(legacy_authority.error()));
+  auto target_authority = target ? (*target)->read_authority() : ava::core::Result<ava::session::SessionReadAuthority>(std::unexpected(target.error()));
+  auto target_load =
+      target_authority ? target_authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(target_authority.error()));
+  auto target_recovery = target ? (*target)->recover() : ava::core::VoidResult(std::unexpected(target.error()));
+
+  expect(policy_authority && target && first && first_load && first_load->size() == 1 && second && !provider_iteration_load && legacy_authority &&
+             legacy_load && legacy_load->size() == 2 && target_authority && !target_load && !target_recovery,
+         "policy-bound runtime authorities reject history growth between provider iterations while legacy authorities remain compatible and targets retain the "
+         "exact policy");
+}
+
 void test_session_append_authority_and_commit_state()
 {
   auto const root = create_empty_root("session-append-authority");
@@ -4065,6 +5778,228 @@ void test_session_append_authority_and_commit_state()
   }
 }
 
+void test_logical_session_projection_v4_public_privacy_and_compatibility()
+{
+  using ava::session::AssistantOutputFunctionCall;
+  using ava::session::AssistantOutputItem;
+  using ava::session::AssistantOutputItemKind;
+  using ava::session::AssistantOutputReasoning;
+  using ava::session::AssistantOutputText;
+  using ava::session::AssistantOutputTextPhase;
+  using ava::session::AssistantTurnCommit;
+  using ava::session::EntryType;
+  using ava::session::SessionEntry;
+
+  auto item = [](std::string id, std::size_t sequence, AssistantOutputItemKind kind, ava::session::AssistantOutputItemPayload payload, std::string timestamp) {
+    auto data =
+        ava::session::serialize_assistant_output_item_data_json(AssistantOutputItem{.assistant_turn_id = "turn_projection",
+                                                                                    .sequence = sequence,
+                                                                                    .kind = kind,
+                                                                                    .provider_item_id = "PRIVATE_PROVIDER_ITEM_ID_" + std::to_string(sequence),
+                                                                                    .provider_output_index = sequence,
+                                                                                    .payload = std::move(payload)});
+    return SessionEntry{
+        .id = std::move(id), .parent_id = "", .type = EntryType::AssistantOutputItem, .timestamp = std::move(timestamp), .data_json = data.value_or("{}")};
+  };
+  auto commit_data = ava::session::serialize_assistant_turn_commit_data_json(
+      AssistantTurnCommit{.assistant_turn_id = "turn_projection",
+                          .item_count = 4,
+                          .provider = "openai",
+                          .model = "gpt-5.5",
+                          .finish_reason = "tool_calls",
+                          .usage_json = "{\"input_tokens\":7,\"output_tokens\":5,\"total_tokens\":12,\"source\":\"provider\"}"});
+  std::string const sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  std::vector<SessionEntry> const entries = {
+      SessionEntry{
+          .id = "legacy_user",
+          .parent_id = "",
+          .type = EntryType::UserMessage,
+          .timestamp = "2026-07-18T00:00:00Z",
+          .data_json = "{\"text\":\"legacy "
+                       "user\",\"attachments\":[{\"id\":\"image_projection\",\"type\":\"image\",\"mime_type\":\"image/png\",\"byte_size\":12,\"sha256\":\"" +
+                       sha256 + "\",\"storage_path\":\"attachments/private-source.png\"}]}",
+          .version = 0},
+      item("out_commentary", 0, AssistantOutputItemKind::Text,
+           AssistantOutputText{.text = "commentary ", .assistant_phase = AssistantOutputTextPhase::Commentary}, "2026-07-18T00:00:01Z"),
+      item("out_reasoning", 1, AssistantOutputItemKind::Reasoning,
+           AssistantOutputReasoning{.text = "visible reasoning",
+                                    .format = "openai_responses",
+                                    .redacted = false,
+                                    .signature = "PRIVATE_SIGNATURE_PROJECTION",
+                                    .redacted_data = "PRIVATE_REDACTED_PROJECTION",
+                                    .native_item_json = "{\"id\":\"PRIVATE_NATIVE_REASONING_ID\",\"type\":\"reasoning\",\"summary\":[]}"},
+           "2026-07-18T00:00:02Z"),
+      item("out_function", 2, AssistantOutputItemKind::FunctionCall,
+           AssistantOutputFunctionCall{.call_id = "call_projection", .name = "read_file", .arguments_json = "{\"path\":\"README.md\"}"},
+           "2026-07-18T00:00:03Z"),
+      item("out_final", 3, AssistantOutputItemKind::Text, AssistantOutputText{.text = "final", .assistant_phase = AssistantOutputTextPhase::FinalAnswer},
+           "2026-07-18T00:00:04Z"),
+      SessionEntry{.id = "commit_projection",
+                   .parent_id = "out_final",
+                   .type = EntryType::AssistantTurnCommit,
+                   .timestamp = "2026-07-18T00:00:05Z",
+                   .data_json = commit_data.value_or("{}")},
+      SessionEntry{.id = "result_projection",
+                   .parent_id = "commit_projection",
+                   .type = EntryType::ToolResult,
+                   .timestamp = "2026-07-18T00:00:06Z",
+                   .data_json =
+                       "{\"assistant_output_entry_id\":\"out_function\",\"call_id\":\"call_projection\",\"name\":\"read_file\",\"success\":true,\"status\":"
+                       "\"success\",\"result\":\"read "
+                       "ok\",\"structured_result\":{\"schema_version\":1,\"call_id\":\"call_projection\",\"tool\":\"read_file\",\"status\":\"success\",\"ok\":"
+                       "true,\"content_type\":\"text/plain\",\"content\":\"read ok\"},\"provider_private\":\"PRIVATE_RESULT_CANARY\"}"},
+      SessionEntry{.id = "tail_projection",
+                   .parent_id = "result_projection",
+                   .type = EntryType::AssistantOutputItem,
+                   .timestamp = "2026-07-18T00:00:07Z",
+                   .data_json = "{\"schema_version\":1,\"assistant_turn_id\":\"tail_projection\",\"sequence\":0,\"kind\":\"text\",\"text\":\"INCOMPLETE_"
+                                "STAGING_CANARY\",\"assistant_phase\":\"commentary\"}"},
+  };
+
+  auto projected = ava::session::project_logical_session_history(entries);
+  auto ordered = ava::session::project_ordered_public_session_history(entries);
+  auto jsonl = ava::session::format_session_portable_jsonl_checked(entries);
+  auto markdown = ava::session::format_session_markdown_checked(entries, ava::session::ExportOptions{.include_tool_details = true});
+  auto html = ava::session::format_session_html_checked(entries, ava::session::ExportOptions{.include_tool_details = true});
+  auto transcript = ava::session::project_transcript(entries);
+  auto estimated = ava::session::estimate_session_tokens(entries);
+  ava::session::CompactionConfig threshold_config = ava::session::default_compaction_config();
+  threshold_config.auto_threshold_tokens = estimated.value_or(0);
+  auto threshold_decision = ava::session::should_auto_compact(entries, threshold_config);
+  auto compaction_prompt = ava::app::build_compaction_summary_prompt(entries, threshold_config, "", 42);
+
+  bool parsed_jsonl = jsonl.has_value();
+  std::vector<SessionEntry> imported;
+  if (jsonl)
+  {
+    std::istringstream input(*jsonl);
+    std::string line;
+    while (std::getline(input, line))
+    {
+      auto parsed = ava::session::parse_session_entry_line(line, "portable-v4-projection.jsonl");
+      if (!parsed)
+      {
+        parsed_jsonl = false;
+        break;
+      }
+      imported.push_back(std::move(*parsed));
+    }
+  }
+  auto const replay = ava::session::validate_session_replay(imported);
+  auto imported_messages = ava::agent::build_provider_messages_from_entries(imported);
+
+  bool compatibility_shape =
+      projected && projected->size() == 5 && (*projected)[0].type == EntryType::UserMessage && (*projected)[1].type == EntryType::ReasoningBlock &&
+      (*projected)[1].id == "out_reasoning" && (*projected)[1].timestamp == "2026-07-18T00:00:02Z" && (*projected)[2].type == EntryType::AssistantMessage &&
+      (*projected)[2].id == "commit_projection" && (*projected)[2].timestamp == "2026-07-18T00:00:05Z" &&
+      (*projected)[2].data_json.find("commentary final") != std::string::npos && (*projected)[2].data_json.find("\"tool_calls\":1") != std::string::npos &&
+      (*projected)[2].data_json.find("\"input_tokens\":7") != std::string::npos &&
+      (*projected)[2].data_json.find("\"ordered_output\":[{") != std::string::npos &&
+      (*projected)[2].data_json.find("\"assistant_phase\":\"commentary\"") != std::string::npos &&
+      (*projected)[2].data_json.find("\"assistant_phase\":\"final_answer\"") != std::string::npos && (*projected)[3].type == EntryType::ToolCall &&
+      (*projected)[3].id == "out_function" && (*projected)[3].timestamp == "2026-07-18T00:00:03Z" && (*projected)[4].type == EntryType::ToolResult &&
+      (*projected)[4].data_json.find("assistant_output_entry_id") == std::string::npos &&
+      (*projected)[4].data_json.find("PRIVATE_RESULT_CANARY") == std::string::npos;
+  bool ordered_shape = ordered && ordered->size() == 6 && (*ordered)[0].type == EntryType::UserMessage && (*ordered)[1].type == EntryType::AssistantMessage &&
+                       (*ordered)[1].id == "out_commentary" && (*ordered)[1].data_json.find("\"assistant_phase\":\"commentary\"") != std::string::npos &&
+                       (*ordered)[2].type == EntryType::ReasoningBlock && (*ordered)[2].id == "out_reasoning" && (*ordered)[3].type == EntryType::ToolCall &&
+                       (*ordered)[3].id == "out_function" && (*ordered)[4].type == EntryType::AssistantMessage && (*ordered)[4].id == "out_final" &&
+                       (*ordered)[4].data_json.find("\"assistant_phase\":\"final_answer\"") != std::string::npos && (*ordered)[5].type == EntryType::ToolResult;
+  bool portable_shape = imported.size() == 7 && imported[0].type == EntryType::UserMessage && imported[0].version == 0 &&
+                        imported[1].type == EntryType::AssistantOutputItem && imported[1].data_json.find("provider_item_id") == std::string::npos &&
+                        imported[2].type == EntryType::AssistantOutputItem && imported[3].type == EntryType::AssistantOutputItem &&
+                        imported[4].type == EntryType::AssistantOutputItem && imported[5].type == EntryType::AssistantTurnCommit &&
+                        imported[6].type == EntryType::ToolResult &&
+                        imported[6].data_json.find("\"assistant_output_entry_id\":\"out_function\"") != std::string::npos;
+  ava::provider::OpenAIProvider const portable_openai_provider("https://api.example.test");
+  ava::provider::AnthropicProvider const portable_anthropic_provider("https://anthropic.example.test");
+  std::optional<ava::provider::HttpRequest> portable_openai_request;
+  std::optional<ava::provider::HttpRequest> portable_anthropic_request;
+  if (imported_messages)
+  {
+    auto openai_request = portable_openai_provider.build_request(
+        ava::provider::ProviderRequest{
+            .provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system", .messages = *imported_messages, .tools_json = {}, .stream = false},
+        "test-key");
+    auto anthropic_request = portable_anthropic_provider.build_request(ava::provider::ProviderRequest{.provider_id = "anthropic",
+                                                                                                      .model_id = "claude-sonnet-4-5",
+                                                                                                      .system_prompt = "system",
+                                                                                                      .messages = *imported_messages,
+                                                                                                      .tools_json = {},
+                                                                                                      .stream = false},
+                                                                       "test-key");
+    if (openai_request)
+      portable_openai_request = std::move(*openai_request);
+    if (anthropic_request)
+      portable_anthropic_request = std::move(*anthropic_request);
+  }
+  bool provider_replay_order =
+      imported_messages && imported_messages->size() == 3 && (*imported_messages)[1].role == "assistant" && (*imported_messages)[1].content_parts.size() == 4 &&
+      (*imported_messages)[1].content_parts[0].type == ava::provider::ContentPartType::Text && (*imported_messages)[1].content_parts[0].text == "commentary " &&
+      (*imported_messages)[1].content_parts[1].type == ava::provider::ContentPartType::Text &&
+      (*imported_messages)[1].content_parts[1].text == "visible reasoning" &&
+      (*imported_messages)[1].content_parts[2].type == ava::provider::ContentPartType::ToolUse &&
+      (*imported_messages)[1].content_parts[2].tool_call_id == "call_projection" &&
+      (*imported_messages)[1].content_parts[3].type == ava::provider::ContentPartType::Text && (*imported_messages)[1].content_parts[3].text == "final" &&
+      (*imported_messages)[2].role == "user";
+  auto markdown_commentary = markdown ? markdown->find("commentary ") : std::string::npos;
+  auto markdown_reasoning = markdown ? markdown->find("visible reasoning") : std::string::npos;
+  auto markdown_function = markdown ? markdown->find("read_file") : std::string::npos;
+  auto markdown_final = markdown ? markdown->find("final") : std::string::npos;
+  auto html_commentary = html ? html->find("commentary ") : std::string::npos;
+  auto html_reasoning = html ? html->find("visible reasoning") : std::string::npos;
+  auto html_function = html ? html->find("read_file") : std::string::npos;
+  auto html_final = html ? html->find("final") : std::string::npos;
+  bool private_values_absent =
+      jsonl && markdown && html && compaction_prompt && jsonl->starts_with("{\"id\":\"legacy_user\"") &&
+      jsonl->find("PRIVATE_PROVIDER_ITEM_ID") == std::string::npos && jsonl->find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&
+      jsonl->find("PRIVATE_REDACTED_PROJECTION") == std::string::npos && jsonl->find("PRIVATE_NATIVE_REASONING_ID") == std::string::npos &&
+      jsonl->find("INCOMPLETE_STAGING_CANARY") == std::string::npos && jsonl->find("attachments/private-source.png") == std::string::npos &&
+      jsonl->find("attachments/portable-redacted") != std::string::npos && markdown->find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&
+      html->find("PRIVATE_REDACTED_PROJECTION") == std::string::npos && compaction_prompt->find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&
+      compaction_prompt->find("PRIVATE_NATIVE_REASONING_ID") == std::string::npos;
+  bool rendered_order = markdown_commentary < markdown_reasoning && markdown_reasoning < markdown_function && markdown_function < markdown_final &&
+                        html_commentary < html_reasoning && html_reasoning < html_function && html_function < html_final &&
+                        compaction_prompt->find("commentary ") < compaction_prompt->find("visible reasoning") &&
+                        compaction_prompt->find("visible reasoning") < compaction_prompt->find("read_file") &&
+                        compaction_prompt->find("read_file") < compaction_prompt->find("final");
+  expect(compatibility_shape && ordered_shape && portable_shape && parsed_jsonl && replay.ok() && provider_replay_order && private_values_absent &&
+             portable_openai_request && portable_anthropic_request && portable_openai_request->body.find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&
+             portable_openai_request->body.find("PRIVATE_NATIVE_REASONING_ID") == std::string::npos &&
+             portable_anthropic_request->body.find("PRIVATE_REDACTED_PROJECTION") == std::string::npos &&
+             portable_anthropic_request->body.find("redacted_thinking") == std::string::npos && rendered_order && transcript && transcript->size() == 3 &&
+             (*transcript)[1].role == ava::session::TranscriptRole::Assistant && (*transcript)[1].text == "commentary " &&
+             (*transcript)[2].role == ava::session::TranscriptRole::Assistant && (*transcript)[2].text == "final" && estimated && *estimated > 0 &&
+             threshold_decision && threshold_decision->should_compact,
+         "v4 compatibility, ordered public, and portable projections preserve order while excluding provider-private data");
+
+  auto malformed = entries;
+  malformed[5].data_json =
+      "{\"schema_version\":1,\"assistant_turn_id\":\"turn_projection\",\"item_count\":3,\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"finish_reason\":\"tool_"
+      "calls\"}";
+  auto malformed_projection = ava::session::project_logical_session_history(malformed);
+  std::vector<SessionEntry> const legacy_v3 = {
+      SessionEntry{.id = "legacy_v3_user",
+                   .parent_id = "",
+                   .type = EntryType::UserMessage,
+                   .timestamp = "2026-07-18T01:00:00Z",
+                   .data_json = "{\"text\":\"v3\"}",
+                   .version = 3},
+      SessionEntry{.id = "legacy_v3_assistant",
+                   .parent_id = "",
+                   .type = EntryType::AssistantMessage,
+                   .timestamp = "2026-07-18T01:00:01Z",
+                   .data_json = "{\"text\":\"unchanged\"}",
+                   .version = 3},
+  };
+  auto legacy_projection = ava::session::project_logical_session_history(legacy_v3);
+  expect(!malformed_projection && legacy_projection && legacy_projection->size() == legacy_v3.size() && (*legacy_projection)[0].id == legacy_v3[0].id &&
+             (*legacy_projection)[0].version == 3 && (*legacy_projection)[0].data_json == legacy_v3[0].data_json &&
+             (*legacy_projection)[1].id == legacy_v3[1].id && (*legacy_projection)[1].version == 3 &&
+             (*legacy_projection)[1].data_json == legacy_v3[1].data_json,
+         "logical projection rejects malformed v4 transactions while preserving v3 records unchanged");
+}
+
 void test_provider_base64_encoding()
 {
   expect(ava::provider::base64_encode("") == "", "base64 encoder handles empty input");
@@ -4089,8 +6024,11 @@ void run_session_tests()
   test_session_branch_fork_and_clone_copy_source_safely();
   test_session_branch_summary_appends_to_source_session();
   test_session_stats_helper();
+  test_session_stats_saturates_large_usage_and_costs();
   test_session_stats_omits_incomplete_cost_total();
   test_session_stats_flags_legacy_assistant_tokens_without_cost();
+  test_assistant_output_v4_session_schema_and_replay();
+  test_session_stats_projects_mixed_v3_v4_history();
   test_session_replay_validation();
   test_session_lease_creation_and_link_safety();
   test_session_torn_tail_recovery();
@@ -4098,15 +6036,21 @@ void run_session_tests()
   test_session_resume_and_listing();
   test_session_compaction_entry_round_trip();
   test_session_markdown_export();
+  test_session_portable_jsonl_sanitizer();
   test_compaction_config_and_thresholds();
   test_compaction_context_reconstruction();
   test_tool_content_parts_reconstruction();
+  test_portable_omitted_reasoning_reconstructs_as_safe_text();
   test_image_attachment_message_reconstruction_and_validation();
   test_image_attachment_storage_boundary();
   test_image_attachment_import();
   test_created_session_rollback_is_identity_safe_and_preserves_attachments();
   test_lease_bound_session_reads_hold_exact_authority();
   test_session_read_authority_binding_and_descriptor_lifetime();
+  test_session_read_authority_retains_runtime_policy();
+  test_assistant_output_append_target_state_and_batches();
+  test_incomplete_assistant_output_suffix_recovery();
   test_session_append_authority_and_commit_state();
+  test_logical_session_projection_v4_public_privacy_and_compatibility();
   test_provider_base64_encoding();
 }

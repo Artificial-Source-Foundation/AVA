@@ -31,9 +31,8 @@ using CompactionSummaryGenerator =
 
 // Consume an already-owned persistent store and its lease without reopening by path.
 // Inputs remain intact on failure so callers can roll back by stable identity.
-[[nodiscard]] ava::core::Result<runtime::Session> open_owned_runtime_session(runtime::OpenOptions const& options,
-                                                                              ava::session::SessionStore& store,
-                                                                              ava::session::SessionLease& lease, bool created);
+[[nodiscard]] ava::core::Result<runtime::Session> open_owned_runtime_session(runtime::OpenOptions const& options, ava::session::SessionStore& store,
+                                                                             ava::session::SessionLease& lease, bool created);
 
 [[nodiscard]] ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::Session const& session, ava::agent::Mode mode);
 
@@ -71,8 +70,9 @@ void apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState 
 
 [[nodiscard]] ava::core::Error stale_compaction_snapshot_error(std::string_view trigger, std::size_t snapshot_entries, std::size_t current_entries);
 
-[[nodiscard]] std::string build_compaction_summary_prompt(std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
-                                                          std::string_view instructions, std::size_t estimated_tokens);
+[[nodiscard]] ava::core::Result<std::string> build_compaction_summary_prompt(std::vector<ava::session::SessionEntry> const& entries,
+                                                                             ava::session::CompactionConfig const& config, std::string_view instructions,
+                                                                             std::size_t estimated_tokens);
 
 [[nodiscard]] ava::core::Result<std::string> generate_compaction_summary(runtime::Session const& session,
                                                                          std::vector<ava::session::SessionEntry> const& entries,

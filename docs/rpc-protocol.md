@@ -33,10 +33,12 @@ A request may contain integer `protocol_version:1`. Omission means legacy v1 and
 `get_protocol` returns:
 
 ```json
-{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":3,"supported_session_entry_versions":[0,1,2,3],"capabilities":["direct_bash_rpc"],"direct_command_types":["run_bash","run_command"]}
+{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":4,"supported_session_entry_versions":[0,1,2,3,4],"capabilities":["direct_bash_rpc"],"direct_command_types":["run_bash","run_command"]}
 ```
 
-Protocol, event-envelope, and session-entry versions are independent. Unknown additive object fields and unknown future event names must be ignored. A client must not infer support for another protocol version from an event or session version.
+Protocol, event-envelope, and session-entry versions are independent. The supported session-version array is generated from the reader's accepted contiguous range `0..kCurrentSessionEntryVersion`; clients must use that field rather than hard-code a historical list. Unknown additive object fields and unknown future event names must be ignored. A client must not infer support for another protocol version from an event or session version.
+
+Session entry v4 adds private physical ordered-output records (`assistant_output_item` and `assistant_turn_commit`). RPC public callbacks and `get_messages` use the compatibility projection: existing assistant `text`, `tool_calls`, and usage fields remain, while a committed v4 assistant message may add a private-free `ordered_output` array. Its text elements carry additive `assistant_phase`; reasoning elements carry only visible text/format/redaction and omission-presence booleans; function elements carry call id/name/arguments. Legacy-compatible entry selection and the established 8 KiB per-entry/1 MiB response caps are applied before this additive detail. If ordered detail is omitted, the response adds `ordered_output_truncated:true` and `ordered_output_omitted_count`; its legacy `messages` and `message_count` remain unchanged. It never exposes staging fields, provider item IDs/output indexes, native reasoning replay payloads, signatures, redacted payloads, or exact tool-result bindings. A valid final incomplete staging suffix is ignored by public reads; every other v4 classifier diagnostic is returned as an error. Portable JSONL is separately import-valid and preserves committed v4 physical order/bindings after sanitization.
 
 ## Message Categories And Envelopes
 
@@ -218,7 +220,7 @@ Protocol discovery:
 
 ```text
 > {"id":"protocol","type":"get_protocol","protocol_version":1}\n
-< {"id":"protocol","type":"response","success":true,"result":{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":3,"supported_session_entry_versions":[0,1,2,3],"capabilities":["direct_bash_rpc"],"direct_command_types":["run_bash","run_command"]}}\n
+< {"id":"protocol","type":"response","success":true,"result":{"protocol_version":1,"supported_protocol_versions":[1],"event_schema_version":1,"supported_event_schema_versions":[1],"session_entry_version":4,"supported_session_entry_versions":[0,1,2,3,4],"capabilities":["direct_bash_rpc"],"direct_command_types":["run_bash","run_command"]}}\n
 ```
 
 Prompt success with tool summary/timeline (events for this run may appear before the response):

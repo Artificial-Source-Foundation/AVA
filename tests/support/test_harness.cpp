@@ -234,6 +234,21 @@ ava::core::Result<ava::session::SessionLease> acquire_test_session_lease(ava::se
 
 ava::core::VoidResult append_session_entry_for_test(ava::session::SessionStore& store, ava::session::SessionEntry const& entry)
 {
+  // Test fixtures follow the same authority boundary as production for v4.
+  // Tests that need malformed physical bytes write their fixture directly.
+  if (entry.type == ava::session::EntryType::AssistantOutputItem || entry.type == ava::session::EntryType::AssistantTurnCommit)
+  {
+    if (store.is_ephemeral())
+    {
+      auto target = ava::session::SessionAppendTarget::create_ephemeral(store);
+      return target ? (*target)->append(entry) : ava::core::VoidResult(std::unexpected(std::move(target.error())));
+    }
+    auto lease = acquire_test_session_lease(store);
+    if (!lease)
+      return std::unexpected(std::move(lease.error()));
+    auto target = ava::session::SessionAppendTarget::create_persistent(store, *lease);
+    return target ? (*target)->append(entry) : ava::core::VoidResult(std::unexpected(std::move(target.error())));
+  }
   if (store.is_ephemeral())
     return store.append_ephemeral(entry);
   auto lease = acquire_test_session_lease(store);
@@ -264,6 +279,23 @@ std::function<ava::core::VoidResult(ava::session::SessionEntry const&)> append_r
   auto const message = target.error().format();
   return [message](ava::session::SessionEntry const&) {
     return ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, message)));
+  };
+}
+
+std::function<ava::core::VoidResult(std::vector<ava::session::SessionEntry>)> append_batch_route_for_test(ava::session::SessionStore const& store)
+{
+  std::shared_ptr<ava::session::SessionAppendTarget> target;
+  {
+    std::lock_guard lock(test_authority_mutex);
+    auto const found = test_append_targets.find(store.session_path().string());
+    if (found != test_append_targets.end())
+      target = found->second.lock();
+  }
+  if (target)
+    return [target = std::move(target)](std::vector<ava::session::SessionEntry> entries) { return target->append_batch(std::move(entries)); };
+  return [](std::vector<ava::session::SessionEntry>) {
+    return ava::core::VoidResult(
+        std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "test batch append route requires append_route_for_test to be initialized first")));
   };
 }
 

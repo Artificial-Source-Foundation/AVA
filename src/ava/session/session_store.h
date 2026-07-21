@@ -3,11 +3,13 @@
 #include "ava/debug/print_members_on.h"
 #include "ava/observability/run_observer.h"
 #include "ava/agent/mode.h"
+#include "ava/session/assistant_output.h"
 #include "ava/core/result.h"
 
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -16,7 +18,9 @@
 
 namespace ava::session {
 
-inline constexpr long long kCurrentSessionEntryVersion = 3;
+inline constexpr long long kCurrentSessionEntryVersion = 4;
+inline constexpr std::size_t kMaxSessionAppendBatchEntries = kMaxAssistantOutputItemsPerTurn + 1;
+inline constexpr std::size_t kMaxSessionAppendBatchBytes = 4U * 1024U * 1024U;
 
 enum class EntryType
 {
@@ -31,6 +35,8 @@ enum class EntryType
   ModelChange,
   ReasoningBlock,
   ReasoningChange,
+  AssistantOutputItem,
+  AssistantTurnCommit,
   Compaction,
   BranchSummary,
   Error,
@@ -74,8 +80,25 @@ struct SessionListLimits
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// Opening/resuming is the only recovery boundary for a complete but
+// uncommitted v4 assistant-output suffix. Persistent recovery quarantines the
+// exact bytes before truncating them; ephemeral recovery removes only the
+// proven in-memory entries and has no quarantine path.
+struct AssistantOutputSuffixRecovery
+{
+  std::optional<std::filesystem::path> quarantine_path = std::nullopt;
+  std::size_t removed_entry_count = 0;
+  std::size_t removed_byte_count = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 using SessionCancelCallback = std::function<bool()>;
 using SessionEntryVisitor = std::function<ava::core::Result<bool>(SessionEntry const&)>;
+
+// Legacy CLI/TUI/RPC reads retain their historical unbounded file/entry policy
+// while still enforcing the hard session-line and strict JSON nesting bounds.
+[[nodiscard]] SessionReadLimits legacy_unbounded_session_read_limits();
 
 struct SessionSummary
 {
@@ -150,9 +173,18 @@ class SessionStore
   [[nodiscard]] SessionStore detached_copy_for_background_persistence() const;
 
   // Persistent stores require the active exact matching lease. Ephemeral
-  // stores deliberately use the explicitly named in-memory path below.
+  // stores deliberately use the explicitly named in-memory path below. These
+  // raw bootstrap/compat mutation APIs reject v4 assistant-output records and
+  // preflight ordinary records against the current v4 state, so they cannot
+  // split a staged assistant transaction. Runtime v4 writes must use
+  // SessionAppendTarget so preflight remains coupled to persistence.
   [[nodiscard]] ava::core::VoidResult append(SessionLease const& lease, SessionEntry const& entry);
   [[nodiscard]] ava::core::VoidResult append_ephemeral(SessionEntry const& entry);
+  // Copies one already-validated complete history into a newly created empty
+  // persistent destination while retaining its creating lease. This is the
+  // only v4 bypass for import/branch copy-forward; it prevalidates the whole
+  // copy and holds per-path serialization through all durable writes.
+  [[nodiscard]] ava::core::VoidResult append_validated_copy(SessionLease const& lease, std::vector<SessionEntry> const& entries);
   // Removes a newly-created persistent session only when the supplied active
   // lease still identifies its sole linked pathname. Intended for rollback
   // before ownership is transferred into a runtime::Session.
@@ -166,6 +198,7 @@ class SessionStore
   // Test-only write seam. A negative result is treated like write(2) failure
   // with errno supplied by the hook, allowing deterministic torn-tail tests.
   void set_append_write_for_test(std::function<ssize_t(int, std::string_view)> hook);
+  void set_before_recovery_quarantine_publication_for_test(std::function<void(std::filesystem::path const&)> hook);
   void set_after_recovery_quarantine_publication_for_test(std::function<void()> hook);
   void set_before_created_file_rollback_detach_for_test(std::function<void()> hook);
   void set_after_created_file_rollback_detach_for_test(std::function<void()> hook);
@@ -175,6 +208,13 @@ class SessionStore
   // tail; no path means the file was already framed or only needed a final LF.
   [[nodiscard]] ava::core::Result<std::optional<std::filesystem::path>> recover_torn_tail(SessionLease const& lease, SessionReadLimits limits,
                                                                                           SessionCancelCallback cancel_requested = nullptr) const;
+  // Repairs only a structurally valid final complete-line v4 staging suffix
+  // after torn-tail recovery. Persistent callers must retain the exact active
+  // lease; the ephemeral overload exists only for an in-memory session.
+  [[nodiscard]] ava::core::Result<std::optional<AssistantOutputSuffixRecovery>> recover_incomplete_assistant_output_suffix(
+      SessionLease const& lease, SessionReadLimits limits, SessionCancelCallback cancel_requested = nullptr) const;
+  [[nodiscard]] ava::core::Result<std::optional<AssistantOutputSuffixRecovery>> recover_incomplete_assistant_output_suffix(
+      SessionReadLimits limits, SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load() const;
   // Authority-sensitive persistent reads are pinned to the active leased inode
   // and to the exact canonical parent/name publication for their full snapshot.
@@ -211,8 +251,11 @@ class SessionStore
   [[nodiscard]] ava::core::Result<SessionSummary> inspect_bounded_for_listing(SessionReadLimits limits, bool inspect_metadata,
                                                                               SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::VoidResult visit_entries_leased(SessionLease const& lease, SessionReadLimits limits, SessionEntryVisitor const& visitor,
-                                                           SessionCancelCallback cancel_requested = nullptr) const;
-  [[nodiscard]] ava::core::VoidResult append_impl(SessionLease const* lease, SessionEntry const& entry);
+                                                           SessionCancelCallback cancel_requested = nullptr,
+                                                           bool invoke_after_lease_bound_read_test_hook = true) const;
+  [[nodiscard]] ava::core::Result<std::optional<AssistantOutputSuffixRecovery>> recover_incomplete_assistant_output_suffix_ephemeral_impl(
+      SessionReadLimits limits, SessionCancelCallback cancel_requested, bool mutation_serialization_held) const;
+  [[nodiscard]] ava::core::VoidResult append_impl(SessionLease const* lease, SessionEntry const& entry, bool append_serialization_held = false);
   explicit SessionStore(SessionStoreOptions options, std::shared_ptr<EphemeralState> ephemeral_state);
 
   SessionStoreOptions options_;
@@ -224,6 +267,7 @@ class SessionStore
   std::function<ssize_t(int, std::string_view)> append_write_for_test_;
   bool fail_persistent_append_target_allocation_for_test_ = false;
   bool fail_persistent_read_authority_allocation_for_test_ = false;
+  std::function<void(std::filesystem::path const&)> before_recovery_quarantine_publication_for_test_;
   std::function<void()> after_recovery_quarantine_publication_for_test_;
   std::function<void()> before_created_file_rollback_detach_for_test_;
   std::function<void()> after_created_file_rollback_detach_for_test_;
@@ -232,6 +276,8 @@ class SessionStore
 // Narrow copyable history authority for one runtime session. Persistent
 // authorities share an owned F_DUPFD_CLOEXEC duplicate of the exact active
 // lease; ephemeral authorities retain only the shared in-memory store state.
+// Each authority also owns the read policy selected when its runtime session
+// was opened, so ordinary load() calls cannot silently bypass that policy.
 class SessionReadAuthority
 {
  public:
@@ -241,8 +287,10 @@ class SessionReadAuthority
   SessionReadAuthority& operator=(SessionReadAuthority&&) noexcept = default;
   ~SessionReadAuthority() = default;
 
-  [[nodiscard]] static ava::core::Result<SessionReadAuthority> create_persistent(SessionStore const& store, SessionLease const& lease);
-  [[nodiscard]] static ava::core::Result<SessionReadAuthority> create_ephemeral(SessionStore const& store);
+  [[nodiscard]] static ava::core::Result<SessionReadAuthority> create_persistent(SessionStore const& store, SessionLease const& lease,
+                                                                                 SessionReadLimits limits = legacy_unbounded_session_read_limits());
+  [[nodiscard]] static ava::core::Result<SessionReadAuthority> create_ephemeral(SessionStore const& store,
+                                                                                SessionReadLimits limits = legacy_unbounded_session_read_limits());
 
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load() const;
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested = nullptr) const;
@@ -260,16 +308,26 @@ class SessionReadAuthority
 // The sole copyable append authority for runtime routes. Persistent targets
 // duplicate the caller's locked open-file description and revalidate the exact
 // published inode before accepting it. Ephemeral targets retain only the
-// shared in-memory store state.
+// shared in-memory store state. Targets retain the selected read policy so
+// their recovery and derived read authorities preserve the runtime boundary.
 class SessionAppendTarget
 {
  public:
-  [[nodiscard]] static ava::core::Result<std::shared_ptr<SessionAppendTarget>> create_persistent(SessionStore const& store, SessionLease const& lease);
-  [[nodiscard]] static ava::core::Result<std::shared_ptr<SessionAppendTarget>> create_ephemeral(SessionStore const& store);
+  [[nodiscard]] static ava::core::Result<std::shared_ptr<SessionAppendTarget>> create_persistent(
+      SessionStore const& store, SessionLease const& lease, SessionReadLimits read_limits = legacy_unbounded_session_read_limits());
+  [[nodiscard]] static ava::core::Result<std::shared_ptr<SessionAppendTarget>> create_ephemeral(
+      SessionStore const& store, SessionReadLimits read_limits = legacy_unbounded_session_read_limits());
 
   [[nodiscard]] ava::core::VoidResult append(SessionEntry const& entry);
-  // Persistent targets repair through their private duplicated lease. Recovery
-  // is deliberately a successful no-op for an ephemeral target.
+  // One all-or-nothing preflight reservation for exactly one complete bounded
+  // v4 assistant transaction: zero or more ordered output items followed by
+  // its one matching commit. Durable writes remain append-only. Once any
+  // batch record may be durable and a later write reports failure, this target
+  // rejects all mutations until recover() rebuilds state from storage.
+  [[nodiscard]] ava::core::VoidResult append_batch(std::vector<SessionEntry> entries);
+  // Recovery is explicit: persistent targets repair through their private
+  // duplicated lease, while ephemeral targets remove only a proven in-memory
+  // incomplete v4 staging suffix. Both rebuild their append state afterward.
   [[nodiscard]] ava::core::VoidResult recover();
   [[nodiscard]] ava::core::Result<SessionReadAuthority> read_authority() const;
   [[nodiscard]] bool is_ephemeral() const noexcept;
@@ -277,15 +335,15 @@ class SessionAppendTarget
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
-  SessionAppendTarget(SessionStore store, std::optional<SessionLease> lease);
+  SessionAppendTarget(SessionStore store, std::optional<SessionLease> lease, AssistantOutputAppendState assistant_output_state, SessionReadLimits read_limits);
 
   SessionStore store_;
   std::optional<SessionLease> lease_;
+  SessionReadLimits read_limits_;
+  mutable std::mutex mutex_;
+  AssistantOutputAppendState assistant_output_state_;
+  bool recovery_required_ = false;
 };
-
-// Legacy CLI/TUI/RPC reads retain their historical unbounded file/entry policy
-// while still enforcing the hard session-line and strict JSON nesting bounds.
-[[nodiscard]] SessionReadLimits legacy_unbounded_session_read_limits();
 
 [[nodiscard]] std::string to_string(EntryType type);
 [[nodiscard]] ava::core::Result<EntryType> parse_entry_type(std::string_view value);

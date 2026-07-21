@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/core/json.h"
 #include "ava/core/strict_json.h"
 
 #include <string>
@@ -100,6 +101,8 @@ class DuplicateRejectingSax final : public nlohmann::json_sax<nlohmann::json>
 
 StrictJsonStatus validate_strict_json(std::string_view value, std::size_t max_nesting_depth)
 {
+  if (!ava::core::json::is_valid_utf8(value))
+    return StrictJsonStatus::Invalid;
   if (!nesting_within_limit(value, max_nesting_depth))
     return StrictJsonStatus::NestingTooDeep;
 

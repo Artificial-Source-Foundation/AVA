@@ -23,11 +23,6 @@ ProviderFinishReason normalized_finish_reason(std::string_view reason)
   return normalize_provider_finish_reason(ProviderProtocol::OpenAIChat, reason);
 }
 
-std::string sanitized_openai_compatible_snippet(std::string_view body)
-{
-  return sanitized_body_snippet(body, {"access_token", "refresh_token", "api_key", "Authorization", "authorization", "reasoning_content", "thinking"});
-}
-
 std::vector<StreamEvent> finish_reasoning_if_open(bool& reasoning_open, std::string_view reasoning_format)
 {
   if (!reasoning_open)
@@ -72,7 +67,10 @@ void append_tool_call_end_events(std::vector<StreamEvent>& events, std::map<int,
 void append_tool_call_delta_events(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids, std::string_view delta,
                                    std::string_view fallback_tool_call_prefix)
 {
-  for (auto const& call : ava::core::json::objects_in_array_field(delta, "tool_calls"))
+  auto const tool_calls = ava::core::json::strict_objects_in_array_field(delta, "tool_calls", kMaxProviderParserArrayItems);
+  if (!tool_calls)
+    return;
+  for (auto const& call : *tool_calls)
   {
     auto const index_value = ava::core::json::integer_field(call, "index").value_or(0);
     auto const index = static_cast<int>(index_value);
@@ -188,9 +186,26 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<int, std::
   }
   if (auto const parsed_usage = parse_openai_usage(data))
     usage = parsed_usage;
-  for (auto const& choice : ava::core::json::objects_in_array_field(data, "choices"))
+  if (ava::core::json::field_value_start(data, "choices"))
   {
-    append_choice_delta_events(events, open_tool_call_ids, reasoning_open, finish_reason, choice, reasoning_format, fallback_tool_call_prefix);
+    auto const choices = ava::core::json::strict_objects_in_array_field(data, "choices", kMaxProviderParserArrayItems);
+    if (!choices)
+    {
+      error_seen = true;
+      append_tool_call_end_events(events, open_tool_call_ids);
+      append_finish_reasoning_if_open(events, reasoning_open, reasoning_format);
+      events.push_back(StreamEvent{.type = StreamEventType::Error,
+                                   .text = "",
+                                   .tool_call_id = "",
+                                   .tool_name = "",
+                                   .error_message = "OpenAI-compatible response parser limit exceeded",
+                                   .usage = std::nullopt});
+      return;
+    }
+    for (auto const& choice : *choices)
+    {
+      append_choice_delta_events(events, open_tool_call_ids, reasoning_open, finish_reason, choice, reasoning_format, fallback_tool_call_prefix);
+    }
   }
   if (auto const error_object = ava::core::json::object_field(data, "error"))
   {
@@ -202,7 +217,7 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<int, std::
                                  .text = "",
                                  .tool_call_id = "",
                                  .tool_name = "",
-                                 .error_message = sanitized_openai_compatible_snippet(ava::core::json::string_field(*error_object, "message").value_or("")),
+                                 .error_message = "OpenAI-compatible provider reported a streaming error",
                                  .usage = std::nullopt});
   }
 }
@@ -243,7 +258,10 @@ ava::core::Result<std::vector<StreamEvent>> parse_chat_completion_message(std::s
   std::optional<ProviderFinishReason> finish_reason;
   bool parsed_message = false;
   std::size_t tool_call_index = 0;
-  for (auto const& choice : ava::core::json::objects_in_array_field(body, "choices"))
+  auto const choices = ava::core::json::strict_objects_in_array_field(body, "choices", kMaxProviderParserArrayItems);
+  if (!choices)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI-compatible response parser limit exceeded"));
+  for (auto const& choice : *choices)
   {
     if (auto raw_finish_reason = ava::core::json::string_field(choice, "finish_reason"))
     {
@@ -297,10 +315,12 @@ ava::core::Result<std::vector<StreamEvent>> parse_chat_completion_message(std::s
             StreamEvent{.type = StreamEventType::TextDelta, .text = *content, .tool_call_id = "", .tool_name = "", .error_message = "", .usage = std::nullopt});
       }
     }
-    auto const tool_calls = ava::core::json::objects_in_array_field(*message, "tool_calls");
-    if (!tool_calls.empty())
+    auto const tool_calls = ava::core::json::strict_objects_in_array_field(*message, "tool_calls", kMaxProviderParserArrayItems);
+    if (ava::core::json::field_value_start(*message, "tool_calls") && !tool_calls)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI-compatible response parser limit exceeded"));
+    if (tool_calls && !tool_calls->empty())
       parsed_content = true;
-    for (auto const& tool_call : tool_calls)
+    for (auto const& tool_call : tool_calls.value_or(std::vector<std::string>{}))
     {
       auto const function = ava::core::json::object_field(tool_call, "function");
       auto id = ava::core::json::string_field(tool_call, "id").value_or("");
@@ -487,10 +507,6 @@ ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleProvider::parse_resp
     error.with_context("provider_error_kind", to_string(kind));
     if (auto const retry_after = retry_after_header(response))
       error.with_context("retry_after", *retry_after);
-    if (!response.body.empty())
-    {
-      error.with_context("body_snippet", sanitized_openai_compatible_snippet(response.body));
-    }
     return std::unexpected(std::move(error));
   }
   if (stream)

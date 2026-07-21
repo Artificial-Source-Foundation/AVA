@@ -37,6 +37,8 @@ struct Session
   ava::config::ModelInfo model;
   BasePromptMetadata base_prompt;
   ava::config::XdgPaths paths;
+  // Resolved once at open time and reused by every runtime history reader.
+  ava::session::SessionReadLimits session_read_limits = ava::session::legacy_unbounded_session_read_limits();
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
   // Additional writable directories beyond workspace_dir (e.g., user-configured
@@ -67,7 +69,8 @@ struct Session
   // (or to its shared in-memory state in sessionless mode).
   [[nodiscard]] ava::core::Result<ava::session::SessionReadAuthority> read_authority() const
   {
-    return sessionless ? ava::session::SessionReadAuthority::create_ephemeral(store) : ava::session::SessionReadAuthority::create_persistent(store, lease);
+    return sessionless ? ava::session::SessionReadAuthority::create_ephemeral(store, session_read_limits)
+                       : ava::session::SessionReadAuthority::create_persistent(store, lease, session_read_limits);
   }
 
   // Append through the session owner so writes remain serialized with active runs.
@@ -82,6 +85,11 @@ struct Session
   [[nodiscard]] ava::agent::SessionAppendSink owner_append_route()
   {
     return run_controller ? run_controller->owner_append_route() : ava::agent::SessionAppendSink{};
+  }
+
+  [[nodiscard]] ava::agent::SessionAppendBatchSink owner_append_batch_route()
+  {
+    return run_controller ? run_controller->owner_append_batch_route() : ava::agent::SessionAppendBatchSink{};
   }
 
   AVA_DEBUG_PRINT_MEMBERS_ON

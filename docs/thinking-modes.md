@@ -118,8 +118,10 @@ Reasoning-related session behavior is append-only and provider-aware:
 - RPC `get_messages` sanitizes reasoning entries: visible non-redacted text may
   be returned, but raw signatures and opaque redacted-thinking payloads are
   replaced by status fields. Markdown/HTML exports report redaction and signature
-  presence and include non-redacted text only; raw JSONL export preserves the
-  local AVA entries.
+  presence and include non-redacted text only. Portable JSONL is likewise
+  sanitized and non-lossless: it rebuilds reasoning blocks from safe fields,
+  omits provider-private replay metadata, and uses a neutral placeholder for
+  redacted reasoning while remaining locally re-importable.
 - `get_session_stats` counts reasoning changes and blocks, and
   `validate_session` checks durable model/reasoning entry shape.
 - With `--no-session`, the same in-process entries exist for the current run, but

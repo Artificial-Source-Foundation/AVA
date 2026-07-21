@@ -3,6 +3,7 @@
 #include "serialization.h"
 #include "serialization_json.h"
 #include "serialization_models.h"
+#include "ava/session/logical_projection.h"
 #include "ava/session/session_tree.h"
 #include "ava/session/stats.h"
 #include "ava/session/validation.h"
@@ -10,6 +11,7 @@
 
 #include <cctype>
 #include <utility>
+#include <vector>
 
 namespace ava::app::rpc {
 namespace {
@@ -54,11 +56,15 @@ std::string context_sources_json(runtime::Session const& session)
   return json;
 }
 
-std::string session_entry_json(ava::session::SessionEntry const& entry)
+std::string session_entry_json(ava::session::SessionEntry const& entry, bool include_ordered_output = true)
 {
-  auto const data_json = (entry.type == ava::session::EntryType::UserMessage || entry.type == ava::session::EntryType::AssistantMessage)
-                             ? ava::session::sanitized_message_data_json(entry.data_json, entry.type == ava::session::EntryType::UserMessage)
-                             : entry.data_json;
+  auto const data_json =
+      entry.type == ava::session::EntryType::UserMessage
+          ? ava::session::sanitized_message_data_json(entry.data_json, true)
+          : (entry.type == ava::session::EntryType::AssistantMessage && ava::core::json::field_value_start(entry.data_json, "ordered_output")
+                 ? ava::session::sanitized_compatibility_assistant_message_data_json(entry.data_json, include_ordered_output)
+                 : (entry.type == ava::session::EntryType::AssistantMessage ? ava::session::sanitized_message_data_json(entry.data_json, false)
+                                                                            : entry.data_json));
   std::string json = "{";
   json += integer_field_json("version", entry.version);
   json += ',';
@@ -120,7 +126,9 @@ std::string sanitized_reasoning_entry_json(ava::session::SessionEntry const& ent
   if (!redacted)
     append_string("text", ava::core::json::string_field(entry.data_json, "text"));
   append_bool("redacted", redacted);
-  append_bool("signature_present", ava::core::json::string_field(entry.data_json, "signature").has_value());
+  auto const omitted = ava::core::json::object_field(entry.data_json, "private_replay_metadata_omitted");
+  bool const signature_present = ava::core::json::string_field(entry.data_json, "signature").has_value() || (omitted && json_bool_field(*omitted, "signature"));
+  append_bool("signature_present", signature_present);
   data += '}';
 
   std::string json = "{";
@@ -139,9 +147,9 @@ std::string sanitized_reasoning_entry_json(ava::session::SessionEntry const& ent
   return json;
 }
 
-std::string capped_session_entry_json(ava::session::SessionEntry const& entry)
+std::string capped_session_entry_json(ava::session::SessionEntry const& entry, bool include_ordered_output = true)
 {
-  auto json = entry.type == ava::session::EntryType::ReasoningBlock ? sanitized_reasoning_entry_json(entry) : session_entry_json(entry);
+  auto json = entry.type == ava::session::EntryType::ReasoningBlock ? sanitized_reasoning_entry_json(entry) : session_entry_json(entry, include_ordered_output);
   if (json.size() <= 8192)
     return json;
   std::string capped = "{";
@@ -632,17 +640,23 @@ std::string command_registry_result_json(CommandRegistry const& registry)
 
 ava::core::Result<std::string> messages_result_json(runtime::Session const& session)
 {
+  struct MessageCandidate
+  {
+    ava::session::SessionEntry const* entry = nullptr;
+    std::string legacy_json;
+    bool has_ordered_output = false;
+  };
+
   auto entries = load_runtime_entries(session);
   if (!entries)
     return std::unexpected(entries.error());
+  auto projected = ava::session::project_logical_session_history(*entries);
+  if (!projected)
+    return std::unexpected(std::move(projected.error()));
 
-  std::string json = "{";
-  json += string_field_json("session_id", session.store.session_id());
-  json += ",\"messages\":[";
-  bool first = true;
-  bool truncated = false;
-  std::size_t included = 0;
-  for (auto const& entry : *entries)
+  std::vector<MessageCandidate> candidates;
+  candidates.reserve(projected->size());
+  for (auto const& entry : *projected)
   {
     if (ava::session::is_internal_replay_user_message(entry))
       continue;
@@ -652,29 +666,86 @@ ava::core::Result<std::string> messages_result_json(runtime::Session const& sess
     {
       continue;
     }
-    if (included >= kMaxRpcMessagesEntries)
-    {
-      truncated = true;
-      break;
-    }
-    auto entry_json = capped_session_entry_json(entry);
-    std::size_t const projected_size = json.size() + entry_json.size() + 16;
-    if (projected_size > kMaxRpcMessagesResponseBytes)
-    {
-      truncated = true;
-      break;
-    }
-    if (!first)
-      json += ',';
-    first = false;
-    json += entry_json;
-    ++included;
+    // First make the exact v1-compatible representation. Ordered output is
+    // strictly additive and must never determine the retained message set.
+    candidates.push_back(MessageCandidate{.entry = &entry,
+                                          .legacy_json = capped_session_entry_json(entry, false),
+                                          .has_ordered_output = entry.type == ava::session::EntryType::AssistantMessage &&
+                                                                ava::core::json::field_value_start(entry.data_json, "ordered_output").has_value()});
   }
-  json += "],";
-  json += bool_field_json("truncated", truncated);
-  json += ',';
-  json += number_field_json("message_count", included);
-  json += '}';
+
+  std::string const prefix = "{" + string_field_json("session_id", session.store.session_id()) + ",\"messages\":[";
+  auto const tail_json = [](bool truncated, std::size_t message_count, std::size_t ordered_output_omitted_count) {
+    std::string tail = "]," + bool_field_json("truncated", truncated) + "," + number_field_json("message_count", message_count) + "," +
+                       bool_field_json("ordered_output_truncated", ordered_output_omitted_count != 0) + "," +
+                       number_field_json("ordered_output_omitted_count", ordered_output_omitted_count);
+    tail += '}';
+    return tail;
+  };
+  auto const rendered_size = [&prefix, &tail_json](std::vector<std::string> const& rendered, bool truncated, std::size_t ordered_output_omitted_count) {
+    std::size_t size = prefix.size() + tail_json(truncated, rendered.size(), ordered_output_omitted_count).size();
+    for (std::size_t index = 0; index < rendered.size(); ++index) size += rendered[index].size() + (index == 0 ? 0U : 1U);
+    return size;
+  };
+
+  std::vector<MessageCandidate const*> selected;
+  std::vector<std::string> rendered;
+  selected.reserve(std::min(candidates.size(), kMaxRpcMessagesEntries));
+  rendered.reserve(std::min(candidates.size(), kMaxRpcMessagesEntries));
+  bool truncated = false;
+  std::size_t potential_ordered_output_omissions = 0;
+  for (std::size_t index = 0; index < candidates.size(); ++index)
+  {
+    if (selected.size() >= kMaxRpcMessagesEntries)
+    {
+      truncated = true;
+      break;
+    }
+    auto const candidate_truncated = index + 1 < candidates.size();
+    auto const candidate_ordered_output_omissions = potential_ordered_output_omissions + (candidates[index].has_ordered_output ? 1U : 0U);
+    rendered.push_back(candidates[index].legacy_json);
+    // Reserve the bounded additive marker/count while making the legacy-only
+    // selection. This prevents ordered detail from removing legacy payload.
+    if (rendered_size(rendered, candidate_truncated, candidate_ordered_output_omissions) > kMaxRpcMessagesResponseBytes)
+    {
+      rendered.pop_back();
+      truncated = true;
+      break;
+    }
+    potential_ordered_output_omissions = candidate_ordered_output_omissions;
+    selected.push_back(&candidates[index]);
+  }
+
+  std::size_t ordered_output_omitted_count = potential_ordered_output_omissions;
+
+  for (std::size_t index = 0; index < selected.size(); ++index)
+  {
+    auto const* candidate = selected[index];
+    if (!candidate->has_ordered_output)
+      continue;
+    auto detailed_json = session_entry_json(*candidate->entry, true);
+    // A detailed entry may never consume the legacy entry's 8 KiB allowance:
+    // otherwise a 5--8 KiB v1 assistant message becomes metadata-only.
+    if (detailed_json.size() > 8192 || detailed_json.find("\"ordered_output\"") == std::string::npos)
+      continue;
+    auto const saved = std::move(rendered[index]);
+    rendered[index] = std::move(detailed_json);
+    if (rendered_size(rendered, truncated, ordered_output_omitted_count - 1) <= kMaxRpcMessagesResponseBytes)
+    {
+      --ordered_output_omitted_count;
+      continue;
+    }
+    rendered[index] = std::move(saved);
+  }
+
+  std::string json = prefix;
+  for (std::size_t index = 0; index < rendered.size(); ++index)
+  {
+    if (index > 0)
+      json += ',';
+    json += rendered[index];
+  }
+  json += tail_json(truncated, rendered.size(), ordered_output_omitted_count);
   return json;
 }
 
@@ -683,7 +754,10 @@ ava::core::Result<std::string> session_stats_result_json(runtime::Session const&
   auto entries = load_runtime_entries(session);
   if (!entries)
     return std::unexpected(entries.error());
-  auto const stats = ava::session::compute_session_stats(*entries);
+  auto stats_result = ava::session::compute_session_stats(*entries);
+  if (!stats_result)
+    return std::unexpected(std::move(stats_result.error()));
+  auto const& stats = *stats_result;
 
   std::string json = "{";
   json += string_field_json("session_id", session.store.session_id());

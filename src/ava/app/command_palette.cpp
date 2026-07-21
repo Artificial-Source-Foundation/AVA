@@ -399,8 +399,8 @@ std::string labels_text(std::vector<std::string> const& labels)
 std::string session_completion_description(ava::session::SessionTreeNode const& node)
 {
   std::string description;
-  if (!node.metadata.name.empty())
-    description += node.metadata.name + " · ";
+  if (!node.metadata.effective_title().empty())
+    description += node.metadata.effective_title() + " · ";
   description += "entries=" + std::to_string(node.summary.entry_count);
   if (!node.summary.last_updated.empty())
     description += " updated=" + node.summary.last_updated;
@@ -415,7 +415,7 @@ std::string session_completion_description(ava::session::SessionTreeNode const& 
 
 std::string session_node_label(ava::session::SessionTreeNode const& node, std::size_t depth)
 {
-  auto label = node.metadata.name.empty() ? node.summary.session_id : node.metadata.name;
+  auto label = node.metadata.effective_title().empty() ? node.summary.session_id : node.metadata.effective_title();
   if (depth == 0)
     return label;
   return std::string(depth * 2, ' ') + "+ " + label;
@@ -425,8 +425,8 @@ std::string session_node_description(ava::session::SessionTreeNode const& node, 
 {
   auto path = node.summary.path.empty() ? std::string("path unavailable") : node.summary.path.generic_string();
   if (!show_paths)
-    return node.metadata.name.empty() ? std::string{} : node.summary.session_id;
-  if (node.metadata.name.empty())
+    return node.metadata.effective_title().empty() ? std::string{} : node.summary.session_id;
+  if (node.metadata.effective_title().empty())
     return path;
   return node.summary.session_id + " · " + path;
 }
@@ -460,8 +460,9 @@ tui::SelectListItemView session_selector_item(ava::session::SessionSummary const
   auto const current = !current_session_id.empty() && summary.session_id == current_session_id;
   auto path = summary.path.empty() ? std::string("path unavailable") : summary.path.generic_string();
   return tui::SelectListItemView{.value = summary.session_id,
-                                 .label = summary.session_id,
-                                 .description = show_paths ? std::move(path) : std::string{},
+                                 .label = summary.title.empty() ? summary.session_id : summary.title,
+                                 .description = show_paths ? (summary.title.empty() ? std::move(path) : summary.session_id + " · " + path)
+                                                           : (summary.title.empty() ? std::string{} : summary.session_id),
                                  .group = "Sessions",
                                  .detail = session_selector_detail(summary),
                                  .badge = current ? std::string("current") : std::string{},
@@ -479,8 +480,8 @@ bool node_less(ava::session::SessionTreeNode const& left, ava::session::SessionT
         return left.summary.last_updated > right.summary.last_updated;
       return left.summary.session_id > right.summary.session_id;
     case SessionSelectorSort::Name: {
-      auto const left_name = left.metadata.name.empty() ? left.summary.session_id : left.metadata.name;
-      auto const right_name = right.metadata.name.empty() ? right.summary.session_id : right.metadata.name;
+      auto const left_name = left.metadata.effective_title().empty() ? left.summary.session_id : left.metadata.effective_title();
+      auto const right_name = right.metadata.effective_title().empty() ? right.summary.session_id : right.metadata.effective_title();
       if (left_name != right_name)
         return left_name < right_name;
       return left.summary.session_id < right.summary.session_id;
@@ -504,8 +505,13 @@ void sort_session_summaries(std::vector<ava::session::SessionSummary>& summaries
         if (left.last_updated != right.last_updated)
           return left.last_updated > right.last_updated;
         return left.session_id > right.session_id;
-      case SessionSelectorSort::Name:
+      case SessionSelectorSort::Name: {
+        auto const& left_title = left.title.empty() ? left.session_id : left.title;
+        auto const& right_title = right.title.empty() ? right.session_id : right.title;
+        if (left_title != right_title)
+          return left_title < right_title;
         return left.session_id < right.session_id;
+      }
       case SessionSelectorSort::Path:
         if (left.path.generic_string() != right.path.generic_string())
         {
@@ -550,7 +556,7 @@ void append_session_tree_items(tui::SelectListView& view, std::vector<ava::sessi
     auto const& node = nodes[found->second];
     auto const current_path_node = std::ranges::find(current_path, node.summary.session_id) != current_path.end();
     auto const visible = show_archived || !node.metadata.archived;
-    if (visible && (!named_only || !node.metadata.name.empty()))
+    if (visible && (!named_only || !node.metadata.effective_title().empty()))
     {
       if (node.current)
         view.selected_item_index = view.items.size();

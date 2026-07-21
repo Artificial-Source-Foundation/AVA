@@ -19,8 +19,9 @@ class RuntimeDiagnostics;
 }
 
 namespace ava::app {
+class SessionTitleCoordinator;
 class SubagentDeliveryManager;
-}
+}  // namespace ava::app
 
 namespace ava::app::runtime {
 
@@ -58,6 +59,8 @@ struct OpenOptions
   // Application-scoped automatic parent-summary delivery. When supplied it
   // also owns the coordinator used by every navigated runtime session.
   std::shared_ptr<ava::app::SubagentDeliveryManager> subagent_delivery_manager = nullptr;
+  // Application-scoped asynchronous root-session title generation.
+  std::shared_ptr<ava::app::SessionTitleCoordinator> session_title_coordinator = nullptr;
   // Application-lifetime private diagnostics owner shared by visible,
   // retained, and protocol-managed runtime sessions.
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;

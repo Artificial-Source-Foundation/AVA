@@ -65,6 +65,7 @@ add_library(ava_app
   "runtime_retry.cpp"
   "runtime_sessions.cpp"
   "session_run_controller.cpp"
+  "session_title_coordinator.cpp"
   "subagent_delivery_manager.cpp"
   "runtime_session.cpp"
 )

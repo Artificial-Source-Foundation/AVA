@@ -4,7 +4,9 @@
 #include "ava/app/runtime_credentials.h"
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_sessions.h"
+#include "ava/app/session_title_coordinator.h"
 #include "ava/app/subagent_delivery_manager.h"
+#include "ava/config/session_title_config.h"
 #include "ava/session/attachments.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/ids.h"
@@ -685,23 +687,45 @@ AcpSessionRegistry::AcpSessionRegistry(AcpSessionOptions options) : options_(std
   if (options_.open_options.subagent_delivery_manager)
   {
     options_.open_options.subagent_coordinator = options_.open_options.subagent_delivery_manager->coordinator();
-    return;
   }
-  auto coordinator = options_.open_options.subagent_coordinator
-                         ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options_.open_options.subagent_coordinator)
-                         : ava::agent::SubagentCoordinator::create({.ava_state_dir = options_.paths.ava_state_dir});
-  if (!coordinator)
-  {
-    coordinator_startup_error_ = std::move(coordinator.error());
-    return;
-  }
-  options_.open_options.subagent_coordinator = std::move(*coordinator);
-  auto manager =
-      SubagentDeliveryManager::create({.coordinator = options_.open_options.subagent_coordinator, .provider_bundle_factory = options_.provider_bundle_factory});
-  if (manager)
-    options_.open_options.subagent_delivery_manager = std::move(*manager);
   else
-    coordinator_startup_error_ = std::move(manager.error());
+  {
+    auto coordinator = options_.open_options.subagent_coordinator
+                           ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options_.open_options.subagent_coordinator)
+                           : ava::agent::SubagentCoordinator::create({.ava_state_dir = options_.paths.ava_state_dir});
+    if (!coordinator)
+    {
+      coordinator_startup_error_ = std::move(coordinator.error());
+      return;
+    }
+    options_.open_options.subagent_coordinator = std::move(*coordinator);
+    auto manager = SubagentDeliveryManager::create(
+        {.coordinator = options_.open_options.subagent_coordinator, .provider_bundle_factory = options_.provider_bundle_factory});
+    if (manager)
+      options_.open_options.subagent_delivery_manager = std::move(*manager);
+    else
+    {
+      coordinator_startup_error_ = std::move(manager.error());
+      return;
+    }
+  }
+
+  if (!options_.open_options.session_title_coordinator)
+  {
+    auto config = ava::config::load_session_title_config(options_.paths);
+    if (!config)
+    {
+      coordinator_startup_error_ = std::move(config.error());
+      return;
+    }
+    auto titles = SessionTitleCoordinator::create({.config = std::move(*config)});
+    if (!titles)
+    {
+      coordinator_startup_error_ = std::move(titles.error());
+      return;
+    }
+    options_.open_options.session_title_coordinator = std::move(*titles);
+  }
 }
 
 AcpSessionRegistry::~AcpSessionRegistry()
@@ -958,6 +982,8 @@ void AcpSessionRegistry::shutdown() noexcept
   }
   for (auto const& host : hosts) host->cancel();
   for (auto const& host : hosts) static_cast<void>(host->close());
+  if (options_.open_options.session_title_coordinator)
+    options_.open_options.session_title_coordinator->shutdown();
   if (options_.open_options.subagent_delivery_manager)
     options_.open_options.subagent_delivery_manager->shutdown();
   else if (options_.open_options.subagent_coordinator)

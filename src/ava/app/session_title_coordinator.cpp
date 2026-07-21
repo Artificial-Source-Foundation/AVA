@@ -1,0 +1,721 @@
+#include "sys.h"
+#include "ava/app/runtime/RunOptions.h"
+#include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_credentials.h"
+#include "ava/app/runtime_model.h"
+#include "ava/app/session_title_coordinator.h"
+#include "ava/provider/curl_transport.h"
+#include "ava/provider/registry.h"
+#include "ava/core/json.h"
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <chrono>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace ava::app {
+namespace {
+
+bool ascii_space(unsigned char ch)
+{
+  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f' || ch == '\v';
+}
+
+bool utf8_continuation(unsigned char ch)
+{
+  return (ch & 0xc0U) == 0x80U;
+}
+
+std::size_t valid_utf8_sequence_size(std::string_view text, std::size_t index)
+{
+  auto const first = static_cast<unsigned char>(text[index]);
+  if (first < 0x80U)
+    return 1;
+  if (first >= 0xc2U && first <= 0xdfU && index + 1 < text.size() && utf8_continuation(static_cast<unsigned char>(text[index + 1])))
+    return 2;
+  if (first >= 0xe0U && first <= 0xefU && index + 2 < text.size())
+  {
+    auto const second = static_cast<unsigned char>(text[index + 1]);
+    auto const third = static_cast<unsigned char>(text[index + 2]);
+    bool const valid_second = utf8_continuation(second) && !(first == 0xe0U && second < 0xa0U) && !(first == 0xedU && second >= 0xa0U);
+    if (valid_second && utf8_continuation(third))
+      return 3;
+  }
+  if (first >= 0xf0U && first <= 0xf4U && index + 3 < text.size())
+  {
+    auto const second = static_cast<unsigned char>(text[index + 1]);
+    auto const third = static_cast<unsigned char>(text[index + 2]);
+    auto const fourth = static_cast<unsigned char>(text[index + 3]);
+    bool const valid_second = utf8_continuation(second) && !(first == 0xf0U && second < 0x90U) && !(first == 0xf4U && second >= 0x90U);
+    if (valid_second && utf8_continuation(third) && utf8_continuation(fourth))
+      return 4;
+  }
+  return 0;
+}
+
+std::size_t utf8_prefix_size(std::string_view text, std::size_t limit)
+{
+  std::size_t index = 0;
+  std::size_t last = 0;
+  while (index < text.size() && index < limit)
+  {
+    auto const size = valid_utf8_sequence_size(text, index);
+    if (size == 0 || index + size > limit)
+      break;
+    index += size;
+    last = index;
+  }
+  return last;
+}
+
+std::string lower_ascii(std::string_view text)
+{
+  std::string result;
+  result.reserve(text.size());
+  for (char ch : text) result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  return result;
+}
+
+void remove_tagged_section(std::string& text, std::string_view tag)
+{
+  auto lower = lower_ascii(text);
+  auto const open_prefix = "<" + std::string(tag);
+  auto const close = "</" + std::string(tag) + ">";
+  std::size_t search = 0;
+  while (true)
+  {
+    auto const start = lower.find(open_prefix, search);
+    if (start == std::string::npos)
+      break;
+    auto const boundary = start + open_prefix.size();
+    if (boundary >= lower.size() || (lower[boundary] != '>' && !ascii_space(static_cast<unsigned char>(lower[boundary]))))
+    {
+      search = boundary;
+      continue;
+    }
+    auto const open_end = lower.find('>', boundary);
+    if (open_end == std::string::npos)
+    {
+      text.erase(start);
+      break;
+    }
+    auto const close_start = lower.find(close, open_end + 1);
+    auto const end = close_start == std::string::npos ? text.size() : close_start + close.size();
+    text.erase(start, end - start);
+    lower.erase(start, end - start);
+    search = start;
+  }
+}
+
+std::string normalized_whitespace(std::string_view text)
+{
+  std::string result;
+  result.reserve(text.size());
+  bool pending_space = false;
+  for (std::size_t index = 0; index < text.size();)
+  {
+    auto const byte = static_cast<unsigned char>(text[index]);
+    if (byte < 0x80U)
+    {
+      if (ascii_space(byte))
+      {
+        pending_space = !result.empty();
+      }
+      else if (byte >= 0x20U && byte != 0x7fU)
+      {
+        if (pending_space)
+          result.push_back(' ');
+        pending_space = false;
+        result.push_back(static_cast<char>(byte));
+      }
+      else
+      {
+        pending_space = !result.empty();
+      }
+      ++index;
+      continue;
+    }
+    auto const size = valid_utf8_sequence_size(text, index);
+    if (size == 0)
+    {
+      pending_space = !result.empty();
+      ++index;
+      continue;
+    }
+    if (pending_space)
+      result.push_back(' ');
+    pending_space = false;
+    result.append(text.substr(index, size));
+    index += size;
+  }
+  return result;
+}
+
+std::string trim_ascii(std::string_view text)
+{
+  std::size_t begin = 0;
+  while (begin < text.size() && ascii_space(static_cast<unsigned char>(text[begin]))) ++begin;
+  std::size_t end = text.size();
+  while (end > begin && ascii_space(static_cast<unsigned char>(text[end - 1]))) --end;
+  return std::string(text.substr(begin, end - begin));
+}
+
+bool contains_control(std::string_view text)
+{
+  return std::ranges::any_of(text, [](char ch) {
+    auto const byte = static_cast<unsigned char>(ch);
+    return (byte < 0x20U && !ascii_space(byte)) || byte == 0x7fU;
+  });
+}
+
+void strip_line_markup(std::string& line)
+{
+  auto trimmed = trim_ascii(line);
+  while (!trimmed.empty() && (trimmed.front() == '#' || trimmed.front() == '>' || trimmed.front() == '-' || trimmed.front() == '*' || trimmed.front() == '`'))
+  {
+    trimmed.erase(trimmed.begin());
+    trimmed = trim_ascii(trimmed);
+  }
+  while (!trimmed.empty() && trimmed.back() == '`') trimmed.pop_back();
+  trimmed = trim_ascii(trimmed);
+  if (trimmed.size() >= 2 && ((trimmed.front() == '"' && trimmed.back() == '"') || (trimmed.front() == '\'' && trimmed.back() == '\'') ||
+                              (trimmed.front() == '`' && trimmed.back() == '`')))
+  {
+    trimmed = trim_ascii(std::string_view(trimmed).substr(1, trimmed.size() - 2));
+  }
+  auto lower = lower_ascii(trimmed);
+  for (auto const prefix : {std::string_view("conversation title:"), std::string_view("title:")})
+  {
+    if (lower.starts_with(prefix))
+    {
+      trimmed = trim_ascii(std::string_view(trimmed).substr(prefix.size()));
+      break;
+    }
+  }
+
+  std::string without_markup;
+  without_markup.reserve(trimmed.size());
+  bool in_tag = false;
+  for (std::size_t index = 0; index < trimmed.size(); ++index)
+  {
+    auto const ch = trimmed[index];
+    if (ch == '<')
+    {
+      in_tag = true;
+      continue;
+    }
+    if (in_tag)
+    {
+      if (ch == '>')
+        in_tag = false;
+      continue;
+    }
+    if (ch == '[')
+    {
+      auto const label_end = trimmed.find("](", index + 1);
+      if (label_end != std::string::npos)
+      {
+        auto const link_end = trimmed.find(')', label_end + 2);
+        if (link_end != std::string::npos)
+        {
+          without_markup.append(trimmed, index + 1, label_end - index - 1);
+          index = link_end;
+          continue;
+        }
+      }
+    }
+    without_markup.push_back(ch);
+  }
+  line = normalized_whitespace(without_markup);
+}
+
+void clear_secret(std::string& value) noexcept
+{
+  std::fill(value.begin(), value.end(), '\0');
+  value.clear();
+}
+
+class DeadlineTransport final : public ava::provider::Transport
+{
+ public:
+  DeadlineTransport(std::unique_ptr<ava::provider::Transport> inner, std::stop_token stop_token, std::chrono::steady_clock::time_point deadline)
+      : inner_(std::move(inner)), stop_token_(stop_token), deadline_(deadline)
+  {
+  }
+
+  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override { return send(request, nullptr); }
+
+  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request, CancelCallback caller_cancel) override
+  {
+    auto bounded = request;
+    auto const now = std::chrono::steady_clock::now();
+    auto const remaining = now < deadline_ ? std::chrono::duration_cast<std::chrono::milliseconds>(deadline_ - now).count() : 0;
+    bounded.timeout_ms = static_cast<int>(std::clamp<long long>(remaining, 1, std::numeric_limits<int>::max()));
+    return inner_->send(bounded, [this, caller_cancel] { return canceled() || (caller_cancel && caller_cancel()); });
+  }
+
+  bool supports_streaming() const noexcept override { return inner_->supports_streaming(); }
+
+ private:
+  bool canceled() const noexcept { return stop_token_.stop_requested() || std::chrono::steady_clock::now() >= deadline_; }
+
+  std::unique_ptr<ava::provider::Transport> inner_;
+  std::stop_token stop_token_;
+  std::chrono::steady_clock::time_point deadline_;
+};
+
+ava::core::Result<ava::config::ModelInfo> title_model(SessionTitleGenerationRequest const& request)
+{
+  if (!request.config.model_id)
+    return request.active_model;
+  auto const provider = request.config.provider_id.value_or(request.active_model.provider_id);
+  auto model = resolve_runtime_model(request.paths, provider, *request.config.model_id);
+  if (!model)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "configured session title model is unavailable");
+    error.with_context("provider", provider).with_context("model", *request.config.model_id);
+    return std::unexpected(std::move(error));
+  }
+  return *model;
+}
+
+ava::core::Result<std::string> default_generate_title(SessionTitleGenerationRequest& generation, std::stop_token stop_token,
+                                                      std::chrono::steady_clock::time_point deadline, SessionTitleTransportFactory const& transport_factory)
+{
+  if (generation.offline)
+    return std::unexpected(offline_provider_error("session title generation"));
+  auto model = title_model(generation);
+  if (!model)
+    return std::unexpected(std::move(model.error()));
+
+  runtime::RunOptions credentials;
+  credentials.access_token = generation.access_token;
+  credentials.credential_type = generation.credential_type;
+  credentials.openai_oauth = generation.openai_oauth;
+  credentials.openai_account_id = generation.account_id;
+  bool const cross_provider = model->provider_id != generation.active_model.provider_id;
+  if (cross_provider)
+  {
+    clear_secret(credentials.access_token);
+    credentials.credential_type = "bearer";
+    credentials.openai_oauth = false;
+    credentials.openai_account_id.clear();
+  }
+  credentials.offline = generation.offline;
+
+  auto auth_inner = transport_factory();
+  if (!auth_inner)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title transport is unavailable"));
+  DeadlineTransport auth_transport(std::move(auth_inner), stop_token, deadline);
+  auto prepared = prepare_runtime_credentials(generation.paths, model->provider_id, std::move(credentials), auth_transport, "session title generation");
+  if (!prepared)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title credentials are unavailable"));
+
+  auto provider = ava::provider::builtin_provider_registry().create(model->provider_id);
+  if (!provider)
+  {
+    clear_secret(prepared->access_token);
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title provider is unavailable"));
+  }
+  bool const stream = prepared->openai_oauth && model->supports_streaming.value_or(true);
+  auto const max_tokens =
+      model->max_output_tokens ? std::optional<long long>(std::min<long long>(*model->max_output_tokens, 64)) : std::optional<long long>(64);
+  ava::provider::ProviderRequest const provider_request{
+      .provider_id = model->provider_id,
+      .model_id = model->model_id,
+      .system_prompt = "Create one natural 5-10-word conversation title. Return only the title, with no reasoning, quotes, markup, or trailing punctuation.",
+      .messages = {ava::provider::ChatMessage{.role = "user", .content = generation.source_text}},
+      .tools_json = {},
+      .stream = stream,
+      .max_output_tokens = max_tokens};
+  ava::provider::ProviderAuthContext auth{
+      .access_token = prepared->access_token,
+      .credential_type = prepared->openai_oauth && prepared->credential_type == "bearer" ? "oauth" : prepared->credential_type,
+      .account_id = prepared->openai_account_id};
+  auto request = (*provider)->build_request(provider_request, auth);
+  clear_secret(auth.access_token);
+  clear_secret(prepared->access_token);
+  if (!request)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title request could not be built"));
+
+  auto transport_inner = transport_factory();
+  if (!transport_inner)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title transport is unavailable"));
+  DeadlineTransport transport(std::move(transport_inner), stop_token, deadline);
+  auto response = transport.send(*request, [&] { return stop_token.stop_requested() || std::chrono::steady_clock::now() >= deadline; });
+  for (auto& [name, value] : request->headers)
+  {
+    auto const lower_name = lower_ascii(name);
+    if (lower_name == "authorization" || lower_name == "x-api-key" || lower_name == "x-goog-api-key")
+      clear_secret(value);
+  }
+  if (!response)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title request failed"));
+  if (response->body.size() > kMaxSessionTitleProviderOutputBytes)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title response exceeded the output limit"));
+  auto events = (*provider)->parse_response(*response, stream);
+  if (!events)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title response was malformed"));
+  std::string output;
+  for (auto const& event : *events)
+  {
+    if (event.type == ava::provider::StreamEventType::Error)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title provider returned an error"));
+    if (event.type != ava::provider::StreamEventType::TextDelta)
+      continue;
+    if (event.text.size() > kMaxSessionTitleProviderOutputBytes - std::min(output.size(), kMaxSessionTitleProviderOutputBytes))
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title response exceeded the output limit"));
+    output += event.text;
+  }
+  if (output.empty())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title response contained no title"));
+  return output;
+}
+
+bool metadata_allows_generation(ava::session::SessionMetadataView const& metadata)
+{
+  bool const root_origin = metadata.branch_origin.empty() || metadata.branch_origin == "root";
+  return !metadata.has_manual_name && metadata.generated_title.empty() && metadata.parent_session_id.empty() && metadata.source_session_id.empty() &&
+         root_origin;
+}
+
+bool has_exactly_one_committed_ordinary_turn(std::vector<ava::session::SessionEntry> const& entries)
+{
+  bool pending_ordinary_user = false;
+  std::size_t committed_ordinary_turns = 0;
+  for (auto const& entry : entries)
+  {
+    if (entry.type == ava::session::EntryType::UserMessage)
+    {
+      auto const synthetic = ava::session::parse_synthetic_delivery_provenance(entry);
+      pending_ordinary_user = synthetic && !*synthetic && !ava::session::is_internal_replay_user_message(entry);
+      continue;
+    }
+    if (entry.type != ava::session::EntryType::AssistantMessage && entry.type != ava::session::EntryType::AssistantTurnCommit)
+      continue;
+    if (pending_ordinary_user)
+      ++committed_ordinary_turns;
+    pending_ordinary_user = false;
+    if (committed_ordinary_turns > 1)
+      return false;
+  }
+  return committed_ordinary_turns == 1;
+}
+
+}  // namespace
+
+std::string normalize_session_title_source(std::string_view text)
+{
+  std::string stripped(text.substr(0, std::min(text.size(), kMaxSessionTitleSourceBytes * 2)));
+  for (auto const tag : {"system-reminder", "available_skills", "skill", "developer-reminder", "session-history", "session-history-since", "project-memory"})
+    remove_tagged_section(stripped, tag);
+  auto normalized = normalized_whitespace(stripped);
+  if (normalized.size() > kMaxSessionTitleSourceBytes)
+    normalized.resize(utf8_prefix_size(normalized, kMaxSessionTitleSourceBytes));
+  return normalized;
+}
+
+ava::core::Result<std::string> sanitize_generated_session_title(std::string_view text)
+{
+  if (text.size() > kMaxSessionTitleProviderOutputBytes || !ava::core::json::is_valid_utf8(text) || contains_control(text))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "generated session title is invalid"));
+  std::string cleaned(text);
+  remove_tagged_section(cleaned, "think");
+  remove_tagged_section(cleaned, "reasoning");
+  remove_tagged_section(cleaned, "analysis");
+  std::size_t start = 0;
+  while (start <= cleaned.size())
+  {
+    auto const end = cleaned.find_first_of("\r\n", start);
+    auto line = std::string_view(cleaned).substr(start, end == std::string::npos ? cleaned.size() - start : end - start);
+    auto candidate = trim_ascii(line);
+    if (!candidate.empty() && candidate != "```" && !candidate.starts_with("```") && !candidate.starts_with("<think"))
+    {
+      strip_line_markup(candidate);
+      if (!candidate.empty())
+      {
+        std::string bounded;
+        std::size_t cursor = 0;
+        std::size_t words = 0;
+        while (cursor < candidate.size() && words < 10)
+        {
+          while (cursor < candidate.size() && candidate[cursor] == ' ') ++cursor;
+          if (cursor >= candidate.size())
+            break;
+          auto end_word = candidate.find(' ', cursor);
+          if (end_word == std::string::npos)
+            end_word = candidate.size();
+          auto word = candidate.substr(cursor, end_word - cursor);
+          while (!word.empty() && std::ispunct(static_cast<unsigned char>(word.front())) != 0) word.erase(word.begin());
+          while (!word.empty() && std::ispunct(static_cast<unsigned char>(word.back())) != 0) word.pop_back();
+          if (!word.empty())
+          {
+            constexpr std::size_t kMaxNaturalWordBytes = 40;
+            if (word.size() > kMaxNaturalWordBytes)
+              word.resize(utf8_prefix_size(word, kMaxNaturalWordBytes));
+            auto const separator_bytes = bounded.empty() ? 0U : 1U;
+            if (word.empty() || word.size() + separator_bytes > ava::session::kMaxGeneratedSessionTitleBytes - bounded.size())
+              break;
+            if (!bounded.empty())
+              bounded.push_back(' ');
+            bounded += word;
+            ++words;
+          }
+          cursor = end_word;
+        }
+        if (words >= 5)
+          return bounded;
+      }
+    }
+    if (end == std::string::npos)
+      break;
+    start = end + 1;
+    if (start < cleaned.size() && cleaned[start - 1] == '\r' && cleaned[start] == '\n')
+      ++start;
+  }
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "generated session title is empty"));
+}
+
+std::string fallback_session_title(std::string_view normalized_source)
+{
+  auto source = normalized_whitespace(normalized_source);
+  std::vector<std::string> title_words;
+  std::size_t cursor = 0;
+  while (cursor < source.size() && title_words.size() < 10)
+  {
+    while (cursor < source.size() && source[cursor] == ' ') ++cursor;
+    auto end = source.find(' ', cursor);
+    if (end == std::string::npos)
+      end = source.size();
+    auto word = std::string(source.substr(cursor, end - cursor));
+    while (!word.empty() && std::ispunct(static_cast<unsigned char>(word.front())) != 0) word.erase(word.begin());
+    while (!word.empty() && std::ispunct(static_cast<unsigned char>(word.back())) != 0) word.pop_back();
+    if (!word.empty())
+    {
+      constexpr std::size_t kMaxFallbackWordBytes = 28;
+      if (word.size() > kMaxFallbackWordBytes)
+        word.resize(utf8_prefix_size(word, kMaxFallbackWordBytes));
+      if (!word.empty())
+        title_words.push_back(std::move(word));
+    }
+    cursor = end;
+  }
+  if (title_words.empty())
+    title_words = {"New", "Conversation"};
+  constexpr std::array<std::string_view, 4> kFallbackWords = {"Overview", "and", "Next", "Steps"};
+  std::size_t filler = 0;
+  while (title_words.size() < 5) title_words.emplace_back(kFallbackWords[filler++]);
+
+  std::string title;
+  for (auto const& word : title_words)
+  {
+    auto const separator_bytes = title.empty() ? 0U : 1U;
+    if (title.size() + separator_bytes + word.size() > ava::session::kMaxGeneratedSessionTitleBytes)
+      break;
+    if (!title.empty())
+      title.push_back(' ');
+    title += word;
+  }
+  return title;
+}
+
+SessionTitleCoordinator::SessionTitleCoordinator(SessionTitleCoordinatorOptions options) : options_(std::move(options))
+{
+  if (!options_.transport_factory)
+    options_.transport_factory = [] { return std::make_unique<ava::provider::CurlCliTransport>(); };
+  if (!options_.generator)
+  {
+    auto transport_factory = options_.transport_factory;
+    options_.generator = [transport_factory = std::move(transport_factory)](SessionTitleGenerationRequest& request, std::stop_token stop_token,
+                                                                            std::chrono::steady_clock::time_point deadline) {
+      return default_generate_title(request, stop_token, deadline, transport_factory);
+    };
+  }
+}
+
+ava::core::Result<std::shared_ptr<SessionTitleCoordinator>> SessionTitleCoordinator::create(SessionTitleCoordinatorOptions options)
+{
+  if (options.worker_count == 0 || options.worker_count > 4 || options.max_queued == 0 || options.max_queued > 128 || options.request_deadline.count() <= 0 ||
+      options.request_deadline > std::chrono::seconds(30))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session title coordinator limits are invalid"));
+  try
+  {
+    auto coordinator = std::shared_ptr<SessionTitleCoordinator>(new SessionTitleCoordinator(std::move(options)));
+    coordinator->start();
+    return coordinator;
+  }
+  catch (...)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "failed to start session title coordinator"));
+  }
+}
+
+SessionTitleCoordinator::~SessionTitleCoordinator()
+{
+  shutdown();
+}
+
+void SessionTitleCoordinator::start()
+{
+  if (!options_.config.enabled)
+    return;
+  workers_.reserve(options_.worker_count);
+  for (std::size_t index = 0; index < options_.worker_count; ++index) workers_.emplace_back([this](std::stop_token token) { worker_loop(token); });
+}
+
+void SessionTitleCoordinator::schedule(runtime::Session const& session, std::string_view original_user_text, runtime::RunOptions const& run_options) noexcept
+{
+  if (!options_.config.enabled || session.sessionless || !session.created || !session.append_target)
+    return;
+  try
+  {
+    Work work{.session_id = session.store.session_id(),
+              .append_target = session.append_target,
+              .request = SessionTitleGenerationRequest{.paths = session.paths,
+                                                       .active_model = session.model,
+                                                       .config = options_.config,
+                                                       .source_text = normalize_session_title_source(original_user_text),
+                                                       .access_token = run_options.access_token,
+                                                       .credential_type = run_options.credential_type,
+                                                       .account_id = run_options.openai_account_id,
+                                                       .openai_oauth = run_options.openai_oauth,
+                                                       .offline = session.offline || run_options.offline}};
+    std::lock_guard lock(mutex_);
+    if (!accepting_ || queue_.size() >= options_.max_queued || active_session_ids_.contains(work.session_id))
+    {
+      clear_secret(work.request.access_token);
+      return;
+    }
+    active_session_ids_.insert(work.session_id);
+    queue_.push_back(std::move(work));
+    changed_.notify_one();
+  }
+  catch (...)
+  {
+  }
+}
+
+void SessionTitleCoordinator::worker_loop(std::stop_token stop_token)
+{
+  while (!stop_token.stop_requested())
+  {
+    std::optional<Work> work;
+    {
+      std::unique_lock lock(mutex_);
+      changed_.wait(lock, stop_token, [&] { return !queue_.empty() || !accepting_; });
+      if (stop_token.stop_requested() || (!accepting_ && queue_.empty()))
+        break;
+      if (queue_.empty())
+        continue;
+      work.emplace(std::move(queue_.front()));
+      queue_.pop_front();
+    }
+    auto const session_id = work->session_id;
+    process(std::move(*work), stop_token);
+    {
+      std::lock_guard lock(mutex_);
+      active_session_ids_.erase(session_id);
+      changed_.notify_all();
+    }
+  }
+}
+
+void SessionTitleCoordinator::process(Work work, std::stop_token stop_token) noexcept
+{
+  auto finish = [&] { clear_secret(work.request.access_token); };
+  try
+  {
+    auto authority = work.append_target->read_authority();
+    if (!authority)
+    {
+      finish();
+      return;
+    }
+    auto entries = authority->load();
+    if (!entries)
+    {
+      finish();
+      return;
+    }
+    auto metadata = ava::session::session_metadata_from_entries(*entries);
+    if (!metadata || !metadata_allows_generation(*metadata) || !has_exactly_one_committed_ordinary_turn(*entries))
+    {
+      finish();
+      return;
+    }
+
+    std::string title;
+    if (!stop_token.stop_requested())
+    {
+      auto generated = options_.generator(work.request, stop_token, std::chrono::steady_clock::now() + options_.request_deadline);
+      if (generated)
+      {
+        auto sanitized = sanitize_generated_session_title(*generated);
+        if (sanitized)
+          title = std::move(*sanitized);
+      }
+    }
+    if (title.empty())
+      title = fallback_session_title(work.request.source_text);
+    if (stop_token.stop_requested())
+    {
+      finish();
+      return;
+    }
+
+    entries = authority->load();
+    if (!entries)
+    {
+      finish();
+      return;
+    }
+    metadata = ava::session::session_metadata_from_entries(*entries);
+    if (!metadata || !metadata_allows_generation(*metadata))
+    {
+      finish();
+      return;
+    }
+    ava::session::SessionMetadataUpdate update;
+    update.actor = "auto-title";
+    update.generated_title = std::move(title);
+    auto entry = ava::session::make_session_metadata_entry(std::move(update), entries->empty() ? std::string{} : entries->back().id);
+    if (entry)
+      static_cast<void>(work.append_target->append(*entry));
+  }
+  catch (...)
+  {
+  }
+  finish();
+}
+
+bool SessionTitleCoordinator::wait_until_idle(std::chrono::milliseconds timeout)
+{
+  std::unique_lock lock(mutex_);
+  return changed_.wait_for(lock, timeout, [&] { return queue_.empty() && active_session_ids_.empty(); });
+}
+
+void SessionTitleCoordinator::shutdown() noexcept
+{
+  std::vector<std::jthread> workers;
+  {
+    std::lock_guard lock(mutex_);
+    if (!accepting_ && workers_.empty())
+      return;
+    accepting_ = false;
+    for (auto& worker : workers_) worker.request_stop();
+    for (auto& work : queue_) clear_secret(work.request.access_token);
+    queue_.clear();
+    active_session_ids_.clear();
+    workers.swap(workers_);
+    changed_.notify_all();
+  }
+  workers.clear();
+}
+
+}  // namespace ava::app

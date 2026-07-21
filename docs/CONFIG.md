@@ -6,6 +6,7 @@ AVA uses XDG paths on Linux.
 | --- | --- |
 | Config directory | `$XDG_CONFIG_HOME/ava` or `~/.config/ava` |
 | Auth file | `$XDG_CONFIG_HOME/ava/auth.json` or `~/.config/ava/auth.json` |
+| Automatic session titles | `$XDG_CONFIG_HOME/ava/session-titles.json` or `~/.config/ava/session-titles.json` |
 | Global permission rules | `$XDG_CONFIG_HOME/ava/permission-rules.json` or `~/.config/ava/permission-rules.json` |
 | Workspace-keyed permission rules | `$XDG_CONFIG_HOME/ava/workspace-permission-rules/<hash>/permission-rules.json` or `~/.config/ava/workspace-permission-rules/<hash>/permission-rules.json` |
 | Session state | `$XDG_STATE_HOME/ava/sessions` or `~/.local/state/ava/sessions` |
@@ -29,6 +30,18 @@ Pi-style package/resource management (`packages list|install|remove|update|confi
 - trusted project resources: `.ava/commands/`, `.ava/skills/`, `.ava/agents/`, `.ava/plugins/`, `.ava/mcp.json`, `.ava/lsp.json`, `.ava/SYSTEM.md`, and `.ava/APPEND_SYSTEM.md`
 
 `ava packages ...` and `/packages ...` currently report this deferral instead of performing side effects or sending the request to the model. AVA also does not enable analytics/telemetry, version checks, package updates, or self-update behavior. `--offline` disables provider model calls for prompt turns and provider-backed compaction before credential resolution; it is not an OS/network sandbox, so network-capable tools still depend on tool visibility plus permission policy.
+
+## Automatic Session Titles
+
+Persistent root sessions receive an asynchronous title after their first ordinary prompt commits. By default AVA uses the active provider and model once, without tools or session assistant records, and falls back to a deterministic title derived from the sanitized prompt when provider generation is unavailable. Manual `/name` values always win; `/name --clear` records an empty manual value and permanently suppresses generated-title fallback for that session. Branches, imports, resumed sessions, child sessions, sessionless runs, and synthetic delivery turns do not initiate generation.
+
+Strict optional configuration lives in `session-titles.json`:
+
+```json
+{"schema_version":1,"enabled":false}
+```
+
+Set `enabled` to `false` to disable generation. The process override `AVA_SESSION_TITLES=off` also disables generation (`on` defers to the file/default); any other value is rejected. To override the model on the active provider, add `"model":"..."`. A cross-provider override requires both `"provider":"..."` and `"model":"..."`; that provider's own configured credential is resolved for the bounded attempt. Unknown fields and unsupported schema versions are rejected.
 
 ## Diagnostics State
 

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/runtime_compaction.h"
@@ -6,6 +7,7 @@
 #include "ava/app/runtime_reasoning.h"
 #include "ava/app/runtime_retry.h"
 #include "ava/app/runtime_sessions.h"
+#include "ava/app/session_title_coordinator.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/subagent_config.h"
@@ -17,7 +19,6 @@
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
 #include "ava/context/skill_loader.h"
-#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/lsp/configured_provider.h"
 #include "ava/core/error.h"
 #include "ava/core/fingerprint.h"
@@ -1190,6 +1191,14 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   }
   if (completed->reason != proposed_reason)
     result->outcome = runtime_outcome_for_stop_reason(completed->reason);
+
+  // This boundary is deliberately after AdmissionGuard completion, not the
+  // earlier Done event. The coordinator is best-effort and cannot change the
+  // already committed ordinary user turn.
+  if (result->committed_turn_id && !options.synthetic_subagent_delivery && !session.sessionless && session.session_title_coordinator)
+  {
+    session.session_title_coordinator->schedule(session, user_message, options);
+  }
 
   return result;
 }

@@ -75,6 +75,7 @@ ava::core::Result<runtime::Session> create_runtime_session_like(runtime::Session
   options.paths = current.paths;
   options.subagent_coordinator = current.subagent_coordinator;
   options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
   return create_runtime_session_at(std::move(options), current.workspace_dir, current.current_dir);
 }
 
@@ -86,6 +87,7 @@ ava::core::Result<runtime::Session> open_runtime_session_like(runtime::Session c
   options.paths = current.paths;
   options.subagent_coordinator = current.subagent_coordinator;
   options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
   return open_runtime_session_at(std::move(options), current.workspace_dir, current.current_dir, requested_session_id);
 }
 

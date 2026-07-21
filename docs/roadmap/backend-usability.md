@@ -22,7 +22,7 @@ External projects are behavior references only. AVA may adopt useful product beh
 | 2 | Foreground/background subagent execution and job controls | Direction approved 2026-07-20; recorded below | Implemented and validated 2026-07-20 |
 | 3 | Privacy-safe diagnostics and support bundles | Direction approved 2026-07-20; recorded below | Implemented and validated 2026-07-20 |
 | 4 | Context-compaction correctness and configuration | Direction approved 2026-07-20; recorded below | Implemented and validated 2026-07-20 |
-| 5 | Automatic session titles | Awaiting focused research and discussion | Not started |
+| 5 | Automatic session titles | Direction approved 2026-07-21 | Implemented and validated 2026-07-21 |
 
 ---
 

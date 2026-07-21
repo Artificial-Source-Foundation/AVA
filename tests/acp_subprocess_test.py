@@ -33,6 +33,7 @@ def environment(root):
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "NO_COLOR": "1",
+        "AVA_SESSION_TITLES": "off",
         # Debug builds must remain protocol-quiet even when an isolated HOME
         # has no developer libcwd configuration.
         "LIBCWD_RCFILE_NAME": str(libcwd_rcfile),

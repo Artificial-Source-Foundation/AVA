@@ -394,12 +394,28 @@ ava::core::Result<std::string> parse_compaction_response_text(ava::provider::Pro
 
 bool same_session_snapshot(std::vector<ava::session::SessionEntry> const& expected, std::vector<ava::session::SessionEntry> const& actual)
 {
-  if (expected.size() != actual.size())
+  if (actual.size() < expected.size())
     return false;
   for (std::size_t index = 0; index < expected.size(); ++index)
   {
     if (expected[index].id != actual[index].id || expected[index].parent_id != actual[index].parent_id || expected[index].type != actual[index].type ||
         expected[index].timestamp != actual[index].timestamp || expected[index].data_json != actual[index].data_json)
+    {
+      return false;
+    }
+  }
+  // Automatic title metadata is context-neutral. Allow it to finish while a
+  // provider-backed compaction is in flight without spending a retry or
+  // treating the generated title as conversation history.
+  for (std::size_t index = expected.size(); index < actual.size(); ++index)
+  {
+    auto const& entry = actual[index];
+    if (entry.type != ava::session::EntryType::SessionMetadata || ava::core::json::string_field(entry.data_json, "actor").value_or("") != "auto-title" ||
+        !ava::core::json::string_field(entry.data_json, "generated_title") || ava::core::json::field_value_start(entry.data_json, "name") ||
+        ava::core::json::field_value_start(entry.data_json, "labels") || ava::core::json::field_value_start(entry.data_json, "archived") ||
+        ava::core::json::field_value_start(entry.data_json, "parent_session_id") || ava::core::json::field_value_start(entry.data_json, "source_session_id") ||
+        ava::core::json::field_value_start(entry.data_json, "branch_from_entry_id") || ava::core::json::field_value_start(entry.data_json, "branch_origin") ||
+        ava::core::json::field_value_start(entry.data_json, "original_cwd"))
     {
       return false;
     }

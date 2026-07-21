@@ -141,6 +141,7 @@ runtime::OpenOptions owned_replacement_options(runtime::Session const& current, 
   options.offline = current.offline;
   options.subagent_coordinator = current.subagent_coordinator;
   options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
   return options;
 }
 

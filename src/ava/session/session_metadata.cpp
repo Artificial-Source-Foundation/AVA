@@ -27,14 +27,14 @@ ava::core::Error metadata_error(std::string message, std::string_view field = {}
   return error;
 }
 
-ava::core::VoidResult validate_name(std::optional<std::string> const& name)
+ava::core::VoidResult validate_title_field(std::optional<std::string> const& value, std::string_view field, std::size_t max_bytes, bool allow_empty)
 {
-  if (!name)
+  if (!value)
     return {};
-  if (name->size() > kMaxSessionNameBytes || has_control_byte(*name))
+  if ((!allow_empty && value->empty()) || value->size() > max_bytes || has_control_byte(*value) || !ava::core::json::is_valid_utf8(*value))
   {
-    auto error = metadata_error("session name is invalid", "name");
-    error.with_context("max_bytes", std::to_string(kMaxSessionNameBytes));
+    auto error = metadata_error("session title field is invalid", field);
+    error.with_context("max_bytes", std::to_string(max_bytes));
     return std::unexpected(std::move(error));
   }
   return {};
@@ -110,12 +110,14 @@ bool is_canonical_absolute_path(std::filesystem::path const& path)
 
 ava::core::VoidResult validate_update(SessionMetadataUpdate const& update)
 {
-  if (!update.name && !update.labels && !update.archived && update.parent_session_id.empty() && update.source_session_id.empty() &&
+  if (!update.name && !update.generated_title && !update.labels && !update.archived && update.parent_session_id.empty() && update.source_session_id.empty() &&
       update.branch_from_entry_id.empty() && update.branch_origin.empty() && !update.original_cwd)
   {
     return std::unexpected(metadata_error("session metadata update is empty"));
   }
-  if (auto valid = validate_name(update.name); !valid)
+  if (auto valid = validate_title_field(update.name, "name", kMaxSessionNameBytes, true); !valid)
+    return valid;
+  if (auto valid = validate_title_field(update.generated_title, "generated_title", kMaxGeneratedSessionTitleBytes, false); !valid)
     return valid;
   if (auto valid = validate_labels(update.labels); !valid)
     return valid;
@@ -209,6 +211,15 @@ ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::vector
       if (!name)
         return std::unexpected(metadata_error("session metadata name must be a string", "name"));
       metadata.name = std::move(*name);
+      metadata.has_manual_name = true;
+    }
+    if (auto const generated_start = ava::core::json::field_value_start(entry.data_json, "generated_title"))
+    {
+      (void)generated_start;
+      auto title = ava::core::json::string_field(entry.data_json, "generated_title");
+      if (!title)
+        return std::unexpected(metadata_error("session metadata generated_title must be a string", "generated_title"));
+      metadata.generated_title = std::move(*title);
     }
     if (ava::core::json::field_value_start(entry.data_json, "labels"))
     {
@@ -285,6 +296,8 @@ ava::core::Result<SessionEntry> make_session_metadata_entry(SessionMetadataUpdat
   bool first = false;
   if (update.name)
     append_string_field(data, first, "name", *update.name);
+  if (update.generated_title)
+    append_string_field(data, first, "generated_title", *update.generated_title);
   if (update.labels)
   {
     if (!first)
@@ -347,6 +360,9 @@ std::string session_metadata_json(std::string_view session_id, SessionMetadataVi
   std::string json = "{";
   json += "\"session_id\":\"" + ava::core::json::escape(session_id) + "\"";
   json += ",\"name\":\"" + ava::core::json::escape(metadata.name) + "\"";
+  json += ",\"has_manual_name\":" + std::string(metadata.has_manual_name ? "true" : "false");
+  json += ",\"generated_title\":\"" + ava::core::json::escape(metadata.generated_title) + "\"";
+  json += ",\"title\":\"" + ava::core::json::escape(metadata.effective_title()) + "\"";
   json += ",\"labels\":" + labels_json(metadata.labels);
   json += ",\"labels_updated\":\"" + ava::core::json::escape(metadata.labels_updated) + "\"";
   json += ",\"archived\":" + std::string(metadata.archived ? "true" : "false");

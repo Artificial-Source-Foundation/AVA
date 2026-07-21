@@ -27,8 +27,9 @@ class RuntimeDiagnostics;
 }
 
 namespace ava::app {
+class SessionTitleCoordinator;
 class SubagentDeliveryManager;
-}
+}  // namespace ava::app
 
 namespace ava::app::runtime {
 
@@ -59,6 +60,9 @@ struct Session
   bool created = false;
   bool sessionless = false;
   std::shared_ptr<SessionRunController> run_controller = nullptr;
+  // Shared with application background metadata work so appends remain
+  // serialized with active runs while retaining the exact leased inode.
+  std::shared_ptr<ava::session::SessionAppendTarget> append_target = nullptr;
   // Detached retained capsules bind reads to the exact original leased inode
   // without reacquiring the pathname. Ordinary visible sessions leave this
   // empty and derive an authority from their owned lease.
@@ -67,6 +71,7 @@ struct Session
   // compatibility seam; production sessions use the delivery manager.
   std::shared_ptr<ava::agent::SubagentCoordinator> subagent_coordinator = nullptr;
   std::shared_ptr<ava::app::SubagentDeliveryManager> subagent_delivery_manager = nullptr;
+  std::shared_ptr<ava::app::SessionTitleCoordinator> session_title_coordinator = nullptr;
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
   // Null uses normal global/project discovery; non-null is immutable session-local MCP composition.
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;

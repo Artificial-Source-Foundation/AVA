@@ -69,6 +69,7 @@ set(AVA_TESTS_SOURCES
   "provider_openai_tests.cpp"
   "session_tests.cpp"
   "session_run_controller_tests.cpp"
+  "session_title_coordinator_tests.cpp"
   "subagent_coordinator_tests.cpp"
   "subagent_delivery_manager_tests.cpp"
   "tool_scheduler_tests.cpp"
@@ -107,6 +108,7 @@ set(AVA_TEST_SUITES
   acp
   session
   session_run_controller
+  session_title_coordinator
   subagent_coordinator
   subagent_delivery_manager
   core_json_permission
@@ -634,4 +636,12 @@ if(OptionEnableLibcwd)
   add_test(
     NAME ava_debug.print_members_format
     COMMAND ava_tests debug)
+endif()
+
+# Existing integration providers use exact finite response scripts. Automatic
+# title generation has dedicated fake-transport coverage and must not consume
+# those scripts or make any external provider call during ordinary CTest runs.
+get_property(AVA_REGISTERED_TESTS DIRECTORY PROPERTY TESTS)
+if(AVA_REGISTERED_TESTS)
+  set_property(TEST ${AVA_REGISTERED_TESTS} APPEND PROPERTY ENVIRONMENT "AVA_SESSION_TITLES=off")
 endif()

@@ -335,8 +335,9 @@ bool metadata_labels_match(std::vector<std::string> const& labels, std::string_v
 bool session_matches_query(ava::session::SessionTreeNode const& node, std::string_view query)
 {
   return contains_ascii_case_insensitive(node.summary.session_id, query) || contains_ascii_case_insensitive(node.summary.last_updated, query) ||
-         contains_ascii_case_insensitive(node.summary.path.generic_string(), query) || contains_ascii_case_insensitive(node.metadata.name, query) ||
-         contains_ascii_case_insensitive(node.metadata.parent_session_id, query) || contains_ascii_case_insensitive(node.metadata.source_session_id, query) ||
+         contains_ascii_case_insensitive(node.summary.path.generic_string(), query) ||
+         contains_ascii_case_insensitive(node.metadata.effective_title(), query) || contains_ascii_case_insensitive(node.metadata.parent_session_id, query) ||
+         contains_ascii_case_insensitive(node.metadata.source_session_id, query) ||
          contains_ascii_case_insensitive(node.metadata.branch_from_entry_id, query) || contains_ascii_case_insensitive(node.metadata.branch_origin, query) ||
          (node.metadata.archived && contains_ascii_case_insensitive("archived", query)) || contains_ascii_case_insensitive(node.metadata.actor, query) ||
          metadata_labels_match(node.metadata.labels, query);
@@ -595,9 +596,9 @@ std::string format_session_tree_line(ava::session::SessionTreeNode const& node, 
 {
   std::string output(depth * 2, ' ');
   output += node.current ? "* " : "- ";
-  if (!node.metadata.name.empty())
+  if (!node.metadata.effective_title().empty())
   {
-    output += sanitize_inline_text(node.metadata.name);
+    output += sanitize_inline_text(node.metadata.effective_title());
     output += "  id=" + sanitize_inline_text(node.summary.session_id);
   }
   else
@@ -635,6 +636,7 @@ ava::core::Result<runtime::Session> reopen_session(runtime::Session const& curre
   options.paths = current.paths;
   options.subagent_coordinator = current.subagent_coordinator;
   options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
   return open_runtime_session(options);
 }
 
@@ -650,6 +652,7 @@ ava::core::Result<runtime::Session> create_fresh_session(runtime::Session const&
   options.paths = current.paths;
   options.subagent_coordinator = current.subagent_coordinator;
   options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
   return open_runtime_session(options);
 }
 
@@ -665,6 +668,7 @@ runtime::OpenOptions owned_replacement_options(runtime::Session const& current)
   options.offline = current.offline;
   options.subagent_coordinator = current.subagent_coordinator;
   options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
   return options;
 }
 

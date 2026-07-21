@@ -11,6 +11,7 @@ void run_diagnostics_tests();
 void run_acp_tests();
 void run_session_tests();
 void run_session_run_controller_tests();
+void run_session_title_coordinator_tests();
 void run_subagent_coordinator_tests();
 void run_subagent_delivery_manager_tests();
 void run_core_json_permission_tests();
@@ -62,6 +63,7 @@ constexpr std::array kTestSuites{
     TestSuite{"acp", run_acp_tests},
     TestSuite{"session", run_session_tests},
     TestSuite{"session_run_controller", run_session_run_controller_tests},
+    TestSuite{"session_title_coordinator", run_session_title_coordinator_tests},
     TestSuite{"subagent_coordinator", run_subagent_coordinator_tests},
     TestSuite{"subagent_delivery_manager", run_subagent_delivery_manager_tests},
     TestSuite{"core_json_permission", run_core_json_permission_tests},

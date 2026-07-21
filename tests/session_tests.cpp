@@ -978,6 +978,63 @@ void test_session_branch_fork_and_clone_copy_source_safely()
                                                                                         .actor = "test"});
   expect(!missing && missing.error().category() == ava::core::ErrorCategory::NotFound, "session fork rejects missing branch source entries");
 
+  auto title_source =
+      ava::session::SessionStore(ava::session::SessionStoreOptions{.root_dir = sessions_dir, .workspace_dir = workspace, .session_id = "session_title_source"});
+  expect(
+      append_session_entry_for_test(title_source, ava::session::SessionEntry{.id = "title_start",
+                                                                             .parent_id = "",
+                                                                             .type = ava::session::EntryType::SessionStart,
+                                                                             .timestamp = "2026-07-21T00:00:00Z",
+                                                                             .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-test\","
+                                                                                          "\"context_sources\":0,\"prompt_override\":false}",
+                                                                             .version = 0}) &&
+          append_session_entry_for_test(title_source, ava::session::SessionEntry{.id = "title_user",
+                                                                                 .parent_id = "title_start",
+                                                                                 .type = ava::session::EntryType::UserMessage,
+                                                                                 .timestamp = "2026-07-21T00:00:01Z",
+                                                                                 .data_json = "{\"text\":\"title source\"}"}) &&
+          append_session_entry_for_test(title_source, ava::session::SessionEntry{.id = "title_assistant",
+                                                                                 .parent_id = "title_user",
+                                                                                 .type = ava::session::EntryType::AssistantMessage,
+                                                                                 .timestamp = "2026-07-21T00:00:02Z",
+                                                                                 .data_json = "{\"text\":\"answer\"}"}),
+      "branch title inheritance source entries append");
+  ava::session::SessionMetadataUpdate generated_title;
+  generated_title.generated_title = "Generated Source Session Title";
+  generated_title.actor = "auto-title";
+  auto generated_title_metadata = append_session_metadata_for_test(title_source, std::move(generated_title));
+  auto inherit_options = [&](ava::session::SessionBranchMode mode = ava::session::SessionBranchMode::Fork) {
+    return ava::session::SessionBranchOptions{.workspace_dir = workspace,
+                                              .root_dir = sessions_dir,
+                                              .source_session_id = "session_title_source",
+                                              .branch_from_entry_id = mode == ava::session::SessionBranchMode::Fork ? "title_user" : "",
+                                              .name = std::nullopt,
+                                              .labels = std::nullopt,
+                                              .mode = mode,
+                                              .actor = "test"};
+  };
+  auto generated_title_fork = ava::session::create_session_branch(inherit_options());
+  expect(generated_title_metadata && generated_title_fork && generated_title_fork->copied_entry_count == 2 &&
+             generated_title_fork->metadata.generated_title == "Generated Source Session Title" && !generated_title_fork->metadata.has_manual_name &&
+             generated_title_fork->metadata.effective_title() == "Generated Source Session Title",
+         "a fork from before generated metadata inherits the full source generated title independently of its copied prefix");
+
+  auto empty_manual_metadata = append_session_metadata_for_test(title_source, {.name = std::string{}, .actor = "test"});
+  auto suppressed_title_fork = ava::session::create_session_branch(inherit_options());
+  auto suppressed_title_clone = ava::session::create_session_branch(inherit_options(ava::session::SessionBranchMode::Clone));
+  auto explicit_title_options = inherit_options(ava::session::SessionBranchMode::Clone);
+  explicit_title_options.name = "Explicit Branch Name";
+  auto explicitly_named_clone = ava::session::create_session_branch(std::move(explicit_title_options));
+  expect(empty_manual_metadata && suppressed_title_fork && suppressed_title_clone && explicitly_named_clone &&
+             suppressed_title_fork->metadata.has_manual_name && suppressed_title_fork->metadata.name.empty() &&
+             suppressed_title_fork->metadata.generated_title == "Generated Source Session Title" && suppressed_title_fork->metadata.effective_title().empty() &&
+             suppressed_title_clone->metadata.has_manual_name && suppressed_title_clone->metadata.name.empty() &&
+             suppressed_title_clone->metadata.generated_title == "Generated Source Session Title" &&
+             suppressed_title_clone->metadata.effective_title().empty() && explicitly_named_clone->metadata.name == "Explicit Branch Name" &&
+             explicitly_named_clone->metadata.generated_title == "Generated Source Session Title" &&
+             explicitly_named_clone->metadata.effective_title() == "Explicit Branch Name",
+         "fork and clone inherit later manual-empty suppression and generated metadata while an explicit branch name wins");
+
   auto v4_source =
       ava::session::SessionStore(ava::session::SessionStoreOptions{.root_dir = sessions_dir, .workspace_dir = workspace, .session_id = "session_v4_prefix"});
   expect(append_session_entry_for_test(v4_source, ava::session::SessionEntry{.id = "v4_safe_prefix",

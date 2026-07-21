@@ -95,6 +95,8 @@ Client request IDs and resolver `request_id`/`correlation_id` values are non-emp
 
 Prompt success contains `session_id`, `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, and optional `tool_timeline`. Command-dispatch success contains `handled`, `quit`, `output`, `text`, and optional `tool_timeline`. State results contain protocol/session/workspace/mode/model/cancel/reasoning/context metadata. Lists and session/model results are bounded and additive.
 
+Session title queries use one effective-title rule: a manual `name` wins whenever any manual name has been persisted, including explicit empty suppression; otherwise `generated_title` is used. `list_sessions.sessions[].title` and each `session_tree.sessions[].title` serialize that effective title. Tree nodes and `session_metadata` additionally serialize `name`, `generated_title`, and `has_manual_name`, allowing clients to distinguish untitled sessions from manual-empty suppression. Automatic fallback/refinement metadata is observable through these existing query commands; protocol v1 defines no live automatic-title event.
+
 ## Shared Payload Shapes
 
 ### Tool timeline/event entry

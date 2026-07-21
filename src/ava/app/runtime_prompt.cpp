@@ -1197,7 +1197,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   // already committed ordinary user turn.
   if (result->committed_turn_id && !options.synthetic_subagent_delivery && !session.sessionless && session.session_title_coordinator)
   {
-    session.session_title_coordinator->schedule(session, user_message, options);
+    session.session_title_coordinator->schedule(session, user_message, *result->committed_turn_id, options);
   }
 
   return result;

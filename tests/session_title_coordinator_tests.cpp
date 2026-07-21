@@ -12,6 +12,8 @@
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
+#include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -100,20 +102,21 @@ struct GeneratorState
   }
 };
 
-std::shared_ptr<ava::app::SessionTitleCoordinator> make_coordinator(std::shared_ptr<GeneratorState> const& state, ava::config::SessionTitleConfig config = {})
+std::shared_ptr<ava::app::SessionTitleCoordinator> make_coordinator(std::shared_ptr<GeneratorState> const& state, ava::config::SessionTitleConfig config = {},
+                                                                    std::size_t max_queued = 4)
 {
   auto coordinator = ava::app::SessionTitleCoordinator::create(
       {.config = std::move(config),
        .generator = [state](ava::app::SessionTitleGenerationRequest& request, std::stop_token token,
                             std::chrono::steady_clock::time_point deadline) { return state->generate(request, token, deadline); },
        .worker_count = 1,
-       .max_queued = 4,
+       .max_queued = max_queued,
        .request_deadline = 2s});
   expect(coordinator.has_value(), coordinator ? "session title coordinator starts" : coordinator.error().format());
   return coordinator ? *coordinator : nullptr;
 }
 
-ava::core::VoidResult seed_committed_ordinary_turn(ava::app::runtime::Session& session, std::string text)
+ava::core::Result<std::string> seed_committed_ordinary_turn(ava::app::runtime::Session& session, std::string text)
 {
   auto authority = session.append_target->read_authority();
   if (!authority)
@@ -127,7 +130,7 @@ ava::core::VoidResult seed_committed_ordinary_turn(ava::app::runtime::Session& s
                                   .timestamp = ava::session::now_timestamp(),
                                   .data_json = "{\"text\":\"" + ava::core::json::escape(text) + "\"}"};
   if (auto appended = session.append_target->append(user); !appended)
-    return appended;
+    return std::unexpected(std::move(appended.error()));
   auto const turn_id = ava::core::make_id("assistant_turn");
   auto output_data = ava::session::serialize_assistant_output_item_data_json(
       {.assistant_turn_id = turn_id,
@@ -142,17 +145,20 @@ ava::core::VoidResult seed_committed_ordinary_turn(ava::app::runtime::Session& s
     return std::unexpected(std::move(output_data.error()));
   if (!commit_data)
     return std::unexpected(std::move(commit_data.error()));
+  auto const commit_entry_id = ava::core::make_id("entry");
   std::vector<ava::session::SessionEntry> batch{{.id = ava::core::make_id("entry"),
                                                  .parent_id = user.id,
                                                  .type = ava::session::EntryType::AssistantOutputItem,
                                                  .timestamp = ava::session::now_timestamp(),
                                                  .data_json = std::move(*output_data)},
-                                                {.id = ava::core::make_id("entry"),
+                                                {.id = commit_entry_id,
                                                  .parent_id = user.id,
                                                  .type = ava::session::EntryType::AssistantTurnCommit,
                                                  .timestamp = ava::session::now_timestamp(),
                                                  .data_json = std::move(*commit_data)}};
-  return session.append_target->append_batch(std::move(batch));
+  if (auto appended = session.append_target->append_batch(std::move(batch)); !appended)
+    return std::unexpected(std::move(appended.error()));
+  return commit_entry_id;
 }
 
 ava::core::Result<ava::app::runtime::Session> open_title_session(std::filesystem::path const& root,
@@ -202,6 +208,13 @@ void test_title_text_boundaries()
   auto capped = ava::app::sanitize_generated_session_title(long_utf8);
   expect(capped && capped->size() <= ava::session::kMaxGeneratedSessionTitleBytes && ava::core::json::is_valid_utf8(*capped),
          "generated session titles hard-cap on a UTF-8 boundary");
+
+  auto const multilingual_source = std::string("日本語 セッション タイトル を 安全に 設計。");
+  auto multilingual_generated = ava::app::sanitize_generated_session_title(multilingual_source);
+  auto multilingual_fallback = ava::app::fallback_session_title(multilingual_source);
+  expect(multilingual_generated && *multilingual_generated == multilingual_source && multilingual_fallback == multilingual_source &&
+             ava::core::json::is_valid_utf8(multilingual_fallback),
+         "ASCII-only punctuation trimming preserves valid multilingual generated titles and fallbacks");
 }
 
 void test_metadata_manual_precedence_and_summary_projection()
@@ -274,9 +287,11 @@ void test_direct_provider_generation_is_isolated()
 
   auto seeded = seed_committed_ordinary_turn(*session, "Inspect isolated provider title generation");
   expect(seeded.has_value(), seeded ? "direct title provider committed turn is seeded" : seeded.error().format());
+  if (!seeded)
+    return;
   ava::app::runtime::RunOptions options;
   options.access_token = "fake-provider-token";
-  coordinator.value()->schedule(*session, "Inspect isolated provider title generation", options);
+  coordinator.value()->schedule(*session, "Inspect isolated provider title generation", *seeded, options);
   expect(coordinator.value()->wait_until_idle(3s), "direct title provider generation becomes idle");
   auto metadata = ava::session::load_session_metadata(session->store, session->lease);
   bool isolated_request = false;
@@ -317,10 +332,12 @@ void test_coordinator_dedupes_and_preserves_manual_rename_races()
 
   auto seeded = seed_committed_ordinary_turn(*session, "First ordinary prompt");
   expect(seeded.has_value(), seeded ? "title race committed turn is seeded" : seeded.error().format());
+  if (!seeded)
+    return;
   ava::app::runtime::RunOptions options;
   options.access_token = "not-used-by-fake";
-  coordinator->schedule(*session, "First ordinary prompt", options);
-  coordinator->schedule(*session, "Second prompt must not replace first", options);
+  coordinator->schedule(*session, "First ordinary prompt", *seeded, options);
+  coordinator->schedule(*session, "Second prompt must not replace first", *seeded, options);
   expect(state->wait_started(), "title race fake generator starts");
   auto renamed = ava::app::append_runtime_session_metadata(
       *session, ava::session::SessionMetadataUpdate{.name = "Manual Rename", .actor = "test", .generated_title = std::nullopt});
@@ -328,9 +345,9 @@ void test_coordinator_dedupes_and_preserves_manual_rename_races()
   state->allow_completion();
   expect(coordinator->wait_until_idle(3s), "title race coordinator becomes idle");
   auto metadata = ava::session::load_session_metadata(session->store, session->lease);
-  expect(metadata && metadata->effective_title() == "Manual Rename" && metadata->generated_title.empty() && state->calls == 1 &&
+  expect(metadata && metadata->effective_title() == "Manual Rename" && metadata->generated_title == "First ordinary prompt Overview and" && state->calls == 1 &&
              state->source == "First ordinary prompt",
-         "coordinator deduplicates by session id, uses only the first prompt, and never appends over a concurrent manual rename");
+         "coordinator permanently deduplicates by session id, binds the first prompt, and never refines over a concurrent manual rename");
   coordinator->shutdown();
 }
 
@@ -350,8 +367,10 @@ void test_coordinator_fallback_and_navigation_lifetime()
   auto const source_id = session->store.session_id();
   auto seeded = seed_committed_ordinary_turn(*session, "Design <skill>hidden scaffold</skill> durable navigation titles");
   expect(seeded.has_value(), seeded ? "title navigation committed turn is seeded" : seeded.error().format());
+  if (!seeded)
+    return;
   ava::app::runtime::RunOptions options;
-  coordinator->schedule(*session, "Design <skill>hidden scaffold</skill> durable navigation titles", options);
+  coordinator->schedule(*session, "Design <skill>hidden scaffold</skill> durable navigation titles", *seeded, options);
   expect(state->wait_started(), "title navigation generator starts");
 
   auto replacement = ava::app::create_runtime_session_like(*session, ava::app::runtime::OpenOptions{});
@@ -365,6 +384,134 @@ void test_coordinator_fallback_and_navigation_lifetime()
   expect(summaries && found != summaries->end() && found->title == "Design durable navigation titles Overview",
          "provider failure uses deterministic fallback through exact retained append authority after in-process navigation" +
              std::string(summaries && found != summaries->end() ? ": observed title '" + found->title + "'" : ": source summary missing"));
+  coordinator->shutdown();
+}
+
+void test_queue_delay_allows_later_turns_after_captured_first_commit()
+{
+  auto const root = temp_root() / ("session-title-queue-delay-" + ava::core::make_id("test"));
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+  auto state = std::make_shared<GeneratorState>();
+  state->release = false;
+  state->output = "Five Word Delayed Queue Title";
+  auto coordinator = make_coordinator(state, {}, 1);
+  auto blocker = open_title_session(root / "blocker", coordinator);
+  auto delayed = open_title_session(root / "delayed", coordinator);
+  auto overflow = open_title_session(root / "overflow", coordinator);
+  expect(blocker && delayed && overflow, "queue-delay title sessions open");
+  if (!blocker || !delayed || !overflow || !coordinator)
+    return;
+
+  auto blocker_commit = seed_committed_ordinary_turn(*blocker, "Block title worker until released");
+  expect(blocker_commit.has_value(), "queue-delay blocker commits its first ordinary turn");
+  if (!blocker_commit)
+    return;
+  ava::app::runtime::RunOptions options;
+  coordinator->schedule(*blocker, "Block title worker until released", *blocker_commit, options);
+  expect(state->wait_started(), "queue-delay blocker occupies the title worker");
+
+  auto first_commit = seed_committed_ordinary_turn(*delayed, "Capture this first ordinary title source");
+  expect(first_commit.has_value(), "queue-delay target commits its first ordinary turn");
+  if (!first_commit)
+    return;
+  coordinator->schedule(*delayed, "Capture this first ordinary title source", *first_commit, options);
+  auto second_commit = seed_committed_ordinary_turn(*delayed, "A later turn arrives while title work is queued");
+  expect(second_commit.has_value(), "queue-delay target appends a later ordinary turn");
+  auto overflow_commit = seed_committed_ordinary_turn(*overflow, "Queue pressure retains this fallback");
+  expect(overflow_commit.has_value(), "queue-pressure target commits its first ordinary turn");
+  if (!overflow_commit)
+    return;
+  coordinator->schedule(*overflow, "Queue pressure retains this fallback", *overflow_commit, options);
+  auto overflow_metadata = ava::session::load_session_metadata(overflow->store, overflow->lease);
+  expect(overflow_metadata && overflow_metadata->effective_title() == "Queue pressure retains this fallback",
+         "a full provider-refinement queue still retains the synchronous fallback");
+
+  state->allow_completion();
+  expect(coordinator->wait_until_idle(3s), "queue-delay title coordinator becomes idle");
+  auto metadata = ava::session::load_session_metadata(delayed->store, delayed->lease);
+  expect(metadata && metadata->effective_title() == "Five Word Delayed Queue Title" && state->calls == 2,
+         "captured first-turn identity remains valid when later turns append during queue delay");
+  coordinator->shutdown();
+}
+
+void test_first_admission_permanently_binds_commit_identity()
+{
+  auto const root = temp_root() / ("session-title-commit-binding-" + ava::core::make_id("test"));
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+  auto state = std::make_shared<GeneratorState>();
+  auto coordinator = make_coordinator(state);
+  auto session = open_title_session(root, coordinator);
+  expect(session.has_value(), "commit-binding title session opens");
+  if (!session || !coordinator)
+    return;
+
+  auto first_commit = seed_committed_ordinary_turn(*session, "The actual first ordinary title source");
+  auto second_commit = seed_committed_ordinary_turn(*session, "The second turn must not be rebound");
+  expect(first_commit && second_commit, "commit-binding fixture appends two ordinary turns");
+  if (!first_commit || !second_commit)
+    return;
+  ava::app::runtime::RunOptions options;
+  coordinator->schedule(*session, "The second turn must not be rebound", *second_commit, options);
+  coordinator->schedule(*session, "The actual first ordinary title source", *first_commit, options);
+  expect(coordinator->wait_until_idle(100ms), "invalid captured commit schedules no title work");
+  auto metadata = ava::session::load_session_metadata(session->store, session->lease);
+  expect(metadata && metadata->effective_title().empty() && state->calls == 0,
+         "the first admission is permanent and a commit outside the first ordinary turn cannot be replaced later");
+  coordinator->shutdown();
+}
+
+void test_fallback_append_retries_only_a_proven_not_started_write()
+{
+  auto const root = temp_root() / ("session-title-stale-tail-" + ava::core::make_id("test"));
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+  auto state = std::make_shared<GeneratorState>();
+  state->release = false;
+  auto coordinator = make_coordinator(state);
+  auto session = open_title_session(root, coordinator);
+  expect(session.has_value(), "stale-tail title session opens");
+  if (!session || !coordinator)
+    return;
+  auto committed = seed_committed_ordinary_turn(*session, "Retry stale tail fallback safely");
+  expect(committed.has_value(), "stale-tail fixture commits its first ordinary turn");
+  if (!committed)
+    return;
+
+  auto original_target = session->append_target;
+  auto armed = std::make_shared<std::atomic<bool>>(false);
+  auto tail_appended = std::make_shared<std::atomic<bool>>(false);
+  auto write_calls = std::make_shared<std::atomic<std::size_t>>(0);
+  session->store.set_after_lease_bound_read_for_test([original_target, armed, tail_appended] {
+    if (!armed->exchange(false))
+      return;
+    auto entry =
+        ava::session::make_session_metadata_entry(ava::session::SessionMetadataUpdate{.labels = std::vector<std::string>{"tail-race"}, .actor = "test"});
+    tail_appended->store(entry && original_target->append(*entry));
+  });
+  session->store.set_append_write_for_test([write_calls](int fd, std::string_view bytes) -> ssize_t {
+    if (write_calls->fetch_add(1) == 0)
+    {
+      errno = EAGAIN;
+      return -1;
+    }
+    return ::write(fd, bytes.data(), bytes.size());
+  });
+  auto replacement = ava::session::SessionAppendTarget::create_persistent(session->store, session->lease, session->session_read_limits);
+  expect(replacement.has_value(), replacement ? "stale-tail append target is recreated with deterministic seams" : replacement.error().format());
+  if (!replacement)
+    return;
+  session->append_target = *replacement;
+  armed->store(true);
+
+  ava::app::runtime::RunOptions options;
+  coordinator->schedule(*session, "Retry stale tail fallback safely", *committed, options);
+  expect(state->wait_started(), "stale-tail provider refinement starts after fallback persistence");
+  auto metadata = ava::session::load_session_metadata(session->store, session->lease);
+  expect(metadata && metadata->effective_title() == "Retry stale tail fallback safely" && metadata->labels == std::vector<std::string>{"tail-race"} &&
+             tail_appended->load() && write_calls->load() == 2,
+         "fallback reloads and retries after a stale tail only when append state proves no bytes were committed");
   coordinator->shutdown();
 }
 
@@ -441,7 +588,7 @@ void test_existing_manual_child_generated_and_sessionless_exclusions()
   {
     auto named = ava::app::append_runtime_session_metadata(*manual, {.name = "Manual Session Title", .actor = "test"});
     expect(named.has_value(), "manual-title exclusion metadata appends");
-    coordinator->schedule(*manual, "Prompt for a manually titled session", options);
+    coordinator->schedule(*manual, "Prompt for a manually titled session", "missing_commit", options);
     expect(coordinator->wait_until_idle(3s), "manual-title exclusion check becomes idle");
   }
 
@@ -451,7 +598,7 @@ void test_existing_manual_child_generated_and_sessionless_exclusions()
   {
     auto marked = ava::app::append_runtime_session_metadata(*child, {.parent_session_id = "session_parent", .actor = "subagent"});
     expect(marked.has_value(), "child exclusion metadata appends");
-    coordinator->schedule(*child, "Prompt for a child session", options);
+    coordinator->schedule(*child, "Prompt for a child session", "missing_commit", options);
     expect(coordinator->wait_until_idle(3s), "child exclusion check becomes idle");
   }
 
@@ -464,7 +611,7 @@ void test_existing_manual_child_generated_and_sessionless_exclusions()
     update.actor = "auto-title";
     auto titled = ava::app::append_runtime_session_metadata(*generated, std::move(update));
     expect(titled.has_value(), "generated-title exclusion metadata appends");
-    coordinator->schedule(*generated, "Prompt for an already titled session", options);
+    coordinator->schedule(*generated, "Prompt for an already titled session", "missing_commit", options);
     expect(coordinator->wait_until_idle(3s), "generated-title exclusion check becomes idle");
   }
 
@@ -475,14 +622,14 @@ void test_existing_manual_child_generated_and_sessionless_exclusions()
     auto first = seed_committed_ordinary_turn(*resumed, "Historical first prompt");
     auto second = seed_committed_ordinary_turn(*resumed, "Current resumed prompt");
     expect(first && second, "resumed-history exclusion seeds prior committed turns");
-    coordinator->schedule(*resumed, "Current resumed prompt", options);
+    coordinator->schedule(*resumed, "Current resumed prompt", second ? *second : "missing_commit", options);
     expect(coordinator->wait_until_idle(3s), "resumed-history exclusion check becomes idle");
   }
 
   auto sessionless = open_title_session(root / "sessionless", coordinator, true);
   expect(sessionless.has_value(), "sessionless exclusion session opens");
   if (sessionless)
-    coordinator->schedule(*sessionless, "Prompt without persistent session state", options);
+    coordinator->schedule(*sessionless, "Prompt without persistent session state", "missing_commit", options);
 
   expect(state->calls == 0, "manual, child, generated, resumed-history, and sessionless sessions make no title-provider attempt");
   coordinator->shutdown();
@@ -493,7 +640,7 @@ void test_existing_manual_child_generated_and_sessionless_exclusions()
   expect(disabled.has_value(), "strict-disable title session opens");
   if (disabled)
   {
-    disabled_coordinator->schedule(*disabled, "Prompt while titles are disabled", options);
+    disabled_coordinator->schedule(*disabled, "Prompt while titles are disabled", "missing_commit", options);
     expect(disabled_coordinator->wait_until_idle(100ms) && disabled_state->calls == 0, "strict title disable starts no worker or provider attempt");
   }
   disabled_coordinator->shutdown();
@@ -513,13 +660,20 @@ void test_shutdown_cancels_owned_generation()
     return;
   auto seeded = seed_committed_ordinary_turn(*session, "Cancel this title generation safely");
   expect(seeded.has_value(), seeded ? "shutdown committed turn is seeded" : seeded.error().format());
+  if (!seeded)
+    return;
   ava::app::runtime::RunOptions options;
-  coordinator->schedule(*session, "Cancel this title generation safely", options);
+  coordinator->schedule(*session, "Cancel this title generation safely", *seeded, options);
   expect(state->wait_started(), "shutdown title generation starts");
+  auto metadata_before_shutdown = ava::session::load_session_metadata(session->store, session->lease);
   coordinator->shutdown();
+  auto metadata_after_shutdown = ava::session::load_session_metadata(session->store, session->lease);
   {
     std::lock_guard lock(state->mutex);
-    expect(state->stop_seen, "title coordinator shutdown cooperatively cancels and joins its owned worker");
+    expect(state->stop_seen && metadata_before_shutdown && metadata_after_shutdown &&
+               metadata_before_shutdown->effective_title() == "Cancel this title generation safely" &&
+               metadata_after_shutdown->effective_title() == "Cancel this title generation safely",
+           "title coordinator shutdown cancels provider refinement without removing the synchronous durable fallback");
   }
 }
 
@@ -533,6 +687,9 @@ void run_session_title_coordinator_tests()
   test_direct_provider_generation_is_isolated();
   test_coordinator_dedupes_and_preserves_manual_rename_races();
   test_coordinator_fallback_and_navigation_lifetime();
+  test_queue_delay_allows_later_turns_after_captured_first_commit();
+  test_first_admission_permanently_binds_commit_identity();
+  test_fallback_append_retries_only_a_proven_not_started_write();
   test_runtime_trigger_is_after_completion_and_excludes_synthetic_turns();
   test_existing_manual_child_generated_and_sessionless_exclusions();
   test_shutdown_cancels_owned_generation();

@@ -74,8 +74,10 @@ class SessionTitleCoordinator final
   SessionTitleCoordinator& operator=(SessionTitleCoordinator const&) = delete;
 
   // Admission completion calls this only after a durable ordinary turn. The
-  // method is nonthrowing and title failures never alter that turn's result.
-  void schedule(runtime::Session const& session, std::string_view original_user_text, runtime::RunOptions const& run_options) noexcept;
+  // deterministic fallback is appended synchronously; provider refinement is
+  // best-effort and can never alter that turn's result.
+  void schedule(runtime::Session const& session, std::string_view original_user_text, std::string_view committed_turn_id,
+                runtime::RunOptions const& run_options) noexcept;
   [[nodiscard]] bool wait_until_idle(std::chrono::milliseconds timeout);
   void shutdown() noexcept;
 
@@ -85,6 +87,8 @@ class SessionTitleCoordinator final
   struct Work
   {
     std::string session_id;
+    std::string committed_turn_id;
+    std::string fallback_title;
     std::shared_ptr<ava::session::SessionAppendTarget> append_target;
     SessionTitleGenerationRequest request;
 
@@ -101,6 +105,7 @@ class SessionTitleCoordinator final
   std::condition_variable_any changed_;
   std::deque<Work> queue_;
   std::unordered_set<std::string> active_session_ids_;
+  std::unordered_set<std::string> admitted_session_ids_;
   bool accepting_ = true;
   std::vector<std::jthread> workers_;
 };

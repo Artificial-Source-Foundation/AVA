@@ -700,3 +700,47 @@ Validation run without paid provider calls:
 - `scripts/build.sh --build-dir build-sanitize --jobs 2` — passed.
 - `scripts/run-tests.sh --build-dir build-sanitize --jobs 2 -R '^ava_tests\\.(session|app_compaction|app_runtime|agent_loop|app_rpc)$' --output-on-failure` — 5/5 focused sanitizer tests passed.
 - `git --no-pager diff --check` — passed.
+
+---
+
+# Workstream 5: Automatic Session Titles
+
+## Approved Product Direction
+
+A newly created persistent root session receives a useful title after its first durably committed ordinary user turn. At the post-`AdmissionGuard` scheduling boundary, AVA derives a deterministic, bounded, UTF-8-safe fallback from the original first-user source and synchronously appends it as `session_metadata`. Only the optional provider/model refinement is asynchronous. Queue pressure, print/RPC one-shot teardown, cancellation, offline operation, provider failure, and coordinator shutdown therefore cannot leave an admitted new root without the local fallback.
+
+The application-scoped coordinator permanently admits each session id at most once per process and binds that admission to the captured `AgentLoopResult::committed_turn_id` and first source text. The captured commit entry must belong to the first ordinary user turn. Later turns may append while refinement is queued, but they cannot invalidate or replace the captured first-turn identity. Synthetic delivery turns, sessionless sessions, resumed/non-new sessions, branches/clones/subagent children, manually named sessions (including `name:""` suppression), and already titled sessions do not initiate generation.
+
+Provider refinement is bounded, tool-free, credential-isolated, cancelable, and sanitized before persistence. It may replace exactly the admitted fallback only while the session remains an unnamed root and no explicit manual name, including empty suppression, has appeared. Failures retain the fallback. Metadata appends reload the exact lease-bound history and retry at most three times only when stable `append_commit_state:not_started` proves that no bytes were committed; partial/unknown and committed-to-inode error states are never retried. ASCII punctuation trimming is deliberately locale-independent so arbitrary valid UTF-8 title bytes are preserved.
+
+Fork and clone creation fold title metadata from the complete lease-bound source independently of the copied entry prefix. An explicit branch name wins. Otherwise the latest manual source name, including empty suppression, is persisted; relevant generated-title metadata is retained. Branch ancestry/provenance and automatic-generation exclusions are unchanged.
+
+## Implementation Record — 2026-07-21
+
+Primary implementation areas are `src/ava/app/session_title_coordinator.{h,cpp}`, the post-admission call in `src/ava/app/runtime_prompt.cpp`, full-source metadata folding in `src/ava/session/session_branch.cpp`, and focused title/session tests. Session metadata remains append-only: `generated_title` is separate from manual `name`, and the effective title is manual `name` whenever a manual value has ever been written, otherwise `generated_title`.
+
+RPC and session list/tree surfaces expose the effective title immediately through their existing query results. `session_metadata` and `session_tree` also expose `generated_title` and `has_manual_name` for precedence-aware clients. There is intentionally no automatic-title event in RPC, ACP, or the TUI event stream; clients refresh through existing session metadata/list/tree commands.
+
+Confirmed review findings and disposition:
+
+| ID | Disposition | Evidence |
+|---|---|---|
+| AST-001 | Fixed | The deterministic fallback is durably appended before provider work is queued, so active/queued shutdown and one-shot teardown retain a title. |
+| AST-002 | Fixed | Work carries the captured commit entry id; validation binds it to the first ordinary user turn while allowing later appended turns. |
+| AST-003 | Fixed | Fork/clone title metadata is folded from the full source, including generated titles and manual-empty suppression beyond an earlier fork prefix. |
+
+## Validation Record
+
+Validation used deterministic fake generators/transports and made no live or paid provider calls. Coverage includes fallback-before-teardown and under queue pressure, queue delay followed by a second turn, captured first-commit identity, bounded definitely-not-committed append retry with a concurrent tail advance, branch/clone inheritance, manual-empty suppression, direct provider-request isolation, serialization, and multilingual UTF-8 preservation.
+
+- The focused automatic-title CTest passed.
+- Focused session/branch, runtime, RPC, and ACP CTests passed.
+- The complete configured 102-test CTest suite passed with 85 executed checks and 17 expected optional/live/tmux/image skips.
+- The configured production/test build, `clang-format --dry-run --Werror` on changed C++, and `git diff --check` passed.
+
+## Explicit Non-Goals
+
+- A live automatic-title event or a separate title subscription protocol.
+- Retitling resumed historical sessions, branches, clones, child sessions, or sessions with any manual-name history.
+- Retrying provider requests after cancellation/shutdown or silently selecting another provider/model.
+- Rewriting earlier session metadata records or changing branch ancestry semantics.

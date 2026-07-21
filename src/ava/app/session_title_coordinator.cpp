@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <chrono>
 #include <limits>
 #include <memory>
@@ -78,8 +77,23 @@ std::string lower_ascii(std::string_view text)
 {
   std::string result;
   result.reserve(text.size());
-  for (char ch : text) result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  for (char ch : text)
+  {
+    auto const byte = static_cast<unsigned char>(ch);
+    result.push_back(byte >= 'A' && byte <= 'Z' ? static_cast<char>(byte + ('a' - 'A')) : ch);
+  }
   return result;
+}
+
+bool ascii_punctuation(unsigned char ch)
+{
+  return (ch >= '!' && ch <= '/') || (ch >= ':' && ch <= '@') || (ch >= '[' && ch <= '`') || (ch >= '{' && ch <= '~');
+}
+
+void trim_ascii_punctuation(std::string& word)
+{
+  while (!word.empty() && ascii_punctuation(static_cast<unsigned char>(word.front()))) word.erase(word.begin());
+  while (!word.empty() && ascii_punctuation(static_cast<unsigned char>(word.back()))) word.pop_back();
 }
 
 void remove_tagged_section(std::string& text, std::string_view tag)
@@ -378,34 +392,93 @@ ava::core::Result<std::string> default_generate_title(SessionTitleGenerationRequ
   return output;
 }
 
-bool metadata_allows_generation(ava::session::SessionMetadataView const& metadata)
+bool metadata_is_root_title_candidate(ava::session::SessionMetadataView const& metadata)
 {
   bool const root_origin = metadata.branch_origin.empty() || metadata.branch_origin == "root";
-  return !metadata.has_manual_name && metadata.generated_title.empty() && metadata.parent_session_id.empty() && metadata.source_session_id.empty() &&
-         root_origin;
+  return !metadata.has_manual_name && metadata.parent_session_id.empty() && metadata.source_session_id.empty() && root_origin;
 }
 
-bool has_exactly_one_committed_ordinary_turn(std::vector<ava::session::SessionEntry> const& entries)
+bool metadata_allows_fallback(ava::session::SessionMetadataView const& metadata)
 {
-  bool pending_ordinary_user = false;
-  std::size_t committed_ordinary_turns = 0;
+  return metadata_is_root_title_candidate(metadata) && metadata.generated_title.empty();
+}
+
+bool metadata_allows_refinement(ava::session::SessionMetadataView const& metadata, std::string_view fallback_title)
+{
+  return metadata_is_root_title_candidate(metadata) && metadata.generated_title == fallback_title;
+}
+
+bool captured_commit_belongs_to_first_ordinary_turn(std::vector<ava::session::SessionEntry> const& entries, std::string_view committed_turn_id)
+{
+  bool inside_first_ordinary_turn = false;
+  bool found_first_ordinary_user = false;
   for (auto const& entry : entries)
   {
     if (entry.type == ava::session::EntryType::UserMessage)
     {
       auto const synthetic = ava::session::parse_synthetic_delivery_provenance(entry);
-      pending_ordinary_user = synthetic && !*synthetic && !ava::session::is_internal_replay_user_message(entry);
-      continue;
+      bool const ordinary = synthetic && !*synthetic && !ava::session::is_internal_replay_user_message(entry);
+      if (ordinary)
+      {
+        if (found_first_ordinary_user)
+          inside_first_ordinary_turn = false;
+        else
+        {
+          found_first_ordinary_user = true;
+          inside_first_ordinary_turn = true;
+        }
+      }
     }
-    if (entry.type != ava::session::EntryType::AssistantMessage && entry.type != ava::session::EntryType::AssistantTurnCommit)
-      continue;
-    if (pending_ordinary_user)
-      ++committed_ordinary_turns;
-    pending_ordinary_user = false;
-    if (committed_ordinary_turns > 1)
-      return false;
+    if (entry.id == committed_turn_id)
+      return inside_first_ordinary_turn && entry.type == ava::session::EntryType::AssistantTurnCommit;
   }
-  return committed_ordinary_turns == 1;
+  return false;
+}
+
+bool error_has_append_commit_state(ava::core::Error const& error, std::string_view value)
+{
+  return std::ranges::any_of(error.context(), [&](ava::core::ErrorContext const& item) { return item.key == "append_commit_state" && item.value == value; });
+}
+
+enum class AutomaticTitleAppendOutcome
+{
+  Persisted,
+  Ineligible,
+  Failed,
+};
+
+constexpr std::size_t kMaxAutomaticTitleAppendAttempts = 3;
+
+template <typename MetadataPredicate>
+AutomaticTitleAppendOutcome append_automatic_title(std::shared_ptr<ava::session::SessionAppendTarget> const& append_target, std::string_view committed_turn_id,
+                                                   std::string const& title, MetadataPredicate&& metadata_predicate)
+{
+  auto authority = append_target->read_authority();
+  if (!authority)
+    return AutomaticTitleAppendOutcome::Failed;
+
+  for (std::size_t attempt = 0; attempt < kMaxAutomaticTitleAppendAttempts; ++attempt)
+  {
+    auto entries = authority->load();
+    if (!entries || !captured_commit_belongs_to_first_ordinary_turn(*entries, committed_turn_id))
+      return AutomaticTitleAppendOutcome::Ineligible;
+    auto metadata = ava::session::session_metadata_from_entries(*entries);
+    if (!metadata || !metadata_predicate(*metadata))
+      return AutomaticTitleAppendOutcome::Ineligible;
+
+    ava::session::SessionMetadataUpdate update;
+    update.actor = "auto-title";
+    update.generated_title = title;
+    auto entry = ava::session::make_session_metadata_entry(std::move(update), entries->empty() ? std::string{} : entries->back().id);
+    if (!entry)
+      return AutomaticTitleAppendOutcome::Failed;
+    auto appended = append_target->append(*entry);
+    if (appended || error_has_append_commit_state(appended.error(), "committed_to_leased_inode"))
+      return AutomaticTitleAppendOutcome::Persisted;
+    if (!error_has_append_commit_state(appended.error(), "not_started"))
+      return AutomaticTitleAppendOutcome::Failed;
+  }
+  return AutomaticTitleAppendOutcome::Failed;
 }
 
 }  // namespace
@@ -452,8 +525,7 @@ ava::core::Result<std::string> sanitize_generated_session_title(std::string_view
           if (end_word == std::string::npos)
             end_word = candidate.size();
           auto word = candidate.substr(cursor, end_word - cursor);
-          while (!word.empty() && std::ispunct(static_cast<unsigned char>(word.front())) != 0) word.erase(word.begin());
-          while (!word.empty() && std::ispunct(static_cast<unsigned char>(word.back())) != 0) word.pop_back();
+          trim_ascii_punctuation(word);
           if (!word.empty())
           {
             constexpr std::size_t kMaxNaturalWordBytes = 40;
@@ -494,8 +566,7 @@ std::string fallback_session_title(std::string_view normalized_source)
     if (end == std::string::npos)
       end = source.size();
     auto word = std::string(source.substr(cursor, end - cursor));
-    while (!word.empty() && std::ispunct(static_cast<unsigned char>(word.front())) != 0) word.erase(word.begin());
-    while (!word.empty() && std::ispunct(static_cast<unsigned char>(word.back())) != 0) word.pop_back();
+    trim_ascii_punctuation(word);
     if (!word.empty())
     {
       constexpr std::size_t kMaxFallbackWordBytes = 28;
@@ -569,25 +640,41 @@ void SessionTitleCoordinator::start()
   for (std::size_t index = 0; index < options_.worker_count; ++index) workers_.emplace_back([this](std::stop_token token) { worker_loop(token); });
 }
 
-void SessionTitleCoordinator::schedule(runtime::Session const& session, std::string_view original_user_text, runtime::RunOptions const& run_options) noexcept
+void SessionTitleCoordinator::schedule(runtime::Session const& session, std::string_view original_user_text, std::string_view committed_turn_id,
+                                       runtime::RunOptions const& run_options) noexcept
 {
-  if (!options_.config.enabled || session.sessionless || !session.created || !session.append_target)
+  if (!options_.config.enabled || session.sessionless || !session.created || !session.append_target || committed_turn_id.empty())
     return;
   try
   {
-    Work work{.session_id = session.store.session_id(),
+    auto const session_id = session.store.session_id();
+    {
+      std::lock_guard lock(mutex_);
+      if (!admitted_session_ids_.insert(session_id).second)
+        return;
+    }
+
+    auto const source_text = normalize_session_title_source(original_user_text);
+    auto const fallback_title = fallback_session_title(source_text);
+    auto const fallback = append_automatic_title(session.append_target, committed_turn_id, fallback_title, metadata_allows_fallback);
+    if (fallback != AutomaticTitleAppendOutcome::Persisted)
+      return;
+
+    Work work{.session_id = session_id,
+              .committed_turn_id = std::string(committed_turn_id),
+              .fallback_title = fallback_title,
               .append_target = session.append_target,
               .request = SessionTitleGenerationRequest{.paths = session.paths,
                                                        .active_model = session.model,
                                                        .config = options_.config,
-                                                       .source_text = normalize_session_title_source(original_user_text),
+                                                       .source_text = source_text,
                                                        .access_token = run_options.access_token,
                                                        .credential_type = run_options.credential_type,
                                                        .account_id = run_options.openai_account_id,
                                                        .openai_oauth = run_options.openai_oauth,
                                                        .offline = session.offline || run_options.offline}};
     std::lock_guard lock(mutex_);
-    if (!accepting_ || queue_.size() >= options_.max_queued || active_session_ids_.contains(work.session_id))
+    if (!accepting_ || queue_.size() >= options_.max_queued)
     {
       clear_secret(work.request.access_token);
       return;
@@ -644,49 +731,34 @@ void SessionTitleCoordinator::process(Work work, std::stop_token stop_token) noe
       return;
     }
     auto metadata = ava::session::session_metadata_from_entries(*entries);
-    if (!metadata || !metadata_allows_generation(*metadata) || !has_exactly_one_committed_ordinary_turn(*entries))
+    if (!metadata || !captured_commit_belongs_to_first_ordinary_turn(*entries, work.committed_turn_id) ||
+        !metadata_allows_refinement(*metadata, work.fallback_title))
     {
       finish();
       return;
     }
 
-    std::string title;
-    if (!stop_token.stop_requested())
-    {
-      auto generated = options_.generator(work.request, stop_token, std::chrono::steady_clock::now() + options_.request_deadline);
-      if (generated)
-      {
-        auto sanitized = sanitize_generated_session_title(*generated);
-        if (sanitized)
-          title = std::move(*sanitized);
-      }
-    }
-    if (title.empty())
-      title = fallback_session_title(work.request.source_text);
     if (stop_token.stop_requested())
     {
       finish();
       return;
     }
+    auto generated = options_.generator(work.request, stop_token, std::chrono::steady_clock::now() + options_.request_deadline);
+    if (!generated || stop_token.stop_requested())
+    {
+      finish();
+      return;
+    }
+    auto sanitized = sanitize_generated_session_title(*generated);
+    if (!sanitized)
+    {
+      finish();
+      return;
+    }
 
-    entries = authority->load();
-    if (!entries)
-    {
-      finish();
-      return;
-    }
-    metadata = ava::session::session_metadata_from_entries(*entries);
-    if (!metadata || !metadata_allows_generation(*metadata))
-    {
-      finish();
-      return;
-    }
-    ava::session::SessionMetadataUpdate update;
-    update.actor = "auto-title";
-    update.generated_title = std::move(title);
-    auto entry = ava::session::make_session_metadata_entry(std::move(update), entries->empty() ? std::string{} : entries->back().id);
-    if (entry)
-      static_cast<void>(work.append_target->append(*entry));
+    static_cast<void>(append_automatic_title(work.append_target, work.committed_turn_id, *sanitized, [&](ava::session::SessionMetadataView const& candidate) {
+      return metadata_allows_refinement(candidate, work.fallback_title);
+    }));
   }
   catch (...)
   {

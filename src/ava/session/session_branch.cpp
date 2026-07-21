@@ -326,6 +326,9 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
   auto source_entries = source->load_bounded(*source_lease, options.read_limits.value_or(legacy_unbounded_session_read_limits()));
   if (!source_entries)
     return std::unexpected(std::move(source_entries.error()));
+  auto source_metadata = session_metadata_from_entries(*source_entries);
+  if (!source_metadata)
+    return std::unexpected(std::move(source_metadata.error()));
 
   std::string resolved_branch_from_entry_id;
   auto copy_count = copy_count_for_branch(*source_entries, options.branch_from_entry_id, options.mode, resolved_branch_from_entry_id);
@@ -373,6 +376,10 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
 
   SessionMetadataUpdate metadata_update;
   metadata_update.name = std::move(options.name);
+  if (!metadata_update.name && source_metadata->has_manual_name)
+    metadata_update.name = source_metadata->name;
+  if (!source_metadata->generated_title.empty())
+    metadata_update.generated_title = source_metadata->generated_title;
   metadata_update.labels = std::move(options.labels);
   metadata_update.parent_session_id = options.source_session_id;
   metadata_update.source_session_id = options.source_session_id;

@@ -16,6 +16,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <sys/stat.h>
 
 namespace {
 
@@ -54,6 +55,8 @@ void test_search_tools()
   auto const root = create_empty_root("test_search_tools");
 
   auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  expect(::chmod(workspace.c_str(), 0700) == 0, "search workspace is owner-only");
   ava::tools::ToolContext const context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
   expect(ava::tools::write_file(context, workspace / "src" / "main.cpp", "int main() { return 0; }\n").has_value(), "search setup writes source");
   expect(ava::tools::write_file(context, workspace / "root.cpp", "int root() { return 0; }\n").has_value(), "search setup writes root source");
@@ -334,6 +337,8 @@ void test_search_gitignore_rules()
   auto const root = create_empty_root("search-ignore");
 
   auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  expect(::chmod(workspace.c_str(), 0700) == 0, "ignore-rule workspace is owner-only");
   ava::tools::ToolContext const context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
 
   expect(ava::tools::write_file(context, workspace / ".gitignore",

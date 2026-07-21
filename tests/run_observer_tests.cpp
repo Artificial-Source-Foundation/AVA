@@ -636,6 +636,10 @@ void test_dispatcher_trace_correlation_and_ordering()
   ava::tools::ToolContext context;
   context.workspace_dir = root / "dispatcher-trace";
   std::filesystem::create_directories(context.workspace_dir);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(context.workspace_dir.c_str(), S_IRWXU) == 0,
+         "dispatcher trace workspace is owner-only for sealed command planning");
+  context.spill_dir = root / "dispatcher-spill";
+  context.anchor_set = command_anchors_for_test(context.workspace_dir, context.spill_dir);
   context.observation = observation;
   context.trace_context = {.run_id = "run",
                            .turn_id = "turn",
@@ -818,6 +822,10 @@ void test_session_and_process_boundaries_are_independent()
   ava::tools::ToolContext context;
   context.workspace_dir = root / "process-boundary";
   std::filesystem::create_directories(context.workspace_dir);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(context.workspace_dir.c_str(), S_IRWXU) == 0,
+         "process boundary workspace is owner-only for sealed command planning");
+  context.spill_dir = root / "process-boundary-spill";
+  context.anchor_set = command_anchors_for_test(context.workspace_dir, context.spill_dir);
   context.observation = observation;
   context.permission_resolver = [](ava::permissions::PermissionPrompt const&) {
     return ava::core::Result<ava::permissions::PermissionResolutionDecision>(
@@ -1371,6 +1379,8 @@ void test_process_cancellation_and_bounded_output_observation()
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
   ava::tools::ToolContext context;
   context.workspace_dir = root;
+  context.spill_dir = root.parent_path() / "process-cancellation-spill";
+  context.anchor_set = command_anchors_for_test(context.workspace_dir, context.spill_dir);
   context.current_call_id = "process-call";
   context.observation = observation;
   context.trace_context = {
@@ -1378,9 +1388,13 @@ void test_process_cancellation_and_bounded_output_observation()
   context.permission_resolver = [](ava::permissions::PermissionPrompt const&) {
     return ava::permissions::PermissionResolutionDecision(ava::permissions::PermissionResolution::Allow);
   };
-  context.cancel_requested = [] { return true; };
+  context.cancel_requested = [collector] {
+    std::lock_guard lock(collector->mutex);
+    return std::ranges::any_of(collector->events, [](auto const& event) { return event.type == ava::observability::TraceEventType::ProcessStart; });
+  };
   auto result = ava::tools::run_bash(context, "sleep 1", {.timeout = std::chrono::seconds(2)});
-  expect(result && result->canceled, "process cancellation remains a normal bash result");
+  expect(result && result->canceled,
+         result ? "process cancellation remains a normal bash result" : "process cancellation remains a normal bash result: " + result.error().format());
   std::lock_guard lock(collector->mutex);
   auto const output_events = 0U;  // Schema v1 has no per-output-chunk event.
   auto const start = std::find_if(collector->events.begin(), collector->events.end(), [](auto const& event) {

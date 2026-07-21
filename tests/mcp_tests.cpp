@@ -176,13 +176,13 @@ void test_mcp_config_parsing()
   expect(!duplicate && duplicate.error().message().find("duplicate") != std::string::npos, "MCP config rejects duplicate server ids across scopes");
 }
 
-void test_session_mcp_launch_identity_is_canonical_and_exact()
+void test_session_mcp_launch_identity_is_logical_and_exact()
 {
   auto const root = create_empty_root("mcp-session-launch-identity");
 
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  auto const canonical_cwd = ava::core::normalized_absolute_path(workspace);
+  auto const logical_cwd = ava::core::normalized_absolute_path(workspace);
 
   ava::mcp::McpServerConfig authorized{.id = "demo",
                                        .name = "Demo",
@@ -199,19 +199,24 @@ void test_session_mcp_launch_identity_is_canonical_and_exact()
   auto changed_argv_boundary = authorized;
   changed_argv_boundary.args = {"alpha", "beta"};
 
-  auto const identity = ava::mcp::session_mcp_launch_identity(authorized, canonical_cwd);
-  auto const reordered_identity = ava::mcp::session_mcp_launch_identity(reordered, canonical_cwd);
-  auto const changed_env_identity = ava::mcp::session_mcp_launch_identity(changed_env, canonical_cwd);
-  auto const changed_argv_identity = ava::mcp::session_mcp_launch_identity(changed_argv_boundary, canonical_cwd);
+  auto const identity = ava::mcp::session_mcp_launch_identity(authorized, logical_cwd);
+  auto const reordered_identity = ava::mcp::session_mcp_launch_identity(reordered, logical_cwd);
+  auto const changed_env_identity = ava::mcp::session_mcp_launch_identity(changed_env, logical_cwd);
+  auto const changed_argv_identity = ava::mcp::session_mcp_launch_identity(changed_argv_boundary, logical_cwd);
   auto const expected_identity =
       std::string(R"({"argv":["/usr/bin/demo","alpha beta"],"env":[{"name":"A_VALUE","value":"one"},{"name":"Z_VALUE","value":"two"}],"cwd":")") +
-      ava::core::json::escape(canonical_cwd.string()) + R"(","clean_environment":true})";
+      ava::core::json::escape(logical_cwd.string()) + R"(","clean_environment":true})";
   expect(identity == expected_identity && identity == reordered_identity && identity != changed_env_identity && identity != changed_argv_identity,
-         "session MCP launch identity canonically binds argv boundaries, sorted explicit env values, cwd, and clean environment");
+         "session MCP launch identity binds argv boundaries, sorted explicit env values, logical cwd spelling, and clean environment");
 
+  auto anchors = ava::core::AnchorSet::open({root});
+  expect(anchors.has_value(), "persistent session MCP launch test opens its shared logical-root anchor");
+  if (!anchors)
+    return;
   ava::permissions::PermissionRuleStore const store{.global_rules_file = root / "config" / "permission-rules.json",
                                                     .workspace_rules_file = workspace / ".ava" / "permission-rules.json",
-                                                    .workspace_dir = workspace};
+                                                    .workspace_dir = workspace,
+                                                    .anchor_set = *anchors};
   auto rule =
       ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
                                                                                                     .action = ava::permissions::PermissionAction::Allow,
@@ -220,6 +225,9 @@ void test_session_mcp_launch_identity_is_canonical_and_exact()
                                                                                                     .tool_name = "mcp_discovery",
                                                                                                     .target_path = {},
                                                                                                     .command = identity,
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
                                                                                                     .reason = "authorize exact session MCP launch",
                                                                                                     .actor = "test_operator"});
   auto prompt = [&](std::string command) {
@@ -1122,7 +1130,7 @@ void test_mcp_stdio_environment_validation()
 void run_mcp_tests()
 {
   test_mcp_config_parsing();
-  test_session_mcp_launch_identity_is_canonical_and_exact();
+  test_session_mcp_launch_identity_is_logical_and_exact();
   test_mcp_protocol_parsing();
   test_mcp_permission_audit_golden_shape();
   test_mcp_stdio_client_lists_and_calls_tools();

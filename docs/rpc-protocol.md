@@ -104,6 +104,32 @@ Tool records use `status` (`running`, `success`, `error`, or `canceled` as appli
 
 `permission_requested.payload` includes `resolver_request_id`, optional durable `permission_request_id`, `operation`, `mode`, `target_path`, `command`, `tool_name`, `reason`, `risk`, and optional `diff_preview`/`diff_truncated`. Reply with `decision` equal to `allow`, `allow_session`, or `deny`; optional `reason` is at most 1024 bytes. `allow_session` creates an in-memory exact-match grant for this RPC process. Persistent allow/deny rules are separate commands and never override built-in hard denies.
 
+When `operation` is `bash` and the request originates from a sealed command plan, `permission_requested.payload` includes an optional `command_metadata` object with the following additive fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `level` | string | Command risk level: `standard`, `sensitive`, or `critical`. |
+| `family` | string | Command family (e.g. `inspection`, `cmake_build`, `interpreter_inline`, `raw_shell`). |
+| `fingerprint` | string | Instantaneous integrity binding for the sealed plan (`sha256:ava-command-plan-v4:...`); never a durable grant identity. |
+| `execution_domain` | string | `direct_argv` or `raw_shell`. |
+| `resolved_executable` | string | Preserved logical spelling of the resolved executable; physical identity remains descriptor-bound internally. |
+| `origin` | string | Executable provenance: `system`, `user`, or `workspace`. |
+| `cwd` | string | Preserved logical working-directory identity. |
+| `containment_available` | boolean | Whether verified local process containment is available for this plan. |
+| `containment_status` | string | `not_required`, `available`, `active`, `unavailable`, or `unverified_delegated_executor` as applicable. |
+| `backend_maximum_scope` | string | Maximum reusable scope: `once`, `session`, or `workspace`. Critical/raw/unverified commands are always `once`. |
+| `recipe_payload_version` | string | Version of the typed durable recipe payload. |
+| `global_recipe_key` / `workspace_recipe_key` | string | Stable typed recipe keys; empty when the plan is not reusable. |
+| `recipe_display` | string | Secret-screened display summary; never matching authority. |
+| `effective_allowed_scopes` | string array | Scopes actually available after backend/policy intersection. |
+| `containment_profile_id` | string | Bound containment policy profile. |
+| `containment_network_allowed` | boolean | Whether the sealed plan permits network access. |
+| `environment_profile_id` | string | Synthetic environment profile identifier. |
+| `environment_digest` | string | Synthetic environment digest (no environment values). |
+| `executor_identity_verified` | boolean | `true` for AVA's descriptor-bound local executor; `false` for delegated ACP execution. |
+
+Session grant serialization (`permission_grants` result) includes additive `command_recipe_key` and `recipe_display` fields for reusable sealed commands. Grant matching uses the workspace recipe key, not raw command text or the instantaneous fingerprint. If policy/backend scope is `once`, an `allow_session` reply is downgraded to one-shot `allow`. Legacy v1 persistent command Allows are ignored; authoritative Denies remain active.
+
 ### Question request/reply
 
 `question_requested.payload` includes `resolver_request_id`, `header`, `question`, option objects (`value`, `label`), and `multiple`, `allow_custom`, `secret`, `modal`, `searchable`. A single-select reply uses one of string `answer` or string `selected`. A multi-select reply may use string-array `selected_options` and, when allowed, string `answer`. Values must match current options; wrong types, duplicates, or invalid combinations do not resolve the pending question.

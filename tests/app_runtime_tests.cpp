@@ -1711,6 +1711,8 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "runtime tool progress workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -1743,6 +1745,9 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
   std::vector<ava::app::runtime::Event> events;
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
+  run_options.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Allow;
+  };
   run_options.event_sink = [&events](ava::app::runtime::Event const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
@@ -1899,6 +1904,8 @@ void test_app_command_dispatcher()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace / "src");
   std::filesystem::create_directories(paths.ava_config_dir);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "command dispatcher workspace is owner-only for sealed command planning");
   write_app_test_file(paths.models_file,
                       "{\n"
                       "  \"models\": [\n"
@@ -2350,16 +2357,24 @@ void test_app_command_dispatcher()
              help->output[0].find("Ctrl+M") != std::string::npos,
          "command dispatcher /help includes catalog commands and effective hotkeys");
 
-  auto bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!pwd"});
+  int shell_prompts = 0;
+  auto const shell_resolver =
+      [&shell_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    ++shell_prompts;
+    expect(prompt.command_metadata && prompt.command_metadata->level == ava::command::CommandLevel::Critical,
+           "Pi-style shell helper receives a critical sealed command prompt");
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!pwd", .permission_resolver = shell_resolver});
   expect(bang_shell && bang_shell->handled && bang_shell->tool_timeline.size() == 2 && bang_shell->tool_timeline[0].name == "bash" &&
              bang_shell->tool_timeline[0].argument_summary == "pwd" && bang_shell->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success &&
              !bang_shell->output.empty() && bang_shell->output[0].find("exit: 0") != std::string::npos,
          "Pi-style ! shell helper runs through the permissioned bash command path");
-  auto hidden_bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!! pwd"});
+  auto hidden_bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!! pwd", .permission_resolver = shell_resolver});
   expect(hidden_bang_shell && hidden_bang_shell->handled && hidden_bang_shell->tool_timeline.size() == 2 &&
              hidden_bang_shell->tool_timeline[0].name == "bash" && hidden_bang_shell->tool_timeline[0].argument_summary == "pwd" &&
-             hidden_bang_shell->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success,
-         "Pi-style !! shell helper is accepted as the hidden-output bash helper without bypassing permissions");
+             hidden_bang_shell->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success && shell_prompts == 2,
+         "Pi-style !! shell helper is accepted as the critical one-shot bash helper without bypassing permissions");
   auto missing_bang_shell = ava::app::run_command(*session, ava::app::CommandRequest{.command = "!"});
   expect(missing_bang_shell && missing_bang_shell->handled && !missing_bang_shell->output.empty() &&
              missing_bang_shell->output[0].find("!<command> or !!<command>") != std::string::npos,
@@ -2745,18 +2760,19 @@ void test_app_command_dispatcher()
   expect(append_permission_audit.has_value(), append_permission_audit
                                                   ? "command dispatcher test appends a permission audit entry"
                                                   : "command dispatcher test appends a permission audit entry: " + append_permission_audit.error().format());
-  auto permissions_audit = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit git push"});
+  auto permissions_audit = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit permreq_runtime"});
   expect(permissions_audit && permissions_audit->handled && !permissions_audit->output.empty() &&
              permissions_audit->output[0].find("Permission audit:") != std::string::npos &&
              permissions_audit->output[0].find("permreq_runtime_deny") != std::string::npos &&
-             permissions_audit->output[0].find("git push origin main") != std::string::npos &&
+             permissions_audit->output[0].find("command=\"<redacted one-shot command>\"") != std::string::npos &&
              permissions_audit->output[0].find("source=resolver") != std::string::npos &&
-             permissions_audit->output[0].find("remembered deny | rule") != std::string::npos,
+             permissions_audit->output[0].find("git push origin main") == std::string::npos &&
+             permissions_audit->output[0].find("remembered deny | rule") == std::string::npos,
          "command dispatcher /permissions audit filters persisted permission decisions");
-  auto permissions_audit_summary = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit summary git push"});
+  auto permissions_audit_summary = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit summary permreq_runtime"});
   expect(permissions_audit_summary && permissions_audit_summary->handled && !permissions_audit_summary->output.empty() &&
              permissions_audit_summary->output[0].find("Permission audit summary:") != std::string::npos &&
-             permissions_audit_summary->output[0].find("filter: git push") != std::string::npos &&
+             permissions_audit_summary->output[0].find("filter: permreq_runtime") != std::string::npos &&
              permissions_audit_summary->output[0].find("entries: 1 matching") != std::string::npos &&
              permissions_audit_summary->output[0].find("denials: 1") != std::string::npos &&
              permissions_audit_summary->output[0].find("by action: deny=1") != std::string::npos &&
@@ -2766,24 +2782,26 @@ void test_app_command_dispatcher()
              permissions_audit_summary->output[0].find("by tool: bash=1") != std::string::npos &&
              permissions_audit_summary->output[0].find("/permissions audit show permreq_runtime_deny") != std::string::npos,
          "command dispatcher /permissions audit summary groups matching permission decisions for browsing");
-  auto permissions_audit_export = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit export git push"});
+  auto permissions_audit_export = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit export permreq_runtime"});
   expect(permissions_audit_export && permissions_audit_export->handled && !permissions_audit_export->output.empty() &&
              permissions_audit_export->output[0].find("Permission audit export:") != std::string::npos &&
              permissions_audit_export->output[0].find("format: markdown table") != std::string::npos &&
              permissions_audit_export->output[0].find("| timestamp | entry | request | action | resolution |") != std::string::npos &&
              permissions_audit_export->output[0].find("| deny |") != std::string::npos &&
-             permissions_audit_export->output[0].find("git push origin main") != std::string::npos &&
-             permissions_audit_export->output[0].find("remembered deny \\| rule") != std::string::npos,
+             permissions_audit_export->output[0].find("<redacted one-shot command>") != std::string::npos &&
+             permissions_audit_export->output[0].find("git push origin main") == std::string::npos &&
+             permissions_audit_export->output[0].find("remembered deny") == std::string::npos,
          "command dispatcher /permissions audit export renders copyable markdown and escapes table cells");
-  auto permissions_diagnose_denial = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions diagnose git push"});
+  auto permissions_diagnose_denial = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions diagnose permreq_runtime"});
   expect(permissions_diagnose_denial && permissions_diagnose_denial->handled && !permissions_diagnose_denial->output.empty() &&
              permissions_diagnose_denial->output[0].find("Permission rule diagnostics:") != std::string::npos &&
              permissions_diagnose_denial->output[0].find("Recent permission denials:") != std::string::npos &&
              permissions_diagnose_denial->output[0].find("decision=deny") != std::string::npos &&
              permissions_diagnose_denial->output[0].find("source=resolver") != std::string::npos &&
-             permissions_diagnose_denial->output[0].find("git push origin main") != std::string::npos &&
+             permissions_diagnose_denial->output[0].find("command=\"<redacted one-shot command>\"") != std::string::npos &&
              permissions_diagnose_denial->output[0].find("reason: command can change external or destructive state") != std::string::npos &&
-             permissions_diagnose_denial->output[0].find("resolution reason: remembered deny | rule") != std::string::npos &&
+             permissions_diagnose_denial->output[0].find("git push origin main") == std::string::npos &&
+             permissions_diagnose_denial->output[0].find("remembered deny | rule") == std::string::npos &&
              permissions_diagnose_denial->output[0].find("next: /permissions explain " + permission_rule_id) != std::string::npos,
          "command dispatcher /permissions diagnose explains recent denied decisions with follow-up commands");
   auto permissions_audit_detail = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit show permreq_runtime"});
@@ -2792,8 +2810,9 @@ void test_app_command_dispatcher()
              permissions_audit_detail->output[0].find("selector: permreq_runtime") != std::string::npos &&
              permissions_audit_detail->output[0].find("matched entries: 1") != std::string::npos &&
              permissions_audit_detail->output[0].find("request: permreq_runtime_deny") != std::string::npos &&
-             permissions_audit_detail->output[0].find("command: git push origin main") != std::string::npos &&
-             permissions_audit_detail->output[0].find("resolution reason: remembered deny | rule") != std::string::npos &&
+             permissions_audit_detail->output[0].find("command: <redacted one-shot command>") != std::string::npos &&
+             permissions_audit_detail->output[0].find("git push origin main") == std::string::npos &&
+             permissions_audit_detail->output[0].find("remembered deny | rule") == std::string::npos &&
              permissions_audit_detail->output[0].find("/permissions audit export permreq_runtime") != std::string::npos &&
              permissions_audit_detail->output[0].find("/permissions explain " + permission_rule_id) != std::string::npos,
          "command dispatcher /permissions audit show drills into a permission request by id prefix");

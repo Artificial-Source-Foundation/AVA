@@ -19,6 +19,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <sys/stat.h>
 
 namespace {
 
@@ -194,6 +195,8 @@ void test_agent_loop_cancellation_boundaries()
 
     auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
+    expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+           "agent bash cancellation workspace is owner-only for sealed planning");
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "cancel-during-bash-tool"});
     ava::tests::FakeTransport transport(
@@ -206,6 +209,7 @@ void test_agent_loop_cancellation_boundaries()
     int bash_cancel_checks = 0;
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
+        .anchor_set = command_anchors_for_test(workspace, store.session_path().parent_path() / "spill"),
         .mode = ava::agent::Mode::Build,
         .provider_id = "openai",
         .model_id = "gpt-5.5",
@@ -218,6 +222,9 @@ void test_agent_loop_cancellation_boundaries()
                 bash_started = true;
               }
             },
+        .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+          return ava::permissions::PermissionResolution::Allow;
+        },
         .cancel_requested =
             [&bash_started, &bash_cancel_checks] {
               if (!bash_started)

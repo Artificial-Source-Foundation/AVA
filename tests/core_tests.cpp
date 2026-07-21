@@ -18,6 +18,7 @@ void run_app_command_classification_tests();
 void run_app_command_registry_tests();
 void run_tools_tests();
 void run_config_context_auth_oauth_tests();
+void run_command_tests();
 void run_app_compaction_tests();
 void run_app_print_tests();
 void run_app_event_serialization_tests();
@@ -40,6 +41,7 @@ void run_mcp_tests();
 void run_permission_rules_tests();
 void run_tui_composer_tests();
 void run_run_observer_tests();
+void run_containment_tests();
 #ifdef CWDEBUG
 void run_debug_tests();
 #endif
@@ -62,6 +64,7 @@ constexpr std::array kTestSuites{
     TestSuite{"app_command_registry", run_app_command_registry_tests},
     TestSuite{"tools", run_tools_tests},
     TestSuite{"config_context_auth_oauth", run_config_context_auth_oauth_tests},
+    TestSuite{"command", run_command_tests},
     TestSuite{"app_compaction", run_app_compaction_tests},
     TestSuite{"app_print", run_app_print_tests},
     TestSuite{"app_event_serialization", run_app_event_serialization_tests},
@@ -84,6 +87,7 @@ constexpr std::array kTestSuites{
     TestSuite{"permission_rules", run_permission_rules_tests},
     TestSuite{"tui_composer", run_tui_composer_tests},
     TestSuite{"run_observer", run_run_observer_tests},
+    TestSuite{"containment", run_containment_tests},
 #ifdef CWDEBUG
     TestSuite{"debug", run_debug_tests},
 #endif

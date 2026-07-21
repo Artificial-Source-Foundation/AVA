@@ -749,6 +749,7 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
         .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
         .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
         .workspace_dir = session.workspace_dir,
+        .anchor_set = session.anchor_set,
     };
     if (auto rules = ava::permissions::load_persistent_permission_rules(store))
     {

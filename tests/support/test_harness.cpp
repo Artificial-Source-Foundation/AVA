@@ -148,6 +148,19 @@ std::filesystem::path create_empty_root(std::filesystem::path root_name)
   return link / root_name;
 }
 
+std::shared_ptr<ava::core::AnchorSet> command_anchors_for_test(std::filesystem::path const& workspace,
+                                                               std::filesystem::path const& spill_dir)
+{
+  std::error_code error;
+  std::filesystem::create_directories(spill_dir, error);
+  if (error || ::chmod(spill_dir.c_str(), S_IRWXU) != 0)
+    throw std::runtime_error("failed to create command test spill anchor");
+  auto anchors = ava::core::AnchorSet::open({workspace, spill_dir});
+  if (!anchors || !(*anchors)->find_anchor(workspace) || !(*anchors)->find_anchor(spill_dir))
+    throw std::runtime_error("failed to open command test AnchorSet");
+  return *anchors;
+}
+
 ScopedEnvVar::ScopedEnvVar(std::string name, std::string value) : name_(std::move(name))
 {
   if (char const* current = std::getenv(name_.c_str()))

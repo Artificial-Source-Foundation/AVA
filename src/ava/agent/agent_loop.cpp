@@ -48,6 +48,44 @@ ToolDispatchResult synthetic_failed_dispatch_result(ProviderToolCall const& call
       ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = dispatch_error_result_json(call, error)});
 }
 
+constexpr std::size_t kMaxAvaAuthorityRoots = 64;
+
+struct BoundedAuthorityRoots
+{
+  std::vector<std::filesystem::path> roots;
+  bool over_limit = false;
+};
+
+BoundedAuthorityRoots bounded_deduplicated_authority_roots(std::vector<std::filesystem::path> roots)
+{
+  BoundedAuthorityRoots result;
+  result.roots.reserve(std::min(roots.size(), kMaxAvaAuthorityRoots));
+  for (auto& root : roots)
+  {
+    if (root.empty())
+      continue;
+    root = root.lexically_normal();
+    if (std::ranges::find(result.roots, root) != result.roots.end())
+      continue;
+    if (result.roots.size() == kMaxAvaAuthorityRoots)
+    {
+      result.over_limit = true;
+      continue;
+    }
+    result.roots.push_back(std::move(root));
+  }
+  return result;
+}
+
+void append_authority_root(std::vector<std::filesystem::path>& roots, std::filesystem::path root)
+{
+  if (root.empty())
+    return;
+  root = root.lexically_normal();
+  if (std::ranges::find(roots, root) == roots.end())
+    roots.push_back(std::move(root));
+}
+
 template <typename Cleanup>
 class BestEffortScopeExit
 {
@@ -446,6 +484,9 @@ BackgroundJobCompletion background_failure_completion(BackgroundJobContext const
 
 AgentLoop::AgentLoop(AgentLoopOptions options) : options_(std::move(options))
 {
+  auto roots = bounded_deduplicated_authority_roots(std::move(options_.ava_authority_roots));
+  options_.ava_authority_roots = std::move(roots.roots);
+  ava_authority_roots_over_limit_ = roots.over_limit;
 }
 
 std::string to_string(ToolTimelineStatus status)
@@ -474,6 +515,11 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
                                                        ava::session::SessionStore& store, ava::provider::Provider const& provider,
                                                        ava::provider::Transport& transport)
 {
+  if (ava_authority_roots_over_limit_)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                             "AgentLoop received more than 64 distinct AVA authority roots"));
+  }
   if (!store.is_ephemeral() && (!options_.append_entry || !options_.append_batch))
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
@@ -787,6 +833,10 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
       return std::unexpected(std::move(child_read_authority.error()));
 
     auto child_options = options_;
+    // A child owns a distinct exact session namespace. Preserve the parent
+    // roots and add the child directory before its AgentLoop constructs any
+    // model ToolContext; duplicates remain bounded and harmless.
+    append_authority_root(child_options.ava_authority_roots, child_store.session_path().parent_path());
     child_options.session_read_authority = std::move(*child_read_authority);
     child_options.system_prompt = subagent_system_prompt(options_.system_prompt, request.subagent_system_prompt);
     child_options.tool_visibility = subagent_tool_visibility(options_.tool_visibility, request.tool_preset);
@@ -947,6 +997,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
                                        .spill_dir = store.session_path().parent_path() / "spill",
                                        .mode = options_.mode,
                                        .permission_resolver = options_.permission_resolver,
+                                       .command_deny_preflight = options_.command_deny_preflight,
                                        .permission_audit_sink = append_permission_decision_locked,
                                        .progress_sink = [this](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
                                          return publish_tool_progress(
@@ -961,6 +1012,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
                                        .redact_permission_audit_arguments = options_.redact_permission_audit_arguments,
                                        .require_explicit_file_permissions = options_.require_explicit_file_permissions,
                                        .anchor_set = options_.anchor_set,
+                                       .ava_authority_roots = options_.ava_authority_roots,
                                        .exact_file_access = options_.exact_file_access,
                                        .command_executor = options_.command_executor,
                                        .lsp_diagnostics_provider = options_.lsp_diagnostics_provider,

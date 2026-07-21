@@ -8,6 +8,7 @@
 #include "ava/app/project_trust.h"
 #include "ava/app/rpc/catalog.h"
 #include "ava/app/rpc/output.h"
+#include "ava/app/rpc/resolvers.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/rpc/runtime_navigation.h"
 #include "ava/app/rpc/serialization.h"
@@ -47,6 +48,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #ifndef AVA_FAKE_MCP_SERVER_PATH
@@ -292,6 +294,76 @@ void test_app_rpc_prompt_payload_serialization()
              permission_json.find("\"diff_preview\":\"--- a\\n+++ b\\n-old\\n+new\"") != std::string::npos &&
              permission_json.find("\"diff_truncated\":true") != std::string::npos,
          "RPC permission request payload preserves semantic operation, target, risk, reason, and diff preview data");
+
+  // The additive optional command_metadata block carries the sealed command
+  // plan identity so RPC clients can display exact execution context.
+  ava::permissions::CommandPermissionMetadata command_metadata;
+  command_metadata.level = ava::command::CommandLevel::Critical;
+  command_metadata.family = ava::command::CommandFamily::InterpreterInline;
+  command_metadata.fingerprint = "sha256:ava-command-plan-v3:test-fingerprint";
+  command_metadata.execution_domain = ava::command::CommandExecutionDomain::RawShell;
+  command_metadata.resolved_executable = "/usr/bin/env";
+  command_metadata.executable_origin = ava::command::ExecutableOrigin::System;
+  command_metadata.cwd = "/workspace";
+  command_metadata.containment_available = false;
+  command_metadata.containment_status = ava::permissions::CommandContainmentStatus::Unavailable;
+  command_metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  command_metadata.environment_profile_id = "ava-local-bash-prompt-v1";
+  command_metadata.environment_digest = "abc123";
+  command_metadata.executor_identity_verified = false;
+  auto const command_permission_json =
+      ava::app::rpc::permission_request_payload_json("permission_cmd", ava::permissions::PermissionPrompt{.permission_request_id = "permreq_cmd",
+                                                                                                          .operation = ava::permissions::Operation::RunCommand,
+                                                                                                          .mode = ava::agent::Mode::Build,
+                                                                                                          .workspace_dir = "/workspace",
+                                                                                                          .target_path = {},
+                                                                                                          .command = "python3 -c 'print(1)'",
+                                                                                                          .tool_name = "bash",
+                                                                                                          .reason = "sealed command requires approval",
+                                                                                                          .risk = ava::permissions::PermissionRisk::Critical,
+                                                                                                          .command_metadata = command_metadata});
+  expect(command_permission_json.find("\"command_metadata\":{") != std::string::npos &&
+             command_permission_json.find("\"level\":\"critical\"") != std::string::npos &&
+             command_permission_json.find("\"family\":\"interpreter_inline\"") != std::string::npos &&
+             command_permission_json.find("\"fingerprint\":\"sha256:ava-command-plan-v3:test-fingerprint\"") != std::string::npos &&
+             command_permission_json.find("\"execution_domain\":\"raw_shell\"") != std::string::npos &&
+             command_permission_json.find("\"resolved_executable\":\"/usr/bin/env\"") != std::string::npos &&
+             command_permission_json.find("\"origin\":\"system\"") != std::string::npos &&
+             command_permission_json.find("\"cwd\":\"/workspace\"") != std::string::npos &&
+             command_permission_json.find("\"containment_available\":false") != std::string::npos &&
+             command_permission_json.find("\"containment_status\":\"unavailable\"") != std::string::npos &&
+             command_permission_json.find("\"backend_maximum_scope\":\"once\"") != std::string::npos &&
+             command_permission_json.find("\"environment_profile_id\":\"ava-local-bash-prompt-v1\"") != std::string::npos &&
+             command_permission_json.find("\"environment_digest\":\"abc123\"") != std::string::npos &&
+             command_permission_json.find("\"executor_identity_verified\":false") != std::string::npos,
+         "RPC permission request payload includes additive optional command_metadata fields for sealed commands");
+
+  // The command_recipe_key is additive in session grant serialization: it is
+  // omitted when empty and present when a sealed command plan is bound.
+  ava::app::rpc::PendingResolverState grant_pending_state;
+  grant_pending_state.permission_session_grants.push_back(ava::app::rpc::PermissionSessionGrant{.grant_id = "permgrant_1",
+                                                                                                .permission_request_id = "permreq_1",
+                                                                                                .session_id = "session_1",
+                                                                                                .operation = ava::permissions::Operation::RunCommand,
+                                                                                                .mode = ava::agent::Mode::Build,
+                                                                                                .tool_name = "bash",
+                                                                                                .target_path = {},
+                                                                                                .command = "true",
+                                                                                                .command_recipe_key = {},
+                                                                                                .command_recipe_display = {},
+                                                                                                .reason = "one-shot",
+                                                                                                .risk = ava::permissions::PermissionRisk::Critical});
+  auto const grants_json_no_recipe = ava::app::rpc::permission_session_grants_result_json(grant_pending_state);
+  expect(grants_json_no_recipe.find("\"command_recipe_key\"") == std::string::npos,
+         "RPC session grant serialization omits command_recipe_key when no sealed plan is bound");
+  grant_pending_state.permission_session_grants.front().command_recipe_key =
+      "sha256:ava-command-workspace-recipe-v1:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+  grant_pending_state.permission_session_grants.front().command_recipe_display = "ctest";
+  auto const grants_json_with_recipe = ava::app::rpc::permission_session_grants_result_json(grant_pending_state);
+  expect(grants_json_with_recipe.find(
+             "\"command_recipe_key\":\"sha256:ava-command-workspace-recipe-v1:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"") !=
+             std::string::npos,
+         "RPC session grant serialization includes command_recipe_key when a sealed plan is bound");
 
   auto const question_json = ava::app::rpc::question_request_payload_json(
       "question_1", ava::agent::QuestionPrompt{.header = "Choose",
@@ -2266,6 +2338,8 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "RPC direct command fixture workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -2309,7 +2383,7 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
   auto const audited_allow = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
                                return entry.type == ava::session::EntryType::PermissionDecision &&
                                       entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
-                                      entry.data_json.find("\"command\":\"printf rpc-direct\"") != std::string::npos &&
+                                      entry.data_json.find("\"command\":\"<redacted one-shot command>\"") != std::string::npos &&
                                       entry.data_json.find("\"resolution\":\"allow\"") != std::string::npos;
                              });
   expect(result.has_value(), "RPC direct command loop completes successfully");
@@ -2328,6 +2402,8 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "RPC direct command denial fixture workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -2368,12 +2444,12 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
   ava::app::runtime::session_ts::rat session_r(unlocked_session);
   auto const jsonl = output_buffer.str();
   auto entries = session_r->store.load();
-  auto const audited_deny = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
-                              return entry.type == ava::session::EntryType::PermissionDecision &&
-                                     entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
-                                     entry.data_json.find("\"command\":\"touch denied.txt\"") != std::string::npos &&
-                                     entry.data_json.find("\"resolution\":\"deny\"") != std::string::npos;
-                            });
+  auto const audited_deny =
+      entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+        return entry.type == ava::session::EntryType::PermissionDecision && entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
+               entry.data_json.find("\"command\":\"<redacted one-shot command>\"") != std::string::npos &&
+               entry.data_json.find("\"resolution\":\"deny\"") != std::string::npos;
+      });
   expect(result.has_value(), "RPC direct command denial loop completes successfully");
   expect(denied && jsonl.find("\"id\":\"cmd-deny\"") != std::string::npos && jsonl.find("\"tool\":\"bash\"") != std::string::npos,
          "RPC direct command denial returns a structured bash tool error");
@@ -2388,6 +2464,8 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "RPC direct command cancellation fixture workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -2413,9 +2491,14 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
   std::jthread rpc_thread(
       [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
 
-  input_buffer.push(R"JSON({"id":"cmd-sleep","type":"run_command","command":"sleep 5"})JSON"
-                    "\n");
+  auto const sleep_marker = workspace / "sleep-started";
+  auto const sleep_command = "/bin/sh -c 'touch " + sleep_marker.string() + "; sleep 5'";
+  input_buffer.push("{\"id\":\"cmd-sleep\",\"type\":\"run_command\",\"command\":\"" + ava::core::json::escape(sleep_command) + "\"}\n");
   bool const started = output_buffer.wait_contains("\"name\":\"tool_start\"", std::chrono::seconds(2));
+  auto const launch_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!std::filesystem::exists(sleep_marker) && std::chrono::steady_clock::now() < launch_deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  bool const process_started = std::filesystem::exists(sleep_marker);
   input_buffer.push(R"JSON({"id":"cmd-second","type":"run_bash","command":"printf should-not-run"})JSON"
                     "\n");
   bool const active_rejected = output_buffer.wait_contains("RPC command is unavailable while a prompt is active", std::chrono::seconds(2));
@@ -2428,7 +2511,7 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
   auto const jsonl = output_buffer.str();
   expect(result.has_value(), "RPC direct command cancellation loop completes successfully");
   expect(transport.requests().empty(), "RPC direct command cancellation does not dispatch provider requests");
-  expect(started && active_rejected && canceled && jsonl.find("\"id\":\"cmd-second\"") != std::string::npos &&
+  expect(started && process_started && active_rejected && canceled && jsonl.find("\"id\":\"cmd-second\"") != std::string::npos &&
              jsonl.find("should-not-run") == std::string::npos && jsonl.find("\"id\":\"cmd-sleep\"") != std::string::npos,
          "RPC direct command rejects concurrent commands and cancels the running process through the bash tool context");
 }

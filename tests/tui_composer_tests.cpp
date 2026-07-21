@@ -21,6 +21,7 @@
 #include "ava/tui/event_state.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/session_grants.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/text_wrap.h"
@@ -552,23 +553,60 @@ void test_tui_composer_rendering_and_input()
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
          "permission prompt ignores unmapped character keys without changing focus");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
-                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false);
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'S'}, false);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
+         "permission prompt ignores session shortcut when session grant is unavailable");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, false, false);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
          "permission prompt ignores remembered-rule shortcut when rule storage is unavailable");
-  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true);
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, false, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::DenyRemember,
          "permission prompt cycles to remembered deny when rule storage is available");
   prompt_input =
-      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::DenyRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, true);
+      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::DenyRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, false, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveDenyRemember, "permission prompt enter confirms remembered deny");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
-                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, true);
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, true, true);
   expect(
       prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowRemember,
       "permission prompt R toggles the selected allow choice into a remembered allow");
   prompt_input =
-      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, true);
+      ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowRemember, ava::tui::InputEvent{.key = ava::tui::Key::Enter}, false, true, true);
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveAllowRemember, "permission prompt enter confirms remembered allow");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Deny,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, false, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::DenyRemember,
+         "permission prompt keeps remembered deny available when a Critical command cannot be remembered as allow");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, false, false, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
+         "permission prompt does not expose remembered allow when the backend only permits one-shot approval");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'S'}, true, true, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveAllowSession && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowSession,
+         "permission prompt S resolves allow session when session grant is available");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true, true, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowSession,
+         "permission prompt tab advances from allow to allow session when available");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowSession, ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true, true, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::DenyRemember,
+         "permission prompt tab advances from allow session to remembered deny when available");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowSession,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, true, true, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw && prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowRemember,
+         "permission prompt R toggles allow session into remembered allow");
+  ava::permissions::CommandPermissionMetadata one_shot_metadata;
+  one_shot_metadata.level = ava::command::CommandLevel::Critical;
+  one_shot_metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  ava::permissions::PermissionPrompt one_shot_prompt;
+  one_shot_prompt.operation = ava::permissions::Operation::RunCommand;
+  one_shot_prompt.command_metadata = one_shot_metadata;
+  auto const one_shot_remember_availability = ava::tui::permission_prompt_remember_availability(one_shot_prompt, true);
+  auto const unavailable_storage_remember_availability = ava::tui::permission_prompt_remember_availability(one_shot_prompt, false);
+  expect(!one_shot_remember_availability.allow_remember_available && one_shot_remember_availability.deny_remember_available &&
+             !unavailable_storage_remember_availability.allow_remember_available && !unavailable_storage_remember_availability.deny_remember_available,
+         "tui runtime enables a persistent deny but not a persistent allow for one-shot Critical prompts when rule storage exists");
 
   auto single_question = ava::tui::QuestionPromptView{
       .header = "Choose",
@@ -3765,18 +3803,79 @@ void test_tui_composer_rendering_and_input()
                                                                                                                .command = "git push origin main",
                                                                                                                .reason = "command can change external state",
                                                                                                                .risk = "high",
-                                                                                                               .remember_available = true},
+                                                                                                               .allow_remember_available = true,
+                                                                                                               .deny_remember_available = true},
                                                            .width = 96,
                                                            .height = 10});
   expect(
       std::ranges::any_of(remembered_permission_modal,
                           [](std::string const& line) {
                             auto visible = strip_sgr(line);
-                            return visible.find("[Reject rule]") != std::string::npos && visible.find("[Always]") != std::string::npos;
+                            return visible.find("[Reject rule]") != std::string::npos && visible.find("[Always in this project]") != std::string::npos;
                           }) &&
           std::ranges::any_of(remembered_permission_modal, [](std::string const& line) { return strip_sgr(line).find("R remember") != std::string::npos; }) &&
           std::ranges::all_of(remembered_permission_modal, [](std::string const& line) { return visible_columns(line) <= 96; }),
       "tui permission dock exposes remembered reject and always-allow choices when rule storage is available");
+
+  auto const session_permission_modal =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "",
+                                                           .status = "permission required",
+                                                           .transcript = {},
+                                                           .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "bash",
+                                                                                                               .operation = "bash",
+                                                                                                               .target = "/workspace",
+                                                                                                               .command = "cargo test",
+                                                                                                               .reason = "sealed workspace recipe",
+                                                                                                               .risk = "medium",
+                                                                                                               .allow_session_available = true,
+                                                                                                               .allow_remember_available = true,
+                                                                                                               .deny_remember_available = true},
+                                                           .width = 120,
+                                                           .height = 10});
+  expect(std::ranges::any_of(session_permission_modal,
+                             [](std::string const& line) {
+                               auto visible = strip_sgr(line);
+                               return visible.find("[Allow session]") != std::string::npos && visible.find("[Allow once]") != std::string::npos &&
+                                      visible.find("[Always in this project]") != std::string::npos && visible.find("[Reject rule]") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(session_permission_modal,
+                                 [](std::string const& line) {
+                                   auto visible = strip_sgr(line);
+                                   return visible.find("S allow session") != std::string::npos && visible.find("R remember") != std::string::npos;
+                                 }) &&
+             std::ranges::all_of(session_permission_modal, [](std::string const& line) { return visible_columns(line) <= 120; }),
+         "tui permission dock exposes allow session between allow once and always-allow when session grant is available");
+
+  auto const deny_only_remember_permission_modal =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "",
+                                                           .status = "permission required",
+                                                           .transcript = {},
+                                                           .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "bash",
+                                                                                                               .operation = "bash",
+                                                                                                               .target = "/workspace",
+                                                                                                               .command = "curl https://example.test",
+                                                                                                               .reason = "containment unavailable",
+                                                                                                               .risk = "critical",
+                                                                                                               .allow_remember_available = false,
+                                                                                                               .deny_remember_available = true},
+                                                           .width = 96,
+                                                           .height = 10});
+  expect(std::ranges::any_of(deny_only_remember_permission_modal,
+                             [](std::string const& line) {
+                               auto visible = strip_sgr(line);
+                               return visible.find("[Reject rule]") != std::string::npos && visible.find("[Always in this project]") == std::string::npos;
+                             }) &&
+             std::ranges::any_of(deny_only_remember_permission_modal,
+                                 [](std::string const& line) { return strip_sgr(line).find("R remember") != std::string::npos; }),
+         "tui permission dock renders a persistent deny without offering an unavailable persistent allow");
 
   auto const allow_focused_modal = ava::tui::render_composer(
       ava::tui::ComposerSnapshot{.mode = "build",
@@ -5887,10 +5986,10 @@ void test_tui_composer_rendering_and_input()
                                                                                    .decision = "deny",
                                                                                    .operation = "bash",
                                                                                    .tool_name = "bash",
-                                                                                   .risk = "high",
-                                                                                   .reason = "command can change external state\x1b[31m",
+                                                                                   .risk = "critical",
+                                                                                   .reason = "command permission denied\x1b[31m",
                                                                                    .target = "",
-                                                                                   .command = "git push origin main",
+                                                                                   .command = "<redacted one-shot command>",
                                                                                    .resolution_reason = "selected deny"}}};
   auto const compact_permission_card =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -5905,8 +6004,8 @@ void test_tui_composer_rendering_and_input()
   expect(std::ranges::any_of(compact_permission_card,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("permission deny") != std::string::npos && visible.find("risk high") != std::string::npos &&
-                                      visible.find("reason command can change") != std::string::npos;
+                               return visible.find("permission deny") != std::string::npos && visible.find("risk critical") != std::string::npos &&
+                                      visible.find("reason command permission d") != std::string::npos;
                              }) &&
              std::ranges::none_of(compact_permission_card, [](std::string const& line) { return line.find("\x1b[31m") != std::string::npos; }) &&
              std::ranges::all_of(compact_permission_card, [](std::string const& line) { return visible_columns(line) <= 72; }),
@@ -5938,7 +6037,7 @@ void test_tui_composer_rendering_and_input()
                  expanded_permission_card,
                  [](std::string const& line) { return strip_sgr(line).find("diagnose: /permissions diagnose permreq_push") != std::string::npos; }) &&
              std::ranges::all_of(expanded_permission_card, [](std::string const& line) { return visible_columns(line) <= 88; }),
-         "tui expanded tool cards expose permission audit ids, command context, and follow-up commands on demand");
+         "tui expanded tool cards expose permission audit ids, reviewed tool arguments, and follow-up commands on demand");
 
   {
     ScopedEnvVar no_color_permission_guard("NO_COLOR", "1");
@@ -5963,9 +6062,9 @@ void test_tui_composer_rendering_and_input()
         std::ranges::all_of(plain_narrow_permission_card,
                             [](std::string const& line) { return line.find('\x1b') == std::string::npos && visible_columns(line) <= 56; }) &&
         plain_permission_text.find("[x] bash") != std::string::npos && plain_permission_text.find("permission: deny") != std::string::npos &&
-        plain_permission_text.find("risk: high") != std::string::npos && plain_permission_text.find("id: permreq_push") != std::string::npos &&
-        plain_permission_text.find("reason: command can change external state") != std::string::npos &&
-        plain_permission_text.find("command: git push origin main") != std::string::npos &&
+        plain_permission_text.find("risk: critical") != std::string::npos && plain_permission_text.find("id: permreq_push") != std::string::npos &&
+        plain_permission_text.find("reason: command permission denied") != std::string::npos &&
+        plain_permission_text.find("command: <redacted one-shot command>") != std::string::npos &&
         plain_permission_text.find("inspect: /permissions audit show permreq_push") != std::string::npos &&
         plain_permission_text.find("diagnose: /permissions diagnose permreq_push") != std::string::npos;
     expect(plain_permission_accessible, "tui plain narrow permission cards keep critical state readable without color");
@@ -6887,6 +6986,124 @@ void test_tui_composer_rendering_and_input()
              "tui resize stress render keeps long mixed transcripts bounded at every tested viewport");
     }
   }
+}
+
+void test_tui_session_grant_registry()
+{
+  auto make_prompt = [] {
+    ava::permissions::CommandPermissionMetadata metadata;
+    metadata.level = ava::command::CommandLevel::Standard;
+    metadata.executor_identity_verified = true;
+    metadata.containment_available = true;
+    metadata.containment_status = ava::permissions::CommandContainmentStatus::Available;
+    metadata.backend_maximum_scope = ava::command::InteractiveScope::Session;
+    metadata.global_recipe_key = "global-recipe";
+    metadata.workspace_recipe_key = "workspace-recipe";
+    metadata.effective_allowed_scopes = {ava::command::InteractiveScope::Once, ava::command::InteractiveScope::Session};
+    return ava::permissions::PermissionPrompt{.permission_request_id = "permreq_tui_session_grant",
+                                              .operation = ava::permissions::Operation::RunCommand,
+                                              .mode = ava::agent::Mode::Build,
+                                              .workspace_dir = {},
+                                              .target_path = {},
+                                              .command = "ctest --test-dir build",
+                                              .tool_name = "bash",
+                                              .reason = "sealed workspace recipe",
+                                              .risk = ava::permissions::PermissionRisk::Medium,
+                                              .command_metadata = std::move(metadata)};
+  };
+
+  auto prompt = make_prompt();
+  ava::tui::TuiSessionGrantRegistry registry;
+  auto const created = registry.add("session_a", prompt);
+  auto const reused = registry.add("session_a", prompt);
+  expect(ava::tui::tui_session_grant_eligible(prompt) && created == ava::tui::TuiSessionGrantInsertResult::Added &&
+             reused == ava::tui::TuiSessionGrantInsertResult::AlreadyPresent && registry.size() == 1 && registry.matches("session_a", prompt),
+         "TUI session grants create once and reuse the exact eligible command recipe");
+
+  auto different_mode = prompt;
+  different_mode.mode = ava::agent::Mode::Plan;
+  auto different_tool = prompt;
+  different_tool.tool_name = "shell";
+  auto different_recipe = prompt;
+  different_recipe.command_metadata->workspace_recipe_key = "another-workspace-recipe";
+  expect(!registry.matches("session_b", prompt) && !registry.matches("session_a", different_mode) && !registry.matches("session_a", different_tool) &&
+             !registry.matches("session_a", different_recipe),
+         "TUI session grants require exact session, mode, tool, and workspace recipe matches");
+
+  auto no_longer_eligible = prompt;
+  no_longer_eligible.command_metadata->effective_allowed_scopes = {ava::command::InteractiveScope::Once};
+  expect(!ava::tui::tui_session_grant_eligible(no_longer_eligible) && !registry.matches("session_a", no_longer_eligible) &&
+             registry.add("session_a", no_longer_eligible) == ava::tui::TuiSessionGrantInsertResult::Ineligible,
+         "TUI session grants recheck backend eligibility before reuse or creation");
+
+  ava::tui::TuiSessionGrantRegistry capped_registry;
+  bool filled_to_cap = true;
+  for (std::size_t index = 0; index < ava::tui::TuiSessionGrantRegistry::kMaxGrants; ++index)
+  {
+    auto distinct_prompt = make_prompt();
+    distinct_prompt.command_metadata->workspace_recipe_key = "workspace-recipe-" + std::to_string(index);
+    filled_to_cap = filled_to_cap && capped_registry.add("session_a", distinct_prompt) == ava::tui::TuiSessionGrantInsertResult::Added;
+  }
+  auto overflow_prompt = make_prompt();
+  overflow_prompt.command_metadata->workspace_recipe_key = "workspace-recipe-overflow";
+  expect(filled_to_cap && capped_registry.size() == ava::tui::TuiSessionGrantRegistry::kMaxGrants &&
+             capped_registry.add("session_a", overflow_prompt) == ava::tui::TuiSessionGrantInsertResult::Full,
+         "TUI session grants fail closed at the 64-grant in-memory cap");
+
+  ava::tui::TuiSessionGrantRegistry same_session_registry;
+  static_cast<void>(same_session_registry.add("session_a", prompt));
+  expect(!same_session_registry.clear_for_session_transition("session_a", "session_a") && same_session_registry.matches("session_a", prompt),
+         "applying an unchanged runtime session id preserves grants created in this TUI process");
+
+  struct SessionTransition
+  {
+    std::string command;
+    std::string session_id;
+  };
+  std::vector<SessionTransition> const transitions = {{"/new", "session_new"},
+                                                        {"/resume session_resume", "session_resume"},
+                                                        {"/fork", "session_fork"},
+                                                        {"/clone", "session_clone"},
+                                                        {"/import --confirm", "session_import"}};
+  bool all_submit_transitions_clear = true;
+  for (auto const& transition : transitions)
+  {
+    ava::tui::TuiSessionGrantRegistry transition_registry;
+    static_cast<void>(transition_registry.add("session_a", prompt));
+    ava::tui::TuiRuntimeStateSnapshot post_submit_state;
+    post_submit_state.session_id = transition.session_id;
+    ava::tui::TuiSubmitResult completed_submit;
+    completed_submit.state_snapshot = std::move(post_submit_state);
+    bool const cleared = completed_submit.state_snapshot &&
+                         transition_registry.clear_for_session_transition("session_a", completed_submit.state_snapshot->session_id);
+    all_submit_transitions_clear = all_submit_transitions_clear && cleared && transition_registry.size() == 0 &&
+                                   !transition_registry.matches(transition.session_id, prompt);
+  }
+  expect(all_submit_transitions_clear,
+         "post-submit runtime snapshots clear TUI session grants for /new, /resume, /fork, /clone, and confirmed import transitions");
+
+  auto const session_only_permission_modal = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_a",
+                                 .input = "",
+                                 .status = "permission required",
+                                 .transcript = {},
+                                 .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "bash",
+                                                                                     .operation = "bash",
+                                                                                     .target = "",
+                                                                                     .command = "ctest --test-dir build",
+                                                                                     .reason = "",
+                                                                                     .risk = "medium",
+                                                                                     .allow_session_available = true},
+                                 .width = 120,
+                                 .height = 10});
+  expect(std::ranges::any_of(session_only_permission_modal,
+                             [](std::string const& line) { return strip_sgr(line).find("S allow session") != std::string::npos; }) &&
+             std::ranges::none_of(session_only_permission_modal,
+                                  [](std::string const& line) { return strip_sgr(line).find("R remember") != std::string::npos; }),
+         "TUI permission key help does not advertise R when only an in-memory session grant is available");
 }
 
 void test_tui_text_model_conversions()
@@ -8414,6 +8631,7 @@ void run_tui_composer_tests()
   ScopedEnvVar tmux_hyperlinks_guard("AVA_TUI_TMUX_HYPERLINKS", "");
   test_tui_terminal_image_support();
   test_tui_composer_rendering_and_input();
+  test_tui_session_grant_registry();
   test_tui_text_model_conversions();
   test_tui_event_state_reduces_runtime_events();
   test_ncurses_newterm_smoke_without_real_tty();

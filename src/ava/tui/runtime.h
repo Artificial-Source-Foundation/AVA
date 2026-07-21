@@ -16,16 +16,6 @@
 
 namespace ava::tui {
 
-struct TuiSubmitResult
-{
-  bool quit = false;
-  std::vector<std::string> output;
-  std::vector<ToolTimelineItem> tool_timeline;
-  std::optional<std::size_t> context_source_count = std::nullopt;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
 struct TuiQueuedFollowUp
 {
   std::string request_id;
@@ -79,6 +69,20 @@ struct TuiRuntimeStateSnapshot
   std::vector<FileReferenceItem> file_references = {};
   std::vector<ThemeOptionItem> custom_themes = {};
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+struct TuiSubmitResult
+{
+  bool quit = false;
+  std::vector<std::string> output;
+  std::vector<ToolTimelineItem> tool_timeline;
+  std::optional<std::size_t> context_source_count = std::nullopt;
+  // Returned by submit workers so the TUI thread applies state changes before
+  // accepting another prompt. This is intentionally distinct from command
+  // output/status, which the TUI settles after rendering the completed turn.
+  std::optional<TuiRuntimeStateSnapshot> state_snapshot = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

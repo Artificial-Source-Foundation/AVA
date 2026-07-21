@@ -53,6 +53,7 @@ set(AVA_TESTS_SOURCES
   "app_rpc_tests.cpp"
   "app_runtime_tests.cpp"
   "config_context_auth_oauth_tests.cpp"
+  "command_tests.cpp"
   "core_tests.cpp"
   "core_mode_json_permissions_tests.cpp"
   "events_tests.cpp"
@@ -73,6 +74,7 @@ set(AVA_TESTS_SOURCES
   "tools_tests.cpp"
   "tui_composer_tests.cpp"
   "run_observer_tests.cpp"
+  "containment_tests.cpp"
 )
 # The debug suite relies on libcwd-backed machinery (ava_debug, CWDEBUG), so it is
 # only compiled in when libcwd is effectively enabled.
@@ -104,6 +106,7 @@ set(AVA_TEST_SUITES
   app_command_registry
   tools
   config_context_auth_oauth
+  command
   app_compaction
   app_print
   app_event_serialization
@@ -126,11 +129,13 @@ set(AVA_TEST_SUITES
   permission_rules
   tui_composer
   run_observer
+  containment
 )
 foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
 endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(ava_tests.containment PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.tool_scheduler PROPERTIES TIMEOUT 30)
 
 add_test(NAME ava_cli.rpc_broken_pipe_subprocess COMMAND ava_rpc_broken_pipe_subprocess_test)

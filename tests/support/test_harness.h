@@ -5,9 +5,11 @@
 #include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
 #include "ava/core/error.h"
+#include "ava/core/AnchorSet.h"
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -33,8 +35,13 @@ class FailingStreambuf final : public std::streambuf
   std::streamsize xsputn(char const* s, std::streamsize count) override;
 };
 
-// Create an empty root. If the directory already exists it will be cleaned out.
+// Physical per-build test namespace used by security fixtures that need to
+// control ancestor permissions explicitly.
+std::filesystem::path temp_root();
+// Create an empty logical root. If the directory already exists it will be cleaned out.
 std::filesystem::path create_empty_root(std::filesystem::path root_name);
+std::shared_ptr<ava::core::AnchorSet> command_anchors_for_test(std::filesystem::path const& workspace,
+                                                               std::filesystem::path const& spill_dir);
 
 class ScopedEnvVar
 {

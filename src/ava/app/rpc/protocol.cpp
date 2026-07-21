@@ -126,6 +126,23 @@ ava::core::Result<std::optional<long long>> exact_optional_integer_field(std::st
   }
 }
 
+ava::core::Result<std::optional<bool>> exact_optional_bool_field(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return std::optional<bool>{};
+  auto const tail = object.substr(*start);
+  auto token_ends = [&](std::size_t end) {
+    while (end < tail.size() && std::isspace(static_cast<unsigned char>(tail[end])) != 0) ++end;
+    return end == tail.size() || tail[end] == ',' || tail[end] == '}';
+  };
+  if (tail.starts_with("true") && token_ends(4))
+    return std::optional<bool>{true};
+  if (tail.starts_with("false") && token_ends(5))
+    return std::optional<bool>{false};
+  return std::unexpected(invalid_rpc("RPC " + std::string(key) + " must be a boolean"));
+}
+
 ava::core::Result<std::optional<std::string>> exact_optional_string_field(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
@@ -845,6 +862,9 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   auto target_path = std::optional<std::string>{};
   auto command_text = std::optional<std::string>{};
   auto tool_name = std::optional<std::string>{};
+  auto command_recipe_key = std::optional<std::string>{};
+  auto recipe_display = std::optional<std::string>{};
+  auto critical_acknowledged = std::optional<bool>{};
   if (rpc::command_type_is(*type, {"run_command", "run_bash"}))
   {
     auto parsed_command = rpc::exact_optional_string_field(line, "command");
@@ -921,6 +941,22 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
     {
       return std::unexpected(std::move(valid.error()));
     }
+    auto parsed_recipe_key = rpc::exact_optional_string_field(line, "command_recipe_key");
+    if (!parsed_recipe_key)
+      return std::unexpected(std::move(parsed_recipe_key.error()));
+    command_recipe_key = std::move(*parsed_recipe_key);
+    if (auto valid = rpc::validate_optional_rpc_text(command_recipe_key, "command_recipe_key", 128); !valid)
+      return std::unexpected(std::move(valid.error()));
+    auto parsed_recipe_display = rpc::exact_optional_string_field(line, "recipe_display");
+    if (!parsed_recipe_display)
+      return std::unexpected(std::move(parsed_recipe_display.error()));
+    recipe_display = std::move(*parsed_recipe_display);
+    if (auto valid = rpc::validate_optional_rpc_text(recipe_display, "recipe_display", 1024); !valid)
+      return std::unexpected(std::move(valid.error()));
+    auto parsed_critical_acknowledged = rpc::exact_optional_bool_field(line, "critical_acknowledged");
+    if (!parsed_critical_acknowledged)
+      return std::unexpected(std::move(parsed_critical_acknowledged.error()));
+    critical_acknowledged = std::move(*parsed_critical_acknowledged);
   }
 
   auto reason = std::optional<std::string>{};
@@ -1142,7 +1178,10 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
                     .path = std::move(*path),
                     .target_path = std::move(target_path),
                     .command = std::move(command_text),
-                    .tool_name = std::move(tool_name)};
+                    .tool_name = std::move(tool_name),
+                    .command_recipe_key = std::move(command_recipe_key),
+                    .recipe_display = std::move(recipe_display),
+                    .critical_acknowledged = std::move(critical_acknowledged)};
 }
 
 std::string serialize_rpc_success_jsonl(std::string_view id, std::string_view result_json)

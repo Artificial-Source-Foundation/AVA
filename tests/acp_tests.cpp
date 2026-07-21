@@ -46,6 +46,7 @@
 #include <thread>
 #include <utility>
 #include <variant>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -1342,10 +1343,10 @@ void test_acp_cross_process_lease_and_bounded_streaming()
   if (!store)
     return;
   static_cast<void>(append_session_entry_for_test(*store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                             .parent_id = "",
-                                                             .type = ava::session::EntryType::SessionStart,
-                                                             .timestamp = ava::session::now_timestamp(),
-                                                             .data_json = "{}"}));
+                                                                                     .parent_id = "",
+                                                                                     .type = ava::session::EntryType::SessionStart,
+                                                                                     .timestamp = ava::session::now_timestamp(),
+                                                                                     .data_json = "{}"}));
   auto lease = ava::session::SessionLease::acquire(store->session_path());
   auto same_process = ava::session::SessionLease::acquire(store->session_path());
   expect(lease && !same_process && same_process.error().message().find("already owned") != std::string::npos,
@@ -1390,11 +1391,12 @@ void test_acp_list_pagination_cancel_race_stop_reasons_and_file_safety()
     auto store = ava::session::SessionStore::create(workspace, paths.sessions_dir);
     if (!store)
       continue;
-    static_cast<void>(append_session_entry_for_test(*store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                               .parent_id = "",
-                                                               .type = ava::session::EntryType::SessionStart,
-                                                               .timestamp = "2026-07-12T12:" + std::to_string(index / 10) + std::to_string(index % 10) + ":00Z",
-                                                               .data_json = "{\"original_cwd\":\"" + ava::core::json::escape(workspace.string()) + "\"}"}));
+    static_cast<void>(append_session_entry_for_test(
+        *store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                           .parent_id = "",
+                                           .type = ava::session::EntryType::SessionStart,
+                                           .timestamp = "2026-07-12T12:" + std::to_string(index / 10) + std::to_string(index % 10) + ":00Z",
+                                           .data_json = "{\"original_cwd\":\"" + ava::core::json::escape(workspace.string()) + "\"}"}));
   }
   std::string request_body;
   AgentServiceOptions options;
@@ -1424,11 +1426,12 @@ void test_acp_list_pagination_cancel_race_stop_reasons_and_file_safety()
     auto store = ava::session::SessionStore::create(workspace, paths.sessions_dir);
     if (!store)
       continue;
-    static_cast<void>(append_session_entry_for_test(*store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                               .parent_id = "",
-                                                               .type = ava::session::EntryType::SessionStart,
-                                                               .timestamp = ava::session::now_timestamp(),
-                                                               .data_json = "{\"original_cwd\":\"" + ava::core::json::escape(workspace.string()) + "\"}"}));
+    static_cast<void>(append_session_entry_for_test(
+        *store, ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                           .parent_id = "",
+                                           .type = ava::session::EntryType::SessionStart,
+                                           .timestamp = ava::session::now_timestamp(),
+                                           .data_json = "{\"original_cwd\":\"" + ava::core::json::escape(workspace.string()) + "\"}"}));
     static_cast<void>(append_session_metadata_for_test(
         *store, ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(std::string(256, 't')), .actor = "test"}));
   }
@@ -1695,6 +1698,111 @@ void test_acp_cancel_terminal_arbitration_and_provider_setup_paths()
   run_setup_case(true, false, ava::core::ErrorCategory::PermissionDenied);
 }
 
+void test_acp_critical_commands_remain_one_shot()
+{
+  using namespace ava::app::acp;
+  auto const root = std::filesystem::temp_directory_path() / ava::core::make_id("acp-critical-persistent-command");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "ACP critical persistent-command fixture keeps sealed planning roots owner-only");
+  configure_acp_tool_test_model(root);
+  auto const paths = ava::tests::app_test_paths(root);
+  ava::permissions::PermissionRuleStore const rule_store{.global_rules_file = paths.ava_config_dir / "permission-rules.json",
+                                                         .workspace_rules_file = workspace / ".ava" / "permission-rules.json",
+                                                         .workspace_dir = workspace};
+  auto added = ava::permissions::add_persistent_permission_rule(
+      rule_store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                        .action = ava::permissions::PermissionAction::Allow,
+                                                        .operation = ava::permissions::Operation::RunCommand,
+                                                        .mode = ava::permissions::PermissionRuleMode::Build,
+                                                        .tool_name = "bash",
+                                                        .target_path = {},
+                                                        .command = "true",
+                                                        .command_recipe_key = {},
+                                                        .recipe_display = {},
+                                                        .critical_acknowledged = true,
+                                                        .reason = "operator acknowledged exact critical command",
+                                                        .actor = "test"});
+  expect(!added && added.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "ACP cannot persist an exact acknowledged Critical command Allow");
+
+  auto state = std::make_shared<CapturingSequenceState>();
+  auto const bash_response = ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = R"({"choices":[{"message":{"tool_calls":[{"id":"call_critical","function":{"name":"bash","arguments":"{\"command\":\"true\"}"}}]},"finish_reason":"tool_calls"}]})"};
+  AgentServiceOptions options;
+  options.agent_version = "1";
+  options.launch_root = workspace;
+  options.paths = paths;
+  options.provider_bundle_factory = sequence_bundle_factory(state, {bash_response, acp_text_response("critical persistent allow completed")});
+  AgentService service(options);
+  service.bind_update_sender([](std::string_view, std::string_view) -> ava::core::VoidResult { return {}; });
+  std::atomic_int permission_requests = 0;
+  service.bind_client_request_sender(
+      [&permission_requests](std::string method, std::optional<std::string>, std::chrono::milliseconds,
+                             OutboundCallPolicy) -> ava::core::Result<PendingCall> {
+        if (method == "session/request_permission")
+          ++permission_requests;
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "unexpected ACP client permission request"));
+      },
+      [](JsonRpcId const&, std::string) { return true; });
+  static_cast<void>(service.handle_request(initialize_request_with_capabilities(R"({"terminal":true})"), {}));
+  auto created = service.handle_request(
+      Request{.id = std::int64_t(2), .method = "session/new", .params_json = std::string("{\"cwd\":\"") + workspace.string() + "\",\"mcpServers\":[]}"},
+      {});
+  auto const session_id = created ? ava::core::json::string_field(*created, "sessionId") : std::nullopt;
+  RequestResult prompted;
+  if (session_id)
+    prompted = service.handle_request(
+        Request{.id = std::int64_t(3),
+                .method = "session/prompt",
+                .params_json = std::string("{\"sessionId\":\"") + *session_id + "\",\"prompt\":[{\"type\":\"text\",\"text\":\"run true\"}]}"},
+        {});
+  std::size_t provider_requests = 0;
+  {
+    std::lock_guard lock(state->mutex);
+    provider_requests = state->request_bodies.size();
+  }
+  expect(session_id && prompted && *prompted == R"({"stopReason":"end_turn"})" && permission_requests.load() == 1 && provider_requests == 2,
+         "ACP requests one-shot client authority for a verified Critical command instead of recovering persistent command text authority: prompt=" +
+             (prompted ? *prompted : prompted.error().message) + ", permission_requests=" + std::to_string(permission_requests.load()) +
+             ", provider_requests=" + std::to_string(provider_requests));
+  service.shutdown();
+
+  int fallback_calls = 0;
+  auto resolver = ava::permissions::build_persistent_permission_rule_resolver(
+      rule_store, [&fallback_calls](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++fallback_calls;
+        ava::permissions::PermissionResolutionDecision denied(ava::permissions::PermissionResolution::Deny, "client approval required");
+        denied.resolution_source = "client";
+        return denied;
+      });
+  ava::permissions::CommandPermissionMetadata unavailable_metadata;
+  unavailable_metadata.level = ava::command::CommandLevel::Critical;
+  unavailable_metadata.executor_identity_verified = true;
+  unavailable_metadata.containment_status = ava::permissions::CommandContainmentStatus::Unavailable;
+  unavailable_metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
+  auto unavailable = resolver(ava::permissions::PermissionPrompt{.permission_request_id = "permreq_acp_unavailable",
+                                                                   .tool_call_id = "call_unavailable",
+                                                                   .operation = ava::permissions::Operation::RunCommand,
+                                                                   .mode = ava::agent::Mode::Build,
+                                                                   .workspace_dir = workspace,
+                                                                   .target_path = workspace,
+                                                                   .command = "true",
+                                                                   .tool_name = "bash",
+                                                                   .reason = "critical command",
+                                                                   .risk = ava::permissions::PermissionRisk::Critical,
+                                                                   .command_metadata = unavailable_metadata});
+  expect(unavailable && *unavailable == ava::permissions::PermissionResolution::Deny && fallback_calls == 1 &&
+             unavailable->resolution_source == "client",
+         "Critical command metadata with Unavailable containment falls through to ACP client denial without persistent authority");
+
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+}
+
 void test_acp_session_mcp_requires_persistent_operator_authorization()
 {
   using namespace ava::app::acp;
@@ -1797,6 +1905,9 @@ void test_acp_strict_session_mcp_registry_and_error_propagation()
                                                           .tool_name = std::move(tool_name),
                                                           .target_path = {},
                                                           .command = std::move(command),
+                                                          .command_recipe_key = {},
+                                                          .recipe_display = {},
+                                                          .critical_acknowledged = false,
                                                           .reason = "authorize exact ACP session MCP operation",
                                                           .actor = "test_operator"});
     expect(added.has_value(), added ? "protected persistent ACP MCP rule installed" : "protected persistent ACP MCP rule installed: " + added.error().format());
@@ -1958,6 +2069,8 @@ void test_acp_negotiated_client_filesystem_and_terminal_routing()
   auto const root = std::filesystem::temp_directory_path() / ava::core::make_id("acp-client-tools");
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "ACP terminal fixture workspace is owner-only for sealed command planning");
   configure_acp_tool_test_model(root);
   auto const paths = ava::tests::app_test_paths(root);
   auto const note = workspace / "note.txt";
@@ -2692,9 +2805,13 @@ void test_acp_client_tool_dtos_lifecycle_and_cancellation()
   auto const truncated_root = std::filesystem::temp_directory_path() / ava::core::make_id("acp-terminal-truncated-tail");
   auto const truncated_workspace = truncated_root / "workspace";
   std::filesystem::create_directories(truncated_workspace);
+  expect(::chmod(truncated_root.c_str(), S_IRWXU) == 0 && ::chmod(truncated_workspace.c_str(), S_IRWXU) == 0,
+         "ACP terminal truncated fixture workspace is owner-only for sealed command planning");
   std::vector<ava::tools::ToolProgressEvent> truncated_progress;
+  auto const truncated_spill = truncated_root / "spill";
   ava::tools::ToolContext truncated_context{
-      .workspace_dir = ava::core::normalized_absolute_path(truncated_workspace),
+      .workspace_dir = truncated_workspace,
+      .spill_dir = truncated_spill,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
@@ -2703,6 +2820,7 @@ void test_acp_client_tool_dtos_lifecycle_and_cancellation()
         truncated_progress.push_back(event);
         return {};
       },
+      .anchor_set = command_anchors_for_test(truncated_workspace, truncated_spill),
       .command_executor = truncated_tail_commands};
   auto truncated_bash =
       ava::tools::run_bash(truncated_context, "printf retained-tail", ava::tools::BashOptions{.timeout = 100ms, .max_bytes = 4096, .max_lines = 200});
@@ -3983,6 +4101,33 @@ void test_acp_peer_started_non_cooperative_shutdown_escalates()
          "a started non-cooperative request causes bounded normal shutdown escalation exit 70");
 }
 
+void test_acp_redacted_command_audit_omits_recipe_arguments()
+{
+  constexpr std::string_view secret = "acp-unique-secret-like-argument-7f3e";
+  ava::tools::PermissionAuditEvent event;
+  event.permission_request_id = "permreq_acp_redacted";
+  event.operation = ava::permissions::Operation::RunCommand;
+  event.mode = ava::agent::Mode::Build;
+  event.tool_name = "bash";
+  event.action = ava::permissions::PermissionAction::Ask;
+  event.reason = "command requires approval";
+  event.risk = ava::permissions::PermissionRisk::Critical;
+  event.command = "curl --token " + std::string(secret);
+  event.resolution_source = "policy";
+  event.command_arguments_redacted = true;
+  ava::permissions::CommandPermissionMetadata metadata;
+  metadata.level = ava::command::CommandLevel::Sensitive;
+  metadata.recipe_display = "sensitive-network: --header " + std::string(secret);
+  metadata.global_recipe_key = "sha256:ava-command-recipe-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  metadata.workspace_recipe_key = "sha256:ava-command-workspace-recipe-v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  event.command_metadata = std::move(metadata);
+  auto const json = ava::tools::permission_audit_data_json(event);
+
+  expect(json.find(secret) == std::string::npos && ava::core::json::string_field(json, "command") == "[redacted]" &&
+             json.find("\"recipe_display\"") == std::string::npos,
+         "ACP-style redacted command audits retain a redacted command and never serialize argument-derived recipe display values");
+}
+
 void test_acp_peer_write_failure_wakes_reader_and_shutdown_race()
 {
   using namespace ava::app::acp;
@@ -4111,6 +4256,7 @@ void run_acp_tests()
   test_acp_cross_process_lease_and_bounded_streaming();
   test_acp_list_pagination_cancel_race_stop_reasons_and_file_safety();
   test_acp_cancel_terminal_arbitration_and_provider_setup_paths();
+  test_acp_critical_commands_remain_one_shot();
   test_acp_session_mcp_requires_persistent_operator_authorization();
   test_acp_strict_session_mcp_registry_and_error_propagation();
   test_acp_negotiated_client_filesystem_and_terminal_routing();
@@ -4133,5 +4279,6 @@ void run_acp_tests()
   test_acp_prompt_admission_rollback_and_control_cancel_saturation();
   test_acp_peer_shutdown_abandons_queued_unstarted_request();
   test_acp_peer_started_non_cooperative_shutdown_escalates();
+  test_acp_redacted_command_audit_omits_recipe_arguments();
   test_acp_peer_write_failure_wakes_reader_and_shutdown_race();
 }

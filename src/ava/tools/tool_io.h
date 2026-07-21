@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/command/command.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
@@ -89,6 +90,39 @@ class ExactFileAccess
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
+// Delegated executors receive a compact plan binding and an explicit
+// environment-profile contract. They never receive the local environment
+// entries or authority to reuse a local approval.
+struct CommandEnvironmentProfileContract
+{
+  std::string profile_id;
+  std::string digest;
+  bool local_execution_authority = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+struct CommandExecutionPlanMetadata
+{
+  std::string fingerprint;
+  ava::command::CommandExecutionDomain execution_domain = ava::command::CommandExecutionDomain::DirectArgv;
+  ava::command::CommandLevel level = ava::command::CommandLevel::Critical;
+  ava::command::CommandFamily family = ava::command::CommandFamily::UnknownWrapper;
+  ava::command::InteractiveScope backend_maximum_scope = ava::command::InteractiveScope::Once;
+  std::filesystem::path resolved_executable;
+  std::filesystem::path cwd;
+  bool executor_identity_verified = false;
+  bool containment_available = false;
+  std::string containment_profile_id;
+  bool containment_network_allowed = false;
+  // Set to true only after the parent verifies the child installed
+  // containment before exec. Pre-permission metadata never claims applied.
+  bool containment_applied = false;
+  std::string containment_network_mode;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct CommandExecutionRequest
 {
   std::vector<std::string> argv;
@@ -96,6 +130,8 @@ struct CommandExecutionRequest
   std::chrono::milliseconds timeout{0};
   std::size_t output_byte_limit = 0;
   ToolIoCancelCallback cancel_requested = nullptr;
+  std::optional<CommandExecutionPlanMetadata> plan_metadata = std::nullopt;
+  std::optional<CommandEnvironmentProfileContract> environment_profile = std::nullopt;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
@@ -106,6 +142,11 @@ struct CommandExecutionResult
   bool canceled = false;
   bool truncated = false;
   std::string output;
+  // Containment status reported by a delegated executor only after it
+  // verifies the child installed containment before exec.
+  bool containment_applied = false;
+  std::string containment_profile_id;
+  std::string containment_network_mode;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 

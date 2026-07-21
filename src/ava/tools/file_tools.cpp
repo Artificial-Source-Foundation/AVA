@@ -55,38 +55,58 @@ ava::core::VoidResult record_permission_audit(ToolContext const& context, Permis
   return context.permission_audit_sink(event);
 }
 
-PermissionAuditEvent audit_event(ToolContext const& context, std::string permission_request_id, ava::permissions::Operation operation, std::string tool_name,
-                                 ava::permissions::PermissionDecision const& decision, std::filesystem::path const& target_path, std::string_view command)
+std::string safe_command_display(std::optional<ava::permissions::CommandPermissionMetadata> const& command_metadata)
 {
-  return PermissionAuditEvent{.permission_request_id = std::move(permission_request_id),
-                              .operation = operation,
-                              .mode = context.mode,
-                              .tool_name = std::move(tool_name),
-                              .action = decision.action,
-                              .reason = decision.reason,
-                              .risk = decision.risk,
-                              .target_path = target_path,
-                              .command = context.redact_permission_audit_arguments && !command.empty() ? std::string("[redacted]") : std::string(command),
-                              .resolution = "",
-                              .resolution_source = "policy",
-                              .resolution_reason = "",
-                              .actor = context.permission_actor.empty() ? std::string("agent") : context.permission_actor,
-                              .rule_id = ""};
+  if (command_metadata && !command_metadata->recipe_display.empty())
+    return command_metadata->recipe_display;
+  return "<redacted one-shot command>";
 }
 
-ava::core::Error permission_denied_error(std::string_view error_message, ava::permissions::PermissionDecision const& decision,
-                                         std::filesystem::path const& target_path, std::string_view command, std::string_view resolution_context,
-                                         std::string_view resolution_reason = {}, std::string_view permission_request_id = {})
+PermissionAuditEvent audit_event(ToolContext const& context, std::string permission_request_id, ava::permissions::Operation operation, std::string tool_name,
+                                 ava::permissions::PermissionDecision const& decision, std::filesystem::path const& target_path, std::string_view command,
+                                 std::optional<ava::permissions::CommandPermissionMetadata> command_metadata)
 {
+  bool const run_command = operation == ava::permissions::Operation::RunCommand;
+  return PermissionAuditEvent{
+      .permission_request_id = std::move(permission_request_id),
+      .operation = operation,
+      .mode = context.mode,
+      .tool_name = std::move(tool_name),
+      .action = decision.action,
+      .reason = run_command ? std::string("command permission decision") : decision.reason,
+      .risk = decision.risk,
+      .target_path = target_path,
+      .command = run_command ? safe_command_display(command_metadata)
+                             : (context.redact_permission_audit_arguments && !command.empty() ? std::string("[redacted]") : std::string(command)),
+      .resolution = "",
+      .resolution_source = "policy",
+      .resolution_reason = "",
+      .actor = context.permission_actor.empty() ? std::string("agent") : context.permission_actor,
+      .rule_id = "",
+      .command_arguments_redacted = context.redact_permission_audit_arguments,
+      .command_metadata = std::move(command_metadata)};
+}
+
+ava::core::Error permission_denied_error(std::string_view error_message, ava::permissions::Operation operation,
+                                         ava::permissions::PermissionDecision const& decision, std::filesystem::path const& target_path,
+                                         std::string_view command, std::optional<ava::permissions::CommandPermissionMetadata> const& command_metadata,
+                                         std::string_view resolution_context, std::string_view resolution_reason = {},
+                                         std::string_view permission_request_id = {})
+{
+  bool const run_command = operation == ava::permissions::Operation::RunCommand;
   auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, std::string(error_message));
   error.with_context("action", ava::permissions::to_string(decision.action));
-  error.with_context("reason", decision.reason);
+  error.with_context("reason", run_command ? "command permission denied" : decision.reason);
   error.with_context("risk", ava::permissions::to_string(decision.risk));
   if (!permission_request_id.empty())
   {
     error.with_context("request_id", std::string(permission_request_id));
   }
-  if (!command.empty())
+  if (run_command)
+  {
+    error.with_context("command", safe_command_display(command_metadata));
+  }
+  else if (!command.empty())
   {
     error.with_context("command", std::string(command));
   }
@@ -97,7 +117,7 @@ ava::core::Error permission_denied_error(std::string_view error_message, ava::pe
   if (decision.action == ava::permissions::PermissionAction::Ask)
   {
     error.with_context("resolution", std::string(resolution_context));
-    if (!resolution_reason.empty())
+    if (!run_command && !resolution_reason.empty())
       error.with_context("resolution_reason", std::string(resolution_reason));
     if (resolution_context == "no_resolver")
       error.with_context("headless_hint", "permission ask failed closed because no interactive or RPC resolver was available");
@@ -127,7 +147,8 @@ void append_permission_rule_store_for_config_dir(std::vector<ava::permissions::P
     return;
   stores.push_back(ava::permissions::PermissionRuleStore{.global_rules_file = config_dir / "permission-rules.json",
                                                          .workspace_rules_file = context.workspace_dir / ".ava" / "permission-rules.json",
-                                                         .workspace_dir = context.workspace_dir});
+                                                         .workspace_dir = context.workspace_dir,
+                                                         .anchor_set = context.anchor_set});
 }
 
 std::vector<ava::permissions::PermissionRuleStore> context_permission_rule_stores(ToolContext const& context)
@@ -251,7 +272,7 @@ ava::core::VoidResult announce_tool_execution_start(ToolContext const& context)
 
 ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permissions::Operation operation, std::filesystem::path const& target_path,
                                         std::string_view command, std::string_view tool_name, std::string_view error_message, std::string_view diff_preview,
-                                        bool diff_truncated)
+                                        bool diff_truncated, std::optional<ava::permissions::CommandPermissionMetadata> command_metadata)
 {
   auto permission_target = target_path;
   if (context.secure_workspace && (operation == ava::permissions::Operation::ReadFile || operation == ava::permissions::Operation::EditFile ||
@@ -283,6 +304,7 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
       .workspace_dir = context.workspace_dir,
       .target_path = permission_target,
       .command = std::string(command),
+      .command_metadata = command_metadata,
   });
   if (context.require_explicit_file_permissions && decision.action == ava::permissions::PermissionAction::Allow &&
       (operation == ava::permissions::Operation::ReadFile || operation == ava::permissions::Operation::EditFile))
@@ -292,7 +314,45 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
     decision.risk = operation == ava::permissions::Operation::EditFile ? ava::permissions::PermissionRisk::Medium : ava::permissions::PermissionRisk::Low;
   }
 
-  auto policy_event = audit_event(context, permission_request_id, operation, request_tool_name, decision, permission_target, command);
+  std::string preflight_source;
+  std::string preflight_rule_id;
+  std::string preflight_reason;
+  if (operation == ava::permissions::Operation::RunCommand && command_metadata && decision.action == ava::permissions::PermissionAction::Allow &&
+      context.command_deny_preflight)
+  {
+    auto preflight = context.command_deny_preflight(ava::permissions::PermissionPrompt{
+        .permission_request_id = permission_request_id,
+        .tool_call_id = context.current_call_id,
+        .operation = operation,
+        .mode = context.mode,
+        .workspace_dir = context.workspace_dir,
+        .target_path = permission_target,
+        .command = std::string(command),
+        .tool_name = request_tool_name,
+        .reason = decision.reason,
+        .risk = decision.risk,
+        .command_metadata = command_metadata,
+    });
+    if (!preflight || (*preflight != ava::permissions::PermissionResolution::Allow && *preflight != ava::permissions::PermissionResolution::AllowSessionGrant))
+    {
+      decision.action = ava::permissions::PermissionAction::Deny;
+      decision.risk = ava::permissions::PermissionRisk::Critical;
+      decision.reason = preflight ? (preflight->reason.empty() ? std::string("command denied by persistent policy") : preflight->reason)
+                                  : "persistent command deny preflight failed: " + preflight.error().format();
+      preflight_source = preflight && !preflight->resolution_source.empty() ? preflight->resolution_source : "persistent_rule_error";
+      preflight_rule_id = preflight ? preflight->rule_id : std::string{};
+      preflight_reason = decision.reason;
+    }
+  }
+
+  auto policy_event = audit_event(context, permission_request_id, operation, request_tool_name, decision, permission_target, command, command_metadata);
+  if (!preflight_source.empty())
+  {
+    policy_event.resolution_source = std::move(preflight_source);
+    if (operation != ava::permissions::Operation::RunCommand)
+      policy_event.resolution_reason = std::move(preflight_reason);
+    policy_event.rule_id = std::move(preflight_rule_id);
+  }
   if (decision.action == ava::permissions::PermissionAction::Allow || decision.action == ava::permissions::PermissionAction::Deny)
   {
     policy_event.resolution = ava::permissions::to_string(decision.action);
@@ -307,7 +367,8 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   }
   if (decision.action == ava::permissions::PermissionAction::Deny)
   {
-    return std::unexpected(permission_denied_error(error_message, decision, permission_target, command, "policy", "", permission_request_id));
+    return std::unexpected(
+        permission_denied_error(error_message, operation, decision, permission_target, command, command_metadata, "policy", "", permission_request_id));
   }
 
   if (!context.permission_resolver)
@@ -319,7 +380,8 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
     {
       return std::unexpected(std::move(audited.error()));
     }
-    return std::unexpected(permission_denied_error(error_message, decision, permission_target, command, "no_resolver", "", permission_request_id));
+    return std::unexpected(
+        permission_denied_error(error_message, operation, decision, permission_target, command, command_metadata, "no_resolver", "", permission_request_id));
   }
 
   auto resolution = context.permission_resolver(ava::permissions::PermissionPrompt{
@@ -335,7 +397,16 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
       .risk = decision.risk,
       .diff_preview = std::string(diff_preview),
       .diff_truncated = diff_truncated,
+      .command_metadata = command_metadata,
   });
+  if (resolution && *resolution == ava::permissions::PermissionResolution::AllowSessionGrant && command_metadata &&
+      !ava::permissions::command_permission_allows_reusable_grant(*command_metadata))
+  {
+    ava::permissions::PermissionResolutionDecision denied(ava::permissions::PermissionResolution::Deny,
+                                                          "the sealed command backend permits only one-shot approval");
+    denied.resolution_source = "backend_scope";
+    resolution = std::move(denied);
+  }
 
   auto outcome_event = policy_event;
   outcome_event.resolution_source =
@@ -345,10 +416,13 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   if (!resolution)
     outcome_event.resolution_source = "resolver_failed";
   outcome_event.resolution = resolution ? ava::permissions::to_string(*resolution) : "deny";
-  if (resolution)
-    outcome_event.resolution_reason = resolution->reason;
-  else
-    outcome_event.resolution_reason = resolution.error().format();
+  if (operation != ava::permissions::Operation::RunCommand)
+  {
+    if (resolution)
+      outcome_event.resolution_reason = resolution->reason;
+    else
+      outcome_event.resolution_reason = resolution.error().format();
+  }
   if (resolution)
     outcome_event.rule_id = resolution->rule_id;
   if (auto audited = record_permission_audit(context, outcome_event); !audited)
@@ -363,14 +437,32 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled");
     error.with_context("permission_request_id", permission_request_id);
-    error.with_context("resolution_reason", resolution->reason);
+    if (operation != ava::permissions::Operation::RunCommand)
+      error.with_context("resolution_reason", resolution->reason);
     return std::unexpected(std::move(error));
   }
 
   auto const resolution_context = resolution ? ava::permissions::to_string(*resolution) : std::string("resolver_failed");
   auto const resolution_reason = resolution ? resolution->reason : resolution.error().format();
-  return std::unexpected(
-      permission_denied_error(error_message, decision, permission_target, command, resolution_context, resolution_reason, permission_request_id));
+  return std::unexpected(permission_denied_error(error_message, operation, decision, permission_target, command, command_metadata, resolution_context,
+                                                 resolution_reason, permission_request_id));
+}
+
+ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command, ava::command::CommandPreparation const& preparation,
+                                                bool unverified_delegated_executor, std::string_view tool_name, std::string_view error_message)
+{
+  auto metadata = ava::permissions::command_permission_metadata(preparation.plan(), unverified_delegated_executor);
+  return ensure_permission(context, ava::permissions::Operation::RunCommand, preparation.plan().cwd(), command, tool_name, error_message, {}, false,
+                           std::move(metadata));
+}
+
+ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command, ava::command::CommandPreparation const& preparation,
+                                                ava::permissions::CommandContainmentInfo const& containment, bool unverified_delegated_executor,
+                                                std::string_view tool_name, std::string_view error_message)
+{
+  auto metadata = ava::permissions::command_permission_metadata(preparation.plan(), containment, unverified_delegated_executor);
+  return ensure_permission(context, ava::permissions::Operation::RunCommand, preparation.plan().cwd(), command, tool_name, error_message, {}, false,
+                           std::move(metadata));
 }
 
 std::string permission_audit_data_json(PermissionAuditEvent const& event)
@@ -388,9 +480,18 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event)
   {
     data += ",\"target_path\":\"" + ava::core::json::escape(event.target_path.string()) + "\"";
   }
-  if (!event.command.empty())
+  if (event.operation == ava::permissions::Operation::RunCommand || event.command_arguments_redacted || !event.command.empty())
   {
-    data += ",\"command\":\"" + ava::core::json::escape(event.command) + "\"";
+    std::string command;
+    if (event.operation == ava::permissions::Operation::RunCommand)
+    {
+      command = event.command_arguments_redacted ? "[redacted]" : safe_command_display(event.command_metadata);
+    }
+    else
+    {
+      command = event.command_arguments_redacted ? "[redacted]" : event.command;
+    }
+    data += ",\"command\":\"" + ava::core::json::escape(command) + "\"";
   }
   if (!event.resolution.empty())
   {
@@ -400,7 +501,7 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event)
   {
     data += ",\"resolution_source\":\"" + ava::core::json::escape(event.resolution_source) + "\"";
   }
-  if (!event.resolution_reason.empty())
+  if (event.operation != ava::permissions::Operation::RunCommand && !event.resolution_reason.empty())
   {
     data += ",\"resolution_reason\":\"" + ava::core::json::escape(event.resolution_reason) + "\"";
   }
@@ -411,6 +512,38 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event)
   if (!event.rule_id.empty())
   {
     data += ",\"rule_id\":\"" + ava::core::json::escape(event.rule_id) + "\"";
+  }
+  if (event.command_metadata)
+  {
+    auto const& metadata = *event.command_metadata;
+    // This is local audit metadata, not a process environment dump. The
+    // profile identifier and digest bind the contract without serializing any
+    // HOME/XDG/TMP/PATH or other environment values.
+    data += ",\"command_metadata\":{\"level\":\"" + ava::core::json::escape(ava::command::to_string(metadata.level)) + "\",\"family\":\"" +
+            ava::core::json::escape(ava::command::to_string(metadata.family)) + "\",\"fingerprint\":\"" + ava::core::json::escape(metadata.fingerprint) +
+            "\",\"execution_domain\":\"" + ava::core::json::escape(ava::command::to_string(metadata.execution_domain)) + "\",\"resolved_executable\":\"" +
+            ava::core::json::escape(metadata.resolved_executable.string()) + "\",\"origin\":\"" +
+            ava::core::json::escape(ava::command::to_string(metadata.executable_origin)) + "\",\"cwd\":\"" + ava::core::json::escape(metadata.cwd.string()) +
+            "\",\"containment_available\":" + (metadata.containment_available ? "true" : "false") + ",\"containment_status\":\"" +
+            ava::core::json::escape(ava::permissions::to_string(metadata.containment_status)) + "\",\"backend_maximum_scope\":\"" +
+            ava::core::json::escape(ava::command::to_string(metadata.backend_maximum_scope)) + "\",\"recipe_payload_version\":\"" +
+            ava::core::json::escape(metadata.recipe_payload_version) + "\",\"global_recipe_key\":\"" + ava::core::json::escape(metadata.global_recipe_key) +
+            "\",\"workspace_recipe_key\":\"" + ava::core::json::escape(metadata.workspace_recipe_key) + "\"";
+    if (!event.command_arguments_redacted)
+    {
+      data += ",\"recipe_display\":\"" + ava::core::json::escape(metadata.recipe_display) + "\"";
+    }
+    data += ",\"effective_allowed_scopes\":[";
+    for (std::size_t index = 0; index < metadata.effective_allowed_scopes.size(); ++index)
+    {
+      if (index > 0)
+        data += ',';
+      data += "\"" + ava::core::json::escape(ava::command::to_string(metadata.effective_allowed_scopes[index])) + "\"";
+    }
+    data += "],\"containment_profile_id\":\"" + ava::core::json::escape(metadata.containment_profile_id) +
+            "\",\"containment_network_allowed\":" + (metadata.containment_network_allowed ? "true" : "false") + ",\"environment_profile_id\":\"" +
+            ava::core::json::escape(metadata.environment_profile_id) + "\",\"environment_digest\":\"" + ava::core::json::escape(metadata.environment_digest) +
+            "\",\"executor_identity_verified\":" + (metadata.executor_identity_verified ? "true" : "false") + '}';
   }
   data += '}';
   return data;

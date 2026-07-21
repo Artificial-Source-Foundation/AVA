@@ -135,6 +135,9 @@ struct AgentLoopOptions
   bool announce_execution_after_permission = false;
   bool redact_permission_audit_arguments = false;
   bool require_explicit_file_permissions = false;
+  // Runtime-owned AVA config/state/session directories that command sealing
+  // must keep disjoint from the model command workspace.
+  std::vector<std::filesystem::path> ava_authority_roots = {};
   std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
   std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
   std::vector<SubagentDefinition> subagents = {};
@@ -146,6 +149,11 @@ struct AgentLoopOptions
   std::function<ava::core::VoidResult(ToolProgressEntry const&)> on_tool_progress = nullptr;
   std::function<ava::core::VoidResult(ava::provider::StreamEvent const&)> on_stream_event = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
+  // Deny-only, non-interactive policy check used before a model-initiated
+  // command's backend auto-Allow. Mirrors ToolContext::command_deny_preflight
+  // so model tool calls receive the same persistent-Deny enforcement as direct
+  // app commands. It must never prompt or return reusable authority.
+  ava::permissions::PermissionResolver command_deny_preflight = nullptr;
   QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
@@ -223,6 +231,7 @@ class AgentLoop
                                                                  ava::provider::Transport& transport, ava::observability::TraceContext const& trace_context);
 
   AgentLoopOptions options_;
+  bool ava_authority_roots_over_limit_ = false;
 };
 
 }  // namespace ava::agent

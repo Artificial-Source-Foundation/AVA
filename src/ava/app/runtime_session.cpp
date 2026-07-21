@@ -266,12 +266,29 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
     // before AnchorSet::open so the anchor descriptor is pre-opened.
     std::error_code spill_error;
     std::filesystem::create_directories(spill_dir, spill_error);
+    if (spill_error)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create the session spill anchor"));
+    std::filesystem::permissions(spill_dir, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace, spill_error);
+    if (spill_error)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to secure the session spill anchor"));
     anchor_roots.push_back(spill_dir);
+
+    std::error_code config_error;
+    std::filesystem::create_directories(options.paths.ava_config_dir, config_error);
+    if (config_error)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create the AVA config anchor"));
+    std::filesystem::permissions(options.paths.ava_config_dir, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace, config_error);
+    if (config_error)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to secure the AVA config anchor"));
+    anchor_roots.push_back(options.paths.ava_config_dir);
+
     for (auto const& dir : options.additional_writable_dirs)
       anchor_roots.push_back(dir);
     auto opened = ava::core::AnchorSet::open(anchor_roots);
-    if (opened)
-      anchor_set = std::move(*opened);
+    if (!opened || !(*opened)->find_anchor(workspace_dir) || !(*opened)->find_anchor(spill_dir) || !(*opened)->find_anchor(options.paths.ava_config_dir))
+      return std::unexpected(opened ? ava::core::Error(ava::core::ErrorCategory::Io, "failed to retain all required runtime anchors")
+                                    : std::move(opened.error()));
+    anchor_set = std::move(*opened);
   }
 
   runtime::Session session{.store = std::move(store),

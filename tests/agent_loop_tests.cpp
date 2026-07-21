@@ -16,6 +16,7 @@
 #include "ava/session/session_store.h"
 #include "ava/session/validation.h"
 #include "ava/permissions/permission.h"
+#include "ava/permissions/permission_rules.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -38,6 +39,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <sys/stat.h>
 
 namespace {
 
@@ -1059,6 +1061,122 @@ void test_agent_loop_task_subagent_runs_child_session()
          "observed foreground task has separate parent/child lifecycles, fresh child session IDs, and typed parent correlation");
 }
 
+void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_background_children()
+{
+  auto run_case = [](bool background) {
+    auto const root = create_empty_root(background ? "agent-task-authority-background" : "agent-task-authority-foreground");
+    std::error_code remove_error;
+    std::filesystem::remove_all(root, remove_error);
+    auto const workspace = root / "workspace";
+    std::filesystem::create_directories(workspace);
+    expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+           "task authority-root fixture keeps sealed planning roots owner-only");
+    ava::session::SessionStore store(ava::session::SessionStoreOptions{
+        .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = background ? "task-authority-bg" : "task-authority-fg"});
+    ava::provider::OpenAIProvider const provider("https://api.example.test");
+    auto const task_arguments = std::string(R"({"description":"authority child","prompt":"run child bash","subagent_type":"general","background":)") +
+                                (background ? "true}" : "false}");
+    auto const child_bash = tool_call_sse("call_child_bash", "bash", R"({"command":"ls"})") + "data: [DONE]\n\n";
+    int task_prompts = 0;
+    auto collector = std::make_shared<TraceCollector>();
+    auto observation = std::make_shared<ava::observability::RunObservation>(collector);
+    std::shared_ptr<ava::agent::BackgroundJobRegistry> registry;
+    std::shared_ptr<std::vector<ava::provider::HttpResponse>> background_responses;
+    std::shared_ptr<std::vector<ava::provider::HttpRequest>> background_requests;
+    std::shared_ptr<std::mutex> background_mutex;
+    ava::tests::FakeTransport transport(background
+                                            ? std::vector<ava::provider::HttpResponse>{sse_response(tool_call_sse("call_task", "task", task_arguments) + "data: [DONE]\n\n"),
+                                                                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent queued\"}\n\n"
+                                                                                                     "data: [DONE]\n\n")}
+                                            : std::vector<ava::provider::HttpResponse>{sse_response(tool_call_sse("call_task", "task", task_arguments) + "data: [DONE]\n\n"),
+                                                                                        sse_response(child_bash),
+                                                                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child denied\"}\n\n"
+                                                                                                     "data: [DONE]\n\n"),
+                                                                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent continued\"}\n\n"
+                                                                                                     "data: [DONE]\n\n")});
+    if (background)
+    {
+      registry = std::make_shared<ava::agent::BackgroundJobRegistry>();
+      background_responses = std::make_shared<std::vector<ava::provider::HttpResponse>>(
+          std::vector<ava::provider::HttpResponse>{sse_response(child_bash),
+                                                    sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child denied\"}\n\n"
+                                                                 "data: [DONE]\n\n")});
+      background_requests = std::make_shared<std::vector<ava::provider::HttpRequest>>();
+      background_mutex = std::make_shared<std::mutex>();
+    }
+
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+        .workspace_dir = workspace,
+        .anchor_set = command_anchors_for_test(workspace, store.session_path().parent_path() / "spill"),
+        .mode = ava::agent::Mode::Build,
+        .provider_id = "openai",
+        .model_id = "gpt-5.5",
+        .system_prompt = "system prompt",
+        .access_token = "token",
+        .ava_authority_roots = {workspace},
+        .permission_resolver = [&task_prompts](ava::permissions::PermissionPrompt const& prompt)
+            -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+          ++task_prompts;
+          expect(prompt.operation == ava::permissions::Operation::TaskRun, "authority-root child only prompts to authorize its parent task");
+          return ava::permissions::PermissionResolution::Allow;
+        },
+        .background_provider_factory = background
+                                           ? []() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
+                                               std::unique_ptr<ava::provider::Provider> child =
+                                                   std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
+                                               return child;
+                                             }
+                                           : decltype(ava::agent::AgentLoopOptions{}.background_provider_factory){},
+        .background_transport_factory =
+            background
+                ? [background_responses, background_requests, background_mutex]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
+                    std::unique_ptr<ava::provider::Transport> child =
+                        std::make_unique<SharedFakeTransport>(background_responses, background_requests, background_mutex);
+                    return child;
+                  }
+                : decltype(ava::agent::AgentLoopOptions{}.background_transport_factory){},
+        .background_jobs = registry,
+        .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
+        .observation = observation,
+    });
+    auto result = loop.run_turn("delegate authority child", store, provider, transport);
+
+    bool child_completed = !background;
+    std::vector<ava::provider::HttpRequest> child_requests;
+    if (background)
+    {
+      auto jobs = registry->snapshot();
+      if (!jobs.empty())
+      {
+        auto completed = registry->wait(jobs.front().job_id, std::chrono::milliseconds(1000));
+        child_completed = completed && completed->state == ava::agent::BackgroundJobState::Completed && completed->final_text == "child denied";
+      }
+      registry->join_finished();
+      std::lock_guard lock(*background_mutex);
+      child_requests = *background_requests;
+    }
+    bool process_started = false;
+    {
+      std::lock_guard lock(collector->mutex);
+      process_started = std::ranges::any_of(collector->events, [](ava::observability::TraceEvent const& event) {
+        return event.type == ava::observability::TraceEventType::ProcessStart;
+      });
+    }
+    auto const child_error_propagated = background
+                                            ? child_requests.size() == 2 && child_requests[1].body.find("must not overlap with any AVA authority root") != std::string::npos
+                                            : transport.requests().size() == 4 &&
+                                                  transport.requests()[2].body.find("must not overlap with any AVA authority root") != std::string::npos;
+    expect(result && task_prompts == 1 && child_completed && child_error_propagated && !process_started,
+           background ? "background child copies AVA authority roots before its AgentLoop starts and blocks overlapping model commands"
+                      : "foreground child copies AVA authority roots before its AgentLoop starts and blocks overlapping model commands");
+  };
+
+  run_case(false);
+  run_case(true);
+}
+
 void test_agent_loop_task_subagent_recovers_torn_child_before_resume()
 {
   auto const root = create_empty_root("agent-task-subagent-torn-resume");
@@ -1850,6 +1968,8 @@ void test_agent_loop_permission_resolver_threads_to_tools()
 
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "agent command permission workspace is owner-only for sealed planning");
   auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
@@ -1916,6 +2036,8 @@ void test_agent_loop_permission_resolver_threads_to_tools()
 
     auto const bash_workspace = bash_root / "workspace";
     std::filesystem::create_directories(bash_workspace);
+    expect(::chmod(bash_root.c_str(), S_IRWXU) == 0 && ::chmod(bash_workspace.c_str(), S_IRWXU) == 0,
+           "agent bash allow workspace is owner-only for sealed planning");
     ava::session::SessionStore bash_store(
         ava::session::SessionStoreOptions{.root_dir = bash_root / "sessions", .workspace_dir = bash_workspace, .session_id = "bash-allow"});
     ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
@@ -1928,6 +2050,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
     int bash_allow_prompts = 0;
     ava::agent::AgentLoop bash_loop(ava::agent::AgentLoopOptions{
         .workspace_dir = bash_workspace,
+        .anchor_set = command_anchors_for_test(bash_workspace, bash_store.session_path().parent_path() / "spill"),
         .mode = ava::agent::Mode::Build,
         .provider_id = "openai",
         .model_id = "gpt-5.5",
@@ -1955,6 +2078,8 @@ void test_agent_loop_permission_resolver_threads_to_tools()
 
     auto const bash_workspace = bash_root / "workspace";
     std::filesystem::create_directories(bash_workspace);
+    expect(::chmod(bash_root.c_str(), S_IRWXU) == 0 && ::chmod(bash_workspace.c_str(), S_IRWXU) == 0,
+           "agent bash deny workspace is owner-only for sealed planning");
     ava::session::SessionStore bash_store(
         ava::session::SessionStoreOptions{.root_dir = bash_root / "sessions", .workspace_dir = bash_workspace, .session_id = "bash-deny"});
     ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
@@ -1967,6 +2092,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
     int bash_deny_prompts = 0;
     ava::agent::AgentLoop bash_loop(ava::agent::AgentLoopOptions{
         .workspace_dir = bash_workspace,
+        .anchor_set = command_anchors_for_test(bash_workspace, bash_store.session_path().parent_path() / "spill"),
         .mode = ava::agent::Mode::Build,
         .provider_id = "openai",
         .model_id = "gpt-5.5",
@@ -1989,7 +2115,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
            "agent loop records denied bash Ask decisions as failed tool results and continues");
     auto bash_entries = bash_store.load();
     auto bash_audits = bash_entries ? permission_entries(*bash_entries) : std::vector<ava::session::SessionEntry>{};
-    expect(bash_audits.size() == 2 && ava::core::json::string_field(bash_audits[1].data_json, "command") == "true" &&
+    expect(bash_audits.size() == 2 && ava::core::json::string_field(bash_audits[1].data_json, "command") == "<redacted one-shot command>" &&
                ava::core::json::string_field(bash_audits[1].data_json, "resolution") == "deny" &&
                ava::core::json::string_field(bash_audits[1].data_json, "resolution_source") == "resolver",
            "agent loop persists resolver-denied command permission audit entries");
@@ -2000,6 +2126,8 @@ void test_agent_loop_permission_resolver_threads_to_tools()
 
     auto const bash_workspace = bash_root / "workspace";
     std::filesystem::create_directories(bash_workspace);
+    expect(::chmod(bash_root.c_str(), S_IRWXU) == 0 && ::chmod(bash_workspace.c_str(), S_IRWXU) == 0,
+           "agent bash resolver failure workspace is owner-only for sealed planning");
     ava::session::SessionStore bash_store(
         ava::session::SessionStoreOptions{.root_dir = bash_root / "sessions", .workspace_dir = bash_workspace, .session_id = "bash-fail"});
     ava::tests::FakeTransport bash_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
@@ -2012,6 +2140,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
     int bash_fail_prompts = 0;
     ava::agent::AgentLoop bash_loop(ava::agent::AgentLoopOptions{
         .workspace_dir = bash_workspace,
+        .anchor_set = command_anchors_for_test(bash_workspace, bash_store.session_path().parent_path() / "spill"),
         .mode = ava::agent::Mode::Build,
         .provider_id = "openai",
         .model_id = "gpt-5.5",
@@ -3243,6 +3372,132 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
   }
 }
 
+void test_agent_loop_model_command_deny_preflight_blocks_auto_allow_without_process()
+{
+  auto const test_root = temp_root();
+  expect(::chmod(test_root.c_str(), S_IRWXU) == 0, "model command deny preflight test secures its test-root ancestor");
+  auto const root = test_root / "agent-model-command-preflight-deny";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "model command deny preflight fixture keeps sealed planning roots owner-only");
+
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "model-preflight-deny"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response(tool_call_sse("call_auto_allow", "bash", R"({"command":"ls"})") + "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"persistent deny handled\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  auto collector = std::make_shared<TraceCollector>();
+  auto observation = std::make_shared<ava::observability::RunObservation>(collector);
+  int interactive_prompts = 0;
+  int deny_preflights = 0;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .anchor_set = command_anchors_for_test(workspace, store.session_path().parent_path() / "spill"),
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .permission_resolver = [&interactive_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++interactive_prompts;
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .command_deny_preflight =
+          [&deny_preflights](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++deny_preflights;
+        expect(prompt.operation == ava::permissions::Operation::RunCommand && prompt.command == "ls" && prompt.command_metadata &&
+                   prompt.command_metadata->level == ava::command::CommandLevel::Standard &&
+                   prompt.command_metadata->containment_status == ava::permissions::CommandContainmentStatus::NotRequired,
+               "model command deny preflight receives the auto-Allow standard command's sealed metadata");
+        ava::permissions::PermissionResolutionDecision denied(ava::permissions::PermissionResolution::Deny, "external persistent Deny");
+        denied.resolution_source = "persistent_rule";
+        denied.rule_id = "rule_model_deny";
+        denied.authoritative = true;
+        return denied;
+      },
+      .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+      .observation = observation,
+  });
+
+  auto result = loop.run_turn("run inspection", store, provider, transport);
+  bool process_started = false;
+  {
+    std::lock_guard lock(collector->mutex);
+    process_started = std::ranges::any_of(collector->events, [](ava::observability::TraceEvent const& event) {
+      return event.type == ava::observability::TraceEventType::ProcessStart;
+    });
+  }
+  expect(result && result->final_text == "persistent deny handled" && deny_preflights == 1 && interactive_prompts == 0 &&
+             result->tool_timeline.size() == 1 && result->tool_timeline.front().status == ava::agent::ToolTimelineStatus::Error && !process_started,
+         "an authoritative model-command Deny preflight overrides Standard auto-Allow before prompt or process side effects");
+}
+
+void test_agent_loop_model_command_rejects_authority_workspace_before_permission_or_process()
+{
+  auto const test_root = temp_root();
+  expect(::chmod(test_root.c_str(), S_IRWXU) == 0, "model authority-root test secures its test-root ancestor");
+  auto const root = test_root / "agent-model-authority-root";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "ava-authority";
+  std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "model authority-root fixture keeps sealed planning roots owner-only");
+
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "model-authority-root"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response(tool_call_sse("call_authority", "bash", R"({"command":"ls"})") + "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"authority rejected\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  auto collector = std::make_shared<TraceCollector>();
+  auto observation = std::make_shared<ava::observability::RunObservation>(collector);
+  int prompts = 0;
+  int preflights = 0;
+  std::vector<std::filesystem::path> duplicate_roots(65, workspace);
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .anchor_set = command_anchors_for_test(workspace, store.session_path().parent_path() / "spill"),
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .ava_authority_roots = std::move(duplicate_roots),
+      .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++prompts;
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .command_deny_preflight = [&preflights](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++preflights;
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+      .observation = observation,
+  });
+
+  auto result = loop.run_turn("inspect authority", store, provider, transport);
+  bool process_started = false;
+  {
+    std::lock_guard lock(collector->mutex);
+    process_started = std::ranges::any_of(collector->events, [](ava::observability::TraceEvent const& event) {
+      return event.type == ava::observability::TraceEventType::ProcessStart;
+    });
+  }
+  auto const detail = result && !result->tool_timeline.empty() ? result->tool_timeline.front().result_summary : std::string{};
+  expect(result && result->final_text == "authority rejected" && prompts == 0 && preflights == 0 && !process_started &&
+             detail.find("must not overlap with any AVA authority root") != std::string::npos,
+         "model ToolContexts deduplicate bounded AVA authority roots and reject overlapping workspaces before prompts or processes");
+}
+
 void test_agent_loop_truncates_tool_context()
 {
   auto const root = create_empty_root("agent-tool-truncate");
@@ -3341,6 +3596,7 @@ void run_agent_loop_tests()
   test_agent_loop_usage_and_cost_persistence();
   test_agent_loop_tool_turn_and_continuation();
   test_agent_loop_task_subagent_runs_child_session();
+  test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_background_children();
   test_agent_loop_task_subagent_recovers_torn_child_before_resume();
   test_subagent_config_loads_project_definitions();
   test_agent_loop_custom_subagent_definition_controls_prompt_and_tools();
@@ -3376,5 +3632,7 @@ void run_agent_loop_tests()
   test_agent_loop_cancellation_stops_later_sequential_tools();
   test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids();
   test_unresolved_committed_function_recovery_never_partially_appends_after_a_closed_window();
+  test_agent_loop_model_command_deny_preflight_blocks_auto_allow_without_process();
+  test_agent_loop_model_command_rejects_authority_workspace_before_permission_or_process();
   test_agent_loop_truncates_tool_context();
 }

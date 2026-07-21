@@ -32,7 +32,8 @@ function(assert_after VAR_NAME ANCHOR NEEDLE)
   endif()
 endfunction()
 
-get_filename_component(TEST_ROOT "${AVA_CLI_TEST_ROOT}" ABSOLUTE)
+get_filename_component(TEST_ROOT_NAME "${AVA_CLI_TEST_ROOT}" NAME)
+set(TEST_ROOT "/tmp/${TEST_ROOT_NAME}")
 set(WORKSPACE "${TEST_ROOT}/workspace")
 set(HOME_DIR "${TEST_ROOT}/home")
 set(CONFIG_DIR "${TEST_ROOT}/config")
@@ -52,7 +53,11 @@ set(TARGET_FILE "${WORKSPACE}/src/todo.txt")
 set(MUTATION_FILE "${TEST_ROOT}/outside-todo.txt")
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
-file(MAKE_DIRECTORY "${WORKSPACE}/src" "${WORKSPACE}/docs" "${HOME_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}" "${DATA_DIR}")
+file(MAKE_DIRECTORY "${WORKSPACE}/src" "${WORKSPACE}/docs" "${HOME_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}/ava/sessions" "${DATA_DIR}")
+# Model command sealing treats AVA's config and current-session namespace as
+# authority roots, so this fixture must model the owner-private XDG layout.
+file(CHMOD "${TEST_ROOT}" "${WORKSPACE}" "${HOME_DIR}" "${CONFIG_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}" "${STATE_DIR}/ava" "${STATE_DIR}/ava/sessions" "${DATA_DIR}"
+     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 file(WRITE "${WORKSPACE}/AGENTS.md" "headless e2e smoke project instructions\n")
 file(WRITE "${TARGET_FILE}" "status: TODO\ndetail: replace TODO with DONE and verify.\n")
 file(WRITE "${MUTATION_FILE}" "status: TODO\ndetail: replace TODO with DONE and verify.\n")

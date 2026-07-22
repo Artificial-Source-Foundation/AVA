@@ -3635,12 +3635,16 @@ void test_acp_peer_writer_acknowledged_lifecycle()
   auto state = std::make_shared<MemoryTransportState>();
   state->block_writes = true;
   std::atomic_int side_effects = 0;
-  std::atomic_bool completed = false;
-  JsonRpcPeer peer(std::make_unique<MemoryTransport>(state), [&side_effects, &completed](Request const&, std::stop_token) -> RequestResult {
-    side_effects.fetch_add(1, std::memory_order_relaxed);
-    completed.store(true, std::memory_order_release);
-    return std::string(R"({"ok":true})");
-  });
+  JsonRpcPeer* handler_peer = nullptr;
+  std::promise<bool> handler_commit;
+  auto handler_committed = handler_commit.get_future();
+  JsonRpcPeer peer(std::make_unique<MemoryTransport>(state),
+                   [&side_effects, &handler_peer, &handler_commit](Request const& request, std::stop_token) -> RequestResult {
+                     side_effects.fetch_add(1, std::memory_order_relaxed);
+                     handler_commit.set_value(handler_peer->commit_inbound_request(request.id));
+                     return std::string(R"({"ok":true})");
+                   });
+  handler_peer = &peer;
   ava::core::VoidResult run_result;
   std::jthread thread([&] { run_result = peer.run(); });
   wait_reader(state);
@@ -3661,7 +3665,8 @@ void test_acp_peer_writer_acknowledged_lifecycle()
   }
 
   feed(state, R"({"jsonrpc":"2.0","id":"held","method":"work","params":{}})");
-  while (!completed.load(std::memory_order_acquire)) std::this_thread::sleep_for(1ms);
+  bool const handler_commit_ready = handler_committed.wait_for(2s) == std::future_status::ready;
+  bool const handler_commit_succeeded = handler_commit_ready && handler_committed.get();
   feed(state, R"({"jsonrpc":"2.0","id":"held","method":"work","params":{}})");
   feed(state, R"({"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":"held"}})");
   while (peer.stats().duplicate_inbound_ids == 0) std::this_thread::sleep_for(1ms);
@@ -3672,13 +3677,16 @@ void test_acp_peer_writer_acknowledged_lifecycle()
     state->cv.notify_all();
   }
   auto blocker = take_output(state);
-  auto first_response = take_output(state);
-  auto duplicate_response = take_output(state);
-  expect(blocker && blocker->find("test/block") != std::string::npos && first_response && first_response->find("\"result\"") != std::string::npos &&
-             duplicate_response && side_effects.load() == 1 && peer.stats().canceled_inbound_requests == 0,
+  auto terminal_response_one = take_output(state);
+  auto terminal_response_two = take_output(state);
+  std::string const terminal_responses = terminal_response_one.value_or("") + terminal_response_two.value_or("");
+  expect(blocker && blocker->find("test/block") != std::string::npos && terminal_response_one && terminal_response_two &&
+             terminal_responses.find("\"result\"") != std::string::npos && terminal_responses.find("\"code\":-32600") != std::string::npos &&
+             terminal_responses.find("Duplicate in-flight request id") != std::string::npos && handler_commit_succeeded && side_effects.load() == 1 &&
+             peer.stats().canceled_inbound_requests == 0,
          "late cancellation loses to the atomically committed handler result while retaining the inbound id and preventing duplicate side effects");
   expect(!take_output(state, 80ms), "each admitted inbound envelope produces exactly one terminal response under a stalled writer");
-  std::string const delivered = blocker.value_or("") + first_response.value_or("") + duplicate_response.value_or("");
+  std::string const delivered = blocker.value_or("") + terminal_responses;
   expect(!timed || delivered.find(id_debug_string(timed->id)) == std::string::npos,
          "a timed-out outbound call is skipped rather than sent after the writer resumes");
 

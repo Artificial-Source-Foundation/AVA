@@ -1,8 +1,8 @@
 #include "sys.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/session_ts.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime/session_ts.h"
 #include "ava/app/runtime_sessions.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/session/session_store.h"
@@ -658,6 +658,15 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
       return;
     std::this_thread::sleep_for(options_.admission_retry_interval);
   }
+  if (stop_token.stop_requested() || std::chrono::steady_clock::now() >= deadline)
+  {
+    if (!stop_token.stop_requested())
+      enqueue(snapshot);
+    return;
+  }
+
+  if (options_.admission_preflight)
+    options_.admission_preflight(stop_token);
   if (stop_token.stop_requested() || std::chrono::steady_clock::now() >= deadline)
   {
     if (!stop_token.stop_requested())

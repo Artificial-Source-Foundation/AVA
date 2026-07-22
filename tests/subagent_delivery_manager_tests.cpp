@@ -2,8 +2,8 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/test_harness.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/tools/tool_io.h"
@@ -55,6 +55,35 @@ struct DeliveryBlockingJob
             .provider_iterations = 0,
             .tool_calls = 0,
             .tool_iterations = 0};
+  }
+};
+
+struct DeliveryAdmissionBarrier
+{
+  std::mutex mutex;
+  std::condition_variable_any changed;
+  bool reached = false;
+  bool released = false;
+
+  void arrive_and_wait(std::stop_token stop_token)
+  {
+    std::unique_lock lock(mutex);
+    reached = true;
+    changed.notify_all();
+    changed.wait(lock, stop_token, [&] { return released; });
+  }
+
+  bool wait_reached()
+  {
+    std::unique_lock lock(mutex);
+    return changed.wait_for(lock, std::chrono::seconds(3), [&] { return reached; });
+  }
+
+  void release()
+  {
+    std::lock_guard lock(mutex);
+    released = true;
+    changed.notify_all();
   }
 };
 
@@ -236,7 +265,8 @@ struct DeliveryFixture
   std::optional<ava::app::runtime::Session> session;
 };
 
-DeliveryFixture make_fixture(std::string_view name, std::shared_ptr<DeliveryFactoryState> state, bool ask_question = false, std::size_t max_attempts = 3)
+DeliveryFixture make_fixture(std::string_view name, std::shared_ptr<DeliveryFactoryState> state, bool ask_question = false, std::size_t max_attempts = 3,
+                             std::function<void(std::stop_token)> admission_preflight = {})
 {
   DeliveryFixture fixture;
   fixture.root = temp_root() / std::string(name);
@@ -250,8 +280,10 @@ DeliveryFixture make_fixture(std::string_view name, std::shared_ptr<DeliveryFact
   if (!coordinator)
     return fixture;
   fixture.coordinator = *coordinator;
-  auto manager = ava::app::SubagentDeliveryManager::create(
-      {.coordinator = fixture.coordinator, .provider_bundle_factory = delivery_factory(std::move(state), ask_question), .max_delivery_attempts = max_attempts});
+  auto manager = ava::app::SubagentDeliveryManager::create({.coordinator = fixture.coordinator,
+                                                            .provider_bundle_factory = delivery_factory(std::move(state), ask_question),
+                                                            .max_delivery_attempts = max_attempts,
+                                                            .admission_preflight = std::move(admission_preflight)});
   expect(manager.has_value(), "delivery fixture creates application manager");
   if (!manager)
     return fixture;
@@ -351,7 +383,9 @@ void test_idle_delivery_and_terminal_before_registration()
 void test_active_turn_ordering_and_inactive_parent_navigation()
 {
   auto state = std::make_shared<DeliveryFactoryState>();
-  auto fixture = make_fixture("subagent-delivery-navigation", state);
+  auto admission = std::make_shared<DeliveryAdmissionBarrier>();
+  auto fixture =
+      make_fixture("subagent-delivery-navigation", state, false, 3, [admission](std::stop_token stop_token) { admission->arrive_and_wait(stop_token); });
   if (!fixture.session)
     return;
   ava::app::runtime::RunOptions options;
@@ -399,6 +433,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   auto completing = guard->transition(ava::app::RunPhase::Completing);
   auto completed = guard->complete({.run_id = {}, .reason = ava::app::StopReason::Completed});
   expect(building && awaiting && completing && completed, "active parent turn closes before synthetic delivery admission");
+  expect(admission->wait_reached(), "delivery worker reaches pre-admission after the parent controller becomes idle");
 
   ava::app::runtime::OpenOptions base;
   base.paths = fixture.paths;
@@ -418,13 +453,17 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   auto retained = ava::app::open_runtime_session(reopen);
   expect(retained && retained->run_controller.get() == parent_controller,
          "reopening a retained parent attaches its exact shared controller without lease reacquisition conflict");
+  admission->release();
   expect(state->wait_completed(), "inactive retained parent delivery completes after navigation");
+  std::size_t factories = 0;
   {
     std::lock_guard lock(state->mutex);
+    factories = state->factories;
     expect(state->retained_credential_at_factory.empty(), "delivery discards the retained parent credential and forces execution-time refresh");
   }
   auto snapshot = fixture.coordinator->snapshot(parent_id, started.job.identity.job_id);
-  expect(snapshot && snapshot->job.delivery == ava::agent::SubagentDeliveryState::Acknowledged, "inactive parent receives and acknowledges automatic delivery");
+  expect(snapshot && snapshot->job.delivery == ava::agent::SubagentDeliveryState::Acknowledged && snapshot->job.delivery_attempts == 1 && factories == 1,
+         "inactive parent receives and acknowledges automatic delivery in exactly one attempt");
   expect(fixture.session->store.session_id() == replacement_id, "inactive delivery does not change the visible session");
   fixture.manager->shutdown();
 }

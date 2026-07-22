@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -34,6 +35,10 @@ struct SubagentDeliveryManagerOptions
   std::size_t max_delivery_attempts = 3;
   std::chrono::milliseconds delivery_deadline = std::chrono::seconds(30);
   std::chrono::milliseconds admission_retry_interval = std::chrono::milliseconds(10);
+  // Optional application-owned hook invoked without manager, session, or
+  // controller locks after an idle controller is observed but before delivery
+  // attempt recording or admission. It must unblock when stop is requested.
+  std::function<void(std::stop_token)> admission_preflight = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

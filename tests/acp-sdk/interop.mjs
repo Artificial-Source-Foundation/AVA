@@ -433,11 +433,13 @@ async function readToolScenario(acp, args, base) {
 
 async function terminalScenario(acp, args, base) {
   const methods = [];
+  const updates = [];
   let expectedSession;
   let expectedWorkspace;
   let releases = 0;
   const terminalId = "official-sdk-terminal";
   const app = acp.client({ name: "ava-sdk-terminal" })
+    .onNotification(acp.methods.client.session.update, ({ params }) => updates.push(params.update))
     .onRequest(acp.methods.client.session.requestPermission, () => {
       methods.push(acp.methods.client.session.requestPermission);
       return { outcome: { outcome: "selected", optionId: "allow_once" } };
@@ -493,13 +495,20 @@ async function terminalScenario(acp, args, base) {
       await sdkRequest(ctx, acp, acp.methods.agent.session.close, { sessionId: created.sessionId }, "terminal session/close");
     },
   });
-  assert.deepEqual(methods, [
+  const expectedMethods = [
     acp.methods.client.session.requestPermission,
     acp.methods.client.terminal.create,
     acp.methods.client.terminal.waitForExit,
     acp.methods.client.terminal.output,
     acp.methods.client.terminal.release,
-  ]);
+  ];
+  const providerLog = await readFile(scenario.requestLog, "utf8");
+  const terminalDiagnostics = JSON.stringify({
+    updates,
+    providerRequests: (providerLog.match(/^--- request /gm) ?? []).length,
+    providerAdvertisedTools: providerLog.includes('"tools"'),
+  });
+  assert.deepEqual(methods, expectedMethods, `terminal method sequence mismatch: ${terminalDiagnostics}`);
   assert.equal(releases, 1, "terminal must be released exactly once");
   assert.equal(existsSync(path.join(scenario.roots.workspace, "terminal-e2e-marker")), false, "AVA executed the terminal command locally");
   assert.ok((await readFile(scenario.requestLog, "utf8")).includes("OFFICIAL_SDK_TERMINAL_OUTPUT"));

@@ -249,6 +249,7 @@ def main():
     for test_name in ("ava_cli.acp_sdk_interop", "ava_cli.acpx_interop", "ava_tests.acp_interop_manifest"):
         assert test_name in cmake
     assert "SKIP_RETURN_CODE 77" in cmake and "--required" in cmake
+    assert "--root ${CMAKE_BINARY_DIR}/acp-sdk-interop" not in cmake
     assert cmake.index("if(AVA_ENABLE_ACPX_INTEROP)") < cmake.index("NAME ava_cli.acpx_interop")
     assert "acp-acpx/node_modules/.bin/acpx" in cmake
 

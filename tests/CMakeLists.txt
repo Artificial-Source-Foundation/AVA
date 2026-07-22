@@ -168,8 +168,7 @@ if(AVA_NODE_EXECUTABLE)
     ${AVA_NODE_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/acp-sdk/interop.mjs
     --ava $<TARGET_FILE:ava>
-    --fake-provider $<TARGET_FILE:ava_fake_provider_server>
-    --root ${CMAKE_BINARY_DIR}/acp-sdk-interop)
+    --fake-provider $<TARGET_FILE:ava_fake_provider_server>)
   if(AVA_REQUIRE_ACP_SDK_INTEROP)
     list(APPEND AVA_ACP_SDK_INTEROP_COMMAND --required)
   endif()

@@ -157,7 +157,7 @@ void append_path_metadata(Sha256Builder& hash, PathMetadata const& metadata)
   }
 }
 
-ava::core::VoidResult validate_sealed_rustup_home(PathMetadata const& root, CommandLimits const& limits,
+ava::core::VoidResult validate_sealed_rustup_home(PathMetadata const& root, PathMetadata const& trusted_home, CommandLimits const& limits,
                                                   std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
 {
   if (root.canonical_path.empty() || !root.canonical_path.is_absolute() || has_forbidden_path_byte(root.canonical_path) ||
@@ -166,7 +166,13 @@ ava::core::VoidResult validate_sealed_rustup_home(PathMetadata const& root, Comm
     return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "RUSTUP_HOME is not a bounded canonical trusted toolchain path", "path",
                                          root.canonical_path.string()));
   }
-  auto fresh = path_metadata_is_fresh(root, anchor_set);
+  if (root.requested_path != (trusted_home.requested_path / ".rustup").lexically_normal())
+  {
+    return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "RUSTUP_HOME is outside the exact sealed trusted-home scope", "path",
+                                         root.requested_path.string()));
+  }
+  auto fresh = is_sealed_user_toolchain_path(root.requested_path, trusted_home) ? user_toolchain_path_metadata_is_fresh(root, trusted_home, anchor_set)
+                                                                                : path_metadata_is_fresh(root, anchor_set);
   if (!fresh)
     return std::unexpected(std::move(fresh.error()));
   if (!*fresh)
@@ -177,7 +183,7 @@ ava::core::VoidResult validate_sealed_rustup_home(PathMetadata const& root, Comm
   return {};
 }
 
-ava::core::Result<std::string> join_path(std::vector<CommandPathEntry> const& entries, CommandLimits const& limits,
+ava::core::Result<std::string> join_path(std::vector<CommandPathEntry> const& entries, PathMetadata const& trusted_home, CommandLimits const& limits,
                                          std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
 {
   std::string result;
@@ -192,7 +198,9 @@ ava::core::Result<std::string> join_path(std::vector<CommandPathEntry> const& en
       return std::unexpected(
           command_error(ava::core::ErrorCategory::InvalidArgument, "sealed PATH entry is not safely representable", "path", entry.directory.string()));
     }
-    auto fresh = path_metadata_is_fresh(entry.metadata, anchor_set);
+    auto fresh = is_sealed_user_toolchain_path(entry.metadata.requested_path, trusted_home)
+                     ? user_toolchain_path_metadata_is_fresh(entry.metadata, trusted_home, anchor_set)
+                     : path_metadata_is_fresh(entry.metadata, anchor_set);
     if (!fresh)
       return std::unexpected(std::move(fresh.error()));
     if (!*fresh)
@@ -264,9 +272,9 @@ std::string Sha256Builder::hex() const
 }
 
 ava::core::Result<CommandEnvironment> EnvironmentFactory::make(CommandEnvironmentOptions const& options, std::vector<CommandPathEntry> const& path_entries,
-                                                               std::filesystem::path const& logical_cwd, SyntheticEnvironmentRoots roots,
-                                                               std::optional<PathMetadata> rustup_home_metadata, CommandLimits const& limits,
-                                                               std::shared_ptr<ava::core::AnchorSet const> const& anchor_set,
+                                                               std::filesystem::path const& logical_cwd, PathMetadata const& trusted_home,
+                                                               SyntheticEnvironmentRoots roots, std::optional<PathMetadata> rustup_home_metadata,
+                                                               CommandLimits const& limits, std::shared_ptr<ava::core::AnchorSet const> const& anchor_set,
                                                                CommandEnvironment::FactoryPasskey passkey)
 {
   if (auto valid = validate_limits(limits); !valid)
@@ -283,6 +291,11 @@ ava::core::Result<CommandEnvironment> EnvironmentFactory::make(CommandEnvironmen
     if (value->empty() || value->size() > limits.max_argument_bytes || has_forbidden_byte(*value))
       return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "USER and LOGNAME must be bounded safe values"));
   }
+  auto trusted_home_fresh = trusted_home_metadata_is_fresh(trusted_home, anchor_set);
+  if (!trusted_home_fresh)
+    return std::unexpected(std::move(trusted_home_fresh.error()));
+  if (!*trusted_home_fresh)
+    return std::unexpected(command_error(ava::core::ErrorCategory::Io, "sealed trusted home changed during environment construction"));
   for (auto const& [name, root] : std::array<std::pair<std::string_view, PathMetadata const*>, 6>{{{"HOME", &roots.home},
                                                                                                    {"XDG_CONFIG_HOME", &roots.xdg_config_home},
                                                                                                    {"XDG_CACHE_HOME", &roots.xdg_cache_home},
@@ -296,11 +309,11 @@ ava::core::Result<CommandEnvironment> EnvironmentFactory::make(CommandEnvironmen
 
   if (rustup_home_metadata)
   {
-    if (auto valid = validate_sealed_rustup_home(*rustup_home_metadata, limits, anchor_set); !valid)
+    if (auto valid = validate_sealed_rustup_home(*rustup_home_metadata, trusted_home, limits, anchor_set); !valid)
       return std::unexpected(std::move(valid.error()));
   }
 
-  auto path = join_path(path_entries, limits, anchor_set);
+  auto path = join_path(path_entries, trusted_home, limits, anchor_set);
   if (!path)
     return std::unexpected(std::move(path.error()));
   CommandEnvironment environment(std::move(passkey), std::move(roots));

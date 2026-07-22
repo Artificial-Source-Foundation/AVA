@@ -2,10 +2,10 @@
 #include "tests/support/test_harness.h"
 #include "ava/command/command.h"
 #include "ava/containment/containment.h"
-#include "ava/core/AnchorSet.h"
 #include "ava/agent/mode.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/permissions/permission.h"
+#include "ava/core/AnchorSet.h"
 
 #include <algorithm>
 #include <array>
@@ -137,11 +137,8 @@ struct ContainmentFixture
 
   ava::tools::ToolContext make_context()
   {
-    return ava::tools::ToolContext{.workspace_dir = workspace,
-                                   .spill_dir = spill,
-                                   .mode = ava::agent::Mode::Build,
-                                   .anchor_set = anchors,
-                                   .ava_authority_roots = {ava_authority_root}};
+    return ava::tools::ToolContext{
+        .workspace_dir = workspace, .spill_dir = spill, .mode = ava::agent::Mode::Build, .anchor_set = anchors, .ava_authority_roots = {ava_authority_root}};
   }
 
   ava::tools::ToolContext make_allow_context()
@@ -701,6 +698,57 @@ void test_contained_rustup_cargo_reads_only_sealed_rustup_home()
          "there or read .cargo credentials, and remains network denied");
 }
 
+void test_final_symlink_trusted_home_containment_stays_strict()
+{
+  RustupContainmentFixture fix("final-symlink-trusted-home");
+  auto const first_target = fix.root / "trusted-home-target-one";
+  auto const second_target = fix.root / "trusted-home-target-two";
+  std::filesystem::rename(fix.trusted_home, first_target);
+  std::filesystem::create_directories(second_target / ".cargo" / "bin");
+  std::filesystem::create_directories(second_target / ".rustup");
+  for (auto const& directory : {second_target, second_target / ".cargo", second_target / ".cargo" / "bin", second_target / ".rustup"})
+    ::chmod(directory.c_str(), S_IRWXU);
+  std::filesystem::create_directory_symlink(first_target.filename(), fix.trusted_home);
+  auto opened = ava::core::AnchorSet::open({fix.workspace, fix.synthetic_root, fix.root});
+  if (opened)
+    fix.anchors = *opened;
+
+  bool const proxy_written = opened && fix.write_rustup_proxy();
+  std::error_code copy_error;
+  if (proxy_written)
+  {
+    std::filesystem::copy_file(first_target / ".cargo" / "bin" / "rustup", second_target / ".cargo" / "bin" / "rustup", copy_error);
+    ::chmod((second_target / ".cargo" / "bin" / "rustup").c_str(), S_IRUSR | S_IWUSR | S_IXUSR);
+    std::filesystem::create_symlink("rustup", second_target / ".cargo" / "bin" / "cargo", copy_error);
+    std::ofstream settings(second_target / ".rustup" / "settings-marker", std::ios::binary | std::ios::trunc);
+    settings << "replacement-rustup-settings-marker\n";
+  }
+  auto const intent = command::CommandIntent::structured({"cargo", "check"});
+  auto preparation = proxy_written && !copy_error ? command::prepare_command(*intent, fix.options())
+                                                  : ava::core::Result<command::CommandPreparation>{std::unexpected(
+                                                        ava::core::Error(ava::core::ErrorCategory::Io, "failed to create final-symlink rustup preparation"))};
+  auto const initial_fresh =
+      preparation ? command::plan_is_fresh(preparation->plan())
+                  : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no final-symlink rustup containment plan"))};
+  auto initial_containment = preparation ? containment::prepare_development_containment(*preparation, false) : containment::DevelopmentContainmentPlan{};
+
+  std::filesystem::remove(fix.trusted_home);
+  std::filesystem::create_directory_symlink(second_target.filename(), fix.trusted_home);
+  auto const retargeted_fresh =
+      preparation ? command::plan_is_fresh(preparation->plan())
+                  : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no retargeted trusted-home plan"))};
+  auto retargeted_containment = preparation ? containment::prepare_development_containment(*preparation, false) : containment::DevelopmentContainmentPlan{};
+
+  expect(proxy_written && preparation && preparation->plan().trusted_home_metadata().requested_path_is_symlink && preparation->plan().rustup_home_metadata() &&
+             preparation->plan().rustup_home_metadata()->requested_path ==
+                 (preparation->plan().trusted_home_metadata().requested_path / ".rustup").lexically_normal() &&
+             environment_value(preparation->environment(), "RUSTUP_HOME") == std::optional<std::string>{fix.rustup_home.string()} && initial_fresh &&
+             *initial_fresh && containment::containment_is_available(initial_containment) && retargeted_fresh && !*retargeted_fresh &&
+             !containment::containment_is_available(retargeted_containment),
+         "containment accepts the shared-AnchorSet logical final-symlink trusted-home spelling while identities are fresh and becomes unavailable after a "
+         "safe symlink retarget replaces its sealed .rustup identity");
+}
+
 void test_containment_rule_replacement_fails_before_restriction()
 {
   if (!landlock_available())
@@ -955,6 +1003,7 @@ void run_containment_tests()
   test_contained_command_reads_system_libs();
   test_contained_command_cannot_read_secret();
   test_contained_rustup_cargo_reads_only_sealed_rustup_home();
+  test_final_symlink_trusted_home_containment_stays_strict();
   test_containment_rule_replacement_fails_before_restriction();
   test_contained_command_cannot_write_ava_authority();
   test_contained_command_cannot_open_outbound_network();

@@ -32,8 +32,7 @@ namespace detail {
 std::uint64_t device_file_mask() noexcept;
 [[nodiscard]] ava::core::VoidResult validate_synthetic_directory_root(std::filesystem::path const& path, ava::core::AnchorSet const& anchors);
 [[nodiscard]] ava::core::VoidResult validate_writable_directory_root(std::filesystem::path const& path, ava::core::AnchorSet const& anchors);
-[[nodiscard]] ava::core::VoidResult validate_read_only_toolchain_directory_root(std::filesystem::path const& path,
-                                                                                ava::core::AnchorSet const& anchors);
+[[nodiscard]] ava::core::VoidResult validate_read_only_toolchain_directory_root(std::filesystem::path const& path, ava::core::AnchorSet const& anchors);
 [[nodiscard]] ava::core::VoidResult validate_device_root(std::filesystem::path const& path, ava::core::AnchorSet const& anchors);
 [[nodiscard]] bool path_is_within(std::filesystem::path const& child, std::filesystem::path const& parent);
 void add_filesystem_rule(std::vector<ContainmentFilesystemRule>& rules, std::filesystem::path const& path, std::uint64_t mask);
@@ -193,9 +192,12 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
   // Landlock allow rule; no CARGO_HOME or broader trusted-home rule exists.
   if (auto const& rustup_home = command_plan.rustup_home_metadata())
   {
-    auto fresh = ava::command::detail::path_metadata_is_fresh(*rustup_home, plan.anchor_set);
-    if (!fresh || !*fresh ||
-        detail::path_is_within(rustup_home->canonical_path, command_plan.workspace()) ||
+    auto fresh = rustup_home->requested_path == (command_plan.trusted_home_metadata().requested_path / ".rustup").lexically_normal()
+                     ? (ava::command::detail::is_sealed_user_toolchain_path(rustup_home->requested_path, command_plan.trusted_home_metadata())
+                            ? ava::command::detail::user_toolchain_path_metadata_is_fresh(*rustup_home, command_plan.trusted_home_metadata(), plan.anchor_set)
+                            : ava::command::detail::path_metadata_is_fresh(*rustup_home, plan.anchor_set))
+                     : ava::core::Result<bool>{false};
+    if (!fresh || !*fresh || detail::path_is_within(rustup_home->canonical_path, command_plan.workspace()) ||
         detail::path_is_within(command_plan.workspace(), rustup_home->canonical_path))
     {
       plan.availability = ContainmentAvailability::Unavailable;

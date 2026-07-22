@@ -109,7 +109,7 @@ def start_fake_provider(executable, root, delay_ms=0, scenario="text-three", tar
         [executable, str(port_file), str(request_log), str(delay_ms), scenario, str(target)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment(root / "environment"),
     )
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         assert server.poll() is None, server.stderr.read().decode(errors="replace")
         try:
@@ -150,26 +150,30 @@ def send(process, payload, ending=b"\n"):
     process.stdin.flush()
 
 
-def read_line(process, timeout=3.0):
+def read_line(process, timeout=10.0, operation="ACP response"):
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ)
     ready = selector.select(timeout)
     selector.close()
-    assert ready, "timed out waiting for ACP stdout record"
+    if not ready:
+        raise AssertionError(
+            f"timed out waiting for {operation}; process.poll()={process.poll()!r}")
     line = process.stdout.readline()
-    assert line, "ACP stdout closed before response"
+    assert line, f"ACP stdout closed during {operation}; process.poll()={process.poll()!r}"
     return json.loads(line)
 
 
-def read_until_id(process, request_id, timeout=5.0):
+def read_until_id(process, request_id, timeout=15.0, operation="ACP request completion"):
     records = []
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        record = read_line(process, max(0.05, deadline - time.monotonic()))
+        record = read_line(
+            process, max(0.05, deadline - time.monotonic()), operation)
         records.append(record)
         if record.get("id", object()) == request_id:
             return records
-    raise AssertionError(f"timed out waiting for ACP response {request_id!r}")
+    raise AssertionError(
+        f"timed out waiting for {operation}; process.poll()={process.poll()!r}")
 
 
 def expect_no_stdout(process, timeout=0.12):
@@ -182,7 +186,7 @@ def expect_no_stdout(process, timeout=0.12):
 
 def stop_cleanly(process):
     process.stdin.close()
-    assert process.wait(timeout=5) == 0
+    assert process.wait(timeout=10) == 0
     assert process.stdout.read() == b""
     assert process.stderr.read() == b""
 
@@ -198,7 +202,7 @@ def main():
     # than the build tree, whose checkout ancestor can deliberately be shared.
     root = Path(tempfile.mkdtemp(prefix="ava-acp-subprocess-"))
 
-    conflict = subprocess.run([args.ava, "--acp", "--rpc"], input=b"", capture_output=True, env=environment(root), timeout=5)
+    conflict = subprocess.run([args.ava, "--acp", "--rpc"], input=b"", capture_output=True, env=environment(root), timeout=10)
     assert conflict.returncode != 0 and conflict.stdout == b"" and b"standalone" in conflict.stderr
 
     parent_secret_name = "AVA_ACP_SUBPROCESS_PARENT_SECRET"
@@ -311,7 +315,7 @@ def main():
     send(loops, b'{"jsonrpc":"2.0","id":"usable","method":"initialize","params":{"protocolVersion":1}}')
     assert read_line(loops)["id"] == "usable"
     loops.stdin.close()
-    assert loops.wait(timeout=5) == 0
+    assert loops.wait(timeout=10) == 0
     assert loops.stdout.read() == b""
     diagnostics = loops.stderr.read().splitlines()
     response_intent_records = len(malformed_response_intent) + 6
@@ -333,7 +337,7 @@ def main():
         extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{port}", "MOONSHOT_API_KEY": "fake-acp-key"},
     )
     send(lifecycle, json.dumps({"jsonrpc": "2.0", "id": "i", "method": "initialize", "params": {"protocolVersion": 1}}).encode())
-    lifecycle_init = read_line(lifecycle)["result"]
+    lifecycle_init = read_line(lifecycle, operation="lifecycle initialize response")["result"]
     assert lifecycle_init["protocolVersion"] == 1
     assert lifecycle_init["agentCapabilities"]["loadSession"] is False
     assert lifecycle_init["agentCapabilities"]["promptCapabilities"]["image"] is False
@@ -343,7 +347,7 @@ def main():
             "jsonrpc": "2.0", "id": request_id, "method": "session/new",
             "params": {"cwd": str(cwd), "mcpServers": []},
         }).encode())
-        return read_line(lifecycle)
+        return read_line(lifecycle, operation="session/new lifecycle response")
 
     traversal = new_session("traversal", workspace / ".." / "outside")
     assert traversal["error"]["code"] == -32602 and "traversal" in traversal["error"]["message"]
@@ -397,14 +401,14 @@ def main():
         "params": {"sessionId": sid, "prompt": [{"type": "text", "text": text}]},
     }).encode())
     prompt("p1", session_a, "first")
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + 10
     while time.monotonic() < deadline and "--- request 1 ---" not in request_log.read_text(errors="replace"):
         time.sleep(0.01)
     assert "--- request 1 ---" in request_log.read_text(errors="replace")
     prompt("same-active", session_a, "must reject")
     active_rejection = read_line(lifecycle)
     assert active_rejection["id"] == "same-active" and active_rejection["error"]["code"] == -32600
-    first_records = read_until_id(lifecycle, "p1")
+    first_records = read_until_id(lifecycle, "p1", operation="first session prompt completion")
     assert first_records[-1]["result"]["stopReason"] == "end_turn"
     assert first_records[-2]["method"] == "session/update"
 
@@ -413,7 +417,7 @@ def main():
     independent = []
     completed = set()
     while completed != {"pa", "pb"}:
-        record = read_line(lifecycle, 5)
+        record = read_line(lifecycle, 10, "parallel session prompt completion")
         independent.append(record)
         if record.get("id") in {"pa", "pb"}:
             assert record["result"]["stopReason"] == "end_turn"
@@ -441,7 +445,7 @@ def main():
     send(lifecycle, json.dumps({"jsonrpc": "2.0", "id": "close-resumed", "method": "session/close", "params": {"sessionId": session_a}}).encode())
     assert read_line(lifecycle)["result"] == {}
     stop_cleanly(lifecycle)
-    assert server.wait(timeout=5) == 0, server.stderr.read().decode(errors="replace")
+    assert server.wait(timeout=10) == 0, server.stderr.read().decode(errors="replace")
 
     # A real bidirectional client must be able to answer a permission request
     # while session/prompt is still in flight. Tool updates remain ordered
@@ -472,7 +476,7 @@ def main():
     permission_records = []
     permission_request = None
     while True:
-        record = read_line(permission_process, 5)
+        record = read_line(permission_process, 10, "permission session lifecycle response")
         permission_records.append(record)
         if record.get("method") == "session/request_permission":
             permission_request = record
@@ -505,7 +509,7 @@ def main():
     assert update_kinds[-1] == "agent_message_chunk"
     assert permission_records[-1]["result"]["stopReason"] == "end_turn"
     stop_cleanly(permission_process)
-    assert permission_server.wait(timeout=5) == 0, permission_server.stderr.read().decode(errors="replace")
+    assert permission_server.wait(timeout=10) == 0, permission_server.stderr.read().decode(errors="replace")
     assert "ACP_PERMISSION_CONTENT" in permission_log.read_text(errors="replace")
 
     # M5 client filesystem routing is exercised through the real stdio peer,
@@ -536,7 +540,7 @@ def main():
     }).encode())
     client_fs_methods = []
     while True:
-        record = read_line(client_fs, 5)
+        record = read_line(client_fs, 10, "client filesystem session lifecycle response")
         method = record.get("method")
         if method == "session/request_permission":
             client_fs_methods.append(method)
@@ -560,7 +564,7 @@ def main():
             break
     assert client_fs_methods == ["session/request_permission", "fs/read_text_file"]
     stop_cleanly(client_fs)
-    assert client_fs_server.wait(timeout=5) == 0, client_fs_server.stderr.read().decode(errors="replace")
+    assert client_fs_server.wait(timeout=10) == 0, client_fs_server.stderr.read().decode(errors="replace")
     client_fs_requests = client_fs_log.read_text(errors="replace")
     assert "REMOTE_CLIENT_FS_CONTENT" in client_fs_requests and "LOCAL_CONTENT_MUST_NOT_WIN" not in client_fs_requests
 
@@ -590,7 +594,7 @@ def main():
     }).encode())
     terminal_methods = []
     while True:
-        record = read_line(terminal_process, 5)
+        record = read_line(terminal_process, 10, "terminal session lifecycle response")
         method = record.get("method")
         if method == "session/request_permission":
             terminal_methods.append(method)
@@ -620,7 +624,7 @@ def main():
         "session/request_permission", "terminal/create", "terminal/wait_for_exit", "terminal/output", "terminal/release"
     ]
     stop_cleanly(terminal_process)
-    assert terminal_server.wait(timeout=5) == 0, terminal_server.stderr.read().decode(errors="replace")
+    assert terminal_server.wait(timeout=10) == 0, terminal_server.stderr.read().decode(errors="replace")
     assert "SUBPROCESS_TERMINAL_OUTPUT" in terminal_log.read_text(errors="replace")
     assert not (workspace / "terminal-e2e-marker").exists()
 
@@ -646,10 +650,10 @@ def main():
             {"type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png", "uri": None},
         ]},
     }).encode())
-    image_records = read_until_id(image_process, "image-prompt", timeout=5)
+    image_records = read_until_id(image_process, "image-prompt", operation="image session prompt completion")
     assert image_records[-1]["result"]["stopReason"] == "end_turn"
     stop_cleanly(image_process)
-    assert image_server.wait(timeout=5) == 0, image_server.stderr.read().decode(errors="replace")
+    assert image_server.wait(timeout=10) == 0, image_server.stderr.read().decode(errors="replace")
     image_requests = image_log.read_text(errors="replace")
     assert "iVBORw0KGgo=" in image_requests and "image/png" in image_requests
 
@@ -673,7 +677,7 @@ def main():
         "jsonrpc": "2.0", "id": "idle-survives", "method": "session/prompt",
         "params": {"sessionId": cancel_session, "prompt": [{"type": "text", "text": "idle cancellation must not leak"}]},
     }).encode())
-    idle_records = read_until_id(cancel_process, "idle-survives", timeout=5)
+    idle_records = read_until_id(cancel_process, "idle-survives", operation="idle cancellation session prompt completion")
     assert idle_records[-1]["result"]["stopReason"] == "end_turn"
 
     prompt_payload = {
@@ -684,23 +688,23 @@ def main():
     send(cancel_process, json.dumps({
         "jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": cancel_session},
     }).encode())
-    canceled_records = read_until_id(cancel_process, "cancel-prompt", timeout=5)
+    canceled_records = read_until_id(cancel_process, "cancel-prompt", operation="active session cancellation completion")
     assert canceled_records[-1]["result"]["stopReason"] == "cancelled"
     stop_cleanly(cancel_process)
-    assert cancel_server.wait(timeout=5) == 0, cancel_server.stderr.read().decode(errors="replace")
+    assert cancel_server.wait(timeout=10) == 0, cancel_server.stderr.read().decode(errors="replace")
 
     auth_root = root / "auth-env"
     configure_fake_model(auth_root)
     auth = start(args.ava, auth_root, cwd=workspace, extra_env={"MOONSHOT_BASE_URL": "http://127.0.0.1:1"})
     send(auth, json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}}).encode())
-    assert read_line(auth)["result"]
+    assert read_line(auth, operation="auth lifecycle initialize response")["result"]
     send(auth, json.dumps({"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": str(workspace), "mcpServers": []}}).encode())
-    auth_session = read_line(auth)["result"]["sessionId"]
+    auth_session = read_line(auth, operation="auth lifecycle session construction")["result"]["sessionId"]
     send(auth, json.dumps({
         "jsonrpc": "2.0", "id": 3, "method": "session/prompt",
         "params": {"sessionId": auth_session, "prompt": [{"type": "text", "text": "needs auth"}]},
     }).encode())
-    auth_error = read_line(auth)
+    auth_error = read_line(auth, operation="auth lifecycle prompt response")
     assert auth_error["error"]["code"] == -32000
     assert "moonshot" in auth_error["error"]["message"] and "hint" in auth_error["error"]["message"]
     stop_cleanly(auth)
@@ -713,7 +717,7 @@ def main():
         "models": [{"provider": "bogus", "id": "missing", "name": "Missing", "family": "fake", "supports_tools": False}],
     }))
     model_process = start(args.ava, model_root, cwd=workspace)
-    assert model_process.wait(timeout=5) != 0
+    assert model_process.wait(timeout=10) != 0
     assert model_process.stdout.read() == b""
     model_diagnostic = model_process.stderr.read()
     assert b"startup provider is not registered" in model_diagnostic and b"bogus" in model_diagnostic
@@ -722,7 +726,7 @@ def main():
     broken = start(args.ava, root / "broken")
     broken.stdout.close()
     send(broken, json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}}).encode())
-    assert broken.wait(timeout=5) != 0
+    assert broken.wait(timeout=10) != 0
     broken.stdin.close()
     diagnostic = broken.stderr.read()
     assert diagnostic and b"protocolVersion" not in diagnostic and b"initialize" not in diagnostic

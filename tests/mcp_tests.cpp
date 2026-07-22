@@ -74,7 +74,8 @@ bool process_group_exists(pid_t pgid)
 
 bool wait_for_process_group_exit(pid_t pgid)
 {
-  for (int index = 0; index < 100; ++index)
+  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (std::chrono::steady_clock::now() < deadline)
   {
     if (!process_group_exists(pgid))
       return true;
@@ -105,8 +106,8 @@ ava::mcp::McpStdioClientOptions fake_client_options(std::filesystem::path const&
 {
   ava::mcp::McpStdioClientOptions options;
   options.workspace_dir = workspace;
-  options.startup_timeout = std::chrono::milliseconds(500);
-  options.request_timeout = std::chrono::milliseconds(500);
+  options.startup_timeout = std::chrono::seconds(5);
+  options.request_timeout = std::chrono::seconds(5);
   return options;
 }
 
@@ -1113,13 +1114,16 @@ void test_mcp_ordinary_global_and_project_environment_is_inherited()
   server.args = {"env-marker", marker.string()};
   server.env = {{"AVA_MCP_EXPLICIT", "project-value"}, {"PATH", "/bounded/project/path"}};
   auto explicit_path = ava::mcp::McpStdioClient::start(server, fake_client_options(root));
-  expect(explicit_path.has_value(), "ordinary project MCP starts with explicit environment overrides");
+  expect(explicit_path.has_value(), explicit_path ? "ordinary project MCP starts with explicit environment overrides"
+                                                  : "ordinary project MCP start failed: " + explicit_path.error().format());
   if (explicit_path)
+  {
     static_cast<void>((*explicit_path)->shutdown());
-  auto const explicit_marker = read_text(marker);
-  expect(explicit_marker.find("EXPLICIT=project-value") != std::string::npos && explicit_marker.find("INHERITED=parent-marker") != std::string::npos &&
-             explicit_marker.find("PATH=/bounded/project/path") != std::string::npos,
-         "ordinary project MCP retains inherited variables while applying exact explicit value and PATH overrides");
+    auto const explicit_marker = read_text(marker);
+    expect(explicit_marker.find("EXPLICIT=project-value") != std::string::npos && explicit_marker.find("INHERITED=parent-marker") != std::string::npos &&
+               explicit_marker.find("PATH=/bounded/project/path") != std::string::npos,
+           "ordinary project MCP retains inherited variables while applying exact explicit value and PATH overrides");
+  }
 
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);

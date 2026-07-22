@@ -476,6 +476,8 @@ class CommandPlan final
   [[nodiscard]] std::filesystem::path const& cwd() const noexcept;
   [[nodiscard]] PathMetadata const& cwd_metadata() const noexcept;
   [[nodiscard]] std::shared_ptr<ava::core::AnchorSet const> const& anchor_set() const noexcept;
+  // Sealed host discovery boundary used only to scope user-toolchain freshness.
+  [[nodiscard]] PathMetadata const& trusted_home_metadata() const noexcept;
   [[nodiscard]] std::vector<std::string> const& argv() const noexcept;
   [[nodiscard]] std::string const& raw_shell_text() const noexcept;
   [[nodiscard]] std::vector<CommandPathEntry> const& path_entries() const noexcept;

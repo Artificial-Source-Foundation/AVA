@@ -286,10 +286,11 @@ std::string write_tool_body(std::string_view path)
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
-std::string bash_tool_body(std::string_view marker_path)
+std::string bash_tool_body(std::string_view pgid_path)
 {
-  auto const command = std::string("/bin/sh -c \"sleep 1; printf leaked > ") + std::string(marker_path) + " & wait\"";
-  auto const arguments = std::string("{\"command\":\"") + json_escape(command) + "\",\"timeout_ms\":50}";
+  auto const marker_path = std::filesystem::path(pgid_path).parent_path() / "bash-child-leak.txt";
+  auto const command = std::string("printf '%s' $$ > \"") + std::string(pgid_path) + "\"; (sleep 30; printf leaked > \"" + marker_path.string() + "\") & wait";
+  auto const arguments = std::string("{\"command\":\"") + json_escape(command) + "\",\"timeout_ms\":4000}";
   return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_bash\",\"type\":\"function\","
          "\"function\":{\"name\":\"bash\",\"arguments\":\"" +
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";

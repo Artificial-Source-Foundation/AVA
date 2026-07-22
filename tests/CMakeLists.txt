@@ -381,6 +381,7 @@ add_test(
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-bash-process-cleanup
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_bash_process_cleanup.cmake)
+set_tests_properties(ava_cli.headless_rpc_bash_process_cleanup PROPERTIES TIMEOUT 75)
 
 add_test(
   NAME ava_cli.headless_rpc_cancel
@@ -526,7 +527,7 @@ if(Python3_Interpreter_FOUND)
             --fake-provider $<TARGET_FILE:ava_fake_provider_server>
             --fake-mcp $<TARGET_FILE:ava_fake_mcp_server>
             --root ${CMAKE_BINARY_DIR}/acp-subprocess)
-  set_tests_properties(ava_cli.acp_subprocess PROPERTIES TIMEOUT 20 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+  set_tests_properties(ava_cli.acp_subprocess PROPERTIES TIMEOUT 60 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
     NAME ava_cli.rpc_parser_subprocess

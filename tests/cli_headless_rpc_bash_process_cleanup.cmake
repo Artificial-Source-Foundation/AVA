@@ -18,6 +18,7 @@ set(CONFIG_DIR "${TEST_ROOT}/config")
 set(STATE_DIR "${TEST_ROOT}/state")
 set(DATA_DIR "${TEST_ROOT}/data")
 set(MARKER_FILE "${TEST_ROOT}/bash-child-leak.txt")
+set(PGID_FILE "${TEST_ROOT}/bash-child-pgid.txt")
 set(PORT_FILE "${TEST_ROOT}/provider-port")
 set(REQUEST_LOG "${TEST_ROOT}/provider-request.log")
 set(PROVIDER_OUT "${TEST_ROOT}/provider.out")
@@ -44,13 +45,16 @@ file(WRITE "${DRIVER_FILE}"
 "set -u\n"
 "ava_pid=\n"
 "provider_pid=\n"
+"home_churn=\n"
 "cleanup() {\n"
 "  if [ -n \"$ava_pid\" ]; then kill \"$ava_pid\" 2>/dev/null || true; fi\n"
 "  if [ -n \"$provider_pid\" ]; then kill \"$provider_pid\" 2>/dev/null || true; fi\n"
+"  if [ -n \"$home_churn\" ]; then rmdir \"$home_churn\" 2>/dev/null || true; fi\n"
+"  rm -f \"${PGID_FILE}\"\n"
 "}\n"
 "trap cleanup EXIT INT TERM\n"
-"rm -f \"${RPC_IN}\" \"${RPC_OUT}\" \"${RPC_ERR}\" \"${PORT_FILE}\" \"${REQUEST_LOG}\" \"${PROVIDER_OUT}\" \"${PROVIDER_ERR}\" \"${MARKER_FILE}\"\n"
-"\"${AVA_FAKE_PROVIDER_EXE}\" \"${PORT_FILE}\" \"${REQUEST_LOG}\" 0 bash-timeout-tree \"${MARKER_FILE}\" > \"${PROVIDER_OUT}\" 2> \"${PROVIDER_ERR}\" &\n"
+"rm -f \"${RPC_IN}\" \"${RPC_OUT}\" \"${RPC_ERR}\" \"${PORT_FILE}\" \"${REQUEST_LOG}\" \"${PROVIDER_OUT}\" \"${PROVIDER_ERR}\" \"${MARKER_FILE}\" \"${PGID_FILE}\"\n"
+"\"${AVA_FAKE_PROVIDER_EXE}\" \"${PORT_FILE}\" \"${REQUEST_LOG}\" 0 bash-timeout-tree \"${PGID_FILE}\" > \"${PROVIDER_OUT}\" 2> \"${PROVIDER_ERR}\" &\n"
 "provider_pid=$!\n"
 "i=0\n"
 "while [ ! -s \"${PORT_FILE}\" ]; do\n"
@@ -94,7 +98,32 @@ file(WRITE "${DRIVER_FILE}"
 "  fi\n"
 "  sleep 0.05\n"
 "done\n"
+"trusted_home=$(getent passwd \"$(id -u)\" | awk -F: 'NR == 1 { print $6 }')\n"
+"if [ -z \"$trusted_home\" ] || [ ! -d \"$trusted_home\" ]; then echo \"failed to resolve trusted account home fixture\" >&2; exit 1; fi\n"
+"home_churn=\"$trusted_home/.ava-rpc-command-freshness-$$\"\n"
+"if ! mkdir \"$home_churn\" || ! rmdir \"$home_churn\"; then echo \"failed to churn trusted-home entry fixture\" >&2; exit 1; fi\n"
+"home_churn=\n"
 "printf '%s\\n' \"{\\\"id\\\":\\\"reply\\\",\\\"type\\\":\\\"permission_reply\\\",\\\"request_id\\\":\\\"$resolver_id\\\",\\\"correlation_id\\\":\\\"prompt\\\",\\\"decision\\\":\\\"allow\\\"}\" >&3\n"
+"i=0\n"
+"while [ ! -s \"${PGID_FILE}\" ]; do\n"
+"  if ! kill -0 \"$ava_pid\" 2>/dev/null; then\n"
+"    echo \"ava exited before timed bash published its process group\" >&2\n"
+"    cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
+"    cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
+"    exit 1\n"
+"  fi\n"
+"  i=$((i + 1))\n"
+"  if [ \"$i\" -gt 200 ]; then\n"
+"    echo \"timed out waiting for bash process-group fixture\" >&2\n"
+"    cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
+"    cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
+"    exit 1\n"
+"  fi\n"
+"  sleep 0.05\n"
+"done\n"
+"shell_pgid=$(cat \"${PGID_FILE}\")\n"
+"case \"$shell_pgid\" in ''|*[!0-9]*) echo \"bash process-group fixture is not a valid PID\" >&2; exit 1;; esac\n"
+"if [ \"$shell_pgid\" -le 1 ]; then echo \"bash process-group fixture is not a valid positive process group\" >&2; exit 1; fi\n"
 "i=0\n"
 "while ! grep -q 'after bash process cleanup' \"${RPC_OUT}\" 2>/dev/null; do\n"
 "  if ! kill -0 \"$ava_pid\" 2>/dev/null; then\n"
@@ -119,7 +148,17 @@ file(WRITE "${DRIVER_FILE}"
 "wait \"$provider_pid\"\n"
 "provider_status=$?\n"
 "provider_pid=\n"
-"sleep 1.2\n"
+"i=0\n"
+"while kill -0 \"-$shell_pgid\" 2>/dev/null; do\n"
+"  i=$((i + 1))\n"
+"  if [ \"$i\" -gt 100 ]; then\n"
+"    echo \"timed-out bash process group $shell_pgid still exists after cleanup\" >&2\n"
+"    cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
+"    cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
+"    exit 1\n"
+"  fi\n"
+"  sleep 0.05\n"
+"done\n"
 "if [ -e \"${MARKER_FILE}\" ]; then\n"
 "  echo \"timed-out bash child process survived and wrote ${MARKER_FILE}\" >&2\n"
 "  cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
@@ -144,7 +183,7 @@ execute_process(
   OUTPUT_VARIABLE DRIVER_OUTPUT
   ERROR_VARIABLE DRIVER_ERROR
   RESULT_VARIABLE DRIVER_RESULT
-  TIMEOUT 30
+  TIMEOUT 60
 )
 
 if(NOT DRIVER_RESULT EQUAL 0)

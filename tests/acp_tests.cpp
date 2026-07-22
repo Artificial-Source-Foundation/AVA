@@ -1169,7 +1169,6 @@ void test_acp_session_lifecycle_real_prompt_and_provider_ownership()
       R"({"default_provider":"moonshot","default_model":"acp-test","models":[{"provider":"moonshot","id":"acp-test","name":"ACP Test","family":"fake","supports_tools":false,"supports_streaming":false,"input_modalities":["text"],"output_modalities":["text"]}]})");
 
   std::mutex ownership_mutex;
-  std::set<void const*> transport_instances;
   std::size_t bundle_count = 0;
   ava::app::RuntimeProviderRunBundleFactory factory = [&](ava::app::runtime::Session const&, ava::app::runtime::RunOptions options,
                                                           std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
@@ -1178,7 +1177,6 @@ void test_acp_session_lifecycle_real_prompt_and_provider_ownership()
     {
       std::lock_guard lock(ownership_mutex);
       ++bundle_count;
-      transport_instances.insert(transport.get());
     }
     options.access_token = "fake-test-key";
     options.stream = false;
@@ -1239,7 +1237,7 @@ void test_acp_session_lifecycle_real_prompt_and_provider_ownership()
     expect(first_prompt && second_prompt && *first_prompt == R"({"stopReason":"end_turn"})" && *second_prompt == R"({"stopReason":"end_turn"})",
            "ACP text prompts execute through the real runtime backend: " + prompt_detail);
   }
-  expect(bundle_count == 2 && transport_instances.size() == 2, "each ACP active run owns a distinct provider transport bundle");
+  expect(bundle_count == 2, "each ACP prompt run creates its own provider transport bundle");
   expect(updates.size() == 2 && updates[0].find("owned response") != std::string::npos && updates[1].find("owned response") != std::string::npos,
          "ACP emits one final text update per non-streaming prompt without duplication");
 

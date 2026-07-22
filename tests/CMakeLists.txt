@@ -563,8 +563,11 @@ if(Python3_Interpreter_FOUND)
 
   add_test(
     NAME ava_release.provenance
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/release_provenance_tests.py)
-  set_tests_properties(ava_release.provenance PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+    COMMAND ${CMAKE_COMMAND} -E env
+            PYTHONDONTWRITEBYTECODE=1
+            AVA_RELEASE_TEST_BINARY=$<TARGET_FILE:ava>
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/release_provenance_tests.py)
+  set_tests_properties(ava_release.provenance PROPERTIES TIMEOUT 15)
 
   add_test(
     NAME ava_release.install_component

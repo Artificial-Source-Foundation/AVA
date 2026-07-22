@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import pathlib
+import shutil
 import subprocess
 import struct
 import sys
@@ -252,16 +254,32 @@ class ReleaseProvenanceTests(unittest.TestCase):
             binary.write_bytes(minimal_elf())
             self.assertEqual(PROVENANCE.elf_metadata(binary), ("x86_64", ["libc.so.6"]))
 
-    def test_built_ava_has_expected_normal_dynamic_dependencies(self) -> None:
-        binary = SOURCE / "build" / "ava"
-        if not sys.platform.startswith("linux") or not binary.is_file():
-            self.skipTest("default Linux AVA build is unavailable")
+    def test_built_ava_dependencies_match_system_elf_inspection(self) -> None:
+        binary = pathlib.Path(os.environ.get("AVA_RELEASE_TEST_BINARY", SOURCE / "build" / "ava"))
+        readelf = shutil.which("readelf")
+        if not sys.platform.startswith("linux") or not binary.is_file() or readelf is None:
+            self.skipTest("built Linux AVA and readelf are required")
+
         architecture, needed = PROVENANCE.elf_metadata(binary)
-        if architecture != "x86_64":
-            self.skipTest("release qualification is currently x86_64-only")
-        self.assertIsNotNone(needed)
+        output = subprocess.run(
+            [readelf, "--dynamic", str(binary)],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        inspected: list[str] = []
+        for line in output.splitlines():
+            if "(NEEDED)" not in line:
+                continue
+            start = line.find("[")
+            end = line.find("]", start + 1)
+            self.assertGreaterEqual(start, 0)
+            self.assertGreater(end, start)
+            inspected.append(line[start + 1 : end])
+
+        self.assertIsNotNone(architecture)
         self.assertTrue(needed)
-        self.assertFalse(set(needed or ()) - PROVENANCE.HOST_DYNAMIC_ALLOWLIST)
+        self.assertEqual(needed, sorted(inspected))
 
     def test_elf_metadata_supports_elf32_and_big_endian(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

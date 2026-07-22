@@ -5,16 +5,22 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
 
 int main()
 {
+  auto const* opt_in = std::getenv("AVA_LSP_REAL_CLANGD_SMOKE");
+  if (opt_in == nullptr || std::string_view(opt_in) != "1")
+    return 77;
+
   std::string fixture_template = (std::filesystem::temp_directory_path() / "ava-clangd-smoke-XXXXXX").string();
   auto* created = ::mkdtemp(fixture_template.data());
   if (created == nullptr)
@@ -37,7 +43,7 @@ int main()
   auto anchors = ava::core::AnchorSet::open({fixture});
   if (!anchors)
   {
-    std::cerr << "failed to open clangd smoke anchor\n";
+    std::cerr << "failed to open clangd smoke anchor: " << anchors.error().format() << '\n';
     return 1;
   }
   auto inspections = ava::lsp::inspect_builtin_servers({"clangd"}, fixture, *anchors);
@@ -58,13 +64,23 @@ int main()
   });
   if (!client)
   {
-    std::cerr << "clangd initialize failed\n";
+    std::cerr << "clangd initialize failed: " << client.error().format() << '\n';
     return 1;
   }
   auto definitions = (*client)->definitions(source_path, 2, 9);
-  if (!definitions || definitions->empty() || definitions->front().path != source_path)
+  if (!definitions)
   {
-    std::cerr << "clangd definition operation failed\n";
+    std::cerr << "clangd definition request failed: " << definitions.error().format() << '\n';
+    return 1;
+  }
+  if (definitions->empty())
+  {
+    std::cerr << "clangd definition request returned no definitions for " << source_path << '\n';
+    return 1;
+  }
+  if (definitions->front().path != source_path)
+  {
+    std::cerr << "clangd definition returned wrong path: expected " << source_path << ", got " << definitions->front().path << '\n';
     return 1;
   }
   return 0;

@@ -1419,12 +1419,13 @@ void test_app_rpc_current_session_reads_reject_path_replacement()
   if (!replacement)
     return;
   bool replaced = false;
-  session->store.set_after_lease_bound_read_for_test([&] {
+  auto const session_path = session->store.session_path();
+  session->store.set_after_lease_bound_read_for_test([&, session_path] {
     if (replaced)
       return;
     replaced = true;
-    std::filesystem::rename(session->store.session_path(), session->store.session_path().string() + ".parked");
-    std::ofstream file(session->store.session_path(), std::ios::binary | std::ios::trunc);
+    std::filesystem::rename(session_path, session_path.string() + ".parked");
+    std::ofstream file(session_path, std::ios::binary | std::ios::trunc);
     file << *replacement << '\n';
   });
 
@@ -1870,21 +1871,22 @@ void test_app_rpc_model_commands()
          "RPC get_session_stats reports model_change count");
   expect(jsonl.find("\"id\":\"cycle\"") != std::string::npos && jsonl.find("\"provider\":\"deepseek\"") != std::string::npos,
          "RPC cycle_model advances to the next configured provider model");
-  expect(session->model.provider_id == "deepseek", "RPC cycle_model updates active session model");
-  auto previous = ava::app::rpc::previous_runtime_model(*session);
+  ava::app::runtime::session_ts::wat session_w(unlocked_session);
+  expect(session_w->model.provider_id == "deepseek", "RPC cycle_model updates active session model");
+  auto previous = ava::app::rpc::previous_runtime_model(*session_w);
   expect(previous && previous->provider_id == "anthropic" && previous->model_id == "claude-sonnet-4-5",
          "runtime previous model helper returns the configured predecessor for TUI reverse cycling");
-  session->scoped_model_cycle = std::vector<std::string>{"anthropic/claude-sonnet-4-5", "openai/gpt-5.5"};
-  auto scoped_next = ava::app::rpc::next_runtime_model(*session);
+  session_w->scoped_model_cycle = std::vector<std::string>{"anthropic/claude-sonnet-4-5", "openai/gpt-5.5"};
+  auto scoped_next = ava::app::rpc::next_runtime_model(*session_w);
   expect(scoped_next && scoped_next->provider_id == "anthropic" && scoped_next->model_id == "claude-sonnet-4-5",
          "runtime next model helper starts at the first scoped model when current model is outside the scoped cycle");
   if (scoped_next)
-    session->model = *scoped_next;
-  auto scoped_previous = ava::app::rpc::previous_runtime_model(*session);
+    session_w->model = *scoped_next;
+  auto scoped_previous = ava::app::rpc::previous_runtime_model(*session_w);
   expect(scoped_previous && scoped_previous->provider_id == "openai" && scoped_previous->model_id == "gpt-5.5",
          "runtime previous model helper wraps within the session-scoped model cycle");
-  session->scoped_model_cycle = std::vector<std::string>{};
-  auto empty_scoped_next = ava::app::rpc::next_runtime_model(*session);
+  session_w->scoped_model_cycle = std::vector<std::string>{};
+  auto empty_scoped_next = ava::app::rpc::next_runtime_model(*session_w);
   expect(!empty_scoped_next && empty_scoped_next.error().message().find("enabled for cycling") != std::string::npos,
          "runtime model cycling fails visibly when the session-scoped model cycle is empty");
 }
@@ -2209,7 +2211,8 @@ void test_app_rpc_protocol_version_and_session_commands()
          "RPC validate_session reports a clean replay audit for the active session");
   expect(jsonl.find("\"id\":\"new\"") != std::string::npos && jsonl.find("\"created\":true") != std::string::npos,
          "RPC new_session creates and switches to a new active session");
-  expect(session->store.session_id() == initial_id && jsonl.find("\"id\":\"switch\"") != std::string::npos,
+  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  expect(session_r->store.session_id() == initial_id && jsonl.find("\"id\":\"switch\"") != std::string::npos,
          "RPC switch_session switches back to the requested session");
 }
 

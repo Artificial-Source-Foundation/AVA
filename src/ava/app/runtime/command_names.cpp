@@ -1,5 +1,7 @@
 #include "sys.h"
 #include "command_names.h"
+
+#include <array>
 #include <cctype>
 #include <fstream>
 #include <system_error>

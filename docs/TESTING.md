@@ -16,7 +16,9 @@ scripts/build.sh
 scripts/run-tests.sh
 ```
 
-The build and test runners default to the `build` tree, detect the available logical cores, and supply that positive job count to CMake/CTest. Use `--jobs N`, `CMAKE_BUILD_PARALLEL_LEVEL=N`, or `CTEST_PARALLEL_LEVEL=N` to cap concurrency; append build options such as `--target` or CTest options such as `-R`. They share a build-tree lock so builds, fixed integration-test roots, and CTest logs cannot collide. An interrupted or untrappably terminated wrapper leaves `.ava-build-tree.lock.d` fail-closed because detached descendants cannot be ruled out; verify that no build/test worker remains before removing that directory manually. Direct CMake/CTest commands remain available as sequential diagnostic fallbacks.
+The build and test runners default to the `build` tree, detect the available logical cores, and supply that positive job count to CMake/CTest. Use `--jobs N`, `CMAKE_BUILD_PARALLEL_LEVEL=N`, or `CTEST_PARALLEL_LEVEL=N` to cap concurrency; append build options such as `--target` or CTest options such as `-R`. They share a build-tree safety lock so builds, fixed integration-test roots, and CTest logs cannot collide. An interrupted or untrappably terminated wrapper leaves `.ava-build-tree.lock.d` fail-closed because detached descendants cannot be ruled out; verify that no build/test worker remains before removing that directory manually.
+
+Do not use `cmake --build build --target test --parallel N` to request parallel test execution: it only parallelizes the build tool around one CTest command and does not propagate `N` to CTest. Use `scripts/run-tests.sh --build-dir build --jobs N` for the locked runner, or `ctest --test-dir build --parallel N` when directly diagnosing CTest behavior without the script's build-tree safety lock.
 
 The test suite is built as one `ava_tests` CTest target from focused test sources under `tests/`. The LSP and MCP tests also build and use fake servers from `tests/support/`.
 
@@ -51,10 +53,11 @@ Recommended coverage:
 - `./build/ava_tests plugin` after plugin authoring changes. The plugin suite validates the checked-in sample under `examples/plugins/todo/` through source-path fixture plumbing instead of duplicating the sample manifest or protocol JSON, and remains the coverage for successful sample entrypoint execution.
 - `./build/ava_tests mcp` after MCP contract changes. The MCP suite uses the local fake MCP server and golden fixtures for representative tool schema, resource read, and audit shapes; MCP resource behavior must stay behind explicit read-style permission coverage.
 
-`lsp_diagnostics` is capability-gated in normal headless runtime. `ava_tests.lsp` uses the stable fake server to cover default-off/global-only exact `clangd` opt-in, rejection of automatic `gopls`/`rust-analyzer`, executable hardlink/replacement rejection, replacement-sensitive launch permission identity, logical per-root cache deduplication, pull and routed publish diagnostics, full-text versioned `didChange`, cache bounds, malformed/out-of-workspace notifications, absolute deadlines, cancellation, environment filtering, and cleanup without downloads or provider calls. `ava_tests.lsp_real_clangd_smoke` is an optional offline real-server smoke: it discovers an already-installed safe `clangd`, uses a private finite fixture, proves initialization plus definition and cleanup, and returns CTest skip code 77 when `clangd` is absent or unsafe. It never installs or downloads clangd.
+`lsp_diagnostics` is capability-gated in normal headless runtime. `ava_tests.lsp` uses the stable fake server to cover default-off/global-only exact `clangd` opt-in, rejection of automatic `gopls`/`rust-analyzer`, executable hardlink/replacement rejection, replacement-sensitive launch permission identity, logical per-root cache deduplication, pull and routed publish diagnostics, full-text versioned `didChange`, cache bounds, malformed/out-of-workspace notifications, absolute deadlines, cancellation, environment filtering, and cleanup without downloads or provider calls. `ava_tests.lsp_real_clangd_smoke` is an explicitly opt-in offline real-server smoke. By default it returns CTest skip code 77 even when `clangd` is installed. When opted in, it discovers an already-installed safe `clangd`, uses no credentials or network access, runs against a private finite fixture, proves initialization plus definition, and cleans up; it also skips when `clangd` is absent or unsafe. It never installs or downloads clangd.
 
 ```sh
-scripts/run-tests.sh -R '^ava_tests\.lsp(_real_clangd_smoke)?$'
+scripts/run-tests.sh --build-dir build -R '^ava_tests\.lsp$'
+AVA_LSP_REAL_CLANGD_SMOKE=1 scripts/run-tests.sh --build-dir build -R '^ava_tests\.lsp_real_clangd_smoke$'
 ```
 
 ## End-To-End AVA Tool Smoke

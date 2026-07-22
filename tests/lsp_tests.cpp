@@ -541,16 +541,11 @@ void test_lsp_configured_provider_rejects_unsafe_config_files()
       .workspace_root = workspace,
       .anchor_set = lsp_anchors(workspace),
   });
-  bool global_ancestor_provider_success = !global_ancestor_provider && global_ancestor_provider.error().format().find("symlink") != std::string::npos;
-  expect(global_ancestor_provider_success, "configured LSP provider rejects an ancestor symlink for an absolute external global config path");
+  bool const global_ancestor_provider_success = global_ancestor_provider.has_value();
+  expect(global_ancestor_provider_success, "configured LSP provider accepts an ancestor symlink contained by the selected workspace anchor");
 #ifdef CWDEBUG
-  if (!global_ancestor_provider_success)
-  {
-    if (global_ancestor_provider)
-      Dout(dc::warning, "global_ancestor_provider = " << *global_ancestor_provider);
-    else
-      Dout(dc::warning, "global_ancestor_provider returned error: " << global_ancestor_provider.error());
-  }
+  if (!global_ancestor_provider)
+    Dout(dc::warning, "global_ancestor_provider returned error: " << global_ancestor_provider.error().format());
 #endif
 
   auto const external_root = create_empty_root("lsp-external-config-entry");

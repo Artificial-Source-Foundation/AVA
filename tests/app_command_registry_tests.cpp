@@ -9,7 +9,6 @@
 #include "ava/app/runtime/Session.h"
 #include "ava/permissions/permission.h"
 #include "ava/session/session_store.h"
-#include "utils/print_pointer.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -124,7 +123,8 @@ void test_skill_commands_are_registry_entries_and_permissioned_prompts()
   bool namespaced_and_unnamespaced_success = entry_skill_release != nullptr && entry_release != nullptr;
   expect(namespaced_and_unnamespaced_success, "command registry exposes skills as namespaced and unnamespaced command entries");
   if (!namespaced_and_unnamespaced_success)
-    Dout(dc::warning, "entry_skill_release = " << print_pointer(entry_skill_release) << ", entry_release = " << print_pointer(entry_release));
+    Dout(dc::warning,
+         "entry_skill_release = " << static_cast<void const*>(entry_skill_release) << ", entry_release = " << static_cast<void const*>(entry_release));
 
   std::vector<ava::permissions::Operation> operations;
   auto result =

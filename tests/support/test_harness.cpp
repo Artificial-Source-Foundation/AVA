@@ -3,6 +3,7 @@
 #include "ava/session/record.h"
 #include "ava/session/validation.h"
 
+#include <cerrno>
 #include <climits>
 #include <cstdlib>
 #include <cwchar>
@@ -13,6 +14,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -143,13 +145,23 @@ std::filesystem::path create_empty_root(std::filesystem::path root_name)
   // <base>/logical -> <base>/physical so that the returned path
   // <base>/logical/<root_name> resolves to <base>/physical/<root_name>.
   auto const real_root = base / "physical" / root_name;
-  std::error_code cleanup;
-  std::filesystem::remove_all(real_root, cleanup);
-  std::filesystem::create_directories(real_root, cleanup);
+  std::error_code error;
+  std::filesystem::remove_all(real_root, error);
+  if (error)
+    throw std::runtime_error("failed to clean test root: " + error.message());
+  std::filesystem::create_directories(real_root, error);
+  if (error)
+    throw std::runtime_error("failed to create test root: " + error.message());
+  if (::chmod(real_root.c_str(), S_IRWXU) != 0)
+    throw std::system_error(errno, std::generic_category(), "set owner-only test root permissions");
+
   auto const link = base / "logical";
-  std::error_code link_error;
-  std::filesystem::remove(link, link_error);
-  std::filesystem::create_symlink("physical", link, link_error);
+  std::filesystem::remove(link, error);
+  if (error)
+    throw std::runtime_error("failed to remove logical test root symlink: " + error.message());
+  std::filesystem::create_symlink("physical", link, error);
+  if (error)
+    throw std::runtime_error("failed to create logical test root symlink: " + error.message());
   return link / root_name;
 }
 

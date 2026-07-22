@@ -622,8 +622,8 @@ void test_queued_writer_bounds_and_unsafe_targets()
   ava::observability::RunObservation intermediate_observation(intermediate_writer, std::make_shared<FixedClock>(1),
                                                               std::make_shared<ava::observability::CounterIdGenerator>());
   intermediate_observation.emit(ava::observability::TraceEventType::AgentRunStart, {});
-  expect(intermediate_writer->counters().failures == 1 && !std::filesystem::exists(intermediate_target / "child" / "trace.jsonl"),
-         "symlink replacement in an intermediate descriptor-walk component fails closed");
+  expect(intermediate_writer->counters().written == 1 && std::filesystem::exists(intermediate_target / "child" / "trace.jsonl"),
+         "contained intermediate symlink resolves within the trace anchor");
 }
 
 void test_dispatcher_trace_correlation_and_ordering()

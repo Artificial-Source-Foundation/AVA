@@ -16,6 +16,8 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <pthread.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -130,18 +132,46 @@ bool read_exact_from_descriptor_for_test(int descriptor, void* buffer, std::size
 
 bool write_all_to_descriptor_for_test(int descriptor, void const* buffer, std::size_t byte_count) noexcept
 {
+  sigset_t sigpipe_mask{};
+  if (::sigemptyset(&sigpipe_mask) != 0 || ::sigaddset(&sigpipe_mask, SIGPIPE) != 0)
+    return false;
+
+  sigset_t previous_mask{};
+  if (::pthread_sigmask(SIG_BLOCK, &sigpipe_mask, &previous_mask) != 0)
+    return false;
+
+  int const sigpipe_was_blocked = ::sigismember(&previous_mask, SIGPIPE);
+  bool succeeded = sigpipe_was_blocked >= 0;
+  bool received_epipe = false;
   auto const* next = static_cast<char const*>(buffer);
   std::size_t offset = 0;
-  while (offset < byte_count)
+  while (succeeded && offset < byte_count)
   {
     auto const transferred = ::write(descriptor, next + offset, byte_count - offset);
     if (transferred < 0 && errno == EINTR)
       continue;
     if (transferred <= 0)
-      return false;
+    {
+      received_epipe = transferred < 0 && errno == EPIPE;
+      succeeded = false;
+      break;
+    }
     offset += static_cast<std::size_t>(transferred);
   }
-  return true;
+
+  if (received_epipe && sigpipe_was_blocked == 0)
+  {
+    timespec const no_wait{};
+    int waited = -1;
+    do
+    {
+      waited = ::sigtimedwait(&sigpipe_mask, nullptr, &no_wait);
+    } while (waited < 0 && errno == EINTR);
+  }
+
+  if (::pthread_sigmask(SIG_SETMASK, &previous_mask, nullptr) != 0)
+    return false;
+  return succeeded;
 }
 
 int FailingStreambuf::overflow(int ch)

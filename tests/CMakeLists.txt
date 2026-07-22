@@ -77,6 +77,7 @@ set(AVA_TESTS_SOURCES
   "session_title_coordinator_tests.cpp"
   "subagent_coordinator_tests.cpp"
   "subagent_delivery_manager_tests.cpp"
+  "test_harness_tests.cpp"
   "tool_scheduler_tests.cpp"
   "tools_file_tests.cpp"
   "tools_process_network_tests.cpp"
@@ -109,6 +110,7 @@ ava_apply_sanitizers(ava_tests)
 
 set(AVA_TEST_SUITES
   core_mode
+  test_harness
   diagnostics
   acp
   session

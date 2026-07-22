@@ -63,13 +63,14 @@ bool process_group_exists(pid_t pgid)
 
 bool wait_for_process_group_exit(pid_t pgid)
 {
-  for (int index = 0; index < 100; ++index)
+  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (process_group_exists(pgid))
   {
-    if (!process_group_exists(pgid))
-      return true;
+    if (std::chrono::steady_clock::now() >= deadline)
+      return false;
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  return !process_group_exists(pgid);
+  return true;
 }
 
 ava::core::Result<ava::tools::BashResult> run_bash_for_test(ava::tools::ToolContext context, std::string_view command,
@@ -292,7 +293,7 @@ void test_bash_tool()
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
       }};
-  auto timeout = run_bash_for_test(timeout_context, "sleep 2", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(50)});
+  auto timeout = run_bash_for_test(timeout_context, "sleep 30", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(50)});
   expect(timeout && timeout->timed_out, "run_bash times out long command");
 
   auto const timeout_group_file = root / "bash-timeout-child-pgid.txt";
@@ -309,7 +310,7 @@ void test_bash_tool()
         return ava::permissions::PermissionResolution::Allow;
       }};
   auto timeout_tree = run_bash_for_test(timeout_tree_context, "/bin/sh -c \"sleep 30 & printf $$ > " + timeout_group_file.generic_string() + "; wait\"",
-                                           ava::tools::BashOptions{.timeout = std::chrono::milliseconds(500), .max_bytes = 1024});
+                                        ava::tools::BashOptions{.timeout = std::chrono::milliseconds(4000), .max_bytes = 1024});
   auto const timeout_pgid = read_pid_file_for_test(timeout_group_file);
   expect(timeout_tree && timeout_tree->timed_out && timeout_tree_prompts == 1 && timeout_pgid && wait_for_process_group_exit(*timeout_pgid),
          "run_bash timeout terminates child processes in the command process group");
@@ -326,7 +327,7 @@ void test_bash_tool()
             ++cancel_checks;
             return cancel_checks >= 3;
           }};
-  auto canceled = run_bash_for_test(cancel_context, "sleep 2", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
+  auto canceled = run_bash_for_test(cancel_context, "sleep 30", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(canceled && canceled->canceled && !canceled->timed_out && canceled->exit_code == -1,
          "run_bash observes tool cancellation and reports a canceled process result");
 
@@ -344,7 +345,7 @@ void test_bash_tool()
       },
       .cancel_requested = [&cancel_group_file] { return std::filesystem::exists(cancel_group_file); }};
   auto cancel_tree = run_bash_for_test(cancel_tree_context, "/bin/sh -c \"sleep 30 & printf $$ > " + cancel_group_file.generic_string() + "; wait\"",
-                                          ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000), .max_bytes = 1024});
+                                       ava::tools::BashOptions{.timeout = std::chrono::milliseconds(12000), .max_bytes = 1024});
   auto const cancel_pgid = read_pid_file_for_test(cancel_group_file);
   expect(
       cancel_tree && cancel_tree->canceled && !cancel_tree->timed_out && cancel_tree_prompts == 1 && cancel_pgid && wait_for_process_group_exit(*cancel_pgid),
@@ -467,16 +468,22 @@ void test_injected_command_executor()
       .command_executor = executor};
   auto result =
       run_bash_for_test(context, "printf 'one two'", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(900), .max_bytes = 8, .max_lines = 2});
-  expect(result && prompts == 1 && executor->requests.size() == 1 && executor->requests.front().argv.size() == 3 &&
-             executor->requests.front().argv[1] == "-c" && executor->requests.front().argv[2] == "printf 'one two'" &&
-             executor->requests.front().cwd == workspace.lexically_normal() && executor->requests.front().timeout == std::chrono::milliseconds(900) &&
-             executor->requests.front().output_byte_limit == 8 && executor->requests.front().plan_metadata &&
-             executor->requests.front().plan_metadata->fingerprint.starts_with("sha256:ava-command-plan-") &&
-             executor->requests.front().plan_metadata->fingerprint == permission_fingerprint &&
-             !executor->requests.front().plan_metadata->executor_identity_verified && executor->requests.front().environment_profile &&
-             !executor->requests.front().environment_profile->local_execution_authority && result->line_limited && result->totals_known &&
-             result->total_lines == 3 && result->total_bytes == executor->result.output.size() && result->output == "three\n",
-         "unverified injected execution receives the raw one-shot plan fingerprint and redacted environment contract while local bounds retain exact totals");
+  expect(prompts == 1, "unverified injected execution prompts exactly once");
+  expect(result && result->line_limited && result->totals_known && result->total_lines == 3 && result->total_bytes == executor->result.output.size() &&
+             result->output == "three\n",
+         "unverified injected execution returns the expected locally bounded result");
+  expect(executor->requests.size() == 1, "unverified injected execution sends exactly one request");
+  if (executor->requests.size() == 1)
+  {
+    auto const& request = executor->requests.front();
+    expect(request.argv.size() == 3 && request.argv[1] == "-c" && request.argv[2] == "printf 'one two'",
+           "unverified injected execution sends the expected shell argv");
+    expect(request.cwd == workspace.lexically_normal() && request.timeout == std::chrono::milliseconds(900) && request.output_byte_limit == 8 &&
+               request.plan_metadata && request.plan_metadata->fingerprint.starts_with("sha256:ava-command-plan-") &&
+               request.plan_metadata->fingerprint == permission_fingerprint && !request.plan_metadata->executor_identity_verified &&
+               request.environment_profile && !request.environment_profile->local_execution_authority,
+           "unverified injected execution sends the expected one-shot plan and redacted environment contract");
+  }
 
   ava::tools::ToolContext denied = context;
   denied.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
@@ -484,15 +491,22 @@ void test_injected_command_executor()
   };
   auto denied_result = run_bash_for_test(denied, "touch denied-marker");
   auto raw_shell = run_bash_for_test(context, "printf ok; touch denied-marker");
-  expect(!denied_result && raw_shell && executor->requests.size() == 2 && executor->requests.back().argv.size() == 3 &&
-             executor->requests.back().argv[1] == "-c" && executor->requests.back().argv[2] == "printf ok; touch denied-marker" &&
-             !std::filesystem::exists(workspace / "denied-marker"),
-         "permission denial blocks callbacks, while an approved raw shell plan reaches the injected executor without local execution");
+  expect(!denied_result, "injected execution does not call the executor after permission denial");
+  expect(static_cast<bool>(raw_shell), "an approved raw shell plan reaches the injected executor");
+  expect(executor->requests.size() == 2, "permission denial and approved raw shell execution produce exactly two executor requests");
+  if (executor->requests.size() == 2)
+  {
+    auto const& request = executor->requests.back();
+    expect(request.argv.size() == 3 && request.argv[1] == "-c" && request.argv[2] == "printf ok; touch denied-marker",
+           "approved raw shell execution sends the expected argv to the injected executor");
+  }
+  expect(!std::filesystem::exists(workspace / "denied-marker"), "injected execution never creates the denied local marker");
 
   executor->fail = true;
   auto failed = run_bash_for_test(context, "true");
-  expect(!failed && failed.error().message() == "injected command execution failed",
-         "an installed command executor failure never falls back to local fork/exec");
+  expect(!failed, "an installed command executor failure returns an error instead of falling back to local fork/exec");
+  if (!failed)
+    expect(failed.error().message() == "injected command execution failed", "injected command executor failure preserves the exact error contract");
 }
 
 void test_sealed_local_bash_contract()

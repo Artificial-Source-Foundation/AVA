@@ -21,6 +21,8 @@ ava-X.Y.Z-linux-ARCH.tar.gz.sha256
 bin/ava
 share/doc/ava/README.md
 share/doc/ava/LICENSE
+share/doc/ava/THIRD_PARTY_NOTICES.md
+share/doc/ava/PROVENANCE.json
 share/doc/ava/docs/USAGE.md
 share/doc/ava/docs/CONFIG.md
 share/doc/ava/docs/TESTING.md
@@ -41,7 +43,7 @@ share/doc/ava/docs/acp-support.json
 share/doc/ava/docs/schema/theme.schema.json
 ```
 
-The installed `README.md` comes from the artifact-specific `docs/release-artifact-readme.md`, not the repository README. Documentation remains in source-relative layout so included local links resolve. `scripts/verify-markdown-links.py` verifies every staged Markdown relative path before archive creation.
+The installed `README.md` comes from the artifact-specific `docs/release-artifact-readme.md`, not the repository README. `THIRD_PARTY_NOTICES.md` is the distribution notice; `PROVENANCE.json` is a deterministic, privacy-safe description of this binary, its source/dependency state, architecture, and ELF dynamic dependencies. Documentation remains in source-relative layout so included local links resolve. `scripts/verify-markdown-links.py` verifies every staged Markdown relative path before archive creation.
 
 The allowlist excludes reference repositories, source and test trees, build trees, examples, credentials, auth/config/session state, provider output, raw interoperability evidence, and the optional desktop prototype. CMake component `ava` must remain exact; always pass `--component ava` for a manual stage:
 
@@ -111,10 +113,17 @@ Other terminal and intentionally credential-gated live-provider checks remain cl
 
 ## Build and verify the Linux host artifact
 
-Build mode configures/builds the current checkout and publishes to a caller-supplied secure output directory:
+Ordinary build mode configures a fresh private Release build tree, builds the current checkout, and publishes to a caller-supplied secure output directory. Package source builds disable Gitache and libcwd, force the pinned in-tree nlohmann JSON source, and set CMake FetchContent fully disconnected, so packaging performs no dependency download. Ordinary mode emits provenance but does not by itself make a qualification claim:
 
 ```sh
 scripts/package-linux.sh --output-dir /absolute/path/outside/AVA
+```
+
+The release-qualified contract is explicit and fail-closed. It rejects supplied binaries, any source or dependency worktree change (including untracked files), mismatched gitlinks, non-x86_64 builds, unexpected ELF `DT_NEEDED` entries, and direct license-file SHA-256 policy mismatches or missing license evidence:
+
+```sh
+scripts/package-linux.sh --require-release-qualified \
+  --output-dir /absolute/path/outside/AVA
 ```
 
 Accepted-binary mode does not configure or build:
@@ -132,7 +141,7 @@ If `--output-dir` is omitted, the script creates and reports a new unpredictable
 
 All staging, allowlist/link checks, archive and checksum creation, checksum verification, extraction, CLI smoke, and fake-provider model smoke happen inside one private unpredictable work directory. The archive is never executed, extracted, or verified after publication. Publication is the final operation: unique temporary files are written and synced through one verified output-directory descriptor, moved with atomic no-replace `renameat2`, directory-synced, and the output namespace identity is revalidated. The script removes only its private work directory; it never recursively deletes caller output.
 
-The deterministic package harness covers secure accepted-binary packaging, default private output, staged allowlist, checksum/extraction, insecure and in-repository output rejection, version mismatch, and symlink no-clobber behavior:
+The deterministic package/provenance harness covers dependency-disconnected source configuration, secure accepted-binary packaging (explicitly unqualified), default private output, staged allowlist including notices/provenance, checksum/extraction, source/dependency worktree and license-hash qualification rejection, architecture/dynamic-dependency gates, insecure and in-repository output rejection, version mismatch, and symlink no-clobber behavior:
 
 ```sh
 scripts/run-tests.sh -R '^ava_release\.package_linux$'
@@ -160,7 +169,7 @@ Quarantines are operator recovery aids and are never replayed or packaged automa
 
 ```sh
 shellcheck scripts/package-linux.sh  # when installed
-python3 -m py_compile scripts/verify-markdown-links.py scripts/publish-linux-artifacts.py tests/package_linux_tests.py
+python3 -m py_compile scripts/verify-markdown-links.py scripts/publish-linux-artifacts.py scripts/generate-release-provenance.py tests/package_linux_tests.py tests/release_provenance_tests.py
 git --no-pager diff --check
 ```
 

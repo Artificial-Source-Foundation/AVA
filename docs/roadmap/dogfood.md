@@ -2,7 +2,7 @@
 
 Status: active qualification on `develop` (2026-07-18).
 
-AVA is ready for regular repository dogfooding. Public binary release remains blocked by the linked ai-utils licensing issue described below.
+AVA is ready for regular repository dogfooding. Linux release closure is implemented for qualified x86_64/x64 source-built artifacts; non-x86 architectures remain unqualified pending provenance or replacement of the non-Carlo AArch64 `yield` contribution.
 
 ## Live OpenAI OAuth results
 
@@ -44,14 +44,14 @@ Dogfooding found and fixed:
 - Separate reasoning/text/tool persistence lost legal interleaving and assistant phase across restart; session-v4 now commits one ordered assistant-output transaction and binds tool results to exact function items.
 - Crash/cancellation windows could strand staged turns or unresolved committed calls; lease-gated suffix recovery and non-reexecuting interrupted-result reconciliation now close those histories safely.
 
-Remaining workflow gaps:
+Current workflow controls:
 
-- Background jobs can start and persist child sessions, but there is no public status, wait, result, or cancel command.
-- The permissioned shell uses a fixed PATH; bare user-installed build commands may be unavailable even after approval.
-- Real LSP behavior still needs a zero-configuration server recipe; deterministic fake-server coverage passes.
+- Background jobs have public status, wait, result, and cancel controls through `/jobs` and RPC.
+- Sealed command plans use a fixed trusted command path rather than inheriting arbitrary user `PATH`; approved development commands follow the contained-command policy.
+- The built-in `clangd` recipe is default-off and requires exact global opt-in; it uses only an already-installed, identity-checked executable. Automatic `gopls` and `rust-analyzer` remain deferred.
 
-## Public release blocker: ai-utils licensing
+## Linux release closure boundary
 
-AVA currently links 23 object files from the `utils/` (`ai-utils`) submodule directly into the executable. The submodule license is GPLv3. The linked `itoa.cxx`, `threading/aithreadid.cxx`, `threading/Semaphore.cxx`, and `threading/SpinSemaphore.cxx` files explicitly carry AGPLv3-or-later notices. AVA cannot truthfully ship that combined executable as MIT-only.
+The pinned `utils` revision is `ce73eaf`; Carlo's MIT relicensing commit is `adee705`. AVA's qualified x86_64/x64 release uses the MIT-licensed Carlo-owned `utils` paths and defines `MIT_LICENSE_ONLY`, which makes accidental inclusion of the guarded BSD `FunctionView.h` and `threading/MpscQueue.h` fail compilation. This is not a claim that every `utils` path has one license: the AArch64 `yield` branch in `cpu_relax.h` remains attributed to Long Wong and is not qualified pending provenance or replacement.
 
-AVA's intentional use is narrow: RPC output synchronization uses the MIT-licensed `threadsafe` wrapper, whose headers import ai-utils. The intended fix is to replace that wrapper with AVA-owned standard-library mutex code, stop linking `utils_ObjLib`, verify the release binary no longer contains those objects, and add a packaging license gate.
+`scripts/package-linux.sh --require-release-qualified` requires a clean source-built x86_64 artifact, matching initialized gitlinks, expected license evidence, and allowlisted host ELF dependencies. The packaged `THIRD_PARTY_NOTICES.md` and `PROVENANCE.json` state the boundary. Supplied-binary packaging remains available but is explicitly unqualified.

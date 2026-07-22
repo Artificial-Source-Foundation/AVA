@@ -5,10 +5,7 @@ commands, contact model providers, load local resources, and launch extension
 processes when you allow those features. AVA's safety model is designed to make
 those actions explicit, bounded, auditable, and fail-closed where practical.
 
-**AVA does not currently provide a hard OS, container, VM, or kernel sandbox.**
-Run AVA inside a separate container, VM, micro-VM, or policy sandbox when you
-need isolation from an untrusted repository, generated code, package scripts, or
-tooling that you would not otherwise run as your user account.
+**AVA has narrow Linux Landlock+seccomp containment for verified sealed local plans, not a general AVA sandbox.** It applies to Standard path-bearing or mutable commands, Sensitive commands after approval, and some Critical/Raw commands when a verified local plan and mutable-code policy require it. It applies filesystem rules, no-new-privileges, and a network-deny seccomp filter when the approved command plan does not allow networking. It does not sandbox whole AVA, plugins, MCP, LSP, containers, or VMs. Descendants that call `setsid` still inherit Landlock and seccomp, but escape AVA's PGID cleanup and its resource/lifetime control. Run AVA inside a separate container, VM, micro-VM, or policy sandbox when you need isolation from untrusted repositories, generated code, package scripts, or tooling.
 
 ## Mental Model
 
@@ -150,11 +147,11 @@ Policy details:
 Linux development containment uses Landlock filesystem rules, no-new-privileges,
 and a seccomp network-deny filter when networking is not part of the approved
 plan. This materially restricts contained build/test commands, but it is not a
-complete VM boundary: in particular, verified process-group cleanup cannot
-contain descendants that deliberately create a new session. Use an external
-container/VM sandbox for hostile code or stronger descendant isolation. See
-[Command containment](security/containment.md) for the exact contract and
-platform fallback.
+complete VM boundary: descendants that deliberately create a new session still
+inherit Landlock/seccomp but escape verified-PGID cleanup and AVA's
+resource/lifetime control. Use an external container/VM sandbox for hostile code
+or stronger descendant isolation. See [Command containment](security/containment.md)
+for the exact contract and platform fallback.
 
 ## Plugin, MCP, And LSP Process Boundaries
 
@@ -235,15 +232,19 @@ sandbox if it must be contained. AVA does not claim cgroup containment.
 
 AVA does not currently provide:
 
-- chroot, user namespace, seccomp, AppArmor, SELinux, Capsicum, pledge/unveil,
-  Landlock, or equivalent OS policy enforcement
+- a general whole-AVA, plugin, MCP, or LSP sandbox; the narrow Linux Landlock and
+  seccomp path applies only to verified sealed local plans where containment is
+  required by command policy
+- chroot, user namespace, AppArmor, SELinux, Capsicum, pledge/unveil, cgroup,
+  or equivalent general OS policy enforcement
 - a bundled container runtime or VM boundary
 - per-tool filesystem mounts
 - per-tool network namespaces
-- a guarantee that approved child processes cannot read other files available to
-  the AVA process
-- a guarantee that approved child processes cannot contact the network if the
-  host allows it
+- a guarantee that plugins, MCP/LSP servers, or arbitrary shell commands outside
+  a verified contained plan remain contained, or that a `setsid` descendant stays
+  subject to AVA's PGID cleanup or resource/lifetime control
+- a guarantee that approved child processes outside the narrow sealed-command
+  path cannot read other files available to the AVA process or contact the network
 - a guarantee that package scripts, compilers, test runners, language servers,
   plugins, or MCP servers are safe to run
 

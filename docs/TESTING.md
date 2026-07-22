@@ -24,6 +24,15 @@ The test suite is built as one `ava_tests` CTest target from focused test source
 
 Plugin/MCP contract changes should also follow [`docs/plugin-compatibility-policy.md`](plugin-compatibility-policy.md). Keep checked-in golden fixtures small and deterministic under `tests/golden/ava-080/`, and prefer existing `ava_tests` plugin/MCP suites for contract assertions.
 
+Focused release provenance/package tests are offline and deterministic:
+
+```sh
+scripts/run-tests.sh -R '^ava_release\.(provenance|install_component|package_linux)$'
+scripts/package-linux.sh --require-release-qualified --output-dir /absolute/path/outside/AVA
+```
+
+The strict package command creates a fresh private Release build tree with Gitache/libcwd disabled, the pinned in-tree nlohmann JSON source selected, and CMake FetchContent fully disconnected. It rejects supplied binaries, dirty/mismatched source dependencies, non-x86_64 output, and unexpected ELF dynamic dependencies. Ordinary `--binary` package workflows remain available but their packaged `PROVENANCE.json` is explicitly unqualified; no signing, SBOM, or attestation is implied.
+
 Privacy-safe diagnostics have focused unit and full-binary coverage:
 
 ```sh

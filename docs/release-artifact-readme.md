@@ -30,4 +30,4 @@ AVA stores user configuration and state under the XDG paths documented in [`docs
 - [`docs/TESTING.md`](docs/TESTING.md): deterministic and optional verification surfaces.
 - [`docs/release-checklist.md`](docs/release-checklist.md): artifact layout, local verification, and explicitly deferred publication work.
 
-The adjacent `LICENSE` applies to this artifact.
+The adjacent `LICENSE` applies to this artifact. `THIRD_PARTY_NOTICES.md` contains direct-dependency notices and distinguishes bundled dependencies from host runtime libraries. `PROVENANCE.json` records deterministic binary/source/dependency/architecture evidence; `release_qualified: false` is an explicit non-qualification, not a release claim.

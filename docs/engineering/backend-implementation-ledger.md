@@ -11,9 +11,9 @@
 - Session migration is additive. No in-place history rewrite is authorized.
 - “Zero duplicate” means zero duplicate **automatic dispatches** in supported recovery cases; external effects may remain explicitly ambiguous.
 
-## Current reconciliation (2026-07-21)
+## Current reconciliation (2026-07-22)
 
-This is the current-source checkpoint for the `develop` sequence through the integrated Workstream-5 automatic-title changes recorded below. It supplements, but does not revise, the July-11 plan or Phase-0 evidence below. The detailed execution rows were authored as the July-11 implementation/audit matrix; except for the explicitly refreshed high-level rows, they remain historical obligation and evidence records, **not** a claim about current HEAD. Use this reconciliation for present status.
+This is the current-source checkpoint for the `develop` sequence through the integrated Workstream-5 automatic-title changes and the later Linux release-closure boundary recorded below. It supplements, but does not revise, the July-11 plan or Phase-0 evidence below. The detailed execution rows were authored as the July-11 implementation/audit matrix; except for the explicitly refreshed high-level rows, they remain historical obligation and evidence records, **not** a claim about current HEAD. Use this reconciliation for present status.
 
 ### Evidence anchors
 
@@ -24,7 +24,7 @@ This is the current-source checkpoint for the `develop` sequence through the int
 - The Workstream-2 source record reports **97 registered, 80 executed/pass, 17 intentional skips** (credential-gated provider, optional ACP SDK, 13 opt-in tmux, and terminal smokes). That workstream's sanitizer suite passed the same 80 checks and all 13 tmux scenarios passed.
 - The Workstream-4 compaction implementation was independently validated without paid provider calls: the normal wrapper suite completed all 97 registered tests successfully (80 pass, the same 17 expected skips), focused sanitizer coverage passed 5/5 for session, compaction, runtime, agent-loop, and RPC paths, and review findings COMP-1 through COMP-4 were fixed and re-verified.
 - The Workstream-5 sequence through `553e67b5`, adapted to Carlo's controller and lease authorities, adds one synchronous deterministic fallback after the first committed ordinary root turn plus bounded asynchronous provider refinement. Refinement retains a copyable leased read authority and controller-owned serialized append route across navigation, never retries append mutation errors, preserves manual-empty precedence and branch inheritance, and excludes resumed, child, synthetic, and sessionless histories. The integrated offline suite passed all 90 registered checks: 85 executed/pass and 5 expected optional/live/terminal skips.
-- Public binary release remains blocked by the `ai-utils` licensing issue recorded in `docs/roadmap/dogfood.md`: 23 directly linked `utils/` objects, a GPLv3 repository license, and AGPLv3-or-later notices in linked files mean the combined executable cannot be represented as MIT-only. Functional hardening does not clear this release blocker.
+- Linux release closure now has a narrow, fail-closed boundary: strict source-built x86_64 artifacts require clean matching gitlinks, committed direct-license SHA-256 policy verified against actual license-file hashes, expected direct licenses, allowlisted ELF dependencies, `THIRD_PARTY_NOTICES.md`, and deterministic `PROVENANCE.json`. Pinned `utils` `ce73eaf` contains Carlo's MIT relicensing (`adee705`) for AVA-used Carlo-owned paths; guarded BSD headers are compile-time excluded. This does not qualify ARM/non-x86: the AArch64 `yield` provenance remains unresolved, and this release work does not claim completion of the historical M3-M9 rows.
 
 ### Current master-plan status
 

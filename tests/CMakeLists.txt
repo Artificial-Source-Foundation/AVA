@@ -561,6 +561,20 @@ if(Python3_Interpreter_FOUND)
             --root ${CMAKE_BINARY_DIR}/rpc-python-client-e2e)
   set_tests_properties(ava_cli.rpc_python_client_e2e PROPERTIES TIMEOUT 45 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
+  add_test(
+    NAME ava_release.provenance
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/release_provenance_tests.py)
+  set_tests_properties(ava_release.provenance PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_release.install_component
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/install_component_tests.py
+            --cmake ${CMAKE_COMMAND}
+            --source ${CMAKE_SOURCE_DIR}
+            --build ${CMAKE_BINARY_DIR})
+  set_tests_properties(ava_release.install_component PROPERTIES TIMEOUT 75 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT OptionEnableLibcwd)
     add_test(
       NAME ava_release.package_linux

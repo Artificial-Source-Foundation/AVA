@@ -15,17 +15,21 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #==============================================================================
 # Begin of gitache configuration.
 
-set(GITACHE_PACKAGES libcwd)  # List of requested packages.
-
 include(FetchContent)
+option(AVA_ENABLE_GITACHE "Fetch and enable gitache-managed developer dependencies" ON)
+if(AVA_ENABLE_GITACHE)
+  set(GITACHE_PACKAGES libcwd)  # List of requested packages.
 
-FetchContent_Declare(
-  gitache
-  GIT_REPOSITORY "https://github.com/CarloWood/gitache.git"
-  GIT_TAG        "c765a7199d8c789fe8d59af69a18a8eb08c5b945"
-  UPDATE_DISCONNECTED TRUE
-)
-FetchContent_MakeAvailable(gitache)
+  FetchContent_Declare(
+    gitache
+    GIT_REPOSITORY "https://github.com/CarloWood/gitache.git"
+    GIT_TAG        "c765a7199d8c789fe8d59af69a18a8eb08c5b945"
+    UPDATE_DISCONNECTED TRUE
+  )
+  FetchContent_MakeAvailable(gitache)
+else()
+  message(STATUS "gitache disabled by AVA_ENABLE_GITACHE=OFF")
+endif()
 # End of gitache configuration.
 
 #==============================================================================
@@ -93,13 +97,20 @@ find_package(nlohmann_json 3.11 CONFIG QUIET)
 if(NOT TARGET nlohmann_json::nlohmann_json)
   set(JSON_BuildTests OFF CACHE INTERNAL "" FORCE)
   set(JSON_Install OFF CACHE INTERNAL "" FORCE)
-  FetchContent_Declare(
-    ava_nlohmann_json
-    URL "https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz"
-    URL_HASH "SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d"
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-  )
-  FetchContent_MakeAvailable(ava_nlohmann_json)
+  # The initialized, pinned gitlink is the release source dependency. Keep the
+  # immutable upstream archive only as the existing non-qualified fallback for
+  # incomplete developer checkouts; provenance rejects a missing gitlink.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/json/CMakeLists.txt")
+    add_subdirectory(src/json EXCLUDE_FROM_ALL)
+  else()
+    FetchContent_Declare(
+      ava_nlohmann_json
+      URL "https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz"
+      URL_HASH "SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d"
+      DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(ava_nlohmann_json)
+  endif()
 endif()
 
 function(ava_apply_debugging target)
@@ -144,8 +155,10 @@ configure_file(
   @ONLY
 )
 
-# Tell cwds/sys.h that we have a config.h.
+# Tell cwds/sys.h that we have a config.h. Reject the two guarded non-MIT
+# ai-utils headers if a future AVA source accidentally includes either one.
 add_definitions(-DHAVE_CONFIG_H)
+add_compile_definitions(MIT_LICENSE_ONLY)
 include_directories(${top_objdir})
 
 # End of CONFIG FILES section.
@@ -175,7 +188,9 @@ install(
   COMPONENT ava
 )
 install(
-  FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+  FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+    "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
   DESTINATION "${CMAKE_INSTALL_DOCDIR}"
   COMPONENT ava
 )
@@ -184,6 +199,7 @@ install(
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/USAGE.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/CONFIG.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/TESTING.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagnostics.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/headless-protocol.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/rpc-protocol.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/acp.md"

@@ -6,6 +6,7 @@ import ctypes
 import errno
 import hashlib
 import importlib.util
+import json
 import os
 import pathlib
 import platform
@@ -459,6 +460,8 @@ def expected_files(package_name: str) -> set[str]:
     docs = {
         "README.md",
         "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+        "PROVENANCE.json",
         "docs/USAGE.md",
         "docs/CONFIG.md",
         "docs/TESTING.md",
@@ -889,10 +892,11 @@ case "${{1-}}" in
   --version)
     if [ ! -e "$AVA_PACKAGE_TEST_BUILD_MUTATION_MARKER" ]; then
       : > "$AVA_PACKAGE_TEST_BUILD_MUTATION_MARKER"
-      install -m 0700 "$AVA_PACKAGE_TEST_BUILD_AVA_REPLACEMENT" "$AVA_PACKAGE_TEST_BUILD_AVA_ORIGINAL.next"
-      mv "$AVA_PACKAGE_TEST_BUILD_AVA_ORIGINAL.next" "$AVA_PACKAGE_TEST_BUILD_AVA_ORIGINAL"
-      install -m 0700 "$AVA_PACKAGE_TEST_BUILD_FAKE_REPLACEMENT" "$AVA_PACKAGE_TEST_BUILD_FAKE_ORIGINAL.next"
-      mv "$AVA_PACKAGE_TEST_BUILD_FAKE_ORIGINAL.next" "$AVA_PACKAGE_TEST_BUILD_FAKE_ORIGINAL"
+      build_dir=$(cat "$AVA_PACKAGE_TEST_BUILD_REPO/build-location")
+      install -m 0700 "$AVA_PACKAGE_TEST_BUILD_AVA_REPLACEMENT" "$build_dir/ava.next"
+      mv "$build_dir/ava.next" "$build_dir/ava"
+      install -m 0700 "$AVA_PACKAGE_TEST_BUILD_FAKE_REPLACEMENT" "$build_dir/tests/ava_fake_provider_server.next"
+      mv "$build_dir/tests/ava_fake_provider_server.next" "$build_dir/tests/ava_fake_provider_server"
     fi
     printf 'ava {version}\\n'
     ;;
@@ -965,6 +969,7 @@ def create_fake_build_repository(
     (fake_repo / "tests").mkdir(mode=0o700)
     shutil.copy2(script, fake_repo / "scripts" / "package-linux.sh")
     shutil.copy2(publisher, fake_repo / "scripts" / "publish-linux-artifacts.py")
+    shutil.copy2(repo / "scripts" / "generate-release-provenance.py", fake_repo / "scripts" / "generate-release-provenance.py")
     shutil.copy2(repo / "scripts" / "verify-markdown-links.py", fake_repo / "scripts" / "verify-markdown-links.py")
     (fake_repo / "CMakeLists.txt").write_text(
         f"cmake_minimum_required(VERSION 3.25)\nproject(ava VERSION {version})\n",
@@ -975,9 +980,10 @@ def create_fake_build_repository(
     package_prefix = f"{package_name}/"
     for member in sorted(expected_files(package_name)):
         relative = member.removeprefix(package_prefix)
-        if relative == "bin/ava":
+        if relative in {"bin/ava", "share/doc/ava/PROVENANCE.json"}:
             continue
         if relative == "share/doc/ava/README.md":
+
             source_relative = "docs/release-artifact-readme.md"
         elif relative == "share/doc/ava/LICENSE":
             source_relative = "LICENSE"
@@ -1017,11 +1023,25 @@ args = sys.argv[1:]
 repo = pathlib.Path(os.environ["AVA_PACKAGE_TEST_BUILD_REPO"])
 
 if args and args[0] == "--preset":
+    required_cache_arguments = {
+        "-DAVA_ENABLE_GITACHE=OFF",
+        "-DEnableLibcwd=OFF",
+        "-DFETCHCONTENT_FULLY_DISCONNECTED=ON",
+        "-DCMAKE_DISABLE_FIND_PACKAGE_nlohmann_json=ON",
+    }
+    missing = sorted(argument for argument in required_cache_arguments if args.count(argument) != 1)
+    if missing:
+        raise RuntimeError(
+            "source-build configure must be dependency-disconnected; "
+            f"missing or duplicate arguments {missing}: {args}"
+        )
     raise SystemExit(0)
 
 if args and args[0] == "--build":
-    ava = repo / "build-release" / "ava"
-    fake = repo / "build-release" / "tests" / "ava_fake_provider_server"
+    build = pathlib.Path(args[1])
+    (repo / "build-location").write_text(str(build), encoding="utf-8")
+    ava = build / "ava"
+    fake = build / "tests" / "ava_fake_provider_server"
     ava.parent.mkdir(parents=True, exist_ok=True)
     fake.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(os.environ["AVA_PACKAGE_TEST_BUILD_AVA_TEMPLATE"], ava)
@@ -1035,9 +1055,10 @@ if args and args[0] == "--install":
         prefix = pathlib.Path(args[args.index("--prefix") + 1])
     except (ValueError, IndexError) as exc:
         raise RuntimeError("fake cmake install did not receive --prefix") from exc
+    build = pathlib.Path(args[1])
     installed_ava = prefix / "bin" / "ava"
     installed_ava.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(repo / "build-release" / "ava", installed_ava)
+    shutil.copy2(build / "ava", installed_ava)
     installed_ava.chmod(0o755)
     for line in (repo / "install-manifest.txt").read_text(encoding="utf-8").splitlines():
         source_name, destination_name = line.split("\\t", 1)
@@ -1057,8 +1078,6 @@ def definition(prefix):
 
 ava = definition("-DAVA_EXE=")
 fake = definition("-DAVA_FAKE_PROVIDER_EXE=")
-if fake == repo / "build-release" / "tests" / "ava_fake_provider_server":
-    raise RuntimeError("model smoke received mutable build-tree fake provider")
 if fake.name != "fake-provider" or fake.parent.name != "inputs":
     raise RuntimeError(f"model smoke did not receive the private fake-provider snapshot: {fake}")
 ava_digest = hashlib.sha256(ava.read_bytes()).hexdigest()
@@ -1067,10 +1086,11 @@ if ava_digest != os.environ["AVA_PACKAGE_TEST_BUILD_AVA_DIGEST"]:
     raise RuntimeError(f"model-smoke AVA digest changed: {ava_digest}")
 if fake_digest != os.environ["AVA_PACKAGE_TEST_BUILD_FAKE_DIGEST"]:
     raise RuntimeError(f"model-smoke fake-provider digest changed: {fake_digest}")
-if hashlib.sha256((repo / "build-release" / "ava").read_bytes()).hexdigest() == ava_digest:
-    raise RuntimeError("build-tree AVA was not replaced before install/model smoke")
-if hashlib.sha256((repo / "build-release" / "tests" / "ava_fake_provider_server").read_bytes()).hexdigest() == fake_digest:
-    raise RuntimeError("build-tree fake provider was not replaced before model smoke")
+build = pathlib.Path((repo / "build-location").read_text(encoding="utf-8"))
+if hashlib.sha256((build / "ava").read_bytes()).hexdigest() == ava_digest:
+    raise RuntimeError("private build-tree AVA was not replaced before install/model smoke")
+if hashlib.sha256((build / "tests" / "ava_fake_provider_server").read_bytes()).hexdigest() == fake_digest:
+    raise RuntimeError("private build-tree fake provider was not replaced before model smoke")
 pathlib.Path(os.environ["AVA_PACKAGE_TEST_BUILD_MODEL_MARKER"]).write_text("smoked\\n", encoding="utf-8")
 """,
     )
@@ -1814,6 +1834,17 @@ def run_package_tests(
                 f"archive allowlist mismatch\nactual={sorted(regular_files)}\n"
                 f"expected={sorted(expected_files(package_name))}"
             )
+        notices = archive.extractfile(f"{package_name}/share/doc/ava/THIRD_PARTY_NOTICES.md")
+        provenance = archive.extractfile(f"{package_name}/share/doc/ava/PROVENANCE.json")
+        if notices is None or "MIT_LICENSE_ONLY" not in notices.read().decode("utf-8"):
+            raise RuntimeError("package third-party notices are missing the guarded-utils boundary")
+        if provenance is None:
+            raise RuntimeError("package provenance is missing")
+        provenance_data = json.loads(provenance.read().decode("utf-8"))
+        if provenance_data.get("schema_version") != 2 or provenance_data.get("build_mode") != "supplied-binary":
+            raise RuntimeError("package provenance has unexpected accepted-binary content")
+        if provenance_data.get("release_qualified") is not False:
+            raise RuntimeError("accepted-binary package must remain unqualified")
         extract = root / "independent-extract"
         extract.mkdir(mode=0o700)
         archive.extractall(extract, filter="data")
@@ -2109,10 +2140,6 @@ pathlib.Path(os.environ["AVA_PACKAGE_TEST_FAKE_SMOKE_MARKER"]).write_text("smoke
     build_env["AVA_PACKAGE_TEST_BUILD_REPO"] = str(fake_build_repo)
     build_env["AVA_PACKAGE_TEST_BUILD_AVA_TEMPLATE"] = str(build_ava_template)
     build_env["AVA_PACKAGE_TEST_BUILD_FAKE_TEMPLATE"] = str(build_fake_template)
-    build_env["AVA_PACKAGE_TEST_BUILD_AVA_ORIGINAL"] = str(fake_build_repo / "build-release" / "ava")
-    build_env["AVA_PACKAGE_TEST_BUILD_FAKE_ORIGINAL"] = str(
-        fake_build_repo / "build-release" / "tests" / "ava_fake_provider_server"
-    )
     build_env["AVA_PACKAGE_TEST_BUILD_AVA_REPLACEMENT"] = str(build_ava_replacement)
     build_env["AVA_PACKAGE_TEST_BUILD_FAKE_REPLACEMENT"] = str(build_fake_replacement)
     build_env["AVA_PACKAGE_TEST_BUILD_MUTATION_MARKER"] = str(build_mutation_marker)
@@ -2125,15 +2152,9 @@ pathlib.Path(os.environ["AVA_PACKAGE_TEST_FAKE_SMOKE_MARKER"]).write_text("smoke
     )
     if not build_mutation_marker.is_file() or not build_model_marker.is_file():
         raise RuntimeError("fake build-mode harness did not exercise mutation and deterministic model smoke")
-    if hashlib.sha256((fake_build_repo / "build-release" / "ava").read_bytes()).hexdigest() == build_ava_digest:
-        raise RuntimeError("fake build-mode AVA pathname was not replaced after snapshot")
-    if (
-        hashlib.sha256(
-            (fake_build_repo / "build-release" / "tests" / "ava_fake_provider_server").read_bytes()
-        ).hexdigest()
-        == build_fake_digest
-    ):
-        raise RuntimeError("fake build-mode provider pathname was not replaced after snapshot")
+    build_location = pathlib.Path((fake_build_repo / "build-location").read_text(encoding="utf-8"))
+    if build_location.exists():
+        raise RuntimeError("private build-mode tree was retained after packaging")
     build_artifact = parse_path(build_result.stdout, "artifact")
     with tarfile.open(build_artifact, "r:gz") as archive:
         packaged_build_ava = archive.extractfile(f"{package_name}/bin/ava")

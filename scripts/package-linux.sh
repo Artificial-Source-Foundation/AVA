@@ -12,16 +12,18 @@ binary=""
 fake_provider=""
 output_dir=""
 binary_supplied=false
+require_release_qualified=false
 
 usage() {
   cat <<'EOF'
-Usage: scripts/package-linux.sh [--binary ABS] [--fake-provider ABS] [--output-dir ABS]
+Usage: scripts/package-linux.sh [--binary ABS] [--fake-provider ABS] [--output-dir ABS] [--require-release-qualified]
 
-Without --binary, configure the release preset and build ava plus the fake-provider helper.
+Without --binary, configure a fresh private Release build tree and build ava plus the fake-provider helper.
 With --binary, snapshot that executable once and stage it only when its exact version matches this checkout.
 A supplied --fake-provider is likewise snapshotted once before model smoke.
+--require-release-qualified accepts only a clean source-built x86_64 artifact with approved provenance.
 If --output-dir is omitted, a new private unpredictable directory is created.
-Python 3 is required only for packaging-time link verification and secure publication.
+Python 3 is required for provenance, packaging-time link verification, and secure publication.
 EOF
 }
 
@@ -50,6 +52,10 @@ while (($# > 0)); do
       esac
       shift 2
       ;;
+    --require-release-qualified)
+      require_release_qualified=true
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -61,6 +67,11 @@ while (($# > 0)); do
       ;;
   esac
 done
+
+if [[ $require_release_qualified == true && $binary_supplied == true ]]; then
+  echo "error: --require-release-qualified rejects supplied-binary mode" >&2
+  exit 2
+fi
 
 required_commands=(python3 tar sha256sum)
 if [[ $binary_supplied == false || -n $fake_provider ]]; then
@@ -125,11 +136,18 @@ if path_is_inside_repo "$work_root"; then
 fi
 
 if [[ -z $binary ]]; then
-  cmake --preset release -S "$repo_root"
-  cmake --build --preset release --target ava ava_fake_provider_server
-  binary="$repo_root/build-release/ava"
+  # A qualification build must not inherit artifacts or configuration from a
+  # developer tree. Keep the Release tree private with the package transaction.
+  release_build="$work_root/release-build"
+  cmake --preset release -S "$repo_root" -B "$release_build" \
+    -DAVA_ENABLE_GITACHE=OFF \
+    -DEnableLibcwd=OFF \
+    -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+    -DCMAKE_DISABLE_FIND_PACKAGE_nlohmann_json=ON
+  cmake --build "$release_build" --target ava ava_fake_provider_server
+  binary="$release_build/ava"
   if [[ -z $fake_provider ]]; then
-    fake_provider="$repo_root/build-release/tests/ava_fake_provider_server"
+    fake_provider="$release_build/tests/ava_fake_provider_server"
   fi
 fi
 
@@ -209,10 +227,11 @@ doc_sources=(
 )
 
 if [[ $binary_supplied == false ]]; then
-  cmake --install "$repo_root/build-release" --prefix "$stage" --component ava
+  cmake --install "$release_build" --prefix "$stage" --component ava
 else
   install -D -m 0644 -- "$repo_root/docs/release-artifact-readme.md" "$doc_root/README.md"
   install -D -m 0644 -- "$repo_root/LICENSE" "$doc_root/LICENSE"
+  install -D -m 0644 -- "$repo_root/THIRD_PARTY_NOTICES.md" "$doc_root/THIRD_PARTY_NOTICES.md"
   for source in "${doc_sources[@]}"; do
     install -D -m 0644 -- "$repo_root/$source" "$doc_root/$source"
   done
@@ -220,8 +239,25 @@ fi
 # cmake --install reads the build tree, so always replace its executable with
 # the exact private snapshot used for version validation and package smoke.
 install -D -m 0755 -- "$binary" "$stage/bin/ava"
+if [[ $binary_supplied == false ]]; then
+  build_mode=source-build
+else
+  build_mode=supplied-binary
+fi
+provenance_command=(
+  python3 "$repo_root/scripts/generate-release-provenance.py"
+  --repo "$repo_root"
+  --binary "$binary"
+  --binary-version "$version"
+  --build-mode "$build_mode"
+  --output "$doc_root/PROVENANCE.json"
+)
+if [[ $require_release_qualified == true ]]; then
+  provenance_command+=(--qualification-mode --require-release-qualified)
+fi
+"${provenance_command[@]}"
 
-expected_files=(bin/ava share/doc/ava/README.md share/doc/ava/LICENSE)
+expected_files=(bin/ava share/doc/ava/README.md share/doc/ava/LICENSE share/doc/ava/THIRD_PARTY_NOTICES.md share/doc/ava/PROVENANCE.json)
 for source in "${doc_sources[@]}"; do
   expected_files+=("share/doc/ava/$source")
 done
@@ -232,6 +268,11 @@ if [[ ${staged_files[*]} != "${sorted_expected[*]}" ]]; then
   printf 'staged:\n%s\n' "${staged_files[*]}" >&2
   printf 'expected:\n%s\n' "${sorted_expected[*]}" >&2
   exit 1
+fi
+if [[ $require_release_qualified == true ]]; then
+  echo "release qualification: qualified"
+else
+  echo "release qualification: see share/doc/ava/PROVENANCE.json (accepted-binary artifacts are unqualified)"
 fi
 if find "$stage" -type l -print -quit | grep -q .; then
   echo "error: staged package contains a symlink" >&2

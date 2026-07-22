@@ -636,6 +636,47 @@ void test_environment_is_synthetic_and_digest_bound()
          "environment digest binds exact environment content to plans");
 }
 
+void test_delegated_context_omits_automatic_host_user_toolchains()
+{
+  CommandFixture fixture("delegated-host-user-toolchains");
+  fixture.executable("pwd");
+  auto const user_bin = fixture.trusted_home / ".local" / "bin";
+  auto const cargo_bin = fixture.trusted_home / ".cargo" / "bin";
+  auto const rustup_home = fixture.trusted_home / ".rustup";
+  auto const workspace_venv = fixture.workspace / ".venv" / "bin";
+  auto const workspace_node_modules = fixture.workspace / "node_modules" / ".bin";
+  for (auto const& directory : {user_bin, cargo_bin, rustup_home, workspace_venv, workspace_node_modules})
+  {
+    std::filesystem::create_directories(directory);
+    ::chmod(directory.c_str(), S_IRWXU);
+  }
+  ::chmod(user_bin.parent_path().c_str(), S_IRWXU);
+  ::chmod(cargo_bin.parent_path().c_str(), S_IRWXU);
+
+  auto const intent = command::CommandIntent::structured({"pwd"});
+  auto local = command::prepare_command(*intent, fixture.options("local-host-user-toolchains"));
+  auto delegated_options = fixture.options("delegated-host-user-toolchains");
+  delegated_options.discover_host_user_toolchains = false;
+  auto delegated = command::prepare_command(*intent, delegated_options);
+  auto const has_path = [](command::CommandPlan const& plan, std::filesystem::path const& directory, command::PathProvenance provenance) {
+    return std::ranges::any_of(plan.path_entries(), [&directory, provenance](command::CommandPathEntry const& entry) {
+      return entry.directory == directory && entry.provenance == provenance;
+    });
+  };
+
+  expect(local && delegated && local->plan().rustup_home_metadata() && environment_value(local->environment(), "RUSTUP_HOME") == rustup_home.string() &&
+             has_path(local->plan(), user_bin, command::PathProvenance::UserLocal) && has_path(local->plan(), cargo_bin, command::PathProvenance::UserCargo) &&
+             has_path(local->plan(), workspace_venv, command::PathProvenance::WorkspaceVenv) &&
+             has_path(local->plan(), workspace_node_modules, command::PathProvenance::WorkspaceNodeModules) && !delegated->plan().rustup_home_metadata() &&
+             !environment_value(delegated->environment(), "RUSTUP_HOME") && !has_path(delegated->plan(), user_bin, command::PathProvenance::UserLocal) &&
+             !has_path(delegated->plan(), cargo_bin, command::PathProvenance::UserCargo) &&
+             has_path(delegated->plan(), fixture.bin, command::PathProvenance::StartupPath) &&
+             has_path(delegated->plan(), workspace_venv, command::PathProvenance::WorkspaceVenv) &&
+             has_path(delegated->plan(), workspace_node_modules, command::PathProvenance::WorkspaceNodeModules),
+         "delegated command contexts omit automatic trusted-home user toolchains and rustup while local contexts retain them and both preserve startup and "
+         "workspace PATH entries");
+}
+
 void test_logical_workspace_and_cwd_spelling_is_preserved()
 {
   CommandFixture fixture("logical-workspace");
@@ -1448,6 +1489,7 @@ void run_command_tests()
   test_workspace_cwd_path_and_interpreter_freshness();
   test_raw_shell_binds_configured_shell_and_accepts_env_shebang();
   test_environment_is_synthetic_and_digest_bound();
+  test_delegated_context_omits_automatic_host_user_toolchains();
   test_logical_workspace_and_cwd_spelling_is_preserved();
   test_only_direct_trusted_home_entry_churn_stays_fresh_for_user_toolchains();
   test_user_toolchain_scope_keeps_final_and_symlink_identity_strict();

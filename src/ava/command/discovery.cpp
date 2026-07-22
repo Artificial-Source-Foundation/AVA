@@ -651,8 +651,11 @@ ava::core::Result<std::vector<CommandPathEntry>> discover_path(CommandBuildOptio
   };
   // Host discovery uses only this trusted root; these paths never flow into the
   // child HOME/XDG/TMP environment.
-  add_optional_candidate(trusted_home / ".local" / "bin", PathProvenance::UserLocal);
-  add_optional_candidate(trusted_home / ".cargo" / "bin", PathProvenance::UserCargo);
+  if (options.discover_host_user_toolchains)
+  {
+    add_optional_candidate(trusted_home / ".local" / "bin", PathProvenance::UserLocal);
+    add_optional_candidate(trusted_home / ".cargo" / "bin", PathProvenance::UserCargo);
+  }
   add_optional_candidate(workspace / ".venv" / "bin", PathProvenance::WorkspaceVenv);
   add_optional_candidate(workspace / "node_modules" / ".bin", PathProvenance::WorkspaceNodeModules);
 
@@ -1065,10 +1068,15 @@ ava::core::Result<SealedCommandContext> discover_command_context(CommandIntent c
                                                         .xdg_state_home = std::move(*xdg_state_home),
                                                         .tmpdir = std::move(*tmpdir)};
 
-  auto rustup_home = discover_optional_rustup_home(*trusted_home, workspace_metadata->canonical_path, ava_authority_paths, synthetic_environment_roots,
-                                                   options.limits, *options.anchor_set);
-  if (!rustup_home)
-    return std::unexpected(std::move(rustup_home.error()));
+  std::optional<PathMetadata> rustup_home;
+  if (options.discover_host_user_toolchains)
+  {
+    auto discovered_rustup_home = discover_optional_rustup_home(*trusted_home, workspace_metadata->canonical_path, ava_authority_paths,
+                                                                synthetic_environment_roots, options.limits, *options.anchor_set);
+    if (!discovered_rustup_home)
+      return std::unexpected(std::move(discovered_rustup_home.error()));
+    rustup_home = std::move(*discovered_rustup_home);
+  }
 
   auto entries = discover_path(options, workspace_metadata->canonical_path, trusted_home->canonical_path, *options.anchor_set);
   if (!entries)
@@ -1092,7 +1100,7 @@ ava::core::Result<SealedCommandContext> discover_command_context(CommandIntent c
                               .ava_authority_roots = std::move(ava_authority_paths),
                               .ava_authority_root_metadata = std::move(ava_authority_roots),
                               .synthetic_environment_roots = std::move(synthetic_environment_roots),
-                              .rustup_home_metadata = std::move(*rustup_home),
+                              .rustup_home_metadata = std::move(rustup_home),
                               .path_entries = std::move(*entries)};
 }
 

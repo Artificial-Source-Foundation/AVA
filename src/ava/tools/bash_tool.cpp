@@ -577,6 +577,7 @@ ava::core::Result<ava::command::CommandBuildOptions> local_command_build_options
   return ava::command::CommandBuildOptions{.workspace = context.workspace_dir,
                                            .anchor_set = context.anchor_set,
                                            .trusted_home = account->first,
+                                           .discover_host_user_toolchains = !static_cast<bool>(context.command_executor),
                                            .startup_path = std::move(startup_path),
                                            .shell = "/bin/sh",
                                            .ava_authority_roots = context.ava_authority_roots,

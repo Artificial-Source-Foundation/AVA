@@ -176,6 +176,9 @@ struct CommandBuildOptions
   // The real, trusted host home used only to discover user-local toolchains.
   // It must be distinct from the synthetic child HOME.
   std::filesystem::path trusted_home;
+  // Controls automatic trusted-home .local/bin, .cargo/bin, and .rustup
+  // discovery only; explicitly supplied and workspace-local PATH entries stay enabled.
+  bool discover_host_user_toolchains = true;
   std::optional<std::string> startup_path;
   // Raw shell plans resolve and bind this exact logical executable; it is never
   // found by basename lookup. The local executor reopens it through the shared

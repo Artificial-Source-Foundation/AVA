@@ -935,9 +935,21 @@ void test_coordinator_lazy_parent_activation_is_process_independent()
 
   int ready[2] = {-1, -1};
   int release[2] = {-1, -1};
-  expect(::pipe2(ready, O_CLOEXEC) == 0 && ::pipe2(release, O_CLOEXEC) == 0, "lazy activation fixture creates synchronization pipes");
-  if (ready[0] < 0 || release[0] < 0)
+  bool const ready_pipe_created = ::pipe2(ready, O_CLOEXEC) == 0;
+  bool const release_pipe_created = ready_pipe_created && ::pipe2(release, O_CLOEXEC) == 0;
+  expect(ready_pipe_created && release_pipe_created, "lazy activation fixture creates synchronization pipes");
+  if (!ready_pipe_created || !release_pipe_created)
+  {
+    if (ready[0] >= 0)
+      static_cast<void>(::close(ready[0]));
+    if (ready[1] >= 0)
+      static_cast<void>(::close(ready[1]));
+    if (release[0] >= 0)
+      static_cast<void>(::close(release[0]));
+    if (release[1] >= 0)
+      static_cast<void>(::close(release[1]));
     return;
+  }
   auto owner_pid = ::fork();
   if (owner_pid == 0)
   {
@@ -947,20 +959,38 @@ void test_coordinator_lazy_parent_activation_is_process_independent()
     auto coordinator = ava::agent::SubagentCoordinator::create({.ava_state_dir = state});
     auto activated = coordinator ? (*coordinator)->activate_parent("parent_a") : ava::core::VoidResult(std::unexpected(coordinator.error()));
     char const status = activated ? '1' : '0';
-    static_cast<void>(::write(ready[1], &status, 1));
+    if (!write_all_to_descriptor_for_test(ready[1], &status, sizeof(status)))
+      ::_exit(5);
+    static_cast<void>(::close(ready[1]));
+    if (status != '1')
+      ::_exit(2);
     char wake = 0;
-    if (status == '1')
-      static_cast<void>(::read(release[0], &wake, 1));
-    ::_exit(status == '1' ? 0 : 2);
+    if (!read_exact_from_descriptor_for_test(release[0], &wake, sizeof(wake)))
+      ::_exit(6);
+    static_cast<void>(::close(release[0]));
+    ::_exit(0);
   }
   static_cast<void>(::close(ready[1]));
   static_cast<void>(::close(release[0]));
-  char owner_ready = 0;
-  auto const ready_bytes = ::read(ready[0], &owner_ready, 1);
-  static_cast<void>(::close(ready[0]));
-  expect(owner_pid > 0 && ready_bytes == 1 && owner_ready == '1', "first process activates and recovers only parent A");
-  if (owner_pid <= 0 || owner_ready != '1')
+  if (owner_pid < 0)
+  {
+    static_cast<void>(::close(ready[0]));
+    static_cast<void>(::close(release[1]));
+    expect(false, "lazy activation fixture forks owner process");
     return;
+  }
+  char owner_ready = 0;
+  bool const ready_read = read_exact_from_descriptor_for_test(ready[0], &owner_ready, sizeof(owner_ready));
+  static_cast<void>(::close(ready[0]));
+  expect(ready_read, "first process readiness status transfers to the parent");
+  expect(owner_ready == '1', "first process activates and recovers only parent A");
+  if (!ready_read || owner_ready != '1')
+  {
+    static_cast<void>(::close(release[1]));
+    int owner_status = 0;
+    static_cast<void>(::waitpid(owner_pid, &owner_status, 0));
+    return;
+  }
 
   auto competing_pid = ::fork();
   if (competing_pid == 0)
@@ -979,8 +1009,9 @@ void test_coordinator_lazy_parent_activation_is_process_independent()
          "another process manages unrelated B and C while the live owner prevents A recovery");
 
   char const wake = 'x';
-  static_cast<void>(::write(release[1], &wake, 1));
+  bool const release_written = write_all_to_descriptor_for_test(release[1], &wake, sizeof(wake));
   static_cast<void>(::close(release[1]));
+  expect(release_written, "parent A release signal transfers from the parent");
   int owner_status = 0;
   static_cast<void>(::waitpid(owner_pid, &owner_status, 0));
   expect(WIFEXITED(owner_status) && WEXITSTATUS(owner_status) == 0, "parent A owner exits and releases only its lease");

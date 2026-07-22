@@ -112,6 +112,38 @@ void expect(bool condition, std::string const& message)
   }
 }
 
+bool read_exact_from_descriptor_for_test(int descriptor, void* buffer, std::size_t byte_count) noexcept
+{
+  auto* next = static_cast<char*>(buffer);
+  std::size_t offset = 0;
+  while (offset < byte_count)
+  {
+    auto const transferred = ::read(descriptor, next + offset, byte_count - offset);
+    if (transferred < 0 && errno == EINTR)
+      continue;
+    if (transferred <= 0)
+      return false;
+    offset += static_cast<std::size_t>(transferred);
+  }
+  return true;
+}
+
+bool write_all_to_descriptor_for_test(int descriptor, void const* buffer, std::size_t byte_count) noexcept
+{
+  auto const* next = static_cast<char const*>(buffer);
+  std::size_t offset = 0;
+  while (offset < byte_count)
+  {
+    auto const transferred = ::write(descriptor, next + offset, byte_count - offset);
+    if (transferred < 0 && errno == EINTR)
+      continue;
+    if (transferred <= 0)
+      return false;
+    offset += static_cast<std::size_t>(transferred);
+  }
+  return true;
+}
+
 int FailingStreambuf::overflow(int ch)
 {
   static_cast<void>(ch);

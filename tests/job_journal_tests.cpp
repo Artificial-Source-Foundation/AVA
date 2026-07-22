@@ -616,6 +616,8 @@ void test_concurrent_appends_are_serialized()
 
   int barrier[2] = {-1, -1};
   expect(::pipe2(barrier, O_CLOEXEC) == 0, "concurrency fixture creates process barrier");
+  if (barrier[0] < 0)
+    return;
   std::vector<pid_t> children;
   for (std::size_t index = 0; index < count; ++index)
   {
@@ -624,10 +626,12 @@ void test_concurrent_appends_are_serialized()
     {
       static_cast<void>(::close(barrier[1]));
       char token = 0;
-      ssize_t const read_count = ::read(barrier[0], &token, 1);
+      bool const released = read_exact_from_descriptor_for_test(barrier[0], &token, sizeof(token));
+      static_cast<void>(::close(barrier[0]));
+      if (!released)
+        ::_exit(2);
       auto started = record(JobJournalTransitionKind::Started, identity(std::to_string(index + 1)), "same-time");
-      bool const appended = read_count == 1 && journals[index].append(started).has_value();
-      ::_exit(appended ? 0 : 1);
+      ::_exit(journals[index].append(started).has_value() ? 0 : 1);
     }
     expect(child > 0, "concurrency fixture forks append process");
     if (child > 0)
@@ -635,8 +639,9 @@ void test_concurrent_appends_are_serialized()
   }
   static_cast<void>(::close(barrier[0]));
   std::string tokens(children.size(), 'x');
-  expect(::write(barrier[1], tokens.data(), tokens.size()) == static_cast<ssize_t>(tokens.size()), "concurrency fixture releases all append processes");
+  bool const released = write_all_to_descriptor_for_test(barrier[1], tokens.data(), tokens.size());
   static_cast<void>(::close(barrier[1]));
+  expect(released, "concurrency fixture releases all append processes");
   bool children_succeeded = true;
   for (pid_t child : children)
   {
@@ -713,9 +718,21 @@ void test_process_lifetime_owner_lease_guards_recovery()
 
   int ready[2] = {-1, -1};
   int release[2] = {-1, -1};
-  expect(::pipe2(ready, O_CLOEXEC) == 0 && ::pipe2(release, O_CLOEXEC) == 0, "owner-process fixture creates CLOEXEC synchronization pipes");
-  if (ready[0] < 0 || release[0] < 0)
+  bool const ready_pipe_created = ::pipe2(ready, O_CLOEXEC) == 0;
+  bool const release_pipe_created = ready_pipe_created && ::pipe2(release, O_CLOEXEC) == 0;
+  expect(ready_pipe_created && release_pipe_created, "owner-process fixture creates CLOEXEC synchronization pipes");
+  if (!ready_pipe_created || !release_pipe_created)
+  {
+    if (ready[0] >= 0)
+      static_cast<void>(::close(ready[0]));
+    if (ready[1] >= 0)
+      static_cast<void>(::close(ready[1]));
+    if (release[0] >= 0)
+      static_cast<void>(::close(release[0]));
+    if (release[1] >= 0)
+      static_cast<void>(::close(release[1]));
     return;
+  }
   auto owner_pid = ::fork();
   if (owner_pid == 0)
   {
@@ -724,20 +741,38 @@ void test_process_lifetime_owner_lease_guards_recovery()
     static_cast<void>(::close(release[1]));
     auto owned = JobJournal::try_open_owned(state, "parent_1");
     char const status = owned && owned->has_value() ? '1' : '0';
-    static_cast<void>(::write(ready[1], &status, 1));
+    if (!write_all_to_descriptor_for_test(ready[1], &status, sizeof(status)))
+      ::_exit(5);
+    static_cast<void>(::close(ready[1]));
+    if (status != '1')
+      ::_exit(2);
     char wake = 0;
-    if (status == '1')
-      static_cast<void>(::read(release[0], &wake, 1));
-    ::_exit(status == '1' ? 0 : 2);
+    if (!read_exact_from_descriptor_for_test(release[0], &wake, sizeof(wake)))
+      ::_exit(6);
+    static_cast<void>(::close(release[0]));
+    ::_exit(0);
   }
   static_cast<void>(::close(ready[1]));
   static_cast<void>(::close(release[0]));
-  char owner_ready = 0;
-  auto const ready_bytes = ::read(ready[0], &owner_ready, 1);
-  static_cast<void>(::close(ready[0]));
-  expect(owner_pid > 0 && ready_bytes == 1 && owner_ready == '1', "process A acquires the parent owner lease before recovery races");
-  if (owner_pid <= 0 || owner_ready != '1')
+  if (owner_pid < 0)
+  {
+    static_cast<void>(::close(ready[0]));
+    static_cast<void>(::close(release[1]));
+    expect(false, "owner-process fixture forks owner process");
     return;
+  }
+  char owner_ready = 0;
+  bool const ready_read = read_exact_from_descriptor_for_test(ready[0], &owner_ready, sizeof(owner_ready));
+  static_cast<void>(::close(ready[0]));
+  expect(ready_read, "process A readiness status transfers to the parent");
+  expect(owner_ready == '1', "process A acquires the parent owner lease before recovery races");
+  if (!ready_read || owner_ready != '1')
+  {
+    static_cast<void>(::close(release[1]));
+    int owner_status = 0;
+    static_cast<void>(::waitpid(owner_pid, &owner_status, 0));
+    return;
+  }
 
   auto blocked_pid = ::fork();
   if (blocked_pid == 0)
@@ -757,8 +792,9 @@ void test_process_lifetime_owner_lease_guards_recovery()
          "process B skips A's owned parent without interruption and may own an unrelated parent");
 
   char const wake = 'x';
-  static_cast<void>(::write(release[1], &wake, 1));
+  bool const release_written = write_all_to_descriptor_for_test(release[1], &wake, sizeof(wake));
   static_cast<void>(::close(release[1]));
+  expect(release_written, "process A release signal transfers from the parent");
   int owner_status = 0;
   static_cast<void>(::waitpid(owner_pid, &owner_status, 0));
   expect(WIFEXITED(owner_status) && WEXITSTATUS(owner_status) == 0, "process A exits and releases its process-lifetime owner lease");

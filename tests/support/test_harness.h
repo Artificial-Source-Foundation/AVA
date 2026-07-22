@@ -28,6 +28,9 @@ std::string skip_message();
 
 void expect(bool condition, std::string const& message);
 
+bool read_exact_from_descriptor_for_test(int descriptor, void* buffer, std::size_t byte_count) noexcept;
+bool write_all_to_descriptor_for_test(int descriptor, void const* buffer, std::size_t byte_count) noexcept;
+
 class FailingStreambuf final : public std::streambuf
 {
  protected:

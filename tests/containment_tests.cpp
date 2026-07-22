@@ -289,8 +289,9 @@ void test_containment_fd_closure_keeps_bound_executable()
     static_cast<void>(::close(report[0]));
     containment::close_inherited_fds_except(report[1], handshake_fd, executable_fd);
     child_state = {::fcntl(report[1], F_GETFD), ::fcntl(handshake_fd, F_GETFD), ::fcntl(executable_fd, F_GETFD), ::fcntl(inherited_fd, F_GETFD)};
-    static_cast<void>(::write(report[1], child_state.data(), sizeof(child_state)));
-    _exit(0);
+    bool const reported = write_all_to_descriptor_for_test(report[1], child_state.data(), sizeof(child_state));
+    static_cast<void>(::close(report[1]));
+    _exit(reported ? 0 : 2);
   }
   if (report[1] >= 0)
     static_cast<void>(::close(report[1]));
@@ -302,14 +303,15 @@ void test_containment_fd_closure_keeps_bound_executable()
     static_cast<void>(::close(inherited_fd));
 
   std::array<int, 4> observed{-1, -1, -1, -1};
-  auto const bytes = report_pipe_created ? ::read(report[0], observed.data(), sizeof(observed)) : -1;
+  bool const report_read = report_pipe_created && read_exact_from_descriptor_for_test(report[0], observed.data(), sizeof(observed));
   if (report[0] >= 0)
     static_cast<void>(::close(report[0]));
   int status = 0;
   if (child > 0)
     static_cast<void>(::waitpid(child, &status, 0));
-  expect(report_pipe_created && child > 0 && bytes == static_cast<ssize_t>(sizeof(observed)) && WIFEXITED(status) && WEXITSTATUS(status) == 0 &&
-             observed[0] >= 0 && observed[1] >= 0 && observed[2] >= 0 && observed[3] == -1,
+  expect(report_read, "containment fd closure report transfers to the parent");
+  expect(report_pipe_created && child > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0 && observed[0] >= 0 && observed[1] >= 0 && observed[2] >= 0 &&
+             observed[3] == -1,
          "containment fd closure preserves handshake and approved-executable descriptors while closing inherited descriptors");
 }
 

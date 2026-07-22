@@ -422,6 +422,8 @@ class CommandEnvironment final
     friend class CommandEnvironment;
 
     FactoryPasskey() = default;
+
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
 
   [[nodiscard]] static FactoryPasskey make_factory_passkey() noexcept { return {}; }

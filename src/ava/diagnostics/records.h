@@ -109,11 +109,38 @@ enum class StoredRecordState
   Unavailable,
 };
 
+// Forward declaration so StoredRecord::print_on can render the state enum as
+// text without depending on the debug ostream operator machinery (which cannot
+// be pulled into this widely-included header due to include-order constraints).
+[[nodiscard]] std::string_view to_string(StoredRecordState state) noexcept;
+
 template <typename Record>
 struct StoredRecord
 {
   StoredRecordState state = StoredRecordState::Absent;
   std::optional<Record> record = std::nullopt;
+
+  // StoredRecord is a template, so the print_members generator cannot emit a
+  // definition for it; it therefore uses AVA_DEBUG_PRINT_MEMBERS_OPT_OUT below.
+  // This hand-written print_on lets the debug catch-all operator<< stream a
+  // StoredRecord<Record> when it appears as a member of a type whose
+  // print_members is generated (for example SupportArtifact::trace and
+  // SupportArtifact::last_failure).
+  //
+  // Only standard-library stream operators and the dependent `os << *record`
+  // (resolved at instantiation via ADL, where the Record type's print_on is
+  // visible) are used, so this compiles in every translation unit that includes
+  // records.h without requiring ava/debug/debug_ostream_operators.h.
+  void print_on(std::ostream& os) const
+  {
+    os << "{state:" << to_string(state) << ",record:";
+    if (record.has_value())
+      os << *record;
+    else
+      os << "nullopt";
+    os << '}';
+  }
+
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 

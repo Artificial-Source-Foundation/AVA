@@ -24,9 +24,17 @@ using utils::has_print_on::operator<<;
 } // namespace runtime
 } // namespace app
 
+namespace command {
+using utils::has_print_on::operator<<;
+} // namespace command
+
 namespace config {
 using utils::has_print_on::operator<<;
 } // namespace config
+
+namespace containment {
+using utils::has_print_on::operator<<;
+} // namespace containment
 
 namespace context {
 using utils::has_print_on::operator<<;
@@ -38,6 +46,10 @@ namespace json {
 using utils::has_print_on::operator<<;
 } // namespace json
 } // namespace core
+
+namespace diagnostics {
+using utils::has_print_on::operator<<;
+} // namespace diagnostics
 
 namespace lsp {
 using utils::has_print_on::operator<<;

@@ -163,6 +163,8 @@ class SubagentCoordinator final
     StartAdmission(StartAdmission const&) = delete;
     StartAdmission& operator=(StartAdmission const&) = delete;
 
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
    private:
     SubagentCoordinator& coordinator_;
     std::string parent_session_id_;

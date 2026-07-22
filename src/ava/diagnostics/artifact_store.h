@@ -32,6 +32,8 @@ class TraceArtifactDescriptor
 
   [[nodiscard]] int fd() const noexcept;
 
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
  private:
   int fd_ = -1;
 };

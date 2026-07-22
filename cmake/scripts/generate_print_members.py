@@ -82,7 +82,12 @@ def emit_body(rel, members):
     lines.append("  os << prefix;\n")
     lines.append("  AVA_USING_OSTREAM_PRELUDE(os)\n")
     if not members:
-        lines.append("      ;\n")
+        # The AVA_USING_OSTREAM_PRELUDE(os) macro above ends with a bare `os`
+        # that is meant to start a `<< member` chain. With no members it would
+        # form a bare `os;` statement, which -Wunused-value flags (and -Werror
+        # rejects). Stream an empty string instead: it is a function call (so
+        # -Wunused-value stays quiet) and writes nothing.
+        lines.append('      << "";\n')
     else:
         for idx, m in enumerate(members):
             sep = "" if idx == 0 else ", "

@@ -348,7 +348,8 @@ ava::core::VoidResult McpStdioClient::initialize(CancelCallback cancel_requested
 
   std::string const notification = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}";
   auto const deadline = std::chrono::steady_clock::now() + options_.request_timeout;
-  return write_message(notification, deadline, options_.request_timeout, "timed out writing MCP initialized notification", cancel_requested);
+  return write_message(notification, deadline, options_.request_timeout, "timed out writing MCP initialized notification",
+                       "MCP server closed before initialized notification", cancel_requested);
 }
 
 ava::core::Result<std::vector<McpToolDescription>> McpStdioClient::list_tools(CancelCallback cancel_requested)
@@ -626,14 +627,15 @@ ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::
   std::string const request_json =
       "{\"jsonrpc\":\"2.0\",\"id\":" + json_string(request_id) + ",\"method\":" + json_string(method) + ",\"params\":" + std::string(params_json) + "}";
   Dout(dc::mcp, "operation=request state=write request_bytes=" << request_json.size());
-  if (auto written = write_message(request_json, deadline, timeout, "timed out writing MCP request", cancel_requested); !written)
+  if (auto written = write_message(request_json, deadline, timeout, "timed out writing MCP request", "MCP server closed before response", cancel_requested);
+      !written)
   {
     return std::unexpected(std::move(written.error()));
   }
 
   while (true)
   {
-    auto message = read_message(deadline, timeout, timeout_message, "MCP server closed stdout before response", cancel_requested);
+    auto message = read_message(deadline, timeout, timeout_message, "MCP server closed before response", cancel_requested);
     if (!message)
       return std::unexpected(std::move(message.error()));
     Dout(dc::mcp, "operation=request state=read response_bytes=" << message->size());
@@ -673,10 +675,12 @@ ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::
 }
 
 ava::core::VoidResult McpStdioClient::write_message(std::string_view message, std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
-                                                    std::string_view timeout_message, CancelCallback cancel_requested)
+                                                    std::string_view timeout_message, std::string_view closed_message, CancelCallback cancel_requested)
 {
+  if (auto reaped = reap_child(); !reaped)
+    return std::unexpected(std::move(reaped.error()));
   if (stdin_fd_ < 0)
-    return std::unexpected(protocol_error("MCP stdin is closed", server_));
+    return std::unexpected(peer_closed_error(closed_message));
   auto const frame = compact_json_line(message);
   if (frame.size() - 1 > options_.max_message_bytes)
   {
@@ -699,11 +703,11 @@ ava::core::VoidResult McpStdioClient::write_message(std::string_view message, st
       offset += static_cast<std::size_t>(bytes);
       continue;
     }
-    if (bytes == 0)
-      return std::unexpected(errno_error("failed to write MCP request", server_));
+    if (bytes == 0 || errno == EPIPE)
+      return std::unexpected(peer_closed_error(closed_message));
     if (errno == EAGAIN || errno == EWOULDBLOCK)
     {
-      if (auto writable = wait_for_writable(deadline, timeout, timeout_message, cancel_requested); !writable)
+      if (auto writable = wait_for_writable(deadline, timeout, timeout_message, closed_message, cancel_requested); !writable)
       {
         return std::unexpected(std::move(writable.error()));
       }
@@ -769,13 +773,7 @@ ava::core::Result<std::string> McpStdioClient::read_message(std::chrono::steady_
           break;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       } while (std::chrono::steady_clock::now() < reap_deadline);
-      auto error = protocol_error(stdout_buffer_.empty() ? std::string(closed_message) : "MCP protocol message ended before newline", server_);
-      if (child_exited_)
-        error.with_context("status", exit_detail(child_status_));
-      error.with_context("response_bytes", std::to_string(stdout_buffer_.size()));
-      error.with_context("stderr_bytes", std::to_string(stderr_tail_.size()));
-      error.with_context("stderr_truncated", stderr_truncated_ ? "true" : "false");
-      return std::unexpected(std::move(error));
+      return std::unexpected(peer_closed_error(closed_message, stdout_buffer_.size()));
     }
     if (auto reaped = reap_child(); !reaped)
       return std::unexpected(std::move(reaped.error()));
@@ -815,7 +813,7 @@ ava::core::Result<std::string> McpStdioClient::read_message(std::chrono::steady_
 }
 
 ava::core::VoidResult McpStdioClient::wait_for_writable(std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
-                                                        std::string_view timeout_message, CancelCallback cancel_requested)
+                                                        std::string_view timeout_message, std::string_view closed_message, CancelCallback cancel_requested)
 {
   while (true)
   {
@@ -826,6 +824,8 @@ ava::core::VoidResult McpStdioClient::wait_for_writable(std::chrono::steady_cloc
     }
     if (auto reaped = reap_child(); !reaped)
       return std::unexpected(std::move(reaped.error()));
+    if (stdin_fd_ < 0)
+      return std::unexpected(peer_closed_error(closed_message));
     if (std::chrono::steady_clock::now() >= deadline)
     {
       auto error = protocol_error(std::string(timeout_message), server_);
@@ -850,15 +850,20 @@ ava::core::VoidResult McpStdioClient::wait_for_writable(std::chrono::steady_cloc
     if ((fds[0].revents & POLLOUT) != 0)
       return {};
     if ((fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
-    {
-      auto error = protocol_error("MCP request pipe closed", server_);
-      if (child_exited_)
-        error.with_context("status", exit_detail(child_status_));
-      error.with_context("stderr_bytes", std::to_string(stderr_tail_.size()));
-      error.with_context("stderr_truncated", stderr_truncated_ ? "true" : "false");
-      return std::unexpected(std::move(error));
-    }
+      return std::unexpected(peer_closed_error(closed_message));
   }
+}
+
+ava::core::Error McpStdioClient::peer_closed_error(std::string_view closed_message, std::optional<std::size_t> response_bytes) const
+{
+  auto error = protocol_error(std::string(closed_message), server_);
+  if (child_exited_)
+    error.with_context("status", exit_detail(child_status_));
+  if (response_bytes)
+    error.with_context("response_bytes", std::to_string(*response_bytes));
+  error.with_context("stderr_bytes", std::to_string(stderr_tail_.size()));
+  error.with_context("stderr_truncated", stderr_truncated_ ? "true" : "false");
+  return error;
 }
 
 ava::core::VoidResult McpStdioClient::drain_stdout()

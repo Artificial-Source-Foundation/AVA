@@ -143,6 +143,12 @@ int main(int argc, char** argv)
                                                                  : std::string("\"protocolVersion\":\"2024-11-05\",");
       auto const capabilities =
           mode == "missing-capabilities" ? std::string{} : std::string("\"capabilities\":{\"tools\":{},\"prompts\":{},\"resources\":{}},");
+      if (mode == "close-stdin-after-initialize")
+      {
+        close(STDIN_FILENO);
+        write_message(response(*id, "{" + protocol_version + capabilities + "\"serverInfo\":{\"name\":\"fake-mcp\",\"version\":\"1.0.0\"}}"));
+        for (;;) pause();
+      }
       write_message(response(*id, "{" + protocol_version + capabilities + "\"serverInfo\":{\"name\":\"fake-mcp\",\"version\":\"1.0.0\"}}"));
     }
     else if (*method == "tools/list")

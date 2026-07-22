@@ -343,10 +343,16 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   exit_start_server.args = {"exit-initialize"};
   auto exit_start = ava::mcp::McpStdioClient::start(exit_start_server, fake_client_options(workspace));
   auto const exit_start_format = exit_start ? std::string{} : exit_start.error().format();
-  expect(!exit_start && exit_start.error().message().find("closed stdout") != std::string::npos &&
-             exit_start_format.find("status: exit 42") != std::string::npos && exit_start_format.find("CANARY_MCP_STDERR_INIT_a138") == std::string::npos &&
-             exit_start_format.find("stderr_bytes") != std::string::npos,
+  expect(!exit_start && exit_start.error().message() == "MCP server closed before response" && exit_start_format.find("status: exit 42") != std::string::npos &&
+             exit_start_format.find("CANARY_MCP_STDERR_INIT_a138") == std::string::npos && exit_start_format.find("stderr_bytes") != std::string::npos,
          "MCP stdio client reports early startup exit with status and safe stderr metadata: " + exit_start_format);
+
+  auto close_stdin_server = fake_server_config(root);
+  close_stdin_server.args = {"close-stdin-after-initialize"};
+  auto close_stdin = ava::mcp::McpStdioClient::start(close_stdin_server, fake_client_options(workspace));
+  expect(!close_stdin && close_stdin.error().message() == "MCP server closed before initialized notification" &&
+             close_stdin.error().format().find("stderr_bytes") != std::string::npos,
+         "MCP stdio client reports a peer-closed initialized notification with safe metadata");
 
   auto const global_config_dir = root / "global-config";
   std::filesystem::create_directories(global_config_dir);
@@ -553,7 +559,7 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   if (exit_list_client)
   {
     auto exited_tools = (*exit_list_client)->list_tools();
-    expect(!exited_tools && exited_tools.error().message().find("closed stdout") != std::string::npos &&
+    expect(!exited_tools && exited_tools.error().message() == "MCP server closed before response" &&
                exited_tools.error().format().find("status: exit 43") != std::string::npos &&
                exited_tools.error().format().find("CANARY_MCP_STDERR_LIST_4b72") == std::string::npos,
            "MCP stdio client reports discovery-time process exit with status and safe stderr metadata");
@@ -603,7 +609,7 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   {
     auto exited_tool = (*exit_tool_client)->call_tool("echo", "{\"text\":\"hello\"}");
     auto const exited_tool_format = exited_tool ? std::string{} : exited_tool.error().format();
-    expect(!exited_tool && exited_tool.error().message().find("closed stdout") != std::string::npos &&
+    expect(!exited_tool && exited_tool.error().message() == "MCP server closed before response" &&
                exited_tool_format.find("status: exit 44") != std::string::npos && exited_tool_format.find("CANARY_MCP_STDERR_CALL_0c95") == std::string::npos,
            "MCP stdio client reports tool-call process exit with status and safe stderr metadata: " + exited_tool_format);
     auto exit_tool_shutdown = (*exit_tool_client)->shutdown(std::chrono::milliseconds(500));

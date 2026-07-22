@@ -148,13 +148,16 @@ class McpStdioClient final
   [[nodiscard]] ava::core::Result<JsonRpcResponse> request(std::string_view method, std::string_view params_json, std::chrono::milliseconds timeout,
                                                            std::string_view timeout_message, CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult write_message(std::string_view message, std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
-                                                    std::string_view timeout_message, CancelCallback cancel_requested = nullptr);
+                                                    std::string_view timeout_message, std::string_view closed_message,
+                                                    CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<std::string> read_message(std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
                                                             std::string_view timeout_message, std::string_view closed_message,
                                                             CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<std::optional<std::string>> try_extract_message();
   [[nodiscard]] ava::core::VoidResult wait_for_writable(std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
-                                                        std::string_view timeout_message, CancelCallback cancel_requested = nullptr);
+                                                        std::string_view timeout_message, std::string_view closed_message,
+                                                        CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Error peer_closed_error(std::string_view closed_message, std::optional<std::size_t> response_bytes = std::nullopt) const;
   [[nodiscard]] ava::core::VoidResult drain_stdout();
   [[nodiscard]] ava::core::VoidResult drain_stderr();
   [[nodiscard]] ava::core::VoidResult reap_child();

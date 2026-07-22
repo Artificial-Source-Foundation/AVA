@@ -1,6 +1,7 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace {
@@ -110,6 +112,78 @@ bool write_all(int fd, std::string_view text)
     if (written <= 0)
       return false;
     text.remove_prefix(static_cast<std::size_t>(written));
+  }
+  return true;
+}
+
+bool write_port_file_atomically(std::filesystem::path const& port_file, std::uint16_t port)
+{
+  if (port == 0)
+  {
+    std::cerr << "refusing to publish an invalid loopback port\n";
+    return false;
+  }
+
+  auto const template_path = port_file.parent_path() / (port_file.filename().string() + ".tmp.XXXXXX");
+  auto temporary_name = template_path.string();
+  int const fd = ::mkstemp(temporary_name.data());
+  if (fd < 0)
+  {
+    std::cerr << "failed to create temporary port file " << template_path << ": " << errno_text() << '\n';
+    return false;
+  }
+  std::filesystem::path const temporary_path = temporary_name;
+  auto const cleanup = [&] {
+    if (::unlink(temporary_path.c_str()) != 0 && errno != ENOENT)
+      std::cerr << "failed to remove temporary port file " << temporary_path << ": " << errno_text() << '\n';
+  };
+
+  auto const text = std::to_string(port) + "\n";
+  std::size_t offset = 0;
+  while (offset < text.size())
+  {
+    auto const written = ::write(fd, text.data() + offset, text.size() - offset);
+    if (written < 0 && errno == EINTR)
+      continue;
+    if (written <= 0)
+    {
+      if (written < 0)
+        std::cerr << "failed to write temporary port file " << temporary_path << ": " << errno_text() << '\n';
+      else
+        std::cerr << "failed to write temporary port file " << temporary_path << ": wrote zero bytes\n";
+      static_cast<void>(::close(fd));
+      cleanup();
+      return false;
+    }
+    offset += static_cast<std::size_t>(written);
+  }
+
+  struct stat metadata{};
+  if (::fstat(fd, &metadata) != 0)
+  {
+    std::cerr << "failed to validate temporary port file " << temporary_path << ": " << errno_text() << '\n';
+    static_cast<void>(::close(fd));
+    cleanup();
+    return false;
+  }
+  if (!S_ISREG(metadata.st_mode) || metadata.st_size != static_cast<off_t>(text.size()))
+  {
+    std::cerr << "temporary port file validation failed for " << temporary_path << '\n';
+    static_cast<void>(::close(fd));
+    cleanup();
+    return false;
+  }
+  if (::close(fd) != 0)
+  {
+    std::cerr << "failed to close temporary port file " << temporary_path << ": " << errno_text() << '\n';
+    cleanup();
+    return false;
+  }
+  if (::rename(temporary_path.c_str(), port_file.c_str()) != 0)
+  {
+    std::cerr << "failed to publish port file " << port_file << ": " << errno_text() << '\n';
+    cleanup();
+    return false;
   }
   return true;
 }
@@ -480,10 +554,8 @@ int main(int argc, char** argv)
     std::cerr << "getsockname failed: " << errno_text() << '\n';
     return 1;
   }
-  {
-    std::ofstream file(port_file, std::ios::binary | std::ios::trunc);
-    file << ntohs(address.sin_port) << '\n';
-  }
+  if (!write_port_file_atomically(port_file, ntohs(address.sin_port)))
+    return 1;
 
   {
     std::ofstream file(request_log, std::ios::binary | std::ios::trunc);

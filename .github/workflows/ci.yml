@@ -164,14 +164,16 @@ jobs:
 
       - name: Run focused credential-free ACP tests
         run: |
-          mkdir -p "${{ runner.temp }}/ava-sdk-parent"/{home,config,data,state,cache,tmp}
-          env -i \
-            HOME="${{ runner.temp }}/ava-sdk-parent/home" \
-            XDG_CONFIG_HOME="${{ runner.temp }}/ava-sdk-parent/config" \
-            XDG_DATA_HOME="${{ runner.temp }}/ava-sdk-parent/data" \
-            XDG_STATE_HOME="${{ runner.temp }}/ava-sdk-parent/state" \
-            XDG_CACHE_HOME="${{ runner.temp }}/ava-sdk-parent/cache" \
-            TMPDIR="${{ runner.temp }}/ava-sdk-parent/tmp" \
+          parent="$(mktemp -d /tmp/ava-sdk-parent.XXXXXX)"
+          trap 'rm -rf "$parent"' EXIT
+          install -d -m 700 "$parent"/{home,config,data,state,cache,tmp}
+          /usr/bin/env -i \
+            HOME="$parent/home" \
+            XDG_CONFIG_HOME="$parent/config" \
+            XDG_DATA_HOME="$parent/data" \
+            XDG_STATE_HOME="$parent/state" \
+            XDG_CACHE_HOME="$parent/cache" \
+            TMPDIR="$parent/tmp" \
             PATH="/usr/local/bin:/usr/bin:/bin" \
             LANG=C.UTF-8 LC_ALL=C.UTF-8 \
             ctest --test-dir build-sdk --output-on-failure \

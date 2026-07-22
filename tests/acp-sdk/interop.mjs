@@ -190,6 +190,7 @@ function cleanEnvironment(roots, providerPort = undefined) {
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
     NO_COLOR: "1",
+    AVA_SESSION_TITLES: "off",
   };
   if (providerPort !== undefined) {
     env.MOONSHOT_BASE_URL = `http://127.0.0.1:${providerPort}`;

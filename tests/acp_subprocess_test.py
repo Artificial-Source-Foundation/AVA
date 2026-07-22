@@ -110,11 +110,18 @@ def start_fake_provider(executable, root, delay_ms=0, scenario="text-three", tar
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment(root / "environment"),
     )
     deadline = time.monotonic() + 3
-    while time.monotonic() < deadline and not port_file.exists():
+    while time.monotonic() < deadline:
         assert server.poll() is None, server.stderr.read().decode(errors="replace")
+        try:
+            port = int(port_file.read_text().strip())
+        except (OSError, ValueError):
+            pass
+        else:
+            if 1 <= port <= 65535:
+                return server, port, request_log
         time.sleep(0.01)
-    assert port_file.exists(), "fake provider did not publish a port"
-    return server, int(port_file.read_text().strip()), request_log
+    assert server.poll() is None, server.stderr.read().decode(errors="replace")
+    raise AssertionError("fake provider did not publish a nonempty valid loopback port")
 
 
 def configure_fake_model(root, supports_tools=False, input_modalities=None):

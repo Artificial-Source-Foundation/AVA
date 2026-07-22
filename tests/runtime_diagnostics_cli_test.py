@@ -21,13 +21,18 @@ def environment(root: Path):
     data = root / "data"
     for path in (root, config, state, data):
         private_dir(path)
+    libcwd_rcfile = root / "libcwdrc"
+    libcwd_rcfile.write_text("silent = on\nchannels_default = off\n", encoding="utf-8")
+    libcwd_rcfile.chmod(0o600)
     env = os.environ.copy()
+    env.pop("LIBCWD_RCFILE_OVERRIDE_NAME", None)
     env.update({
         "HOME": str(root / "home"),
         "XDG_CONFIG_HOME": str(config),
         "XDG_STATE_HOME": str(state),
         "XDG_DATA_HOME": str(data),
         "NO_COLOR": "1",
+        "LIBCWD_RCFILE_NAME": str(libcwd_rcfile),
     })
     return env
 

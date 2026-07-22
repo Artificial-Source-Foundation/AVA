@@ -183,7 +183,11 @@ def seeded_environment(root: Path) -> tuple[dict[str, str], Path, socket.socket]
     listener.settimeout(0.05)
     host, port = listener.getsockname()
 
+    libcwd_rcfile = root / "libcwdrc"
+    private_file(libcwd_rcfile, "silent = on\nchannels_default = off\n")
+
     env = os.environ.copy()
+    env.pop("LIBCWD_RCFILE_OVERRIDE_NAME", None)
     env.update(
         {
             "HOME": str(root / "home"),
@@ -194,6 +198,7 @@ def seeded_environment(root: Path) -> tuple[dict[str, str], Path, socket.socket]
             "OPENAI_API_KEY": CANARY,
             "ANTHROPIC_API_KEY": CANARY,
             "NO_COLOR": "1",
+            "LIBCWD_RCFILE_NAME": str(libcwd_rcfile),
         }
     )
     return env, workspace, listener
@@ -293,8 +298,17 @@ def test_usage_and_required_failure(ava: Path, root: Path) -> None:
     for directory in (config_home, state_home, workspace, target):
         private_dir(directory)
     (config_home / "ava").symlink_to(target, target_is_directory=True)
+    libcwd_rcfile = root / "libcwdrc"
+    private_file(libcwd_rcfile, "silent = on\nchannels_default = off\n")
     env = os.environ.copy()
-    env.update({"HOME": str(root / "bad-home"), "XDG_CONFIG_HOME": str(config_home), "XDG_STATE_HOME": str(state_home), "NO_COLOR": "1"})
+    env.pop("LIBCWD_RCFILE_OVERRIDE_NAME", None)
+    env.update({
+        "HOME": str(root / "bad-home"),
+        "XDG_CONFIG_HOME": str(config_home),
+        "XDG_STATE_HOME": str(state_home),
+        "NO_COLOR": "1",
+        "LIBCWD_RCFILE_NAME": str(libcwd_rcfile),
+    })
     logical = run(ava, ["doctor", "--json"], env, workspace)
     assert logical.returncode == 0
     logical_report = json.loads(logical.stdout)

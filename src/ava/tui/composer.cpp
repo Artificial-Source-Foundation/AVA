@@ -1821,7 +1821,9 @@ bool detail::draw_processing_footer_cached(ComposerSnapshot const& snapshot, Com
 
   auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
   auto const canvas = composer_canvas_layout(snapshot);
-  auto const footer = detail::render_composer_footer_line(snapshot, canvas.content_width);
+  auto footer = detail::render_composer_footer_line(snapshot, canvas.content_width);
+  if (tui_plain_output())
+    footer = strip_sgr_sequences(footer);
   auto const row = std::min<std::size_t>(height - 1, LINES > 0 ? LINES - 1 : 0);
   move(static_cast<int>(row), static_cast<int>(canvas.left));
   // Do not clear past the main canvas: that would erase a visible sidebar on every tick.

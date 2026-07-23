@@ -10153,6 +10153,7 @@ struct VirtualTerminalProfile
   std::string ssh_tty = {};
   std::string kitty_window_id = {};
   std::string wezterm_exec = {};
+  bool no_color = false;
 };
 
 struct VirtualTerminalResult
@@ -10164,6 +10165,7 @@ struct VirtualTerminalResult
   bool cursor_restored_after_modal = false;
   bool processing_footer_updates_stable = false;
   bool processing_footer_output_is_quiet = false;
+  bool processing_footer_output_is_plain = false;
   bool cursor_forced_visible_for_teardown = false;
 };
 
@@ -10177,6 +10179,7 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
   ScopedEnvVar ssh_tty_guard("SSH_TTY", profile.ssh_tty);
   ScopedEnvVar kitty_window_guard("KITTY_WINDOW_ID", profile.kitty_window_id);
   ScopedEnvVar wezterm_exec_guard("WEZTERM_EXECUTABLE", profile.wezterm_exec);
+  ScopedEnvVar no_color_guard("NO_COLOR", profile.no_color ? "1" : "");
 
   VirtualTerminalResult result;
   FILE* input = std::tmpfile();
@@ -10307,13 +10310,13 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
         static_cast<void>(std::fseek(output, 0, SEEK_END));
       }
       restore_stdout();
-      result.processing_footer_output_is_quiet =
-          result.processing_footer_output_is_quiet && footer_output_read &&
-          (footer_output.find("\x1b[?25l") == std::string::npos && footer_output.find("\x1b[?25h") == std::string::npos &&
-           footer_output.find("\x1b[2J") == std::string::npos && footer_output.find("FOOTER_ONLY_KITTY_MARKER") == std::string::npos);
-      return output_before_footer >= 0 && output_after_footer >= output_before_footer && footer_output_read &&
-             footer_output.find("\x1b[?25l") == std::string::npos && footer_output.find("\x1b[?25h") == std::string::npos &&
-             footer_output.find("\x1b[2J") == std::string::npos && footer_output.find("FOOTER_ONLY_KITTY_MARKER") == std::string::npos;
+      auto const footer_output_is_quiet = footer_output_read && footer_output.find("\x1b[?25l") == std::string::npos &&
+                                          footer_output.find("\x1b[?25h") == std::string::npos && footer_output.find("\x1b[2J") == std::string::npos &&
+                                          footer_output.find("FOOTER_ONLY_KITTY_MARKER") == std::string::npos;
+      auto const footer_output_is_plain = !profile.no_color || (footer_output_read && footer_output.find("\x1b[1m") == std::string::npos);
+      result.processing_footer_output_is_quiet = result.processing_footer_output_is_quiet && footer_output_is_quiet;
+      result.processing_footer_output_is_plain = result.processing_footer_output_is_plain && footer_output_is_plain;
+      return output_before_footer >= 0 && output_after_footer >= output_before_footer && footer_output_is_quiet && footer_output_is_plain;
     };
     auto ordinary_footer_snapshot = snapshot;
     ordinary_footer_snapshot.width = 80;
@@ -10327,6 +10330,7 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
     narrow_footer_snapshot.width = 20;
     narrow_footer_snapshot.height = 8;
     result.processing_footer_output_is_quiet = true;
+    result.processing_footer_output_is_plain = true;
     result.processing_footer_updates_stable = exercise_processing_footer(ordinary_footer_snapshot) && exercise_processing_footer(centered_footer_snapshot) &&
                                               exercise_processing_footer(rail_footer_snapshot) && exercise_processing_footer(narrow_footer_snapshot);
     result.cursor_forced_visible_for_teardown = ava::tui::detail::force_terminal_cursor_visible();
@@ -10347,6 +10351,7 @@ void test_ncurses_newterm_smoke_without_real_tty()
 
   std::vector<VirtualTerminalProfile> const profiles = {
       {.name = "xterm baseline", .term = "xterm-256color"},
+      {.name = "xterm NO_COLOR", .term = "xterm-256color", .no_color = true},
       {.name = "screen/tmux terminfo", .term = "screen-256color"},
       {.name = "tmux-like environment",
        .term = "xterm-256color",
@@ -10369,12 +10374,12 @@ void test_ncurses_newterm_smoke_without_real_tty()
     if (result.screen_created)
       ++exercised;
     expect(result.screen_created, "ncurses smoke test creates a screen without a real terminal for " + profile.name);
-    expect(result.base_drawn && result.modal_drawn && result.cursor_restored_after_modal && result.processing_footer_updates_stable &&
-               result.processing_footer_output_is_quiet && result.cursor_forced_visible_for_teardown,
-           "ncurses smoke test draws base/modal frames, updates processing footers without terminal clears, cursor toggles, or graphics, and forces the cursor "
-           "visible for "
-           "teardown for " +
-               profile.name);
+    expect(
+        result.base_drawn && result.modal_drawn && result.cursor_restored_after_modal && result.processing_footer_updates_stable &&
+            result.processing_footer_output_is_quiet && result.processing_footer_output_is_plain && result.cursor_forced_visible_for_teardown,
+        "ncurses smoke test draws base/modal frames, updates processing footers without terminal clears, cursor toggles, graphics, or NO_COLOR bold styling, "
+        "and forces the cursor visible for teardown for " +
+            profile.name);
   }
   expect(exercised == profiles.size(),
          "ncurses smoke test covers xterm and screen terminfo plus tmux, kitty, wezterm, and ssh-like environment "

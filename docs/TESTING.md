@@ -24,6 +24,19 @@ The test suite is built as one `ava_tests` CTest target from focused test source
 
 Plugin/MCP contract changes should also follow [`docs/plugin-compatibility-policy.md`](plugin-compatibility-policy.md). Keep checked-in golden fixtures small and deterministic under `tests/golden/ava-080/`, and prefer existing `ava_tests` plugin/MCP suites for contract assertions.
 
+## Per-Suite libcwd Debug Logs
+
+In libcwd-enabled builds, set `AVA_DEBUG_OUTPUT_DIR` to an absolute path to capture `ava_tests` libcwd output without contaminating normal stdout or stderr. The final directory is created when absent and otherwise validated as a current-user, non-symlink directory with exact mode 0700. Logs are private mode-0600 files named `ava_tests.<suite>.libcwd.log` (`all` for no argument and `invalid` for invalid arguments); each invocation truncates its deterministic file, while distinct CTest suites can write in parallel without colliding. The setting is ignored by libcwd-disabled builds.
+
+The caller's `LIBCWD_RCFILE_NAME` and `LIBCWD_RCFILE_OVERRIDE_NAME` remain authoritative for channel selection. CTest suppresses only pre-main startup output by setting `LIBCWD_NO_STARTUP_MSGS=1` and unsetting inherited `LIBCWD_PRINT_LOADING`. Use the same startup environment for direct invocations when completely quiet pre-main behavior is required:
+
+```sh
+LIBCWD_NO_STARTUP_MSGS=1 env -u LIBCWD_PRINT_LOADING \
+  AVA_DEBUG_OUTPUT_DIR=/absolute/private/debug-logs ./build/ava_tests session
+```
+
+Treat these logs as private diagnostic artifacts because enabled channels may contain process or test details.
+
 Focused release provenance/package tests are offline and deterministic:
 
 ```sh

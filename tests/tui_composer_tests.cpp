@@ -6854,26 +6854,25 @@ void test_tui_composer_rendering_and_input()
   expect(std::ranges::none_of(tool_card, [](std::string const& line) { return line.find("\x1b[31m") != std::string::npos; }),
          "tui tool card rendering removes untrusted raw sgr escape sequences");
 
-  auto permission_tool_item =
-      ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Error,
-                                 .name = "bash",
-                                 .argument_summary = "command=git push origin main",
-                                 .result_summary = "permission denied",
-                                 .arguments_json = "{\"command\":\"git push origin main\"}",
-                                 .result_json = "{\"tool\":\"bash\",\"exit_code\":126}",
-                                 .call_id = "call_permission",
-                                 .lifecycle = ava::tui::ToolLifecycleState::Error,
-                                 .permission_request_ids = {"permreq_push"},
-                                 .permissions = {ava::tui::ToolPermissionAuditItem{.permission_request_id = "permreq_push",
-                                                                                   .resolver_request_id = "permission_1",
-                                                                                   .decision = "deny",
-                                                                                   .operation = "bash",
-                                                                                   .tool_name = "bash",
-                                                                                   .risk = "critical",
-                                                                                   .reason = "command permission denied\x1b[31m",
-                                                                                   .target = "",
-                                                                                   .command = "<redacted one-shot command>",
-                                                                                   .resolution_reason = "selected deny"}}};
+  auto permission_tool_item = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Error,
+                                                         .name = "bash",
+                                                         .argument_summary = "command=git push origin main",
+                                                         .result_summary = "permission denied",
+                                                         .arguments_json = "{\"command\":\"git push origin main\"}",
+                                                         .result_json = "{\"tool\":\"bash\",\"exit_code\":126}",
+                                                         .call_id = "call_permission",
+                                                         .lifecycle = ava::tui::ToolLifecycleState::Error,
+                                                         .permission_request_ids = {"permreq_push"},
+                                                         .permissions = {ava::tui::ToolPermissionAuditItem{.permission_request_id = "permreq_push",
+                                                                                                           .resolver_request_id = "permission_1",
+                                                                                                           .decision = "deny",
+                                                                                                           .operation = "bash",
+                                                                                                           .tool_name = "bash",
+                                                                                                           .risk = "critical",
+                                                                                                           .reason = "command permission denied\x1b[31m",
+                                                                                                           .target = "",
+                                                                                                           .command = "<redacted one-shot command>",
+                                                                                                           .resolution_reason = "selected deny"}}};
   auto pending_permission_item = permission_tool_item;
   pending_permission_item.status = ava::tui::ToolTimelineStatus::Running;
   pending_permission_item.lifecycle = ava::tui::ToolLifecycleState::ExecutionStarted;
@@ -6892,7 +6891,7 @@ void test_tui_composer_rendering_and_input()
              pending_permission_text.find("permission_1") == std::string::npos && pending_permission_text.find("executing") == std::string::npos,
          "tui compact pending tool audit is permission required without lifecycle or raw ids");
   expect(pending_permission_expanded_text.find("permission: required") != std::string::npos &&
-             pending_permission_expanded_text.find("id permreq_push") != std::string::npos &&
+             pending_permission_expanded_text.find("id: permreq_push") != std::string::npos &&
              pending_permission_copy.find("lifecycle: executing") != std::string::npos && pending_permission_copy.find("id permreq_push") != std::string::npos,
          "tui expanded and copied pending tool diagnostics retain lifecycle and permission ids");
   auto running_id_only_permission_item = pending_permission_item;
@@ -6930,7 +6929,7 @@ void test_tui_composer_rendering_and_input()
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
                                return visible.find("permission deny") != std::string::npos && visible.find("risk critical") != std::string::npos &&
-                                      visible.find("reason command permission d") != std::string::npos;
+                                      visible.find("reason command permiss...") != std::string::npos;
                              }) &&
              std::ranges::none_of(compact_permission_card,
                                   [](std::string const& line) {
@@ -6987,15 +6986,13 @@ void test_tui_composer_rendering_and_input()
     return count_text(text, "permission: deny") == 1 && count_text(text, "risk: critical") == 1 && count_text(text, "id: permreq_push") == 1 &&
            count_text(text, "resolver: permission_1") == 1 && count_text(text, "reason: command permission denied") == 1 &&
            count_text(text, "resolution: selected deny") == 1 && count_text(text, "operation: bash") == 1 && count_text(text, "tool: bash") == 1 &&
-           count_text(text, "command: <redacted one-shot command>") == 1 &&
-           count_text(text, "inspect: /permissions audit show permreq_push") == 1 &&
+           count_text(text, "command: <redacted one-shot command>") == 1 && count_text(text, "inspect: /permissions audit show permreq_push") == 1 &&
            count_text(text, "diagnose: /permissions diagnose permreq_push") == 1;
   };
   auto const curated_copied_permission_fields_once = [&](std::string_view text) {
     return count_text(text, "permission: deny · risk critical · id permreq_push") == 1 && count_text(text, "resolver permission_1") == 1 &&
            count_text(text, "reason command permission denied") == 1 && count_text(text, "resolution selected deny") == 1 &&
-           count_text(text, "operation bash") == 1 && count_text(text, "tool bash") == 1 &&
-           count_text(text, "command <redacted one-shot command>") == 1 &&
+           count_text(text, "operation bash") == 1 && count_text(text, "tool bash") == 1 && count_text(text, "command <redacted one-shot command>") == 1 &&
            count_text(text, "inspect: /permissions audit show permreq_push") == 1 && count_text(text, "diagnose: /permissions diagnose permreq_push") == 1;
   };
   auto const excludes_raw_permission_dump = [](std::string_view text) {
@@ -7196,23 +7193,30 @@ void test_tui_composer_rendering_and_input()
                                                            .status = "ready",
                                                            .transcript = {ava::tui::TranscriptItem{.tool = permission_tool_item}},
                                                            .width = 88,
-                                                           .height = 16});
-  expect(std::ranges::any_of(expanded_permission_card,
-                             [](std::string const& line) {
-                               auto const visible = strip_sgr(line);
-                               return visible.find("permission: deny") != std::string::npos && visible.find("id permreq_push") != std::string::npos &&
-                                      visible.find("resolver permission_1") != std::string::npos;
-                             }) &&
-             std::ranges::any_of(expanded_permission_card,
-                                 [](std::string const& line) { return strip_sgr(line).find("command: <redacted one-shot command>") != std::string::npos; }) &&
-             std::ranges::any_of(
-                 expanded_permission_card,
-                 [](std::string const& line) { return strip_sgr(line).find("inspect: /permissions audit show permreq_push") != std::string::npos; }) &&
-             std::ranges::any_of(
-                 expanded_permission_card,
-                 [](std::string const& line) { return strip_sgr(line).find("diagnose: /permissions diagnose permreq_push") != std::string::npos; }) &&
-             std::ranges::all_of(expanded_permission_card, [](std::string const& line) { return visible_columns(line) <= 88; }),
-         "tui expanded tool cards expose permission audit ids, reviewed tool arguments, and follow-up commands on demand");
+                                                           .height = 28});
+  expect(
+      std::ranges::any_of(expanded_permission_card, [](std::string const& line) { return strip_sgr(line).find("permission: deny") != std::string::npos; }) &&
+          std::ranges::any_of(expanded_permission_card, [](std::string const& line) { return strip_sgr(line).find("risk: critical") != std::string::npos; }) &&
+          std::ranges::any_of(expanded_permission_card,
+                              [](std::string const& line) { return strip_sgr(line).find("id: permreq_push") != std::string::npos; }) &&
+          std::ranges::any_of(expanded_permission_card,
+                              [](std::string const& line) { return strip_sgr(line).find("resolver: permission_1") != std::string::npos; }) &&
+          std::ranges::any_of(expanded_permission_card,
+                              [](std::string const& line) { return strip_sgr(line).find("reason: command permission denied?") != std::string::npos; }) &&
+          std::ranges::any_of(expanded_permission_card,
+                              [](std::string const& line) { return strip_sgr(line).find("resolution: selected deny") != std::string::npos; }) &&
+          std::ranges::any_of(expanded_permission_card, [](std::string const& line) { return strip_sgr(line).find("operation: bash") != std::string::npos; }) &&
+          std::ranges::any_of(expanded_permission_card, [](std::string const& line) { return strip_sgr(line).find("tool: bash") != std::string::npos; }) &&
+          std::ranges::any_of(expanded_permission_card,
+                              [](std::string const& line) { return strip_sgr(line).find("command: <redacted one-shot command>") != std::string::npos; }) &&
+          std::ranges::any_of(
+              expanded_permission_card,
+              [](std::string const& line) { return strip_sgr(line).find("inspect: /permissions audit show permreq_push") != std::string::npos; }) &&
+          std::ranges::any_of(
+              expanded_permission_card,
+              [](std::string const& line) { return strip_sgr(line).find("diagnose: /permissions diagnose permreq_push") != std::string::npos; }) &&
+          std::ranges::all_of(expanded_permission_card, [](std::string const& line) { return visible_columns(line) <= 88; }),
+      "tui expanded tool cards expose permission audit ids, reviewed tool arguments, and follow-up commands on demand");
 
   {
     ScopedEnvVar no_color_permission_guard("NO_COLOR", "1");
@@ -7236,7 +7240,7 @@ void test_tui_composer_rendering_and_input()
     auto const plain_permission_accessible =
         std::ranges::all_of(plain_narrow_permission_card,
                             [](std::string const& line) { return line.find('\x1b') == std::string::npos && visible_columns(line) <= 56; }) &&
-        plain_permission_text.find("[x] bash") != std::string::npos && plain_permission_text.find("permission: deny") != std::string::npos &&
+        plain_permission_text.find("x bash") != std::string::npos && plain_permission_text.find("permission: deny") != std::string::npos &&
         plain_permission_text.find("risk: critical") != std::string::npos && plain_permission_text.find("id: permreq_push") != std::string::npos &&
         plain_permission_text.find("reason: command permission denied") != std::string::npos &&
         plain_permission_text.find("command: <redacted one-shot command>") != std::string::npos &&

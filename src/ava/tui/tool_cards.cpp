@@ -440,6 +440,14 @@ void append_tool_detail_lines(std::vector<std::string>& lines, std::string_view 
   }
 }
 
+bool tool_detail_line_fits(std::string_view label, std::string_view text, std::size_t width)
+{
+  auto const prefix = wide_blocks(width) ? std::string_view("  │     ") : std::string_view("      ");
+  return detail::terminal_text_columns(prefix) + detail::terminal_text_columns(label) + detail::terminal_text_columns(": ") +
+             detail::terminal_text_columns(sanitize_terminal_text(text)) <=
+         width;
+}
+
 std::vector<std::string> display_changed_paths(ToolTimelineItem const& item)
 {
   auto paths = item.changed_paths;
@@ -503,8 +511,7 @@ std::string project_display_path_aliases(ToolTimelineItem const& item, std::stri
     return std::string(text);
 
   std::string projected(text);
-  for (auto offset = projected.find(paths.front()); offset != std::string::npos;
-       offset = projected.find(paths.front(), offset + argument_path->size()))
+  for (auto offset = projected.find(paths.front()); offset != std::string::npos; offset = projected.find(paths.front(), offset + argument_path->size()))
   {
     projected.replace(offset, paths.front().size(), *argument_path);
   }
@@ -770,9 +777,10 @@ void append_permission_lines(std::vector<std::string>& lines, ToolTimelineItem c
   }
   for (auto const& audit : item.permissions)
   {
-    if (width >= kWidePermissionDetailWidth)
+    auto const detail = permission_audit_detail(item, audit);
+    if (width >= kWidePermissionDetailWidth && tool_detail_line_fits("permission", detail, width))
     {
-      append_tool_detail_lines(lines, "permission", permission_audit_detail(item, audit), width);
+      append_tool_detail_lines(lines, "permission", detail, width);
       continue;
     }
     append_tool_detail_lines(lines, "permission", permission_state_label(item, audit), width);

@@ -43,9 +43,17 @@ void append_path_metadata(detail::Sha256Builder& hash, PathMetadata const& metad
     hash.append_number(ancestor.mode);
     hash.append_number(ancestor.owner);
     hash.append_number(ancestor.group);
-    hash.append_number(ancestor.link_count);
-    hash.append_field(std::to_string(ancestor.changed_seconds));
-    hash.append_field(std::to_string(ancestor.changed_nanoseconds));
+    // A non-identity-bound ancestor (a root-owned sticky namespace such as
+    // /tmp) has its binding fields hashed but not its volatile link_count and
+    // ctime, which legitimately fluctuate as unrelated processes create and
+    // remove sibling entries. This keeps the fingerprint stable across
+    // concurrent /tmp churn and matches the equality and freshness treatment.
+    if (ancestor.identity_bound)
+    {
+      hash.append_number(ancestor.link_count);
+      hash.append_field(std::to_string(ancestor.changed_seconds));
+      hash.append_field(std::to_string(ancestor.changed_nanoseconds));
+    }
     hash.append_field(ancestor.is_symlink ? "1" : "0");
     hash.append_field(ancestor.identity_bound ? "1" : "0");
   }

@@ -214,7 +214,25 @@ struct PathAncestorMetadata
   // change their timestamps and link counts.
   bool identity_bound = true;
 
-  friend bool operator==(PathAncestorMetadata const&, PathAncestorMetadata const&) = default;
+  // Equality honors identity_bound. A non-identity-bound ancestor (a root-owned
+  // sticky namespace such as /tmp) compares only its binding fields -- path,
+  // device, inode, mode, owner, group, is_symlink, and identity_bound itself --
+  // because its changed_seconds/changed_nanoseconds and link_count legitimately
+  // fluctuate as unrelated processes create and remove sibling entries. This
+  // keeps value comparisons stable across concurrent /tmp churn and matches the
+  // freshness logic, which already skips those volatile fields for
+  // non-identity-bound ancestors. Identity-bound ancestors compare every field.
+  friend bool operator==(PathAncestorMetadata const& lhs, PathAncestorMetadata const& rhs)
+  {
+    if (lhs.path != rhs.path || lhs.device != rhs.device || lhs.inode != rhs.inode || lhs.mode != rhs.mode || lhs.owner != rhs.owner ||
+        lhs.group != rhs.group || lhs.is_symlink != rhs.is_symlink || lhs.identity_bound != rhs.identity_bound)
+    {
+      return false;
+    }
+    if (!lhs.identity_bound)
+      return true;
+    return lhs.link_count == rhs.link_count && lhs.changed_seconds == rhs.changed_seconds && lhs.changed_nanoseconds == rhs.changed_nanoseconds;
+  }
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

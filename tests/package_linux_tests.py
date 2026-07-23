@@ -786,6 +786,8 @@ def run_harness_signal_cleanup_regression(
             str(fixture),
             "--repo",
             str(regression_root),
+            "--build-dir",
+            str(regression_root),
             "--root",
             str(regression_root),
             "--signal-cleanup-regression-child",
@@ -1576,12 +1578,32 @@ def create_private_base() -> tuple[pathlib.Path, int, OwnedDirectoryIdentity, in
         raise
 
 
+def is_within(path: pathlib.Path, parent: pathlib.Path) -> bool:
+    return path == parent or parent in path.parents
+
+
+def physical_existing_directory(path: pathlib.Path, description: str) -> pathlib.Path:
+    resolved = path.resolve(strict=True)
+    if not resolved.is_dir():
+        raise RuntimeError(f"{description} must name an existing directory: {path}")
+    return resolved
+
+
+def in_repository_probe_parent(repo: pathlib.Path, build_dir: pathlib.Path) -> pathlib.Path:
+    repo_physical = physical_existing_directory(repo, "repository")
+    build_physical = physical_existing_directory(build_dir, "build directory")
+    if is_within(build_physical, repo_physical):
+        return build_dir
+    return repo
+
+
 def prepare_workspace(requested_root: pathlib.Path, repo: pathlib.Path) -> PackageTestWorkspace:
     # Inspect the final component before resolve() so a caller-controlled final
     # symlink is refused rather than silently redirected through its target.
     existing = checked_final_directory(requested_root, "package-test root")
     resolved_root = requested_root.resolve(strict=False)
-    redirected = resolved_root == repo or repo in resolved_root.parents
+    repo_physical = physical_existing_directory(repo, "repository")
+    redirected = is_within(resolved_root, repo_physical)
 
     if redirected:
         base_path, base_fd, base_identity, parent_fd = create_private_base()
@@ -1648,19 +1670,59 @@ def require_workspace_cleanup(workspace: PackageTestWorkspace, context: str, **k
         raise RuntimeError(f"{context}: {error}")
 
 
-def run_workspace_safety_regressions(repo: pathlib.Path) -> None:
+def cleanup_workspace_after_regression(workspace: PackageTestWorkspace, context: str) -> None:
+    if workspace.base_fd >= 0:
+        require_workspace_cleanup(workspace, context)
+
+
+def run_workspace_safety_regressions(repo: pathlib.Path, build_dir: pathlib.Path) -> None:
     """Exercise root ownership and cleanup races without touching caller roots."""
-    in_repo_request = repo / "build" / f".ava-package-linux-tests-in-repo-root.{secrets.token_hex(12)}"
+    in_repo_parent = in_repository_probe_parent(repo, build_dir)
+    in_repo_request = in_repo_parent / f".ava-package-linux-tests-in-repo-root.{secrets.token_hex(12)}"
     in_repo_workspace = prepare_workspace(in_repo_request, repo)
-    if not in_repo_workspace.owns_base or in_repo_workspace.root.parent == in_repo_request.parent:
-        raise RuntimeError("in-repository CTest root was not redirected to a private system-temporary base")
-    private_base = in_repo_workspace.base_path
-    require_workspace_cleanup(in_repo_workspace, "in-repository workspace cleanup")
-    if private_base.exists() or in_repo_request.exists():
-        raise RuntimeError("in-repository workspace cleanup changed the requested root or retained its private base")
+    try:
+        if not in_repo_workspace.owns_base or in_repo_workspace.root.parent == in_repo_request.parent:
+            raise RuntimeError("in-repository CTest root was not redirected to a private system-temporary base")
+        private_base = in_repo_workspace.base_path
+        require_workspace_cleanup(in_repo_workspace, "in-repository workspace cleanup")
+        if private_base.exists() or in_repo_request.exists():
+            raise RuntimeError("in-repository workspace cleanup changed the requested root or retained its private base")
+    finally:
+        cleanup_workspace_after_regression(in_repo_workspace, "in-repository workspace cleanup after failure")
 
     with tempfile.TemporaryDirectory(prefix="ava-package-linux-tests-regressions-") as temporary:
         sandbox = pathlib.Path(temporary)
+
+        source_physical = sandbox / "source"
+        source_physical.mkdir(mode=0o700)
+        source_sentinel = source_physical / "preserve"
+        source_sentinel.write_text("preserve\n", encoding="utf-8")
+        source_logical = sandbox / "source-logical"
+        source_logical.symlink_to(source_physical, target_is_directory=True)
+        external_build = sandbox / "external-build"
+        external_build.mkdir(mode=0o700)
+        nonstandard_build = source_physical / "nonstandard-build"
+        nonstandard_build.mkdir(mode=0o700)
+        for selected_build, expected_parent in (
+            (external_build, source_logical),
+            (source_logical / "nonstandard-build", source_logical / "nonstandard-build"),
+        ):
+            selected_parent = in_repository_probe_parent(source_logical, selected_build)
+            if selected_parent != expected_parent:
+                raise RuntimeError(
+                    f"package-test in-repository probe selected {selected_parent}, expected {expected_parent}"
+                )
+            requested = selected_parent / f".ava-package-linux-tests-build-dir.{secrets.token_hex(12)}"
+            selected_workspace = prepare_workspace(requested, source_logical)
+            try:
+                if not selected_workspace.owns_base or requested.exists():
+                    raise RuntimeError("in-repository build-dir probe was not redirected safely")
+            finally:
+                cleanup_workspace_after_regression(
+                    selected_workspace, "in-repository build-dir workspace cleanup"
+                )
+        if (source_physical / "build").exists() or source_sentinel.read_text(encoding="utf-8") != "preserve\n":
+            raise RuntimeError("build-dir safety regression created source/build or modified source content")
 
         symlink_target = sandbox / "symlink-target"
         symlink_target.mkdir(mode=0o700)
@@ -1695,97 +1757,111 @@ def run_workspace_safety_regressions(repo: pathlib.Path) -> None:
         external_sentinel = external_base / "preexisting"
         external_sentinel.write_text("preserve\n", encoding="utf-8")
         external_workspace = prepare_workspace(external_base, repo)
-        (external_workspace.root / "work").write_text("private\n", encoding="utf-8")
-        require_workspace_cleanup(external_workspace, "external root cleanup")
-        if external_sentinel.read_text(encoding="utf-8") != "preserve\n":
-            raise RuntimeError("external caller root content was removed or modified")
+        try:
+            (external_workspace.root / "work").write_text("private\n", encoding="utf-8")
+            require_workspace_cleanup(external_workspace, "external root cleanup")
+            if external_sentinel.read_text(encoding="utf-8") != "preserve\n":
+                raise RuntimeError("external caller root content was removed or modified")
+        finally:
+            cleanup_workspace_after_regression(external_workspace, "external root cleanup after failure")
 
         swap_base = sandbox / "top-level-swap"
         swap_base.mkdir(mode=0o700)
         swap_workspace = prepare_workspace(swap_base, repo)
-        saved_child = swap_base / "expected-child"
-        os.rename(swap_workspace.child_name, saved_child.name, src_dir_fd=swap_workspace.base_fd, dst_dir_fd=swap_workspace.base_fd)
-        os.mkdir(swap_workspace.child_name, 0o700, dir_fd=swap_workspace.base_fd)
-        replacement_fd = os.open(
-            swap_workspace.child_name,
-            os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
-            dir_fd=swap_workspace.base_fd,
-        )
         try:
-            write_fd_text(replacement_fd, "replacement", b"preserve\n")
+            saved_child = swap_base / "expected-child"
+            os.rename(swap_workspace.child_name, saved_child.name, src_dir_fd=swap_workspace.base_fd, dst_dir_fd=swap_workspace.base_fd)
+            os.mkdir(swap_workspace.child_name, 0o700, dir_fd=swap_workspace.base_fd)
+            replacement_fd = os.open(
+                swap_workspace.child_name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=swap_workspace.base_fd,
+            )
+            try:
+                write_fd_text(replacement_fd, "replacement", b"preserve\n")
+            finally:
+                os.close(replacement_fd)
+            swap_error = swap_workspace.cleanup()
+            if swap_error is None or "restored" not in swap_error:
+                raise RuntimeError(f"top-level swap cleanup did not conservatively restore the replacement: {swap_error}")
+            if not (swap_base / swap_workspace.child_name / "replacement").is_file() or not saved_child.is_dir():
+                raise RuntimeError("top-level swap cleanup removed a replacement or the original child")
         finally:
-            os.close(replacement_fd)
-        swap_error = swap_workspace.cleanup()
-        if swap_error is None or "restored" not in swap_error:
-            raise RuntimeError(f"top-level swap cleanup did not conservatively restore the replacement: {swap_error}")
-        if not (swap_base / swap_workspace.child_name / "replacement").is_file() or not saved_child.is_dir():
-            raise RuntimeError("top-level swap cleanup removed a replacement or the original child")
+            cleanup_workspace_after_regression(swap_workspace, "top-level swap workspace cleanup after failure")
 
         quarantine_base = sandbox / "quarantine-mismatch"
         quarantine_base.mkdir(mode=0o700)
         quarantine_workspace = prepare_workspace(quarantine_base, repo)
+        try:
+            def replace_quarantine(base_fd: int, quarantine_name: str) -> None:
+                os.rename(quarantine_name, "stolen-expected-child", src_dir_fd=base_fd, dst_dir_fd=base_fd)
+                os.mkdir(quarantine_name, 0o700, dir_fd=base_fd)
+                replacement_fd = os.open(
+                    quarantine_name,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                    dir_fd=base_fd,
+                )
+                try:
+                    write_fd_text(replacement_fd, "replacement", b"preserve\n")
+                finally:
+                    os.close(replacement_fd)
 
-        def replace_quarantine(base_fd: int, quarantine_name: str) -> None:
-            os.rename(quarantine_name, "stolen-expected-child", src_dir_fd=base_fd, dst_dir_fd=base_fd)
-            os.mkdir(quarantine_name, 0o700, dir_fd=base_fd)
-            replacement_fd = os.open(
-                quarantine_name,
-                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
-                dir_fd=base_fd,
-            )
-            try:
-                write_fd_text(replacement_fd, "replacement", b"preserve\n")
-            finally:
-                os.close(replacement_fd)
-
-        quarantine_error = quarantine_workspace.cleanup(after_detach=replace_quarantine)
-        if quarantine_error is None or "restored" not in quarantine_error:
-            raise RuntimeError(f"quarantine mismatch was not restored safely: {quarantine_error}")
-        if not (quarantine_base / quarantine_workspace.child_name / "replacement").is_file():
-            raise RuntimeError("quarantine mismatch cleanup removed the replacement")
-        if not (quarantine_base / "stolen-expected-child").is_dir():
-            raise RuntimeError("quarantine mismatch cleanup removed the expected child after it was moved")
+            quarantine_error = quarantine_workspace.cleanup(after_detach=replace_quarantine)
+            if quarantine_error is None or "restored" not in quarantine_error:
+                raise RuntimeError(f"quarantine mismatch was not restored safely: {quarantine_error}")
+            if not (quarantine_base / quarantine_workspace.child_name / "replacement").is_file():
+                raise RuntimeError("quarantine mismatch cleanup removed the replacement")
+            if not (quarantine_base / "stolen-expected-child").is_dir():
+                raise RuntimeError("quarantine mismatch cleanup removed the expected child after it was moved")
+        finally:
+            cleanup_workspace_after_regression(quarantine_workspace, "quarantine workspace cleanup after failure")
 
         nested_base = sandbox / "nested-replacement"
         nested_base.mkdir(mode=0o700)
         nested_workspace = prepare_workspace(nested_base, repo)
-        nested = nested_workspace.root / "nested"
-        nested.mkdir(mode=0o700)
-        (nested / "original").write_text("remove only the original\n", encoding="utf-8")
+        try:
+            nested = nested_workspace.root / "nested"
+            nested.mkdir(mode=0o700)
+            (nested / "original").write_text("remove only the original\n", encoding="utf-8")
 
-        def replace_nested(parent_fd: int, name: str, _expected: DirectoryIdentity) -> None:
-            if name != "nested":
-                return
-            os.rename(name, "nested-original", src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
-            os.mkdir(name, 0o700, dir_fd=parent_fd)
-            replacement_fd = os.open(
-                name,
-                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
-                dir_fd=parent_fd,
-            )
-            try:
-                write_fd_text(replacement_fd, "replacement", b"preserve\n")
-            finally:
-                os.close(replacement_fd)
+            def replace_nested(parent_fd: int, name: str, _expected: DirectoryIdentity) -> None:
+                if name != "nested":
+                    return
+                os.rename(name, "nested-original", src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+                os.mkdir(name, 0o700, dir_fd=parent_fd)
+                replacement_fd = os.open(
+                    name,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                    dir_fd=parent_fd,
+                )
+                try:
+                    write_fd_text(replacement_fd, "replacement", b"preserve\n")
+                finally:
+                    os.close(replacement_fd)
 
-        nested_error = nested_workspace.cleanup(before_rmdir=replace_nested)
-        if nested_error is None or "changed directory entry before rmdir" not in nested_error:
-            raise RuntimeError(f"nested replacement cleanup did not refuse the changed entry: {nested_error}")
-        if nested_workspace.quarantine_name is None:
-            raise RuntimeError("nested replacement cleanup did not retain a quarantine name")
-        retained_nested = nested_base / nested_workspace.quarantine_name / "nested" / "replacement"
-        if retained_nested.read_bytes() != b"preserve\n":
-            raise RuntimeError("nested replacement cleanup removed or traversed the replacement")
+            nested_error = nested_workspace.cleanup(before_rmdir=replace_nested)
+            if nested_error is None or "changed directory entry before rmdir" not in nested_error:
+                raise RuntimeError(f"nested replacement cleanup did not refuse the changed entry: {nested_error}")
+            if nested_workspace.quarantine_name is None:
+                raise RuntimeError("nested replacement cleanup did not retain a quarantine name")
+            retained_nested = nested_base / nested_workspace.quarantine_name / "nested" / "replacement"
+            if retained_nested.read_bytes() != b"preserve\n":
+                raise RuntimeError("nested replacement cleanup removed or traversed the replacement")
+        finally:
+            cleanup_workspace_after_regression(nested_workspace, "nested workspace cleanup after failure")
 
         link_base = sandbox / "symlink-cleanup"
         link_base.mkdir(mode=0o700)
         link_workspace = prepare_workspace(link_base, repo)
-        external_target = sandbox / "outside-link-target"
-        external_target.write_text("preserve\n", encoding="utf-8")
-        (link_workspace.root / "link").symlink_to(external_target)
-        require_workspace_cleanup(link_workspace, "symlink cleanup")
-        if external_target.read_text(encoding="utf-8") != "preserve\n":
-            raise RuntimeError("cleanup followed a symbolic link target")
+        try:
+            external_target = sandbox / "outside-link-target"
+            external_target.write_text("preserve\n", encoding="utf-8")
+            (link_workspace.root / "link").symlink_to(external_target)
+            require_workspace_cleanup(link_workspace, "symlink cleanup")
+            if external_target.read_text(encoding="utf-8") != "preserve\n":
+                raise RuntimeError("cleanup followed a symbolic link target")
+        finally:
+            cleanup_workspace_after_regression(link_workspace, "symlink workspace cleanup after failure")
 
 
 def run_package_tests(
@@ -1857,6 +1933,7 @@ def run_package_tests(
 
     fixture = root / "fixture-ava"
     write_ava_fixture(fixture, version)
+    in_repo_parent = in_repository_probe_parent(repo, args.build_dir)
 
     default_result = run(package_command(script, fixture), env=env)
     default_artifact = parse_path(default_result.stdout, "artifact")
@@ -1881,11 +1958,11 @@ def run_package_tests(
     insecure_result = run(package_command(script, fixture, insecure), env=env, check=False)
     require_failure(insecure_result, "exact mode 0700", "non-0700 output was not rejected")
 
-    in_repo = repo / "build" / "package-linux-in-repo-negative"
+    in_repo = in_repo_parent / f".ava-package-linux-in-repo-negative.{secrets.token_hex(12)}"
     in_repo_result = run(package_command(script, fixture, in_repo), env=env, check=False)
     require_failure(in_repo_result, "outside the repository", "in-repository output was not rejected")
 
-    opened_in_repo = repo / "build" / f"publisher-opened-in-repo-{secrets.token_hex(8)}"
+    opened_in_repo = in_repo_parent / f"publisher-opened-in-repo-{secrets.token_hex(8)}"
     opened_in_repo.mkdir(mode=0o700)
     try:
         opened_in_repo_result = run(
@@ -1905,7 +1982,7 @@ def run_package_tests(
     symlink_checkout = root / "symlinked-checkout"
     symlink_checkout.symlink_to(repo, target_is_directory=True)
     symlinked_script = symlink_checkout / "scripts" / "package-linux.sh"
-    symlinked_in_repo_output = repo / "build" / f"package-linux-symlinked-in-repo-{secrets.token_hex(8)}"
+    symlinked_in_repo_output = in_repo_parent / f"package-linux-symlinked-in-repo-{secrets.token_hex(8)}"
     if symlinked_in_repo_output.exists() or symlinked_in_repo_output.is_symlink():
         raise RuntimeError("symlinked-checkout output rejection fixture unexpectedly exists")
     symlinked_output_result = run(package_command(symlinked_script, fixture, symlinked_in_repo_output), env=env, check=False)
@@ -1919,12 +1996,12 @@ def run_package_tests(
 
     symlinked_external_output = root / "symlinked-checkout-external-output"
     symlinked_external_output.mkdir(mode=0o700)
-    in_repo_temp_entries_before = set((repo / "build").glob("ava-package-linux.*"))
+    in_repo_temp_entries_before = set(in_repo_parent.glob("ava-package-linux.*"))
     symlinked_env = dict(env)
-    symlinked_env["TMPDIR"] = str(repo / "build")
+    symlinked_env["TMPDIR"] = str(in_repo_parent)
     symlinked_external_result = run(package_command(symlinked_script, fixture, symlinked_external_output), env=symlinked_env)
     parse_path(symlinked_external_result.stdout, "artifact")
-    in_repo_temp_entries_after = set((repo / "build").glob("ava-package-linux.*"))
+    in_repo_temp_entries_after = set(in_repo_parent.glob("ava-package-linux.*"))
     if in_repo_temp_entries_after != in_repo_temp_entries_before:
         raise RuntimeError("symlinked checkout used a physically in-repository TMPDIR")
 
@@ -2428,7 +2505,7 @@ def run_main_package_tests(args: argparse.Namespace) -> int:
             # workspace. Defer terminal delivery across the complete sequence so a
             # signal cannot land between creation and that local cleanup.
             with PackageTestTerminationDeferral():
-                run_workspace_safety_regressions(repo)
+                run_workspace_safety_regressions(repo, args.build_dir)
             raise_deferred_package_test_termination()
             # Keep a terminal signal from landing after prepare_workspace()
             # creates its private child but before this finally block can own it.
@@ -2449,6 +2526,7 @@ def main() -> int:
     parser.add_argument("--ava", type=pathlib.Path, required=True)
     parser.add_argument("--fake-provider", type=pathlib.Path, required=True)
     parser.add_argument("--repo", type=pathlib.Path, required=True)
+    parser.add_argument("--build-dir", type=pathlib.Path, required=True)
     parser.add_argument("--root", type=pathlib.Path, required=True)
     parser.add_argument("--signal-cleanup-regression-child", action="store_true")
     parser.add_argument("--signal-cleanup-fixture", type=pathlib.Path)

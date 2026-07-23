@@ -18,9 +18,6 @@ namespace {
 
 constexpr std::size_t kMaxImageAttachmentIdBytes = 128;
 constexpr std::size_t kMaxImageStoragePathBytes = 4096;
-constexpr std::size_t kMaxImageBytes = 20 * 1024 * 1024;
-constexpr std::size_t kMaxImageAttachmentsPerRequest = 16;
-constexpr std::size_t kMaxImageBytesPerRequest = 40 * 1024 * 1024;
 
 class DefaultStreamParser final : public StreamParser
 {
@@ -731,6 +728,14 @@ bool is_context_overflow_error(ava::core::Error const& error)
   return false;
 }
 
+ImageInputPolicy image_input_policy_for_api_family(std::string_view api_family) noexcept
+{
+  auto policy = ImageInputPolicy{};
+  if (api_family == "anthropic_messages")
+    policy.max_bytes_per_image = 5 * 1024 * 1024;
+  return policy;
+}
+
 bool is_supported_image_mime_type(std::string_view mime_type)
 {
   return mime_type == "image/png" || mime_type == "image/jpeg" || mime_type == "image/webp" || mime_type == "image/gif";
@@ -775,6 +780,7 @@ bool valid_image_storage_path(std::string_view path)
 
 ava::core::VoidResult validate_image_content_parts(ProviderRequest const& request, bool model_supports_images)
 {
+  auto const policy = image_input_policy_for_api_family({});
   std::size_t image_count = 0;
   std::size_t total_image_bytes = 0;
   for (std::size_t message_index = 0; message_index < request.messages.size(); ++message_index)
@@ -805,7 +811,7 @@ ava::core::VoidResult validate_image_content_parts(ProviderRequest const& reques
       {
         return std::unexpected(image_part_error("image attachment storage path is invalid", message_index, part_index));
       }
-      if (part.byte_size == 0 || part.byte_size > kMaxImageBytes)
+      if (part.byte_size == 0 || part.byte_size > policy.max_bytes_per_image)
       {
         return std::unexpected(image_part_error("image attachment byte size is outside supported limits", message_index, part_index));
       }
@@ -818,11 +824,11 @@ ava::core::VoidResult validate_image_content_parts(ProviderRequest const& reques
         return std::unexpected(image_part_error("image attachment base64 payload is invalid", message_index, part_index));
       }
       ++image_count;
-      if (image_count > kMaxImageAttachmentsPerRequest)
+      if (image_count > policy.max_attachments_per_request)
       {
         return std::unexpected(image_part_error("image attachment count exceeds supported limits", message_index, part_index));
       }
-      if (part.byte_size > kMaxImageBytesPerRequest - total_image_bytes)
+      if (part.byte_size > policy.max_bytes_per_request - total_image_bytes)
       {
         return std::unexpected(image_part_error("image attachment total byte size exceeds supported limits", message_index, part_index));
       }

@@ -10,6 +10,7 @@
 #include "ava/core/AnchorSet.h"
 #include "ava/core/result.h"
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -54,6 +55,14 @@ using SessionTitleGenerator =
     std::function<ava::core::Result<std::string>(SessionTitleGenerationRequest&, std::stop_token, std::chrono::steady_clock::time_point)>;
 using SessionTitleTransportFactory = std::function<std::unique_ptr<ava::provider::Transport>()>;
 
+struct SessionTitleCatalogChanges
+{
+  std::size_t cursor = 0;
+  std::vector<std::string> dirty_session_ids = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct SessionTitleCoordinatorOptions
 {
   ava::config::SessionTitleConfig config;
@@ -84,6 +93,10 @@ class SessionTitleCoordinator final
   void schedule(runtime::Session const& session, std::string_view original_user_text, std::string_view committed_turn_id,
                 runtime::RunOptions const& run_options) noexcept;
   [[nodiscard]] bool wait_until_idle(std::chrono::milliseconds timeout);
+  // Automatic fallback and refined-title persistence each publish the exact
+  // dirtied session after commit. The returned snapshot owns its values.
+  [[nodiscard]] SessionTitleCatalogChanges catalog_changes_since(std::size_t cursor) const;
+  [[nodiscard]] std::size_t catalog_generation() const noexcept { return catalog_generation_.load(std::memory_order_acquire); }
   void shutdown() noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
@@ -109,15 +122,24 @@ class SessionTitleCoordinator final
   void start();
   void worker_loop(std::stop_token stop_token);
   void process(Work work, std::stop_token stop_token) noexcept;
+  void publish_catalog_change(std::string const& session_id);
+
+  struct CatalogNotification
+  {
+    std::size_t cursor = 0;
+    std::string session_id;
+  };
 
   SessionTitleCoordinatorOptions options_;
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::condition_variable_any changed_;
   std::deque<Work> queue_;
   std::unordered_set<std::string> active_session_ids_;
   std::unordered_set<std::string> admitted_session_ids_;
   bool accepting_ = true;
   std::vector<std::jthread> workers_;
+  std::vector<CatalogNotification> catalog_notifications_;
+  std::atomic_size_t catalog_generation_ = 0;
 };
 
 [[nodiscard]] std::string normalize_session_title_source(std::string_view text);

@@ -1093,7 +1093,7 @@ void test_acp_startup_model_is_pinned_across_config_mutation()
   std::filesystem::remove_all(invalid_root, cleanup);
 }
 
-void test_acp_resume_validates_history_against_pinned_startup_model()
+void test_acp_resume_projects_history_for_pinned_startup_model()
 {
   using namespace ava::app::acp;
   auto const root = std::filesystem::temp_directory_path() / ava::core::make_id("acp-resume-model-history");
@@ -1139,6 +1139,7 @@ void test_acp_resume_validates_history_against_pinned_startup_model()
   AgentServiceOptions text_options = image_options;
   text_options.provider_bundle_factory = recording_bundle_factory(&text_body);
   AgentService text_service(std::move(text_options));
+  text_service.bind_update_sender([](std::string_view, std::string_view) -> ava::core::VoidResult { return {}; });
   static_cast<void>(text_service.handle_request(initialize_request(), {}));
   RequestResult resumed;
   if (session_id)
@@ -1147,8 +1148,21 @@ void test_acp_resume_validates_history_against_pinned_startup_model()
                 .method = "session/resume",
                 .params_json = std::string("{\"sessionId\":\"") + *session_id + "\",\"cwd\":\"" + workspace.string() + "\",\"mcpServers\":[]}"},
         {});
-  expect(session_id && !resumed && resumed.error().code == -32602 && resumed.error().message.find("image input support") != std::string::npos,
-         "ACP resume rejects image history that the immutable text-only startup model cannot replay");
+  RequestResult resumed_prompt;
+  if (session_id && resumed)
+  {
+    resumed_prompt = text_service.handle_request(
+        Request{.id = std::int64_t(6),
+                .method = "session/prompt",
+                .params_json = std::string("{\"sessionId\":\"") + *session_id +
+                               "\",\"prompt\":[{\"type\":\"text\",\"text\":\"continue without images\"}]}"},
+        {});
+  }
+  expect(session_id && resumed, "ACP resume accepts image history under the immutable text-only startup model");
+  expect(static_cast<bool>(resumed_prompt), "ACP resumed text-only session accepts a subsequent prompt");
+  expect(text_body.find("historical image omitted: mime=image/png bytes=8") != std::string::npos && text_body.find("data:image/png") == std::string::npos &&
+             text_body.find("attachments/") == std::string::npos,
+         "ACP resumed request uses a non-identifying historical image placeholder");
   text_service.shutdown();
 
   std::error_code cleanup;
@@ -4298,7 +4312,7 @@ void run_acp_tests()
   test_acp_session_request_schema_defaults_and_invalid_item_skipping();
   test_acp_session_capacity_is_reserved_before_persistence();
   test_acp_startup_model_is_pinned_across_config_mutation();
-  test_acp_resume_validates_history_against_pinned_startup_model();
+  test_acp_resume_projects_history_for_pinned_startup_model();
   test_acp_session_lifecycle_real_prompt_and_provider_ownership();
   test_acp_exact_identity_persisted_cwd_and_restart();
   test_acp_cross_process_lease_and_bounded_streaming();

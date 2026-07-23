@@ -15,84 +15,72 @@ constexpr std::string_view kCopyOptionPrefix = "copy:";
 
 std::string render_permission_choice(std::string_view label, bool selected)
 {
-  std::string text = selected ? "> " : "  ";
+  std::string text = selected ? "› " : "  ";
   text += label;
-  if (!selected)
-    return text;
-  return std::string(kReverseVideo) + text + std::string(kSgrReset);
-}
-
-std::string render_compact_permission_choice(std::string_view label, bool selected)
-{
-  std::string text = selected ? "> " : "  ";
-  text += label;
-  if (!selected)
-    return text;
-  return std::string(kReverseVideo) + text + std::string(kSgrReset);
+  if (selected)
+    return std::string(kSgrWarning) + std::string(kSgrBold) + text + std::string(kSgrReset);
+  return std::string(kSgrMuted) + text + std::string(kSgrReset);
 }
 
 std::string permission_dock_header(std::size_t width)
 {
-  if (width < 8)
-  {
-    return fit_line_preserving_sgr(std::string(kSgrBold) + std::string(kSgrError) + "PERM" + std::string(kSgrReset), width);
-  }
-  std::string text = "  -- Permission required";
-  auto text_cols = terminal_text_columns(text);
-  if (text_cols < width)
-    text += std::string(width - text_cols, '-');
-  text = fit_line(text, width);
-
-  auto pos = text.find("Permission required");
-  if (pos != std::string::npos)
-  {
-    std::string result;
-    result += std::string(kSgrDim) + text.substr(0, pos) + std::string(kSgrReset);
-    result += std::string(kSgrBold) + std::string(kSgrError) + "Permission required" + std::string(kSgrReset);
-    if (pos + 19 < text.size())
-    {
-      result += std::string(kSgrDim) + text.substr(pos + 19) + std::string(kSgrReset);
-    }
-    return result;
-  }
-  return std::string(kSgrDim) + text + std::string(kSgrReset);
+  auto const label = width < 8 ? std::string("! PERM") : std::string("! Permission required");
+  return fit_line_preserving_sgr("  " + std::string(kSgrWarning) + std::string(kSgrBold) + label + std::string(kSgrReset), width);
 }
 
-std::string permission_dock_summary(PermissionPromptView const& prompt, std::size_t width)
+std::string permission_label_source(PermissionPromptView const& prompt)
 {
-  std::string summary = "  ";
-  if (!prompt.tool_name.empty())
+  auto source = !prompt.tool_name.empty() ? prompt.tool_name : prompt.operation;
+  source = sanitize_terminal_text(source);
+  std::string lowered;
+  lowered.reserve(source.size());
+  for (char const ch : source) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  if (!prompt.command.empty() || lowered == "bash" || lowered == "shell" || lowered == "shell.run" || lowered == "run_command" || lowered == "run command")
   {
-    summary += std::string(kSgrBold) + sanitize_terminal_text(prompt.tool_name) + std::string(kSgrReset);
-    if (!prompt.command.empty() || !prompt.target.empty() || !prompt.operation.empty())
-    {
-      summary += ": ";
-    }
+    return "Shell command";
   }
+  if (source.empty())
+    return "Requested action";
+  for (char& ch : source)
+  {
+    if (ch == '_' || ch == '.')
+      ch = ' ';
+  }
+  source.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(source.front())));
+  return source;
+}
 
-  std::string detail_text;
+std::string permission_subject(PermissionPromptView const& prompt)
+{
   if (!prompt.command.empty())
-  {
-    detail_text = sanitize_terminal_text(prompt.command);
-  }
-  else if (!prompt.target.empty())
+    return "$ " + sanitize_terminal_text(prompt.command);
+  if (!prompt.target.empty())
   {
     if (prompt.reason.find("outside the workspace") != std::string::npos)
-      detail_text = "Access external directory " + sanitize_terminal_text(prompt.target);
-    else
-      detail_text = sanitize_terminal_text(prompt.target);
+      return "Access external directory " + sanitize_terminal_text(prompt.target);
+    return sanitize_terminal_text(prompt.target);
   }
-  else if (!prompt.operation.empty())
-  {
-    detail_text = sanitize_terminal_text(prompt.operation);
-  }
+  if (!prompt.operation.empty() && sanitize_terminal_text(prompt.operation) != sanitize_terminal_text(prompt.tool_name))
+    return sanitize_terminal_text(prompt.operation);
+  return {};
+}
 
-  if (!detail_text.empty())
-  {
-    summary += detail_text;
-  }
+std::string permission_dock_action(PermissionPromptView const& prompt, std::size_t width)
+{
+  return fit_line_preserving_sgr("  " + std::string(kSgrBold) + permission_label_source(prompt) + std::string(kSgrReset), width);
+}
 
-  return fit_line_preserving_sgr(summary, width);
+std::string permission_dock_subject(PermissionPromptView const& prompt, std::size_t width)
+{
+  return fit_line_preserving_sgr("  " + std::string(kSgrText) + permission_subject(prompt) + std::string(kSgrReset), width);
+}
+
+std::string permission_dock_compact_summary(PermissionPromptView const& prompt, std::size_t width)
+{
+  auto text = "  " + permission_label_source(prompt);
+  if (auto const subject = permission_subject(prompt); !subject.empty())
+    text += " · " + subject;
+  return fit_line_preserving_sgr(std::string(kSgrText) + std::move(text) + std::string(kSgrReset), width);
 }
 
 std::string permission_metadata_text(PermissionPromptView const& prompt)
@@ -100,16 +88,8 @@ std::string permission_metadata_text(PermissionPromptView const& prompt)
   std::vector<std::string> parts;
   if (!prompt.risk.empty())
     parts.push_back("risk " + sanitize_terminal_text(prompt.risk));
-  if (!prompt.request_id.empty())
-    parts.push_back("id " + sanitize_terminal_text(prompt.request_id));
   if (!prompt.reason.empty())
     parts.push_back("reason " + sanitize_terminal_text(prompt.reason));
-  if (!prompt.recipe_display.empty())
-    parts.push_back("recipe " + sanitize_terminal_text(prompt.recipe_display));
-  if (!prompt.workspace_recipe_key.empty())
-    parts.push_back("recipe-key " + sanitize_terminal_text(prompt.workspace_recipe_key));
-  if (!prompt.effective_allowed_scopes.empty())
-    parts.push_back("scopes " + sanitize_terminal_text(prompt.effective_allowed_scopes));
   if (parts.empty())
     return {};
 
@@ -139,8 +119,7 @@ std::string key_pill(std::string_view key)
 
 bool permission_choice_is_allow(PermissionPromptChoice choice)
 {
-  return choice == PermissionPromptChoice::Allow || choice == PermissionPromptChoice::AllowSession ||
-         choice == PermissionPromptChoice::AllowRemember;
+  return choice == PermissionPromptChoice::Allow || choice == PermissionPromptChoice::AllowSession || choice == PermissionPromptChoice::AllowRemember;
 }
 
 bool permission_choice_is_remember(PermissionPromptChoice choice)
@@ -215,28 +194,33 @@ PermissionPromptInputAction resolve_permission_choice_action(PermissionPromptCho
   return PermissionPromptInputAction::ResolveDeny;
 }
 
-std::string permission_dock_actions(PermissionPromptChoice selected, bool allow_session_available, bool allow_remember_available,
-                                    bool deny_remember_available, std::size_t width)
+std::string permission_dock_actions(PermissionPromptChoice selected, bool allow_session_available, bool allow_remember_available, bool deny_remember_available,
+                                    std::size_t width)
 {
-  auto compose = [&](bool compact, bool shortest) {
+  auto compose = [&](std::array<std::string_view, 5> const& labels) {
     std::string text = "  ";
     auto append = [&](std::string_view label, PermissionPromptChoice choice) {
-      if (text.size() > 2)
+      if (terminal_text_columns(text) > 2)
         text += " ";
-      text += compact ? render_compact_permission_choice(label, selected == choice) : render_permission_choice(label, selected == choice);
+      text += render_permission_choice(label, selected == choice);
     };
-    append(shortest ? "[D]" : "[Reject]", PermissionPromptChoice::Deny);
-    append(shortest ? "[A]" : "[Allow once]", PermissionPromptChoice::Allow);
+    append(labels[0], PermissionPromptChoice::Deny);
+    append(labels[1], PermissionPromptChoice::Allow);
     if (allow_session_available)
-      append(shortest ? "[S]" : "[Allow session]", PermissionPromptChoice::AllowSession);
+      append(labels[2], PermissionPromptChoice::AllowSession);
     if (deny_remember_available)
-      append(shortest ? "[DR]" : "[Reject rule]", PermissionPromptChoice::DenyRemember);
+      append(labels[3], PermissionPromptChoice::DenyRemember);
     if (allow_remember_available)
-      append(shortest ? "[AR]" : "[Always in this project]", PermissionPromptChoice::AllowRemember);
+      append(labels[4], PermissionPromptChoice::AllowRemember);
     return text;
   };
 
-  std::array const candidates = {compose(false, false), compose(true, false), compose(false, true)};
+  std::array const full = {std::string_view("Reject"), std::string_view("Allow once"), std::string_view("Allow session"), std::string_view("Always reject"),
+                           std::string_view("Always allow")};
+  std::array const compact = {std::string_view("Reject"), std::string_view("Once"), std::string_view("Session"), std::string_view("Never"),
+                              std::string_view("Always")};
+  std::array const narrow = {std::string_view("No"), std::string_view("Yes"), std::string_view("Sess"), std::string_view("Never"), std::string_view("Always")};
+  std::array const candidates = {compose(full), compose(compact), compose(narrow)};
   for (auto const& candidate : candidates)
   {
     if (terminal_text_columns(candidate) <= width)
@@ -247,80 +231,23 @@ std::string permission_dock_actions(PermissionPromptChoice selected, bool allow_
 
 std::string permission_dock_keys(bool allow_session_available, bool allow_remember_available, bool deny_remember_available, std::size_t width)
 {
-  if (allow_session_available && !allow_remember_available && !deny_remember_available)
-  {
-    std::array const candidates = {
-        std::string("  ") + key_pill("A") + " allow once  " + key_pill("S") + " allow session  " + key_pill("D") + " reject  " +
-            key_pill("Enter") + " confirm  " + key_pill("Esc") + " reject",
-        std::string("  ") + key_pill("A") + " allow  " + key_pill("S") + " session  " + key_pill("D") + " reject  " + key_pill("Enter") +
-            " ok  " + key_pill("Esc") + " no",
-        std::string("  ") + key_pill("A") + "=allow " + key_pill("S") + "=session " + key_pill("D") + "=reject",
-    };
-    for (auto const& candidate : candidates)
-    {
-      if (terminal_text_columns(candidate) <= width)
-        return candidate;
-    }
-    return fit_line_preserving_sgr(candidates.back(), width);
-  }
-
+  auto shortcuts = std::string("A/D shortcuts");
   if (allow_session_available)
-  {
-    auto const remember_label =
-        allow_remember_available && deny_remember_available ? "remember selected" : (deny_remember_available ? "remember reject" : "remember allow");
-    std::array const candidates = {
-        std::string("  ") + key_pill("A") + " allow once  " + key_pill("S") + " allow session  " + key_pill("D") + " reject  " + key_pill("R") + " " +
-            remember_label + "  " + key_pill("Enter") + " confirm  " + key_pill("Esc") + " reject",
-        std::string("  ") + key_pill("A") + " allow  " + key_pill("S") + " session  " + key_pill("D") + " reject  " + key_pill("R") + " remember  " +
-            key_pill("Enter") + " ok  " + key_pill("Esc") + " no",
-        std::string("  ") + key_pill("A") + "=allow " + key_pill("S") + "=session " + key_pill("D") + "=reject " + key_pill("R") + "=remember",
-    };
-
-    for (auto const& candidate : candidates)
-    {
-      if (terminal_text_columns(candidate) <= width)
-        return candidate;
-    }
-    return fit_line_preserving_sgr(candidates.back(), width);
-  }
-
+    shortcuts = "A/S/D shortcuts";
   if (allow_remember_available || deny_remember_available)
-  {
-    auto const remember_label =
-        allow_remember_available && deny_remember_available ? "remember selected" : (deny_remember_available ? "remember reject" : "remember allow");
-    std::array const candidates = {
-        std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " reject  " + key_pill("R") + " " + remember_label + "  " +
-            key_pill("Enter") + " confirm  " + key_pill("Esc") + " reject",
-        std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject  " + key_pill("R") + " remember  " + key_pill("Enter") + " ok  " +
-            key_pill("Esc") + " no",
-        std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=reject " + key_pill("R") + "=remember",
-    };
-
-    for (auto const& candidate : candidates)
-    {
-      if (terminal_text_columns(candidate) <= width)
-        return candidate;
-    }
-    return fit_line_preserving_sgr(candidates.back(), width);
-  }
-
+    shortcuts += "  R remember";
   std::array const candidates = {
-      std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " reject  " + key_pill("Enter") + " confirm  " + key_pill("Esc") + " reject  " +
-          key_pill("Tab/arrows") + " move",
-      std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject  " + key_pill("Enter") + " ok  " + key_pill("Esc") + " reject  " +
-          key_pill("Tab") + " move",
-      std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject  " + key_pill("Enter") + " ok  " + key_pill("Esc") + " no  " + key_pill("Tab") +
-          " move",
-      std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject  " + key_pill("Enter/Esc") + " ok/no",
-      std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=reject",
+      std::string("  ") + key_pill("↑/↓") + " move  " + key_pill("Enter") + " confirm  " + shortcuts + "  " + key_pill("Esc") + " reject",
+      std::string("  ") + key_pill("Enter") + " confirm  " + shortcuts + "  " + key_pill("Esc") + " reject",
+      std::string("  ") + key_pill("Enter") + " confirm  " + key_pill("Esc") + " reject",
+      std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject",
   };
-
   for (auto const& candidate : candidates)
   {
     if (terminal_text_columns(candidate) <= width)
-      return candidate;
+      return std::string(kSgrMuted) + candidate + std::string(kSgrReset);
   }
-  return fit_line_preserving_sgr(std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=reject", width);
+  return fit_line_preserving_sgr(std::string(kSgrMuted) + candidates.back() + std::string(kSgrReset), width);
 }
 
 void append_permission_diff_lines(std::vector<std::string>& lines, PermissionPromptView const& prompt, std::size_t width, std::size_t budget)
@@ -338,34 +265,39 @@ void append_permission_diff_lines(std::vector<std::string>& lines, PermissionPro
   lines.insert(lines.end(), diff_lines.begin(), diff_lines.end());
 }
 
+std::string question_title(QuestionPromptView const& prompt)
+{
+  auto const title = prompt.header.empty() ? std::string("Question") : sanitize_terminal_text(prompt.header);
+  return "? " + title;
+}
+
 std::string question_dock_header(QuestionPromptView const& prompt, std::size_t width)
 {
-  auto label = prompt.header.empty() ? std::string("QUESTION") : sanitize_terminal_text(prompt.header);
-  label = prompt.multiple ? label + " (multi-select)" : label;
-  std::string text = "  -- " + label;
-  auto text_cols = terminal_text_columns(text);
-  if (text_cols < width)
-    text += std::string(width - text_cols, '-');
-  text = fit_line(text, width);
-  return std::string(kSgrDim) + text + std::string(kSgrReset);
+  return fit_line_preserving_sgr("  " + std::string(kSgrAccent) + std::string(kSgrBold) + question_title(prompt) + std::string(kSgrReset), width);
+}
+
+bool question_custom_owns_cursor(QuestionPromptView const& prompt)
+{
+  return !prompt.multiple && prompt.allow_custom && !prompt.custom_text.empty();
 }
 
 std::string question_option_line(QuestionPromptView const& prompt, std::size_t index, std::size_t width)
 {
   auto const& option = prompt.options[index];
-  std::string text = "  ";
-  text += index == prompt.selected_option_index ? "> " : "  ";
+  auto const cursor = index == prompt.selected_option_index && !question_custom_owns_cursor(prompt);
+  std::string text = cursor ? "  › " : "    ";
   text += std::to_string(index + 1) + ". ";
-  text += prompt.multiple ? (option.selected ? "[x] " : "[ ] ") : "";
+  if (prompt.multiple)
+    text += option.selected ? "✓ " : "· ";
   text += sanitize_terminal_text(option.label.empty() ? option.value : option.label);
-  if (index == prompt.selected_option_index)
-    text = std::string(kReverseVideo) + text + std::string(kSgrReset);
-  return fit_line_preserving_sgr(text, width);
+  auto const style = cursor ? std::string(kSgrAccent) + std::string(kSgrBold) : std::string(kSgrMuted);
+  return fit_line_preserving_sgr(style + text + std::string(kSgrReset), width);
 }
 
 std::string question_custom_line(QuestionPromptView const& prompt, std::size_t width)
 {
-  std::string text = "  Custom: ";
+  auto const cursor = question_custom_owns_cursor(prompt);
+  std::string text = cursor ? "  › Custom: " : "    Custom: ";
   if (prompt.custom_text.empty())
   {
     text += prompt.secret ? std::string("paste secret") : std::string("type to answer");
@@ -378,7 +310,8 @@ std::string question_custom_line(QuestionPromptView const& prompt, std::size_t w
   {
     text += sanitize_terminal_text(prompt.custom_text);
   }
-  return fit_line_preserving_sgr(std::string(kSgrTextDimmed) + text + std::string(kSgrReset), width);
+  auto const style = cursor ? std::string(kSgrAccent) + std::string(kSgrBold) : std::string(kSgrTextDimmed);
+  return fit_line_preserving_sgr(style + text + std::string(kSgrReset), width);
 }
 
 std::string lower_ascii(std::string_view text)
@@ -505,8 +438,7 @@ std::vector<std::string> modal_wrapped_lines(std::string_view text, std::size_t 
 
 std::string modal_title_line(QuestionPromptView const& prompt, std::size_t width)
 {
-  auto const title = prompt.header.empty() ? sanitize_terminal_text(prompt.question) : sanitize_terminal_text(prompt.header);
-  std::string line = std::string(kSgrBold) + title + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  std::string line = std::string(kSgrAccent) + std::string(kSgrBold) + question_title(prompt) + std::string(kSgrReset) + std::string(kSgrComposerBg);
   std::string const esc = std::string(kSgrMuted) + "esc" + std::string(kSgrReset) + std::string(kSgrComposerBg);
   auto const line_cols = terminal_text_columns(line);
   auto const esc_cols = terminal_text_columns(esc);
@@ -527,12 +459,14 @@ std::string modal_search_line(QuestionPromptView const& prompt, std::size_t widt
 std::string modal_option_line(QuestionPromptView const& prompt, std::size_t index, std::size_t width)
 {
   auto const& option = prompt.options[index];
-  std::string text = index == prompt.selected_option_index ? "› " : "  ";
-  text += option.selected ? "✓ " : "  ";
+  auto const cursor = index == prompt.selected_option_index && !question_custom_owns_cursor(prompt);
+  std::string text = cursor ? "› " : "  ";
+  text += std::to_string(index + 1) + ". ";
+  if (prompt.multiple)
+    text += option.selected ? "✓ " : "· ";
   text += sanitize_terminal_text(option.label.empty() ? option.value : option.label);
-  if (index == prompt.selected_option_index)
-    text = std::string(kReverseVideo) + text + std::string(kSgrReset);
-  return modal_line(std::move(text), width);
+  auto const style = cursor ? std::string(kSgrAccent) + std::string(kSgrBold) : std::string(kSgrMuted);
+  return modal_line(style + std::move(text) + std::string(kSgrReset), width);
 }
 
 std::string modal_keys_line(QuestionPromptView const& prompt, std::size_t width)
@@ -572,45 +506,45 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
   if (max_lines == 0)
     return lines;
 
+  auto const actions =
+      permission_dock_actions(prompt.selected_choice, prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width);
   if (max_lines == 1)
   {
-    lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.allow_session_available, prompt.allow_remember_available,
-                                            prompt.deny_remember_available, width));
+    lines.push_back(actions);
     return lines;
   }
 
   lines.push_back(permission_dock_header(width));
-
   if (max_lines == 2)
   {
-    lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.allow_session_available, prompt.allow_remember_available,
-                                          prompt.deny_remember_available, width));
+    lines.push_back(actions);
     return lines;
   }
 
-  lines.push_back(permission_dock_summary(prompt, width));
-  auto metadata_text = permission_metadata_text(prompt);
-
-  if (max_lines == 3)
+  if (max_lines <= 4)
   {
-    lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.allow_session_available, prompt.allow_remember_available,
-                                            prompt.deny_remember_available, width));
+    lines.push_back(permission_dock_compact_summary(prompt, width));
+    lines.push_back(actions);
+    if (lines.size() < max_lines)
+      lines.push_back(permission_dock_keys(prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width));
     return lines;
+  }
+
+  if (prompt.diff_preview.empty())
+  {
+    lines.push_back(permission_dock_action(prompt, width));
+    if (!permission_subject(prompt).empty())
+      lines.push_back(permission_dock_subject(prompt, width));
+  }
+  else
+  {
+    lines.push_back(permission_dock_compact_summary(prompt, width));
   }
 
   constexpr std::size_t kReservedActionLines = 2;
-  if (!metadata_text.empty() && !prompt.diff_preview.empty())
-  {
-    auto const inline_metadata = std::string(kSgrWarning) + std::string(metadata_text) + std::string(kSgrReset);
-    auto const candidate = lines.back() + "  " + inline_metadata;
-    lines.back() = fit_line_preserving_sgr(candidate, width);
-    metadata_text.clear();
-  }
-
+  auto const metadata_text = permission_metadata_text(prompt);
   if (auto metadata = permission_dock_metadata(metadata_text, width); !metadata.empty() && max_lines > lines.size() + kReservedActionLines)
-  {
     lines.push_back(std::move(metadata));
-  }
 
   if (!prompt.diff_preview.empty() && max_lines > lines.size() + kReservedActionLines)
   {
@@ -620,69 +554,76 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
     lines.insert(lines.end(), diff_lines.begin(), diff_lines.end());
   }
 
-  lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.allow_session_available, prompt.allow_remember_available,
-                                          prompt.deny_remember_available, width));
+  lines.push_back(actions);
   if (lines.size() < max_lines)
-  {
     lines.push_back(permission_dock_keys(prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width));
-  }
   return lines;
 }
 
-std::vector<std::string> render_question_prompt(QuestionPromptView const& prompt, std::size_t width, std::size_t max_lines)
+namespace {
+
+struct QuestionRenderRows
 {
   std::vector<std::string> lines;
-  if (max_lines == 0)
-    return lines;
-  lines.push_back(question_dock_header(prompt, width));
-  if (lines.size() >= max_lines)
-    return lines;
-  lines.push_back(fit_line_preserving_sgr("  " + sanitize_terminal_text(prompt.question), width));
-  if (lines.size() >= max_lines)
-    return lines;
+  std::vector<std::optional<std::size_t>> option_indices;
+};
 
-  auto const option_budget = prompt.allow_custom && max_lines > lines.size() + 2 ? max_lines - lines.size() - 2 : max_lines - lines.size() - 1;
+void append_question_row(QuestionRenderRows& rows, std::string line, std::optional<std::size_t> option_index = std::nullopt)
+{
+  rows.lines.push_back(std::move(line));
+  rows.option_indices.push_back(option_index);
+}
+
+QuestionRenderRows render_question_prompt_rows(QuestionPromptView const& prompt, std::size_t width, std::size_t max_lines)
+{
+  QuestionRenderRows rows;
+  if (max_lines == 0)
+    return rows;
+  append_question_row(rows, question_dock_header(prompt, width));
+  if (rows.lines.size() >= max_lines)
+    return rows;
+  append_question_row(rows, fit_line_preserving_sgr("  " + sanitize_terminal_text(prompt.question), width));
+  if (rows.lines.size() >= max_lines)
+    return rows;
+
+  auto const option_budget = prompt.allow_custom && max_lines > rows.lines.size() + 2 ? max_lines - rows.lines.size() - 2 : max_lines - rows.lines.size() - 1;
   auto const matches = matching_option_indices(prompt);
   auto const start = visible_option_window_start(matches, prompt.selected_option_index, option_budget);
   auto const end = std::min(matches.size(), start + option_budget);
   for (std::size_t visible = start; visible < end; ++visible)
   {
-    lines.push_back(question_option_line(prompt, matches[visible], width));
+    append_question_row(rows, question_option_line(prompt, matches[visible], width), matches[visible]);
   }
-  if (prompt.allow_custom && lines.size() < max_lines)
-  {
-    lines.push_back(question_custom_line(prompt, width));
-  }
-  if (lines.size() < max_lines)
-  {
-    lines.push_back(question_dock_keys(prompt, width));
-  }
-  return lines;
+  if (prompt.allow_custom && rows.lines.size() < max_lines)
+    append_question_row(rows, question_custom_line(prompt, width));
+  if (rows.lines.size() < max_lines)
+    append_question_row(rows, question_dock_keys(prompt, width));
+  return rows;
 }
 
-std::vector<std::string> render_question_modal(QuestionPromptView const& prompt, std::size_t width, std::size_t max_lines)
+QuestionRenderRows render_question_modal_rows(QuestionPromptView const& prompt, std::size_t width, std::size_t max_lines)
 {
-  std::vector<std::string> lines;
+  QuestionRenderRows rows;
   if (max_lines == 0)
-    return lines;
-  lines.push_back(composer_surface_line("", width));
-  if (lines.size() >= max_lines)
-    return lines;
-  lines.push_back(modal_title_line(prompt, width));
-  if (lines.size() >= max_lines)
-    return lines;
-  lines.push_back(composer_surface_line("", width));
-  if (lines.size() >= max_lines)
-    return lines;
+    return rows;
+  append_question_row(rows, composer_surface_line("", width));
+  if (rows.lines.size() >= max_lines)
+    return rows;
+  append_question_row(rows, modal_title_line(prompt, width));
+  if (rows.lines.size() >= max_lines)
+    return rows;
+  append_question_row(rows, composer_surface_line("", width));
+  if (rows.lines.size() >= max_lines)
+    return rows;
 
   if (prompt.searchable)
   {
-    lines.push_back(modal_search_line(prompt, width));
-    if (lines.size() >= max_lines)
-      return lines;
-    lines.push_back(composer_surface_line("", width));
-    if (lines.size() >= max_lines)
-      return lines;
+    append_question_row(rows, modal_search_line(prompt, width));
+    if (rows.lines.size() >= max_lines)
+      return rows;
+    append_question_row(rows, composer_surface_line("", width));
+    if (rows.lines.size() >= max_lines)
+      return rows;
   }
   else if (!prompt.question.empty() && prompt.question != prompt.header)
   {
@@ -691,55 +632,69 @@ std::vector<std::string> render_question_modal(QuestionPromptView const& prompt,
     std::size_t rendered = 0;
     for (auto const& line : question_lines)
     {
-      if (lines.size() + reserved >= max_lines)
+      if (rows.lines.size() + reserved >= max_lines)
         break;
-      lines.push_back(line);
+      append_question_row(rows, line);
       ++rendered;
     }
-    if (rendered < question_lines.size() && lines.size() + reserved < max_lines)
-    {
-      lines.push_back(modal_line(std::string(kSgrMuted) + "..." + std::string(kSgrReset), width));
-    }
-    if (lines.size() >= max_lines)
-      return lines;
-    lines.push_back(composer_surface_line("", width));
-    if (lines.size() >= max_lines)
-      return lines;
+    if (rendered < question_lines.size() && rows.lines.size() + reserved < max_lines)
+      append_question_row(rows, modal_line(std::string(kSgrMuted) + "..." + std::string(kSgrReset), width));
+    if (rows.lines.size() >= max_lines)
+      return rows;
+    append_question_row(rows, composer_surface_line("", width));
+    if (rows.lines.size() >= max_lines)
+      return rows;
   }
 
   if (!prompt.options.empty())
   {
     auto const matches = matching_option_indices(prompt);
     auto const reserved_footer = std::size_t{2};
-    auto const budget = max_lines > lines.size() + reserved_footer ? max_lines - lines.size() - reserved_footer : 0;
+    auto const budget = max_lines > rows.lines.size() + reserved_footer ? max_lines - rows.lines.size() - reserved_footer : 0;
     auto const content_rows = visible_question_modal_rows(prompt, budget);
     for (auto const& row : content_rows)
     {
       if (row.option_index)
-      {
-        lines.push_back(modal_option_line(prompt, *row.option_index, width));
-      }
+        append_question_row(rows, modal_option_line(prompt, *row.option_index, width), row.option_index);
       else
-      {
-        lines.push_back(modal_line(std::string(kSgrWarning) + row.section + std::string(kSgrReset), width));
-      }
+        append_question_row(rows, modal_line(std::string(kSgrWarning) + row.section + std::string(kSgrReset), width));
     }
-    if (matches.empty() && lines.size() + reserved_footer < max_lines)
-    {
-      lines.push_back(modal_line(std::string(kSgrMuted) + "No matches. Press Enter to use custom provider id." + std::string(kSgrReset), width));
-    }
+    if (matches.empty() && rows.lines.size() + reserved_footer < max_lines)
+      append_question_row(rows, modal_line(std::string(kSgrMuted) + "No matches. Press Enter to use custom provider id." + std::string(kSgrReset), width));
   }
 
-  if (prompt.allow_custom && !prompt.searchable && lines.size() < max_lines)
-  {
-    lines.push_back(question_custom_line(prompt, width));
-  }
-  if (lines.size() < max_lines)
-    lines.push_back(composer_surface_line("", width));
-  if (lines.size() < max_lines)
-    lines.push_back(modal_keys_line(prompt, width));
-  while (lines.size() < max_lines) lines.push_back(composer_surface_line("", width));
-  return lines;
+  if (prompt.allow_custom && !prompt.searchable && rows.lines.size() < max_lines)
+    append_question_row(rows, question_custom_line(prompt, width));
+  if (rows.lines.size() < max_lines)
+    append_question_row(rows, composer_surface_line("", width));
+  if (rows.lines.size() < max_lines)
+    append_question_row(rows, modal_keys_line(prompt, width));
+  while (rows.lines.size() < max_lines) append_question_row(rows, composer_surface_line("", width));
+  return rows;
+}
+
+}  // namespace
+
+std::vector<std::string> render_question_prompt(QuestionPromptView const& prompt, std::size_t width, std::size_t max_lines)
+{
+  return render_question_prompt_rows(prompt, width, max_lines).lines;
+}
+
+std::vector<std::string> render_question_modal(QuestionPromptView const& prompt, std::size_t width, std::size_t max_lines)
+{
+  return render_question_modal_rows(prompt, width, max_lines).lines;
+}
+
+std::optional<std::size_t> question_option_for_dock_row(QuestionPromptView const& prompt, std::size_t row, std::size_t width, std::size_t max_lines)
+{
+  auto const rows = render_question_prompt_rows(prompt, width, max_lines);
+  return row < rows.option_indices.size() ? rows.option_indices[row] : std::nullopt;
+}
+
+std::optional<std::size_t> question_option_for_modal_row(QuestionPromptView const& prompt, std::size_t row, std::size_t width, std::size_t max_lines)
+{
+  auto const rows = render_question_modal_rows(prompt, width, max_lines);
+  return row < rows.option_indices.size() ? rows.option_indices[row] : std::nullopt;
 }
 
 }  // namespace detail
@@ -792,14 +747,13 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
     case Key::ArrowLeft:
     case Key::ArrowUp:
     case Key::MouseWheelUp:
-      return {.selected_choice = detail::previous_permission_choice(selected_choice, allow_session_available, allow_remember_available,
-                                                                    deny_remember_available),
-              .action = PermissionPromptInputAction::Redraw};
+      return {
+          .selected_choice = detail::previous_permission_choice(selected_choice, allow_session_available, allow_remember_available, deny_remember_available),
+          .action = PermissionPromptInputAction::Redraw};
     case Key::ArrowRight:
     case Key::ArrowDown:
     case Key::MouseWheelDown:
-      return {.selected_choice = detail::next_permission_choice(selected_choice, allow_session_available, allow_remember_available,
-                                                                  deny_remember_available),
+      return {.selected_choice = detail::next_permission_choice(selected_choice, allow_session_available, allow_remember_available, deny_remember_available),
               .action = PermissionPromptInputAction::Redraw};
     case Key::Escape:
     case Key::CtrlC:
@@ -908,6 +862,37 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
       break;
   }
   return {.selected_choice = selected_choice, .action = PermissionPromptInputAction::None};
+}
+
+QuestionPromptInputResult activate_question_option(QuestionPromptView const& prompt, std::size_t option_index)
+{
+  auto result = QuestionPromptInputResult{.selected_option_index = prompt.selected_option_index,
+                                          .options = prompt.options,
+                                          .custom_text = prompt.custom_text,
+                                          .copy_text = {},
+                                          .action = QuestionPromptInputAction::None};
+  if (option_index >= result.options.size())
+    return result;
+
+  result.selected_option_index = option_index;
+  if (auto copy_text = detail::copy_text_for_option(result.options[option_index]))
+  {
+    result.copy_text = std::string(*copy_text);
+    result.action = QuestionPromptInputAction::Copy;
+    return result;
+  }
+  if (prompt.multiple)
+  {
+    result.options[option_index].selected = !result.options[option_index].selected;
+    result.action = QuestionPromptInputAction::Redraw;
+    return result;
+  }
+
+  for (auto& option : result.options) option.selected = false;
+  result.options[option_index].selected = true;
+  result.custom_text.clear();
+  result.action = QuestionPromptInputAction::Resolve;
+  return result;
 }
 
 QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt, InputEvent event)

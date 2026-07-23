@@ -39,14 +39,18 @@ struct PersistedAssistantTurn
 [[nodiscard]] ava::core::Result<PersistedAssistantTurn> append_assistant_turn(SessionAppendBatchSink const& sink, ParsedAssistantTurn const& turn,
                                                                               std::string_view provider_id, std::string_view model_id,
                                                                               ava::provider::TokenUsage const& usage,
-                                                                              std::optional<long double> const& cost_usd);
+                                                                              std::optional<long double> const& cost_usd,
+                                                                              std::optional<std::string_view> api_family = std::nullopt,
+                                                                              std::optional<std::string_view> reasoning_format = std::nullopt);
 // Direct AgentLoop unit tests may use an ephemeral store without a runtime
 // batch route. This overload creates a guarded ephemeral append target rather
 // than bypassing its v4 append-state validation.
 [[nodiscard]] ava::core::Result<PersistedAssistantTurn> append_assistant_turn(ava::session::SessionStore& store, ParsedAssistantTurn const& turn,
                                                                               std::string_view provider_id, std::string_view model_id,
                                                                               ava::provider::TokenUsage const& usage,
-                                                                              std::optional<long double> const& cost_usd);
+                                                                              std::optional<long double> const& cost_usd,
+                                                                              std::optional<std::string_view> api_family = std::nullopt,
+                                                                              std::optional<std::string_view> reasoning_format = std::nullopt);
 
 [[nodiscard]] ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text);
 [[nodiscard]] ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text,

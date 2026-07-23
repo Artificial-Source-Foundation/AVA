@@ -1268,8 +1268,9 @@ void test_builtin_provider_model_metadata_contracts()
   if (openai)
   {
     expect(contains_string(openai->input_modalities, "image"), "OpenAI builtin model metadata declares image input for storage-backed serialization");
-    expect(!ava::config::provider_accepts_reasoning_format(*openai, "openai_responses"),
-           "OpenAI metadata does not claim native reasoning replay until the request builder supports it");
+    expect(ava::config::provider_accepts_reasoning_format(*openai, "openai_responses") &&
+               !ava::config::provider_accepts_reasoning_format(*openai, "reasoning_content") && !ava::config::provider_accepts_reasoning_format(*openai, ""),
+           "OpenAI Responses metadata accepts only its exact native reasoning replay format");
     auto const openai_off = ava::config::resolve_reasoning_level(*openai, "off");
     auto const openai_minimal = ava::config::resolve_reasoning_level(*openai, "minimal");
     auto const openai_xhigh = ava::config::resolve_reasoning_level(*openai, "xhigh");
@@ -1292,8 +1293,10 @@ void test_builtin_provider_model_metadata_contracts()
                model->supports_reasoning.value_or(false) && contains_string(model->reasoning_levels, "minimal") &&
                contains_string(model->reasoning_levels, "max") && contains_string(model->input_modalities, "image") && model->pricing &&
                model->pricing->input_per_million == input_price && model->pricing->output_per_million == output_price &&
-               model->pricing->cache_read_per_million == cache_read_price && model->pricing->cache_write_per_million == cache_write_price,
-           "GPT-5.6 model carries short-context limits, modalities, and current pricing: " + std::string(model_id));
+               model->pricing->cache_read_per_million == cache_read_price && model->pricing->cache_write_per_million == cache_write_price &&
+               ava::config::provider_accepts_reasoning_format(*model, "openai_responses") &&
+               !ava::config::provider_accepts_reasoning_format(*model, "anthropic_thinking"),
+           "GPT-5.6 model carries short-context limits, modalities, pricing, and exact OpenAI Responses replay support: " + std::string(model_id));
     auto const off = ava::config::resolve_reasoning_level(*model, "off");
     auto const minimal = ava::config::resolve_reasoning_level(*model, "minimal");
     auto const xhigh = ava::config::resolve_reasoning_level(*model, "xhigh");

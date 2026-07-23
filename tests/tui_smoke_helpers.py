@@ -668,7 +668,14 @@ class SmokeContext:
             command,
         )
 
-    def start_fake_provider(self, name: str, *, delay_ms: int) -> FakeProvider:
+    def start_fake_provider(
+        self,
+        name: str,
+        *,
+        delay_ms: int,
+        scenario: str = "text-three",
+        target: str | pathlib.Path = "",
+    ) -> FakeProvider:
         port_file = self.root / f"{name}-provider.port"
         request_log = self.root / f"{name}-provider-requests.log"
         stdout_path = self.root / f"{name}-provider.out"
@@ -678,7 +685,7 @@ class SmokeContext:
         stdout = stdout_path.open("w", encoding="utf-8")
         stderr = stderr_path.open("w", encoding="utf-8")
         process = subprocess.Popen(
-            [str(self.fake_provider_exe), str(port_file), str(request_log), str(delay_ms), "text-three", ""],
+            [str(self.fake_provider_exe), str(port_file), str(request_log), str(delay_ms), scenario, str(target)],
             stdout=stdout,
             stderr=stderr,
             env=self._environment,

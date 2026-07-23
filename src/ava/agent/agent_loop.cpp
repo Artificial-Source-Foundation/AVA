@@ -628,19 +628,67 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     return options_.append_entry ? append_user_message(options_.append_entry, text, attachments, options_.synthetic_user_message_provenance)
                                  : append_user_message(store, text, attachments, options_.synthetic_user_message_provenance);
   };
+  struct ActiveTurnUserMessage
+  {
+    std::string id;
+    std::string text;
+    std::vector<ava::session::ImageAttachmentRef> image_attachments;
+  };
+  std::vector<ActiveTurnUserMessage> active_turn_user_messages;
+  auto message_build_options = [&]() {
+    auto api_family = options_.api_family;
+    auto reasoning_format = options_.reasoning_format;
+    if (api_family.empty())
+    {
+      if (options_.provider_id == "openai")
+        api_family = "openai_responses";
+      else if (options_.provider_id == "anthropic")
+        api_family = "anthropic_messages";
+      else if (options_.provider_id == "gemini")
+        api_family = "gemini_generate_content";
+      else
+        api_family = "openai_chat_completions";
+    }
+    if (reasoning_format.empty())
+    {
+      if (api_family == "openai_responses")
+        reasoning_format = "openai_responses";
+      else if (api_family == "anthropic_messages")
+        reasoning_format = "anthropic_thinking";
+    }
+    std::vector<std::string> active_entry_ids;
+    active_entry_ids.reserve(active_turn_user_messages.size());
+    for (auto const& message : active_turn_user_messages) active_entry_ids.push_back(message.id);
+    bool const supports_images =
+        std::find(options_.model_input_modalities.begin(), options_.model_input_modalities.end(), "image") != options_.model_input_modalities.end();
+    return MessageBuildOptions{.max_tool_result_context_bytes = options_.max_tool_result_context_bytes,
+                               .target = HistoryReplayTarget{.provider_id = options_.provider_id,
+                                                             .model_id = options_.model_id,
+                                                             .api_family = std::move(api_family),
+                                                             .reasoning_format = std::move(reasoning_format),
+                                                             .supports_tools = options_.model_supports_tools,
+                                                             .supports_images = supports_images},
+                               .active_turn_user_entry_ids = std::move(active_entry_ids)};
+  };
   auto build_messages_locked = [&]() -> ava::core::Result<BuiltProviderMessages> {
+    auto build_options = message_build_options();
     if (options_.session_mutex)
     {
       std::lock_guard lock(*options_.session_mutex);
-      return build_messages(*options_.session_read_authority, options_.max_tool_result_context_bytes);
+      return build_messages(*options_.session_read_authority, std::move(build_options));
     }
-    return build_messages(*options_.session_read_authority, options_.max_tool_result_context_bytes);
+    return build_messages(*options_.session_read_authority, std::move(build_options));
   };
   auto append_assistant_turn_locked = [&](ParsedAssistantTurn const& turn, ava::provider::TokenUsage const& usage,
                                           std::optional<long double> const& cost_usd) -> ava::core::Result<PersistedAssistantTurn> {
     auto append = [&]() -> ava::core::Result<PersistedAssistantTurn> {
-      return options_.append_batch ? append_assistant_turn(options_.append_batch, turn, options_.provider_id, options_.model_id, usage, cost_usd)
-                                   : append_assistant_turn(store, turn, options_.provider_id, options_.model_id, usage, cost_usd);
+      auto const source_api_family = options_.api_family.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.api_family};
+      auto const source_reasoning_format =
+          options_.reasoning_format.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.reasoning_format};
+      return options_.append_batch
+                 ? append_assistant_turn(options_.append_batch, turn, options_.provider_id, options_.model_id, usage, cost_usd, source_api_family,
+                                         source_reasoning_format)
+                 : append_assistant_turn(store, turn, options_.provider_id, options_.model_id, usage, cost_usd, source_api_family, source_reasoning_format);
     };
     if (options_.session_mutex)
     {
@@ -676,13 +724,6 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& u
     }
     return options_.append_entry ? append_error(options_.append_entry, error) : append_error(store, error);
   };
-  struct ActiveTurnUserMessage
-  {
-    std::string id;
-    std::string text;
-    std::vector<ava::session::ImageAttachmentRef> image_attachments;
-  };
-  std::vector<ActiveTurnUserMessage> active_turn_user_messages;
   auto replayable_active_turn_texts = [&]() {
     std::vector<std::string> messages;
     messages.reserve(active_turn_user_messages.size());

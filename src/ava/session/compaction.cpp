@@ -156,7 +156,7 @@ std::string compaction_data_json(ManualCompactionRequest const& request, std::st
           ",\"keep_recent_tokens\":" + std::to_string(request.config.keep_recent_tokens) +
           ",\"keep_recent_turns\":" + std::to_string(request.config.keep_recent_turns) +
           ",\"keep_recent_messages\":" + std::to_string(request.config.keep_recent_messages) +
-          ",\"max_summary_bytes\":" + std::to_string(request.config.max_summary_bytes) +
+          ",\"max_summary_bytes\":" + std::to_string(request.config.max_summary_bytes) + ",\"history_projection\":\"portable-v1\"" +
           ",\"recent_context_omitted\":" + (request.recent_context_omitted ? "true" : "false") + ",\"recent_context\":\"" +
           ava::core::json::escape(request.recent_context) + "\"";
   if (normalized_reason(trigger) == "overflow")

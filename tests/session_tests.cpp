@@ -767,6 +767,18 @@ void test_session_tree_index_derives_branches()
          "session tree index derives roots and leaves from parent metadata");
   expect(tree->current_path == std::vector<std::string>({"session_root", "session_child", "session_grandchild"}),
          "session tree index derives current branch path without scanning child lists");
+
+  auto retargeted = *tree;
+  ava::session::retarget_session_tree(retargeted, "session_child");
+  auto const retargeted_child = std::ranges::find_if(retargeted.sessions, [](auto const& node) { return node.summary.session_id == "session_child"; });
+  auto const retargeted_grandchild =
+      std::ranges::find_if(retargeted.sessions, [](auto const& node) { return node.summary.session_id == "session_grandchild"; });
+  expect(retargeted.current_session_id == "session_child" && retargeted.current_path == std::vector<std::string>({"session_root", "session_child"}) &&
+             retargeted_child != retargeted.sessions.end() && retargeted_child->current && retargeted_grandchild != retargeted.sessions.end() &&
+             !retargeted_grandchild->current && retargeted_child->children == std::vector<std::string>({"session_grandchild"}),
+         "session tree current-session retarget is pure and preserves parent and child topology");
+  expect(tree->current_session_id == "session_grandchild" && grandchild_node && grandchild_node->current,
+         "session tree retarget leaves the original authoritative index unchanged");
 }
 
 void test_session_tree_index_handles_parent_cycles()
@@ -2386,6 +2398,14 @@ void test_session_replay_validation()
   expect(valid_model_reasoning.ok() && valid_model_reasoning.issues.empty(), "session replay validator accepts durable model and reasoning metadata");
 
   auto valid_native_reasoning_item_entries = valid_model_reasoning_entries;
+  valid_native_reasoning_item_entries[0].data_json =
+      "{\"mode\":\"build\",\"provider\":\"anthropic\",\"model\":\"claude-test\",\"prompt_override\":false,"
+      "\"context_sources\":0,\"supports_reasoning\":true}";
+  valid_native_reasoning_item_entries[1].data_json =
+      "{\"previous_provider\":\"anthropic\",\"previous_model\":\"claude-test\",\"provider\":\"openai\",\"model\":\"gpt-5.5\","
+      "\"supports_reasoning\":true,\"max_output_tokens\":8192}";
+  valid_native_reasoning_item_entries[2].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"enabled\":true,\"level\":\"high\"}";
   valid_native_reasoning_item_entries[3].data_json =
       "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"format\":\"openai_responses\",\"text\":\"reasoned\",\"redacted\":false,"
       "\"native_item_json\":\"{\\\"id\\\":\\\"rs_session\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[],\\\"encrypted_content\\\":\\\"cipher-"
@@ -2501,6 +2521,19 @@ void test_session_replay_validation()
   auto const invalid_reasoning_block = ava::session::validate_session_replay(invalid_reasoning_block_entries);
   expect(!invalid_reasoning_block.ok() && has_replay_issue(invalid_reasoning_block, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "session replay validator flags reasoning_block entries without replayable content");
+
+  auto mismatched_reasoning_block_entries = valid_model_reasoning_entries;
+  mismatched_reasoning_block_entries[3].data_json =
+      "{\"provider\":\"deepseek\",\"model\":\"deepseek-reasoner\",\"format\":\"reasoning_content\","
+      "\"text\":\"contradictory\",\"redacted\":false}";
+  auto const mismatched_reasoning_block = ava::session::validate_session_replay(mismatched_reasoning_block_entries);
+  expect(!mismatched_reasoning_block.ok() && has_replay_issue(mismatched_reasoning_block, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+         "session replay validator rejects reasoning_block provider/model metadata that contradicts the active model");
+
+  auto legacy_reasoning_without_active_model = valid_model_reasoning_entries[3];
+  legacy_reasoning_without_active_model.parent_id.clear();
+  auto const unavailable_active_model = ava::session::validate_session_replay({legacy_reasoning_without_active_model});
+  expect(unavailable_active_model.ok(), "session replay validator preserves legacy reasoning_block validation when no active model is available");
 
   expect(ava::session::to_string(ava::session::SessionReplayIssueKind::InvalidCompactionEntry) == "invalid_compaction_entry",
          "session replay issue kind names include compaction validation failures");
@@ -3802,7 +3835,7 @@ void test_compaction_context_reconstruction()
                                  .parent_id = "",
                                  .type = ava::session::EntryType::Compaction,
                                  .timestamp = "2026-04-27T00:00:03Z",
-                                 .data_json = "{\"summary\":\"first summary\",\"instructions\":\"ignored later\"}"},
+                                 .data_json = "{\"summary\":\"first summary\",\"instructions\":\"ignored later\",\"history_projection\":\"portable-v1\"}"},
       ava::session::SessionEntry{.id = "middle_user",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::UserMessage,
@@ -3812,7 +3845,7 @@ void test_compaction_context_reconstruction()
                                  .parent_id = "",
                                  .type = ava::session::EntryType::Compaction,
                                  .timestamp = "2026-04-27T00:00:05Z",
-                                 .data_json = "{\"summary\":\"latest summary\",\"instructions\":\"carry this\"}"},
+                                 .data_json = "{\"summary\":\"latest summary\",\"instructions\":\"carry this\",\"history_projection\":\"portable-v1\"}"},
       ava::session::SessionEntry{.id = "new_user",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::UserMessage,
@@ -3842,7 +3875,13 @@ void test_compaction_context_reconstruction()
                                  .data_json = "{\"call_id\":\"call_read\",\"name\":\"read_file\","
                                               "\"result\":\"note contents\"}"}};
 
-  auto messages = ava::agent::build_provider_messages_from_entries(entries);
+  auto messages = ava::agent::build_provider_messages_from_entries(
+      entries, ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "test",
+                                                                                         .model_id = "test-tools",
+                                                                                         .api_family = "test_api",
+                                                                                         .reasoning_format = "",
+                                                                                         .supports_tools = true,
+                                                                                         .supports_images = false}});
   expect(messages && messages->size() == 6, "compacted context reconstructs summary plus post-compaction turns");
   if (!messages)
     return;
@@ -3858,17 +3897,17 @@ void test_compaction_context_reconstruction()
   expect((*messages)[1].role == "user" && (*messages)[1].content == "new user" && (*messages)[2].role == "user" && (*messages)[2].content == "new user" &&
              (*messages)[3].role == "assistant" && (*messages)[3].content == "new assistant",
          "post-compaction entries include internal replays as normal provider messages");
-  expect((*messages)[4].role == "assistant" && (*messages)[4].content.find("Tool call requested by assistant") != std::string::npos &&
-             (*messages)[4].content.find("read_file") != std::string::npos && (*messages)[5].role == "user" &&
+  expect((*messages)[4].role == "assistant" && (*messages)[4].content.find("Tool call (read_file)") != std::string::npos &&
+             (*messages)[4].content.find("note.txt") != std::string::npos && (*messages)[5].role == "user" &&
              (*messages)[5].content.find("note contents") != std::string::npos,
-         "post-compaction context includes tool-call metadata before tool result data");
+         "post-compaction portable context includes labelled tool-call metadata before tool result data");
   expect((*messages)[4].content_parts.size() == 1 && (*messages)[4].content_parts[0].type == ava::provider::ContentPartType::ToolUse &&
-             (*messages)[4].content_parts[0].tool_call_id == "call_read" && (*messages)[4].content_parts[0].tool_name == "read_file" &&
+             (*messages)[4].content_parts[0].tool_call_id == "ava_history_tool_1" && (*messages)[4].content_parts[0].tool_name == "read_file" &&
              (*messages)[4].content_parts[0].input_json.find("note.txt") != std::string::npos && (*messages)[5].content_parts.size() == 1 &&
              (*messages)[5].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
-             (*messages)[5].content_parts[0].tool_call_id == "call_read" && (*messages)[5].content_parts[0].tool_name == "read_file" &&
+             (*messages)[5].content_parts[0].tool_call_id == "ava_history_tool_1" && (*messages)[5].content_parts[0].tool_name == "read_file" &&
              (*messages)[5].content_parts[0].text == "note contents" && !(*messages)[5].content_parts[0].is_error,
-         "tool-call and tool-result entries carry native provider content parts");
+         "portable tool-call and tool-result entries carry request-local native parts without persisted call ids");
 }
 
 void test_tool_content_parts_reconstruction()
@@ -3888,22 +3927,29 @@ void test_tool_content_parts_reconstruction()
                                                                                                    "\"success\":false,\"result\":\"" +
                                                                                                    long_result + "\"}"}};
 
-  auto messages = ava::agent::build_provider_messages_from_entries(entries, ava::agent::MessageBuildOptions{.max_tool_result_context_bytes = 48});
+  auto messages = ava::agent::build_provider_messages_from_entries(
+      entries, ava::agent::MessageBuildOptions{.max_tool_result_context_bytes = 48,
+                                               .target = ava::agent::HistoryReplayTarget{.provider_id = "test",
+                                                                                         .model_id = "test-tools",
+                                                                                         .api_family = "test_api",
+                                                                                         .reasoning_format = "",
+                                                                                         .supports_tools = true,
+                                                                                         .supports_images = false}});
   expect(messages && messages->size() == 2, "tool entries reconstruct as provider messages");
   if (!messages || messages->size() != 2)
     return;
 
-  expect((*messages)[0].role == "assistant" && (*messages)[0].content.find("Tool call requested by assistant") != std::string::npos &&
+  expect((*messages)[0].role == "assistant" && (*messages)[0].content.find("Tool call (bash)") != std::string::npos &&
              (*messages)[0].content_parts.size() == 1 && (*messages)[0].content_parts[0].type == ava::provider::ContentPartType::ToolUse &&
-             (*messages)[0].content_parts[0].tool_call_id == "call_failed" && (*messages)[0].content_parts[0].tool_name == "bash" &&
+             (*messages)[0].content_parts[0].tool_call_id == "ava_history_tool_1" && (*messages)[0].content_parts[0].tool_name == "bash" &&
              (*messages)[0].content_parts[0].input_json.find("false") != std::string::npos,
-         "tool-call entry reconstructs an assistant tool-use content part with fallback text");
+         "portable tool-call entry reconstructs an assistant tool-use part with a request-local id");
   expect((*messages)[1].role == "user" && !(*messages)[1].content.empty() && (*messages)[1].content_parts.size() == 1 &&
              (*messages)[1].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
-             (*messages)[1].content_parts[0].tool_call_id == "call_failed" && (*messages)[1].content_parts[0].tool_name == "bash" &&
+             (*messages)[1].content_parts[0].tool_call_id == "ava_history_tool_1" && (*messages)[1].content_parts[0].tool_name == "bash" &&
              (*messages)[1].content_parts[0].is_error && (*messages)[1].content_parts[0].text.size() == 48 &&
              (*messages)[1].content_parts[0].text.find("[AVA: tool result content truncated]") != std::string::npos,
-         "failed tool-result entry reconstructs native error metadata and truncated result text");
+         "portable failed tool-result entry preserves bounded error metadata without its persisted call id");
 
   std::vector<ava::session::SessionEntry> const permission_entries = {
       ava::session::SessionEntry{.id = "permission_tool_call",
@@ -3923,7 +3969,13 @@ void test_tool_content_parts_reconstruction()
                                  .timestamp = "2026-04-27T00:00:02Z",
                                  .data_json = "{\"call_id\":\"call_permission\",\"name\":\"read_file\","
                                               "\"success\":true,\"result\":\"permission result\"}"}};
-  auto permission_messages = ava::agent::build_provider_messages_from_entries(permission_entries);
+  auto permission_messages = ava::agent::build_provider_messages_from_entries(
+      permission_entries, ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "test",
+                                                                                                    .model_id = "test-tools",
+                                                                                                    .api_family = "test_api",
+                                                                                                    .reasoning_format = "",
+                                                                                                    .supports_tools = true,
+                                                                                                    .supports_images = false}});
   expect(permission_messages && permission_messages->size() == 2, "permission decisions are internal metadata during provider replay");
   if (!permission_messages || permission_messages->size() != 2)
     return;
@@ -3960,24 +4012,31 @@ void test_tool_content_parts_reconstruction()
                                  .timestamp = "2026-04-27T00:00:04Z",
                                  .data_json = "{\"call_id\":\"call_batch_second\",\"name\":\"read_file\","
                                               "\"success\":true,\"result\":\"second result\"}"}};
-  auto paired_batch_messages = ava::agent::build_provider_messages_from_entries(paired_batch_entries);
-  expect(paired_batch_messages && paired_batch_messages->size() == 2, "provider-order multi-tool pairs replay as one native tool-use/tool-result batch");
+  auto paired_batch_messages = ava::agent::build_provider_messages_from_entries(
+      paired_batch_entries, ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "test",
+                                                                                                      .model_id = "test-tools",
+                                                                                                      .api_family = "test_api",
+                                                                                                      .reasoning_format = "",
+                                                                                                      .supports_tools = true,
+                                                                                                      .supports_images = false}});
+  expect(paired_batch_messages && paired_batch_messages->size() == 2,
+         "provider-order portable multi-tool pairs replay as one request-local tool-use/tool-result batch");
   if (!paired_batch_messages || paired_batch_messages->size() != 2)
     return;
   expect((*paired_batch_messages)[0].role == "assistant" && (*paired_batch_messages)[0].content_parts.size() == 2 &&
              (*paired_batch_messages)[0].content_parts[0].type == ava::provider::ContentPartType::ToolUse &&
-             (*paired_batch_messages)[0].content_parts[0].tool_call_id == "call_batch_first" &&
+             (*paired_batch_messages)[0].content_parts[0].tool_call_id == "ava_history_tool_1" &&
              (*paired_batch_messages)[0].content_parts[0].tool_name == "read_file" &&
              (*paired_batch_messages)[0].content_parts[1].type == ava::provider::ContentPartType::ToolUse &&
-             (*paired_batch_messages)[0].content_parts[1].tool_call_id == "call_batch_second" &&
+             (*paired_batch_messages)[0].content_parts[1].tool_call_id == "ava_history_tool_2" &&
              (*paired_batch_messages)[0].content_parts[1].tool_name == "read_file" && (*paired_batch_messages)[1].role == "user" &&
              (*paired_batch_messages)[1].content_parts.size() == 2 &&
              (*paired_batch_messages)[1].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
-             (*paired_batch_messages)[1].content_parts[0].tool_call_id == "call_batch_first" &&
+             (*paired_batch_messages)[1].content_parts[0].tool_call_id == "ava_history_tool_1" &&
              (*paired_batch_messages)[1].content_parts[1].type == ava::provider::ContentPartType::ToolResult &&
-             (*paired_batch_messages)[1].content_parts[1].tool_call_id == "call_batch_second" &&
+             (*paired_batch_messages)[1].content_parts[1].tool_call_id == "ava_history_tool_2" &&
              (*paired_batch_messages)[1].content_parts[0].text == "first result" && (*paired_batch_messages)[1].content_parts[1].text == "second result",
-         "native multi-tool replay preserves provider-order tool-use and tool-result content parts");
+         "portable multi-tool replay preserves provider order while replacing persisted call ids");
 
   auto const content_parts_empty = [](std::vector<ava::provider::ChatMessage> const& built_messages) {
     for (auto const& message : built_messages)
@@ -4017,7 +4076,13 @@ void test_tool_content_parts_reconstruction()
                                                                                                         "\"success\":true,\"result\":\"" +
                                                                                                         utf8_result + "\"}"}};
   auto utf8_messages = ava::agent::build_provider_messages_from_entries(
-      utf8_entries, ava::agent::MessageBuildOptions{.max_tool_result_context_bytes = truncation_marker.size() + 4});
+      utf8_entries, ava::agent::MessageBuildOptions{.max_tool_result_context_bytes = truncation_marker.size() + 4,
+                                                    .target = ava::agent::HistoryReplayTarget{.provider_id = "test",
+                                                                                              .model_id = "test-tools",
+                                                                                              .api_family = "test_api",
+                                                                                              .reasoning_format = "",
+                                                                                              .supports_tools = true,
+                                                                                              .supports_images = false}});
   expect(utf8_messages && utf8_messages->size() == 2, "utf8 tool entries reconstruct as provider messages");
   if (!utf8_messages || utf8_messages->size() != 2)
     return;
@@ -4042,8 +4107,8 @@ void test_tool_content_parts_reconstruction()
   expect(malformed_success_messages && malformed_success_messages->size() == 2, "malformed bool tool entries reconstruct as provider messages");
   if (!malformed_success_messages || malformed_success_messages->size() != 2)
     return;
-  expect((*malformed_success_messages)[1].content_parts.size() == 1 && !(*malformed_success_messages)[1].content_parts[0].is_error,
-         "malformed success bool prefixes do not parse as native error metadata");
+  expect((*malformed_success_messages)[1].content_parts.empty() && (*malformed_success_messages)[1].content.find("bool result") != std::string::npos,
+         "malformed success bool prefixes remain bounded text instead of native error metadata");
 
   std::vector<ava::session::SessionEntry> const malformed_entries = {ava::session::SessionEntry{.id = "malformed_tool_call",
                                                                                                 .parent_id = "",
@@ -4147,13 +4212,23 @@ void test_tool_content_parts_reconstruction()
                                                                                                 .timestamp = "2026-04-27T00:00:03Z",
                                                                                                 .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
                                                                                                              "\"success\":true,\"result\":\"second result\"}"}};
-  auto reused_id_messages = ava::agent::build_provider_messages_from_entries(reused_id_entries);
+  auto reused_id_messages = ava::agent::build_provider_messages_from_entries(
+      reused_id_entries, ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "test",
+                                                                                                   .model_id = "test-tools",
+                                                                                                   .api_family = "test_api",
+                                                                                                   .reasoning_format = "",
+                                                                                                   .supports_tools = true,
+                                                                                                   .supports_images = false}});
   expect(reused_id_messages && reused_id_messages->size() == 4, "reused tool ids reconstruct as provider messages");
   if (!reused_id_messages || reused_id_messages->size() != 4)
     return;
-  expect((*reused_id_messages)[1].content_parts.size() == 1 && (*reused_id_messages)[1].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
-             (*reused_id_messages)[2].content_parts.empty() && (*reused_id_messages)[3].content_parts.empty(),
-         "native tool-result matching is one-shot and reused native ids fall back to text-only");
+  expect((*reused_id_messages)[0].content_parts.size() == 1 && (*reused_id_messages)[1].content_parts.size() == 1 &&
+             (*reused_id_messages)[2].content_parts.size() == 1 && (*reused_id_messages)[3].content_parts.size() == 1 &&
+             (*reused_id_messages)[0].content_parts[0].tool_call_id == "ava_history_tool_1" &&
+             (*reused_id_messages)[1].content_parts[0].tool_call_id == "ava_history_tool_1" &&
+             (*reused_id_messages)[2].content_parts[0].tool_call_id == "ava_history_tool_2" &&
+             (*reused_id_messages)[3].content_parts[0].tool_call_id == "ava_history_tool_2",
+         "portable repeated source tool ids receive distinct deterministic request-local pair ids");
 
   std::vector<ava::session::SessionEntry> const interrupted_entries = {ava::session::SessionEntry{.id = "interrupted_tool_call",
                                                                                                   .parent_id = "",
@@ -4180,7 +4255,7 @@ void test_tool_content_parts_reconstruction()
          "non-contiguous tool-use/result history falls back to text-only native replay");
 }
 
-void test_portable_omitted_reasoning_reconstructs_as_safe_text()
+void test_portable_omitted_reasoning_is_dropped_from_provider_replay()
 {
   std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "portable_reasoning",
@@ -4197,10 +4272,10 @@ void test_portable_omitted_reasoning_reconstructs_as_safe_text()
                                  .data_json = "{\"text\":\"answer after portable import\",\"tool_calls\":0}"}};
 
   auto messages = ava::agent::build_provider_messages_from_entries(entries);
-  expect(messages && messages->size() == 1 && (*messages)[0].content_parts.size() == 2 &&
+  expect(messages && messages->size() == 1 && (*messages)[0].content_parts.size() == 1 &&
              (*messages)[0].content_parts[0].type == ava::provider::ContentPartType::Text && !(*messages)[0].content_parts[0].redacted &&
-             (*messages)[0].content_parts[0].text.find("metadata omitted") != std::string::npos,
-         "portable private-replay omission markers reconstruct as ordinary safe assistant text");
+             (*messages)[0].content_parts[0].text == "answer after portable import",
+         "portable private-replay omission markers are dropped while visible assistant answers remain");
   if (!messages)
     return;
 
@@ -4209,8 +4284,9 @@ void test_portable_omitted_reasoning_reconstructs_as_safe_text()
       ava::provider::ProviderRequest{
           .provider_id = "anthropic", .model_id = "claude-sonnet-4-5", .system_prompt = "system", .messages = *messages, .tools_json = {}, .stream = false},
       "anthropic-key");
-  expect(request && request->body.find("metadata omitted") != std::string::npos && request->body.find("redacted_thinking") == std::string::npos,
-         "portable imported Anthropic reasoning builds a safe ordinary-text request without private redacted data");
+  expect(request && request->body.find("metadata omitted") == std::string::npos && request->body.find("redacted_thinking") == std::string::npos &&
+             request->body.find("answer after portable import") != std::string::npos,
+         "portable imported Anthropic reasoning is omitted entirely while visible answer text remains");
 
   auto const v4_reasoning_data = ava::session::serialize_assistant_output_item_data_json(
       ava::session::AssistantOutputItem{.assistant_turn_id = "portable_v4_reasoning_turn",
@@ -4249,36 +4325,10 @@ void test_portable_omitted_reasoning_reconstructs_as_safe_text()
     if (built_messages)
       portable_v4_messages = std::move(*built_messages);
   }
-  std::optional<ava::provider::HttpRequest> portable_v4_anthropic_request;
-  std::optional<ava::provider::HttpRequest> portable_v4_openai_request;
-  if (portable_v4_messages)
-  {
-    auto anthropic = provider.build_request(ava::provider::ProviderRequest{.provider_id = "anthropic",
-                                                                           .model_id = "claude-sonnet-4-5",
-                                                                           .system_prompt = "system",
-                                                                           .messages = *portable_v4_messages,
-                                                                           .tools_json = {},
-                                                                           .stream = false},
-                                            "anthropic-key");
-    ava::provider::OpenAIProvider const openai_provider("https://api.example.test");
-    auto openai = openai_provider.build_request(
-        ava::provider::ProviderRequest{
-            .provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system", .messages = *portable_v4_messages, .tools_json = {}, .stream = false},
-        "openai-key");
-    if (anthropic)
-      portable_v4_anthropic_request = std::move(*anthropic);
-    if (openai)
-      portable_v4_openai_request = std::move(*openai);
-  }
   expect(portable_v4_entries && portable_v4_entries->front().data_json.find("private_replay_metadata_omitted\":true") != std::string::npos &&
              portable_v4_entries->front().data_json.find("PRIVATE_REDACTED_V4_SIGNATURE") == std::string::npos && portable_v4_messages &&
-             portable_v4_messages->size() == 1 && (*portable_v4_messages)[0].content_parts.size() == 1 &&
-             (*portable_v4_messages)[0].content_parts[0].type == ava::provider::ContentPartType::Text &&
-             !(*portable_v4_messages)[0].content_parts[0].redacted && portable_v4_anthropic_request && portable_v4_openai_request &&
-             portable_v4_anthropic_request->body.find("redacted_thinking") == std::string::npos &&
-             portable_v4_anthropic_request->body.find("PRIVATE_REDACTED_V4") == std::string::npos &&
-             portable_v4_openai_request->body.find("PRIVATE_REDACTED_V4") == std::string::npos,
-         "portable v4 signed/redacted reasoning replays only as safe ordered text for OpenAI and Anthropic");
+             portable_v4_messages->empty(),
+         "portable v4 signed/redacted reasoning is dropped entirely for every provider request projection");
 }
 
 void test_image_attachment_message_reconstruction_and_validation()
@@ -4293,8 +4343,15 @@ void test_image_attachment_message_reconstruction_and_validation()
                                  .timestamp = "2026-05-08T00:00:00Z",
                                  .data_json = "{\"text\":\"describe this\",\"attachments\":[" + attachment_json + "]}"}};
 
-  auto messages = ava::agent::build_provider_messages_from_entries(entries);
-  expect(messages && messages->size() == 1, "image user message reconstructs as one provider message");
+  auto messages = ava::agent::build_provider_messages_from_entries(
+      entries, ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "openai",
+                                                                                         .model_id = "gpt-image",
+                                                                                         .api_family = "openai_responses",
+                                                                                         .reasoning_format = "openai_responses",
+                                                                                         .supports_tools = false,
+                                                                                         .supports_images = true},
+                                               .active_turn_user_entry_ids = {"image_user"}});
+  expect(messages && messages->size() == 1, "active image user message reconstructs as one provider message");
   if (!messages || messages->empty())
     return;
   expect((*messages)[0].content.find("describe this") != std::string::npos &&
@@ -6027,6 +6084,8 @@ void test_logical_session_projection_v4_public_privacy_and_compatibility()
                           .item_count = 4,
                           .provider = "openai",
                           .model = "gpt-5.5",
+                          .api_family = "openai_responses",
+                          .reasoning_format = "openai_responses",
                           .finish_reason = "tool_calls",
                           .usage_json = "{\"input_tokens\":7,\"output_tokens\":5,\"total_tokens\":12,\"source\":\"provider\"}"});
   std::string const sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -6108,6 +6167,13 @@ void test_logical_session_projection_v4_public_privacy_and_compatibility()
   }
   auto const replay = ava::session::validate_session_replay(imported);
   auto imported_messages = ava::agent::build_provider_messages_from_entries(imported);
+  auto imported_exact_target_messages = ava::agent::build_provider_messages_from_entries(
+      imported, ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "openai",
+                                                                                          .model_id = "gpt-5.5",
+                                                                                          .api_family = "openai_responses",
+                                                                                          .reasoning_format = "openai_responses",
+                                                                                          .supports_tools = true,
+                                                                                          .supports_images = false}});
 
   bool compatibility_shape =
       projected && projected->size() == 5 && (*projected)[0].type == EntryType::UserMessage && (*projected)[1].type == EntryType::ReasoningBlock &&
@@ -6155,14 +6221,24 @@ void test_logical_session_projection_v4_public_privacy_and_compatibility()
       portable_anthropic_request = std::move(*anthropic_request);
   }
   bool provider_replay_order =
-      imported_messages && imported_messages->size() == 3 && (*imported_messages)[1].role == "assistant" && (*imported_messages)[1].content_parts.size() == 4 &&
+      imported_messages && imported_messages->size() == 3 && (*imported_messages)[1].role == "assistant" && (*imported_messages)[1].content_parts.size() == 3 &&
       (*imported_messages)[1].content_parts[0].type == ava::provider::ContentPartType::Text && (*imported_messages)[1].content_parts[0].text == "commentary " &&
       (*imported_messages)[1].content_parts[1].type == ava::provider::ContentPartType::Text &&
-      (*imported_messages)[1].content_parts[1].text == "visible reasoning" &&
-      (*imported_messages)[1].content_parts[2].type == ava::provider::ContentPartType::ToolUse &&
-      (*imported_messages)[1].content_parts[2].tool_call_id == "call_projection" &&
-      (*imported_messages)[1].content_parts[3].type == ava::provider::ContentPartType::Text && (*imported_messages)[1].content_parts[3].text == "final" &&
-      (*imported_messages)[2].role == "user";
+      (*imported_messages)[1].content_parts[1].text.find("Tool call (read_file)") != std::string::npos &&
+      (*imported_messages)[1].content_parts[2].type == ava::provider::ContentPartType::Text && (*imported_messages)[1].content_parts[2].text == "final" &&
+      (*imported_messages)[1].content.find("visible reasoning") == std::string::npos &&
+      (*imported_messages)[1].content.find("Tool call (read_file)") != std::string::npos && (*imported_messages)[2].role == "user" &&
+      (*imported_messages)[2].content_parts.empty();
+  bool exact_target_portable_archive =
+      imported_exact_target_messages && imported_exact_target_messages->size() == 3 && (*imported_exact_target_messages)[1].content_parts.size() == 3 &&
+      (*imported_exact_target_messages)[1].content_parts[0].type == ava::provider::ContentPartType::Text &&
+      (*imported_exact_target_messages)[1].content_parts[1].type == ava::provider::ContentPartType::ToolUse &&
+      (*imported_exact_target_messages)[1].content_parts[1].tool_call_id != "call_projection" &&
+      (*imported_exact_target_messages)[1].content_parts[2].type == ava::provider::ContentPartType::Text &&
+      (*imported_exact_target_messages)[2].content_parts.size() == 1 &&
+      (*imported_exact_target_messages)[2].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
+      (*imported_exact_target_messages)[2].content_parts[0].tool_call_id == (*imported_exact_target_messages)[1].content_parts[1].tool_call_id &&
+      (*imported_exact_target_messages)[1].content.find("visible reasoning") == std::string::npos;
   auto markdown_commentary = markdown ? markdown->find("commentary ") : std::string::npos;
   auto markdown_reasoning = markdown ? markdown->find("visible reasoning") : std::string::npos;
   auto markdown_function = markdown ? markdown->find("read_file") : std::string::npos;
@@ -6178,21 +6254,21 @@ void test_logical_session_projection_v4_public_privacy_and_compatibility()
       jsonl->find("INCOMPLETE_STAGING_CANARY") == std::string::npos && jsonl->find("attachments/private-source.png") == std::string::npos &&
       jsonl->find("attachments/portable-redacted") != std::string::npos && markdown->find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&
       html->find("PRIVATE_REDACTED_PROJECTION") == std::string::npos && compaction_prompt->find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&
-      compaction_prompt->find("PRIVATE_NATIVE_REASONING_ID") == std::string::npos;
+      compaction_prompt->find("PRIVATE_NATIVE_REASONING_ID") == std::string::npos && compaction_prompt->find("visible reasoning") == std::string::npos;
   bool rendered_order = markdown_commentary < markdown_reasoning && markdown_reasoning < markdown_function && markdown_function < markdown_final &&
                         html_commentary < html_reasoning && html_reasoning < html_function && html_function < html_final &&
-                        compaction_prompt->find("commentary ") < compaction_prompt->find("visible reasoning") &&
-                        compaction_prompt->find("visible reasoning") < compaction_prompt->find("read_file") &&
+                        compaction_prompt->find("commentary ") < compaction_prompt->find("read_file") &&
                         compaction_prompt->find("read_file") < compaction_prompt->find("final");
-  expect(compatibility_shape && ordered_shape && portable_shape && parsed_jsonl && replay.ok() && provider_replay_order && private_values_absent &&
-             portable_openai_request && portable_anthropic_request && portable_openai_request->body.find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&
+  expect(compatibility_shape && ordered_shape && portable_shape && parsed_jsonl && replay.ok() && provider_replay_order && exact_target_portable_archive &&
+             private_values_absent && portable_openai_request && portable_anthropic_request &&
+             portable_openai_request->body.find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&
              portable_openai_request->body.find("PRIVATE_NATIVE_REASONING_ID") == std::string::npos &&
              portable_anthropic_request->body.find("PRIVATE_REDACTED_PROJECTION") == std::string::npos &&
              portable_anthropic_request->body.find("redacted_thinking") == std::string::npos && rendered_order && transcript && transcript->size() == 3 &&
              (*transcript)[1].role == ava::session::TranscriptRole::Assistant && (*transcript)[1].text == "commentary " &&
              (*transcript)[2].role == ava::session::TranscriptRole::Assistant && (*transcript)[2].text == "final" && estimated && *estimated > 0 &&
              threshold_decision && threshold_decision->should_compact,
-         "v4 compatibility, ordered public, and portable projections preserve order while excluding provider-private data");
+         "v4 compatibility and public projections preserve order while request and compaction projections drop reasoning and private data");
 
   auto malformed = entries;
   malformed[5].data_json =
@@ -6261,7 +6337,7 @@ void run_session_tests()
   test_compaction_config_and_thresholds();
   test_compaction_context_reconstruction();
   test_tool_content_parts_reconstruction();
-  test_portable_omitted_reasoning_reconstructs_as_safe_text();
+  test_portable_omitted_reasoning_is_dropped_from_provider_replay();
   test_image_attachment_message_reconstruction_and_validation();
   test_synthetic_delivery_provenance_validation();
   test_image_attachment_storage_boundary();

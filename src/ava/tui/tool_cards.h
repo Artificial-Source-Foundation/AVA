@@ -14,6 +14,7 @@ namespace ava::tui::detail {
 [[nodiscard]] std::string tool_card_diff_copy_text(ToolTimelineItem const& item);
 [[nodiscard]] std::string tool_card_permission_copy_text(ToolTimelineItem const& item, std::string_view query = {});
 [[nodiscard]] std::string tool_card_copy_text(ToolTimelineItem const& item);
-[[nodiscard]] std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::size_t width, bool global_details_visible);
+[[nodiscard]] std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::size_t width, bool global_details_visible,
+                                                        bool suppress_result_summary = false);
 
 }  // namespace ava::tui::detail

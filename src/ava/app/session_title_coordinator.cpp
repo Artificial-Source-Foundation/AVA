@@ -448,9 +448,8 @@ enum class AutomaticTitleAppendOutcome
 };
 
 template <typename MetadataPredicate>
-AutomaticTitleAppendOutcome append_automatic_title(ava::session::SessionReadAuthority const& authority,
-                                                   ava::agent::SessionAppendSink const& append_route, std::string_view committed_turn_id,
-                                                   std::string const& title, MetadataPredicate&& metadata_predicate)
+AutomaticTitleAppendOutcome append_automatic_title(ava::session::SessionReadAuthority const& authority, ava::agent::SessionAppendSink const& append_route,
+                                                   std::string_view committed_turn_id, std::string const& title, MetadataPredicate&& metadata_predicate)
 {
   auto entries = authority.load();
   if (!entries || !captured_commit_belongs_to_first_ordinary_turn(*entries, committed_turn_id))
@@ -653,6 +652,7 @@ void SessionTitleCoordinator::schedule(runtime::Session const& session, std::str
     auto const fallback = append_automatic_title(*read_authority, append_route, committed_turn_id, fallback_title, metadata_allows_fallback);
     if (fallback != AutomaticTitleAppendOutcome::Persisted)
       return;
+    publish_catalog_change(session_id);
 
     Work work{.session_id = session_id,
               .committed_turn_id = std::string(committed_turn_id),
@@ -747,15 +747,38 @@ void SessionTitleCoordinator::process(Work work, std::stop_token stop_token) noe
       return;
     }
 
-    static_cast<void>(append_automatic_title(work.read_authority, work.append_route, work.committed_turn_id, *sanitized,
-                                             [&](ava::session::SessionMetadataView const& candidate) {
-                                               return metadata_allows_refinement(candidate, work.fallback_title);
-                                             }));
+    auto const outcome =
+        append_automatic_title(work.read_authority, work.append_route, work.committed_turn_id, *sanitized,
+                               [&](ava::session::SessionMetadataView const& candidate) { return metadata_allows_refinement(candidate, work.fallback_title); });
+    if (outcome == AutomaticTitleAppendOutcome::Persisted)
+      publish_catalog_change(work.session_id);
   }
   catch (...)
   {
   }
   finish();
+}
+
+void SessionTitleCoordinator::publish_catalog_change(std::string const& session_id)
+{
+  std::lock_guard lock(mutex_);
+  auto const cursor = catalog_generation_.load(std::memory_order_relaxed) + 1;
+  catalog_notifications_.push_back(CatalogNotification{.cursor = cursor, .session_id = session_id});
+  catalog_generation_.store(cursor, std::memory_order_release);
+}
+
+SessionTitleCatalogChanges SessionTitleCoordinator::catalog_changes_since(std::size_t cursor) const
+{
+  std::lock_guard lock(mutex_);
+  SessionTitleCatalogChanges changes;
+  changes.cursor = catalog_generation_.load(std::memory_order_relaxed);
+  std::unordered_set<std::string> seen;
+  for (auto const& notification : catalog_notifications_)
+  {
+    if (notification.cursor > cursor && seen.insert(notification.session_id).second)
+      changes.dirty_session_ids.push_back(notification.session_id);
+  }
+  return changes;
 }
 
 bool SessionTitleCoordinator::wait_until_idle(std::chrono::milliseconds timeout)

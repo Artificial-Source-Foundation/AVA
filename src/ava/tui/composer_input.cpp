@@ -12,11 +12,6 @@
 namespace ava::tui::detail {
 namespace {
 
-std::string composer_bar()
-{
-  return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(kSgrComposerBg) + "  ";
-}
-
 std::string model_label(std::string_view model)
 {
   return sanitize_terminal_text(ava::config::model_display_label(model));
@@ -184,7 +179,7 @@ std::string render_status_line(ComposerSnapshot const& snapshot, std::size_t wid
     if (budget == 0)
       return std::string{};
 
-    auto line = composer_bar();
+    auto line = composer_gutter();
     auto const bar_columns = terminal_text_columns(line);
     if (budget <= bar_columns)
       return fit_line_preserving_sgr(std::move(line), budget);
@@ -227,9 +222,8 @@ std::string render_status_line(ComposerSnapshot const& snapshot, std::size_t wid
   auto line = build_left_status(width);
   if (snapshot.processing)
   {
-    static constexpr std::array<std::string_view, 10> kSpinner = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
     auto const spinner =
-        std::string(kSgrWarning) + std::string(kSpinner[snapshot.spinner_frame % kSpinner.size()]) + std::string(kSgrReset) + std::string(kSgrComposerBg);
+        std::string(kSgrAccent) + std::string(processing_indicator_frame(snapshot.spinner_frame)) + std::string(kSgrReset) + std::string(kSgrComposerBg);
     constexpr auto kRightGap = std::size_t{2};
     constexpr auto kRightMargin = std::size_t{2};
     auto const left_columns = terminal_text_columns(line);
@@ -266,7 +260,7 @@ std::string render_status_line(ComposerSnapshot const& snapshot, std::size_t wid
 
 std::string render_input_line(ComposerSnapshot const& snapshot, std::size_t width)
 {
-  std::string line = composer_bar();
+  std::string line = composer_gutter();
   if (snapshot.input.empty())
   {
     line += std::string(kSgrTextDimmed) + "Type a message..." + std::string(kSgrReset) + std::string(kSgrComposerBg);
@@ -280,7 +274,7 @@ std::string render_input_line(ComposerSnapshot const& snapshot, std::size_t widt
 
 std::string render_input_fragment_line(ComposerSnapshot const& snapshot, std::string_view text, bool /*first_line*/, std::size_t width, std::size_t line_start)
 {
-  std::string line = composer_bar();
+  std::string line = composer_gutter();
   append_input_text(line, snapshot, text, line_start);
   return composer_surface_line(std::move(line), width);
 }

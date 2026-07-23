@@ -1,6 +1,6 @@
 # AVA dogfood qualification
 
-Status: active qualification on `develop` (2026-07-18).
+Status: active qualification on `develop` (2026-07-23).
 
 AVA is ready for regular repository dogfooding. Linux release closure is implemented for qualified x86_64/x64 source-built artifacts; non-x86 architectures remain unqualified pending provenance or replacement of the non-Carlo AArch64 `yield` contribution.
 
@@ -26,16 +26,23 @@ OpenAI continuation now persists each assistant turn as one ordered session-v4 t
 - Deterministic full-binary coding smoke covers read, grep, list, patch, shell, permissions, persistence, and replay.
 - ACP subprocess and official-SDK interop are credential-free.
 - MCP, plugin, fake-LSP, RPC, packaging, Kitty-image, OSC-8, and tmux terminal smokes are available without provider spend.
-- The tmux smoke is split into 13 isolated scenarios and can run in parallel:
+- The frontend F0-F8 offline closure is complete as of 2026-07-23; see the [frontend roadmap](frontend.md) for the milestone record. This is offline evidence only and adds no live-provider claim.
+- The tmux smoke is split into 14 isolated scenarios and can run in parallel:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 13 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 14 -R '^ava_tui\.tmux_smoke_'
 ```
+
+Four additional gated direct PTY/protocol CTests cover Kitty, iTerm2, terminal lifecycle, and OSC 8/OSC 52. See [TESTING.md](../TESTING.md) for the current commands and prerequisite behavior.
 
 ## Defects found while dogfooding
 
 Dogfooding found and fixed:
 
+- A headless visual pass replaced cyan-heavy built-in hierarchy with neutral muted roles and blue focus/actions, made the automatic rail progressive (`144x16` for actionable activity/changes and `176x16` for idle metadata), capped and centered ordinary conversation/composer/prompt content at 120 columns on wider terminals, gave selectors/questions a quiet backdrop, shortened only proven workspace-path aliases in expanded cards, and kept hidden-rail reasoning changes visible without expanding the footer. Automatic-rail main panes, the full-width `/sidebar` drawer, custom/plain themes, and canonical copied tool data remain unchanged.
+- Expanded denied shell cards no longer repeat the raw structured permission status alongside the curated permission audit; unrelated permissioned-shell failures and output remain visible and copyable.
+- `/new` lifecycle receipts are title-first, retain the created and previous IDs exactly once for actionability, and do not repeat the active session ID on the switched line.
+- Background subagents now use the model-facing `job` controls for list/status/wait/result/cancel; `/jobs` provides show/wait/result/cancel/promote, and RPC exposes the corresponding controls.
 - Strict task-subagent schemas rejected omitted default values.
 - Task permission records were rejected by session replay validation.
 - OpenAI tool calls were replayed as synthetic text rather than native Responses items.

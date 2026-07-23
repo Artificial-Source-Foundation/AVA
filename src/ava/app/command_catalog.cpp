@@ -32,6 +32,7 @@ std::vector<CommandCatalogEntry> const& command_catalog()
                           .description = "Show, initialize, import, edit, reset, or validate effective TUI keybindings",
                           .category = "General"},
       CommandCatalogEntry{.command = "/settings", .description = "Open TUI settings", .category = "General"},
+      CommandCatalogEntry{.command = "/sidebar", .description = "Open the current session overview", .category = "General"},
       CommandCatalogEntry{
           .command = "/theme", .description = "Persist the TUI display theme", .hint = "[dark|light|plain|custom-name|reset]", .category = "General"},
       CommandCatalogEntry{.command = "/mode", .description = "Toggle build/plan mode", .category = "General"},
@@ -133,7 +134,7 @@ std::vector<CommandCatalogEntry> const& command_catalog()
                           .hint = "<path.jsonl> --confirm",
                           .category = "Sessions"},
       CommandCatalogEntry{.command = "/reload",
-                          .description = "Reload config domains or report restart-required domains",
+                          .description = "Reload config domains; /reload or /reload all also refreshes workspace path completions",
                           .hint = "[all|theme|models|prompts|trust|compaction|keybindings|auth|permissions|lsp|mcp|plugins]",
                           .category = "General"},
       CommandCatalogEntry{.command = "/logout",

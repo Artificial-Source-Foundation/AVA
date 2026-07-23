@@ -69,7 +69,11 @@ struct TuiRuntimeStateSnapshot
   std::optional<std::size_t> context_source_count = std::nullopt;
   std::string status;
   std::vector<SlashCommandItem> slash_commands = {};
+  std::optional<std::size_t> slash_catalog_generation = std::nullopt;
   std::vector<FileReferenceItem> file_references = {};
+  // When present, identical generations let runtime snapshots reuse the
+  // existing workspace references without invalidating completion rankings.
+  std::optional<std::size_t> workspace_catalog_generation = std::nullopt;
   std::vector<ThemeOptionItem> custom_themes = {};
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
 
@@ -127,7 +131,9 @@ struct TuiRuntimeOptions
   std::string initial_status = "";
   std::vector<TranscriptItem> initial_transcript = {};
   std::vector<SlashCommandItem> slash_commands = {};
+  std::optional<std::size_t> slash_catalog_generation = std::nullopt;
   std::vector<FileReferenceItem> file_references = {};
+  std::optional<std::size_t> workspace_catalog_generation = std::nullopt;
   std::vector<ThemeOptionItem> custom_themes = {};
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
   TuiKeyBindings key_bindings = default_key_bindings();
@@ -173,7 +179,6 @@ struct TuiRuntimeOptions
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-[[nodiscard]] std::optional<std::vector<std::string>> dispatch_tui_active_nonblocking_command(TuiActiveRunQueues const& queues, std::string const& submitted);
 [[nodiscard]] int run_interactive_composer(TuiRuntimeOptions options);
 [[nodiscard]] SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::string footer_hint = {});
 [[nodiscard]] SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, TuiKeyBindings const& bindings, std::string footer_hint = {});

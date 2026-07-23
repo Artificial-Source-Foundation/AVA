@@ -29,7 +29,7 @@ file(REMOVE_RECURSE "${TEST_ROOT}")
 file(MAKE_DIRECTORY "${WORKSPACE}" "${HOME_DIR}" "${CONFIG_DIR}/ava" "${STATE_DIR}" "${DATA_DIR}")
 file(WRITE "${CONFIG_DIR}/ava/models.json"
      "{\"default_provider\":\"moonshot\",\"default_model\":\"ava-headless-fake\","
-     "\"models\":[{\"provider\":\"moonshot\",\"id\":\"ava-headless-fake\",\"family\":\"fake\","
+     "\"models\":[{\"provider\":\"moonshot\",\"id\":\"ava-headless-fake\",\"family\":\"fake\",\"api_family\":\"openai_chat_completions\","
      "\"context_window_tokens\":8192,\"max_output_tokens\":1024,\"supports_tools\":true,"
      "\"supports_streaming\":false,\"supports_reasoning\":false,\"reports_usage\":true}]}\n")
 file(WRITE "${CONFIG_DIR}/ava/compaction.json"
@@ -149,7 +149,7 @@ foreach(NEEDLE
         "\"stream\":false"
         "source before compact"
         "remember cli compact"
-        "Session entries in chronological order")
+        "Portable conversation messages in chronological order")
   string(FIND "${PROVIDER_REQUEST}" "${NEEDLE}" NEEDLE_INDEX)
   if(NEEDLE_INDEX EQUAL -1)
     message(FATAL_ERROR "fake provider request log did not contain ${NEEDLE}\nrequest:\n${PROVIDER_REQUEST}\nstderr:\n${AVA_ERROR}")

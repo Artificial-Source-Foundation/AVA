@@ -210,6 +210,11 @@ void test_builtin_session_alias_registers_as_current_stats_command()
          "command registry exposes /session as the built-in current-session /stats alias");
 
   expect(ava::app::is_backend_command("/session"), "command catalog classifies /session as a backend slash command");
+  auto const* sidebar_entry = find_entry(registry, "/sidebar");
+  expect(sidebar_entry != nullptr && sidebar_entry->source == ava::app::UnifiedCommandSource::Builtin &&
+             sidebar_entry->kind == ava::app::UnifiedCommandKind::Backend && sidebar_entry->description == "Open the current session overview",
+         "command registry exposes the discoverable built-in /sidebar TUI view");
+  expect(ava::app::command_help_text().find("/sidebar") != std::string::npos, "command help includes the discoverable /sidebar TUI view");
 
   auto seeded_stats_usage = session.append_owned(ava::session::SessionEntry{.id = "entry_session_alias_usage",
                                                                             .parent_id = "",

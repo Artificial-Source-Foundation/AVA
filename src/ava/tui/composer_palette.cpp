@@ -35,10 +35,11 @@ struct PathCompletionPrefix
   bool leading_dot_slash = false;
 };
 
-struct ScoredFileReference
+struct ScoredFileReferenceIndex
 {
-  FileReferenceItem item;
+  std::size_t source_index = 0;
   int score = 0;
+  std::string lowered_value = {};
 };
 
 struct ScoredSlashCommand
@@ -164,24 +165,16 @@ std::optional<std::string> swapped_alpha_numeric_query(std::string_view query)
   if (query.empty())
     return std::nullopt;
 
-  auto const first_digit = std::find_if(query.begin(), query.end(), [](char ch) {
-    return std::isdigit(static_cast<unsigned char>(ch)) != 0;
-  });
-  auto const first_alpha = std::find_if(query.begin(), query.end(), [](char ch) {
-    return std::isalpha(static_cast<unsigned char>(ch)) != 0;
-  });
+  auto const first_digit = std::find_if(query.begin(), query.end(), [](char ch) { return std::isdigit(static_cast<unsigned char>(ch)) != 0; });
+  auto const first_alpha = std::find_if(query.begin(), query.end(), [](char ch) { return std::isalpha(static_cast<unsigned char>(ch)) != 0; });
   if (first_digit == query.end() || first_alpha == query.end())
     return std::nullopt;
 
   auto const all_alpha = [](std::string_view value) {
-    return !value.empty() && std::ranges::all_of(value, [](char ch) {
-             return std::isalpha(static_cast<unsigned char>(ch)) != 0;
-           });
+    return !value.empty() && std::ranges::all_of(value, [](char ch) { return std::isalpha(static_cast<unsigned char>(ch)) != 0; });
   };
   auto const all_digit = [](std::string_view value) {
-    return !value.empty() && std::ranges::all_of(value, [](char ch) {
-             return std::isdigit(static_cast<unsigned char>(ch)) != 0;
-           });
+    return !value.empty() && std::ranges::all_of(value, [](char ch) { return std::isdigit(static_cast<unsigned char>(ch)) != 0; });
   };
 
   auto const digit_index = static_cast<std::size_t>(std::distance(query.begin(), first_digit));
@@ -250,8 +243,8 @@ std::optional<int> fuzzy_ordered_text_score(std::string_view lowered_query, std:
           if (last_match >= 0)
             score += (current - last_match - 1) * 3;
         }
-        if (text_index == 0 || lowered_text[text_index - 1] == '/' || lowered_text[text_index - 1] == '-' ||
-            lowered_text[text_index - 1] == '_' || lowered_text[text_index - 1] == '.' || is_ascii_space(lowered_text[text_index - 1]))
+        if (text_index == 0 || lowered_text[text_index - 1] == '/' || lowered_text[text_index - 1] == '-' || lowered_text[text_index - 1] == '_' ||
+            lowered_text[text_index - 1] == '.' || is_ascii_space(lowered_text[text_index - 1]))
         {
           score -= 20;
         }
@@ -418,8 +411,7 @@ bool completion_previous_args_match(SlashCommandArgumentCompletion const& comple
   return true;
 }
 
-std::optional<int> slash_argument_completion_match_score(SlashCommandArgumentCompletion const& completion,
-                                                         std::string_view prefix)
+std::optional<int> slash_argument_completion_match_score(SlashCommandArgumentCompletion const& completion, std::string_view prefix)
 {
   if (prefix.empty())
     return 0;
@@ -429,7 +421,7 @@ std::optional<int> slash_argument_completion_match_score(SlashCommandArgumentCom
       return std::nullopt;
     return -500 + static_cast<int>(prefix.size());
   }
-  return fuzzy_text_score(prefix, completion.value + " " + completion.description + " " + completion.category);
+  return fuzzy_text_score(prefix, completion.value + " " + completion.display_label + " " + completion.description + " " + completion.category);
 }
 
 std::string completion_insert_text(SlashCommandItem const& command, SlashCommandArgumentCompletion const& completion, std::vector<std::string> const& tokens,
@@ -489,11 +481,10 @@ bool slash_argument_completion_exact_submission_ready(std::string_view input, st
       continue;
     if (completion.value != prefix)
       continue;
-    auto const has_deeper_same_argument_completion =
-        std::ranges::any_of(command->argument_completions, [&](SlashCommandArgumentCompletion const& next) {
-          return next.argument_index == argument_index && next.enabled && completion_previous_args_match(next, tokens) &&
-                 next.value.size() > prefix.size() && next.value.starts_with(prefix);
-        });
+    auto const has_deeper_same_argument_completion = std::ranges::any_of(command->argument_completions, [&](SlashCommandArgumentCompletion const& next) {
+      return next.argument_index == argument_index && next.enabled && completion_previous_args_match(next, tokens) && next.value.size() > prefix.size() &&
+             next.value.starts_with(prefix);
+    });
     if (has_deeper_same_argument_completion)
       return false;
     if (!completion.append_space)
@@ -513,8 +504,8 @@ bool slash_argument_completion_exact_submission_ready(std::string_view input, st
 std::string slash_command_display(SlashCommandItem const& item)
 {
   if (item.argument_completion)
-    return item.command;
-  auto text = item.command;
+    return sanitize_terminal_text(item.display_label.empty() ? item.command : item.display_label);
+  auto text = sanitize_terminal_text(item.command);
   if (!item.aliases.empty())
   {
     text += " (";
@@ -522,7 +513,7 @@ std::string slash_command_display(SlashCommandItem const& item)
     {
       if (index > 0)
         text += ", ";
-      text += item.aliases[index];
+      text += sanitize_terminal_text(item.aliases[index]);
     }
     text += ')';
   }
@@ -533,26 +524,26 @@ std::string slash_command_hint_display(SlashCommandItem const& item)
 {
   if (item.argument_completion)
     return item.hint;
-  auto text = item.hint;
+  auto text = sanitize_terminal_text(item.hint);
   if (!item.key_display.empty())
   {
     if (!text.empty())
       text += " · ";
-    text += item.key_display;
+    text += sanitize_terminal_text(item.key_display);
   }
   return text;
 }
 
 std::string slash_command_description_display(SlashCommandItem const& item)
 {
-  auto text = item.description;
+  auto text = sanitize_terminal_text(item.description);
   if (!item.enabled)
   {
     if (!text.empty())
       text += " — ";
     text += "disabled";
     if (!item.disabled_reason.empty())
-      text += ": " + item.disabled_reason;
+      text += ": " + sanitize_terminal_text(item.disabled_reason);
   }
   return text;
 }
@@ -596,6 +587,7 @@ std::vector<SlashCommandItem> filter_slash_argument_completions(std::string_view
   {
     auto const& completion = scored_completion.completion;
     matches.push_back(SlashCommandItem{.command = completion.value,
+                                       .display_label = completion.display_label,
                                        .description = completion.description,
                                        .hint = completion.append_space ? "" : "[complete]",
                                        .category = completion.category.empty() ? command->category : completion.category,
@@ -666,11 +658,8 @@ std::optional<PathCompletionPrefix> find_path_completion_prefix(std::string_view
       continue;
     if (!force && !path_completion_value_is_natural(quoted_value, true))
       return std::nullopt;
-    return PathCompletionPrefix{.start = quote,
-                                .cursor = cursor,
-                                .value = std::string(quoted_value),
-                                .quoted = true,
-                                .leading_dot_slash = quoted_value.starts_with("./")};
+    return PathCompletionPrefix{
+        .start = quote, .cursor = cursor, .value = std::string(quoted_value), .quoted = true, .leading_dot_slash = quoted_value.starts_with("./")};
   }
 
   auto start = cursor;
@@ -690,50 +679,56 @@ std::optional<PathCompletionPrefix> find_path_completion_prefix(std::string_view
     return std::nullopt;
   if (!force && !path_completion_value_is_natural(value, false))
     return std::nullopt;
-  return PathCompletionPrefix{.start = start,
-                              .cursor = cursor,
-                              .value = std::string(value),
-                              .quoted = false,
-                              .leading_dot_slash = value.starts_with("./")};
+  return PathCompletionPrefix{.start = start, .cursor = cursor, .value = std::string(value), .quoted = false, .leading_dot_slash = value.starts_with("./")};
 }
 
-std::vector<SlashCommandItem> file_reference_display_items(std::vector<FileReferenceItem> const& references, bool force_quote)
+std::vector<std::size_t> rank_file_reference_indices(std::string_view query, std::vector<FileReferenceItem> const& references)
 {
-  std::vector<SlashCommandItem> items;
-  items.reserve(references.size());
-  for (auto const& reference : references)
+  std::vector<ScoredFileReferenceIndex> scored;
+  scored.reserve(references.size());
+  for (std::size_t index = 0; index < references.size(); ++index)
   {
-    items.push_back(SlashCommandItem{.command = file_reference_token_text(reference, force_quote),
-                                     .description = reference.description,
-                                     .hint = reference.directory ? "[directory]" : "",
-                                     .category = reference.category,
-                                     .enabled = reference.enabled,
-                                     .disabled_reason = reference.disabled_reason,
-                                     .argument_completion = true});
+    auto score = file_reference_match_score(query, references[index].value);
+    if (!score)
+      continue;
+    scored.push_back(ScoredFileReferenceIndex{.source_index = index, .score = *score, .lowered_value = ascii_lower(references[index].value)});
   }
-  return items;
+  std::ranges::sort(scored, [&](ScoredFileReferenceIndex const& left, ScoredFileReferenceIndex const& right) {
+    auto const& left_item = references[left.source_index];
+    auto const& right_item = references[right.source_index];
+    if (left_item.directory != right_item.directory)
+      return left_item.directory > right_item.directory;
+    if (left.score != right.score)
+      return left.score < right.score;
+    return left.lowered_value < right.lowered_value;
+  });
+  std::vector<std::size_t> indices;
+  indices.reserve(scored.size());
+  for (auto const& match : scored) indices.push_back(match.source_index);
+  return indices;
 }
 
-std::vector<SlashCommandItem> path_completion_display_items(std::vector<FileReferenceItem> const& references, PathCompletionPrefix const& prefix)
+SlashCommandItem completion_display_item(FileReferenceItem const& reference, CompletionMatchModel const& model)
 {
-  std::vector<SlashCommandItem> items;
-  items.reserve(references.size());
-  for (auto const& reference : references)
-  {
-    items.push_back(SlashCommandItem{.command = path_completion_token_text(reference, prefix),
-                                     .description = reference.description,
-                                     .hint = reference.directory ? "[directory]" : "",
-                                     .category = reference.category,
-                                     .enabled = reference.enabled,
-                                     .disabled_reason = reference.disabled_reason,
-                                     .argument_completion = true});
-  }
-  return items;
+  auto command = model.surface == CompletionSurface::FileReference
+                     ? file_reference_token_text(reference, model.prefix.quoted)
+                     : path_completion_token_text(reference, PathCompletionPrefix{.start = model.prefix.start,
+                                                                                  .cursor = model.prefix.cursor,
+                                                                                  .value = model.prefix.value,
+                                                                                  .quoted = model.prefix.quoted,
+                                                                                  .leading_dot_slash = model.prefix.leading_dot_slash});
+  return SlashCommandItem{.command = std::move(command),
+                          .description = {},
+                          .hint = reference.directory ? "dir" : "",
+                          .category = {},
+                          .enabled = reference.enabled,
+                          .disabled_reason = reference.disabled_reason,
+                          .argument_completion = true};
 }
 
 std::string palette_prefix()
 {
-  return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(kSgrComposerBg) + "  ";
+  return composer_gutter();
 }
 
 std::size_t palette_content_width(std::size_t width)
@@ -747,90 +742,184 @@ std::string palette_surface_line(std::string content, std::size_t width)
   return detail::composer_surface_line(palette_prefix() + std::move(content), width);
 }
 
+SlashCommandItem palette_visible_item(SlashCommandItem const& source)
+{
+  auto item = source;
+  if (item.argument_completion)
+    item.category.clear();
+  if (source.argument_completion && source.category == "Files")
+  {
+    auto const directory = source.description == "directory" || source.description == "directory glob" || source.hint == "[directory]";
+    item.description.clear();
+    item.hint = directory ? "dir" : std::string{};
+  }
+  return item;
+}
+
+std::string render_palette_item(SlashCommandItem const& source, bool selected, std::size_t width)
+{
+  auto const item = palette_visible_item(source);
+  auto const display = slash_command_display(item);
+  std::string line = selected ? std::string(kSgrAccent) + "› " + std::string(kSgrReset) + std::string(kSgrComposerBg) : "  ";
+  if (selected)
+    line += std::string(kSgrBold) + display + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  else
+    line += display;
+  auto const hint_text = slash_command_hint_display(item);
+  auto const description_text = slash_command_description_display(item);
+  if (!description_text.empty())
+    line += "  " + std::string(kSgrMuted) + description_text + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  if (!hint_text.empty())
+    line += "  " + std::string(kSgrMuted) + hint_text + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  if (!item.category.empty())
+    line += "  " + std::string(kSgrMuted) + sanitize_terminal_text(item.category) + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  line = detail::fit_line_preserving_sgr(std::move(line), palette_content_width(width));
+  if (!item.enabled)
+    line = std::string(kSgrDim) + line + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  return palette_surface_line(std::move(line), width);
+}
+
 std::string render_palette_item_columns(SlashCommandItem const& item, bool selected, std::size_t selected_index, std::size_t match_count, std::size_t width,
                                         std::size_t cmd_col_width, std::size_t category_col_width, std::size_t hint_col_width)
 {
   static_cast<void>(selected_index);
   static_cast<void>(match_count);
-  auto command_text = slash_command_display(item);
-  auto const hint_text = slash_command_hint_display(item);
-  auto const description_text = slash_command_description_display(item);
-
-  std::string line = selected ? "› " : "  ";
-  line += command_text;
-
-  auto cmd_cols = detail::terminal_text_columns(command_text);
-  if (cmd_cols < cmd_col_width && detail::terminal_text_columns(line) + (cmd_col_width - cmd_cols) <= width)
-  {
-    line += std::string(cmd_col_width - cmd_cols, ' ');
-  }
-
-  if (!item.category.empty())
-  {
-    line += "  " + item.category;
-    auto category_cols = detail::terminal_text_columns(item.category);
-    if (category_cols < category_col_width && detail::terminal_text_columns(line) + (category_col_width - category_cols) <= width)
-    {
-      line += std::string(category_col_width - category_cols, ' ');
-    }
-  }
-
-  if (!hint_text.empty())
-  {
-    line += "  " + hint_text;
-    auto hint_cols = detail::terminal_text_columns(hint_text);
-    if (hint_cols < hint_col_width && detail::terminal_text_columns(line) + (hint_col_width - hint_cols) <= width)
-    {
-      line += std::string(hint_col_width - hint_cols, ' ');
-    }
-  }
-
-  if (!description_text.empty())
-  {
-    line += "  " + description_text;
-  }
-
-  line = detail::fit_line(std::move(line), palette_content_width(width));
-  if (selected)
-  {
-    line = std::string(kReverseVideo) + line + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  }
-  if (!item.enabled && !selected)
-    line = std::string(kSgrDim) + line + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  return palette_surface_line(std::move(line), width);
+  static_cast<void>(cmd_col_width);
+  static_cast<void>(category_col_width);
+  static_cast<void>(hint_col_width);
+  return render_palette_item(item, selected, width);
 }
 
 std::string render_palette_item_compact(SlashCommandItem const& item, bool selected, std::size_t selected_index, std::size_t match_count, std::size_t width)
 {
   static_cast<void>(selected_index);
   static_cast<void>(match_count);
-  std::string line = selected ? "› " : "  ";
-  line += slash_command_display(item);
-  auto const hint_text = slash_command_hint_display(item);
-  if (!hint_text.empty())
-  {
-    line += " " + hint_text;
-  }
-  if (!item.category.empty())
-  {
-    line += "  [" + item.category + ']';
-  }
-  auto const description_text = slash_command_description_display(item);
-  if (!description_text.empty())
-  {
-    line += "  " + description_text;
-  }
-  line = detail::fit_line(std::move(line), palette_content_width(width));
-  if (selected)
-  {
-    line = std::string(kReverseVideo) + line + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  }
-  if (!item.enabled && !selected)
-    line = std::string(kSgrDim) + line + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  return palette_surface_line(std::move(line), width);
+  return render_palette_item(item, selected, width);
 }
 
 }  // namespace
+
+void refresh_completion_match_cache(CompletionMatchCache& cache, ComposerSnapshot const& snapshot, std::size_t source_revision)
+{
+  auto surface = CompletionSurface::None;
+  auto prefix = CompletionPrefix{};
+  if (!snapshot.slash_palette_suppressed && !slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands))
+  {
+    if (auto const reference_prefix = find_file_reference_prefix(snapshot.input, snapshot.input_cursor))
+    {
+      surface = CompletionSurface::FileReference;
+      prefix = CompletionPrefix{
+          .start = reference_prefix->start, .cursor = reference_prefix->cursor, .value = reference_prefix->value, .quoted = reference_prefix->quoted};
+    }
+    else if (auto const path_prefix = find_path_completion_prefix(snapshot.input, snapshot.input_cursor, snapshot.path_completion_force_active))
+    {
+      surface = CompletionSurface::PathCompletion;
+      prefix = CompletionPrefix{.start = path_prefix->start,
+                                .cursor = path_prefix->cursor,
+                                .value = path_prefix->value,
+                                .quoted = path_prefix->quoted,
+                                .leading_dot_slash = path_prefix->leading_dot_slash};
+    }
+  }
+
+  if (cache.model && cache.model->input == snapshot.input && cache.model->cursor == snapshot.input_cursor &&
+      cache.model->force_path == snapshot.path_completion_force_active && cache.model->source_revision == source_revision && cache.model->surface == surface)
+  {
+    return;
+  }
+
+  CompletionMatchModel model{.input = snapshot.input,
+                             .cursor = snapshot.input_cursor,
+                             .force_path = snapshot.path_completion_force_active,
+                             .source_revision = source_revision,
+                             .surface = surface,
+                             .prefix = std::move(prefix)};
+  auto const query = model.surface == CompletionSurface::PathCompletion
+                         ? path_completion_query_value(PathCompletionPrefix{.start = model.prefix.start,
+                                                                            .cursor = model.prefix.cursor,
+                                                                            .value = model.prefix.value,
+                                                                            .quoted = model.prefix.quoted,
+                                                                            .leading_dot_slash = model.prefix.leading_dot_slash})
+                         : model.prefix.value;
+  if (model.surface != CompletionSurface::None)
+    model.ranked_source_indices = rank_file_reference_indices(query, snapshot.file_references);
+  model.palette_visible = !model.ranked_source_indices.empty();
+  if (model.palette_visible && model.ranked_source_indices.size() == 1)
+  {
+    auto const& match = snapshot.file_references[model.ranked_source_indices.front()];
+    if (match.enabled && !match.directory && match.value == query)
+      model.palette_visible = false;
+  }
+  cache.model = std::move(model);
+  ++cache.ranking_build_count;
+}
+
+std::size_t clamp_completion_selection(CompletionMatchCache const& cache, std::size_t selected_index)
+{
+  if (!cache.model || cache.model->ranked_source_indices.empty())
+    return 0;
+  return std::min(selected_index, cache.model->ranked_source_indices.size() - 1);
+}
+
+std::size_t next_completion_selection(CompletionMatchCache const& cache, std::size_t selected_index)
+{
+  if (!cache.model || cache.model->ranked_source_indices.empty())
+    return 0;
+  return (clamp_completion_selection(cache, selected_index) + 1) % cache.model->ranked_source_indices.size();
+}
+
+std::size_t previous_completion_selection(CompletionMatchCache const& cache, std::size_t selected_index)
+{
+  if (!cache.model || cache.model->ranked_source_indices.empty())
+    return 0;
+  auto const selected = clamp_completion_selection(cache, selected_index);
+  return selected == 0 ? cache.model->ranked_source_indices.size() - 1 : selected - 1;
+}
+
+std::optional<std::string> completion_selection_disabled_reason(CompletionMatchCache const& cache, std::vector<FileReferenceItem> const& references,
+                                                                std::size_t selected_index)
+{
+  if (!cache.model || cache.model->ranked_source_indices.empty())
+    return std::nullopt;
+  auto const source_index = cache.model->ranked_source_indices[clamp_completion_selection(cache, selected_index)];
+  if (source_index >= references.size() || references[source_index].enabled)
+    return std::nullopt;
+  auto const& reason = references[source_index].disabled_reason;
+  if (!reason.empty())
+    return reason;
+  return cache.model->surface == CompletionSurface::FileReference ? std::optional<std::string>{"reference is disabled"}
+                                                                  : std::optional<std::string>{"path is disabled"};
+}
+
+FileReferenceSelectionText completion_selection_text(CompletionMatchCache const& cache, ComposerSnapshot const& snapshot, std::size_t selected_index)
+{
+  auto const effective = effective_cursor(snapshot.input, snapshot.input_cursor);
+  if (!cache.model || cache.model->ranked_source_indices.empty())
+    return FileReferenceSelectionText{.text = snapshot.input, .cursor = effective};
+  auto const source_index = cache.model->ranked_source_indices[clamp_completion_selection(cache, selected_index)];
+  if (source_index >= snapshot.file_references.size())
+    return FileReferenceSelectionText{.text = snapshot.input, .cursor = effective};
+  auto const& model = *cache.model;
+  auto const& match = snapshot.file_references[source_index];
+  auto replacement = completion_display_item(match, model).command;
+  auto cursor_after_replacement = model.prefix.start + replacement.size();
+  if (match.directory && replacement.ends_with('"'))
+    --cursor_after_replacement;
+  if (model.surface == CompletionSurface::FileReference && !match.directory &&
+      (model.prefix.cursor >= snapshot.input.size() ||
+       (!is_ascii_space(snapshot.input[model.prefix.cursor]) && !is_file_reference_closing_boundary(snapshot.input[model.prefix.cursor]))))
+  {
+    replacement.push_back(' ');
+    cursor_after_replacement = model.prefix.start + replacement.size();
+  }
+  auto replacement_end = model.prefix.cursor;
+  if (model.prefix.quoted && replacement_end < snapshot.input.size() && snapshot.input[replacement_end] == '"' && replacement.ends_with('"'))
+    ++replacement_end;
+  auto text = snapshot.input.substr(0, model.prefix.start);
+  text += replacement;
+  text += snapshot.input.substr(replacement_end);
+  return FileReferenceSelectionText{.text = std::move(text), .cursor = cursor_after_replacement};
+}
 
 std::vector<std::string> render_slash_palette(ComposerSnapshot const& snapshot, std::size_t width, std::size_t max_lines)
 {
@@ -853,7 +942,7 @@ std::vector<std::string> render_slash_palette(ComposerSnapshot const& snapshot, 
     {
       auto const text = has_argument_text(active_input) ? std::string("  no matching arguments")
                         : prefix.empty()                ? std::string("  no matching commands")
-                                                        : "  no commands match /" + std::string(prefix);
+                                                        : "  no commands match /" + sanitize_terminal_text(prefix);
       lines.push_back(palette_surface_line(text, width));
     }
     return lines;
@@ -907,177 +996,184 @@ std::vector<std::string> render_slash_palette(ComposerSnapshot const& snapshot, 
   return lines;
 }
 
-std::vector<std::string> render_file_reference_palette(ComposerSnapshot const& snapshot, std::size_t width, std::size_t max_lines)
+std::vector<std::string> render_file_reference_palette(ComposerSnapshot const& snapshot, CompletionMatchCache& cache, std::size_t width, std::size_t max_lines)
 {
   std::vector<std::string> lines;
-  if (max_lines == 0 || !file_reference_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.file_references))
+  if (max_lines == 0 || !cache.model || cache.model->surface != CompletionSurface::FileReference || !cache.model->palette_visible)
     return lines;
 
-  auto const matches = filter_file_references(snapshot.input, snapshot.input_cursor, snapshot.file_references);
-  if (matches.empty())
-    return lines;
-  auto const prefix = find_file_reference_prefix(snapshot.input, snapshot.input_cursor);
-  auto const selected =
-      clamp_file_reference_selection(snapshot.input, snapshot.input_cursor, snapshot.file_references, snapshot.selected_slash_command_index);
-  auto const display_items = file_reference_display_items(matches, prefix && prefix->quoted);
-  auto const visible_items = std::min(display_items.size(), max_lines);
+  auto const& model = *cache.model;
+  auto const selected = clamp_completion_selection(cache, snapshot.selected_slash_command_index);
+  auto const visible_items = std::min(model.ranked_source_indices.size(), max_lines);
   auto start = selected >= visible_items ? selected - visible_items + 1 : 0;
-  if (start + visible_items > display_items.size())
-    start = display_items.size() - visible_items;
+  if (start + visible_items > model.ranked_source_indices.size())
+    start = model.ranked_source_indices.size() - visible_items;
+
+  std::vector<SlashCommandItem> display_items;
+  display_items.reserve(visible_items);
+  for (std::size_t offset = 0; offset < visible_items; ++offset)
+  {
+    display_items.push_back(completion_display_item(snapshot.file_references[model.ranked_source_indices[start + offset]], model));
+    ++cache.formatted_candidate_count;
+  }
 
   std::size_t max_cmd_cols = 0;
   std::size_t max_category_cols = 0;
   std::size_t max_hint_cols = 0;
   bool has_any_hint = false;
   bool has_any_category = false;
-  for (std::size_t offset = 0; offset < visible_items; ++offset)
+  for (auto const& item : display_items)
   {
-    auto const& item = display_items[start + offset];
-    auto command_text = slash_command_display(item);
-    max_cmd_cols = std::max(max_cmd_cols, detail::terminal_text_columns(command_text));
+    max_cmd_cols = std::max(max_cmd_cols, terminal_text_columns(slash_command_display(item)));
     if (!item.category.empty())
     {
       has_any_category = true;
-      max_category_cols = std::max(max_category_cols, detail::terminal_text_columns(item.category));
+      max_category_cols = std::max(max_category_cols, terminal_text_columns(item.category));
     }
     auto const hint_text = slash_command_hint_display(item);
     if (!hint_text.empty())
     {
       has_any_hint = true;
-      max_hint_cols = std::max(max_hint_cols, detail::terminal_text_columns(hint_text));
+      max_hint_cols = std::max(max_hint_cols, terminal_text_columns(hint_text));
     }
   }
 
   bool const use_columns =
       width >= 40 && (2 + max_cmd_cols + (has_any_category ? max_category_cols + 2 : 0) + (has_any_hint ? max_hint_cols + 2 : 0) + 4 <= width);
-
-  for (std::size_t offset = 0; offset < visible_items && lines.size() < max_lines; ++offset)
+  for (std::size_t offset = 0; offset < display_items.size(); ++offset)
   {
     auto const index = start + offset;
     if (use_columns)
     {
-      lines.push_back(render_palette_item_columns(display_items[index], index == selected, selected, display_items.size(), width, max_cmd_cols,
+      lines.push_back(render_palette_item_columns(display_items[offset], index == selected, selected, model.ranked_source_indices.size(), width, max_cmd_cols,
                                                   max_category_cols, max_hint_cols));
     }
     else
     {
-      lines.push_back(render_palette_item_compact(display_items[index], index == selected, selected, display_items.size(), width));
+      lines.push_back(render_palette_item_compact(display_items[offset], index == selected, selected, model.ranked_source_indices.size(), width));
     }
   }
-
   return lines;
 }
 
-std::vector<std::string> render_path_completion_palette(ComposerSnapshot const& snapshot, std::size_t width, std::size_t max_lines)
+std::vector<std::string> render_path_completion_palette(ComposerSnapshot const& snapshot, CompletionMatchCache& cache, std::size_t width, std::size_t max_lines)
 {
   std::vector<std::string> lines;
-  if (max_lines == 0 || !path_completion_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.file_references,
-                                                         snapshot.path_completion_force_active))
+  if (max_lines == 0 || !cache.model || cache.model->surface != CompletionSurface::PathCompletion || !cache.model->palette_visible)
     return lines;
 
-  auto const matches =
-      filter_path_completions(snapshot.input, snapshot.input_cursor, snapshot.file_references, snapshot.path_completion_force_active);
-  if (matches.empty())
-    return lines;
-  auto const prefix = find_path_completion_prefix(snapshot.input, snapshot.input_cursor, snapshot.path_completion_force_active);
-  if (!prefix)
-    return lines;
-  auto const selected =
-      clamp_path_completion_selection(snapshot.input, snapshot.input_cursor, snapshot.file_references, snapshot.selected_slash_command_index,
-                                      snapshot.path_completion_force_active);
-  auto const display_items = path_completion_display_items(matches, *prefix);
-  auto const visible_items = std::min(display_items.size(), max_lines);
+  auto const& model = *cache.model;
+  auto const selected = clamp_completion_selection(cache, snapshot.selected_slash_command_index);
+  auto const visible_items = std::min(model.ranked_source_indices.size(), max_lines);
   auto start = selected >= visible_items ? selected - visible_items + 1 : 0;
-  if (start + visible_items > display_items.size())
-    start = display_items.size() - visible_items;
+  if (start + visible_items > model.ranked_source_indices.size())
+    start = model.ranked_source_indices.size() - visible_items;
+
+  std::vector<SlashCommandItem> display_items;
+  display_items.reserve(visible_items);
+  for (std::size_t offset = 0; offset < visible_items; ++offset)
+  {
+    display_items.push_back(completion_display_item(snapshot.file_references[model.ranked_source_indices[start + offset]], model));
+    ++cache.formatted_candidate_count;
+  }
 
   std::size_t max_cmd_cols = 0;
   std::size_t max_category_cols = 0;
   std::size_t max_hint_cols = 0;
   bool has_any_hint = false;
   bool has_any_category = false;
-  for (std::size_t offset = 0; offset < visible_items; ++offset)
+  for (auto const& item : display_items)
   {
-    auto const& item = display_items[start + offset];
-    auto command_text = slash_command_display(item);
-    max_cmd_cols = std::max(max_cmd_cols, detail::terminal_text_columns(command_text));
+    max_cmd_cols = std::max(max_cmd_cols, terminal_text_columns(slash_command_display(item)));
     if (!item.category.empty())
     {
       has_any_category = true;
-      max_category_cols = std::max(max_category_cols, detail::terminal_text_columns(item.category));
+      max_category_cols = std::max(max_category_cols, terminal_text_columns(item.category));
     }
     auto const hint_text = slash_command_hint_display(item);
     if (!hint_text.empty())
     {
       has_any_hint = true;
-      max_hint_cols = std::max(max_hint_cols, detail::terminal_text_columns(hint_text));
+      max_hint_cols = std::max(max_hint_cols, terminal_text_columns(hint_text));
     }
   }
 
   bool const use_columns =
       width >= 40 && (2 + max_cmd_cols + (has_any_category ? max_category_cols + 2 : 0) + (has_any_hint ? max_hint_cols + 2 : 0) + 4 <= width);
-
-  for (std::size_t offset = 0; offset < visible_items && lines.size() < max_lines; ++offset)
+  for (std::size_t offset = 0; offset < display_items.size(); ++offset)
   {
     auto const index = start + offset;
     if (use_columns)
     {
-      lines.push_back(render_palette_item_columns(display_items[index], index == selected, selected, display_items.size(), width, max_cmd_cols,
+      lines.push_back(render_palette_item_columns(display_items[offset], index == selected, selected, model.ranked_source_indices.size(), width, max_cmd_cols,
                                                   max_category_cols, max_hint_cols));
     }
     else
     {
-      lines.push_back(render_palette_item_compact(display_items[index], index == selected, selected, display_items.size(), width));
+      lines.push_back(render_palette_item_compact(display_items[offset], index == selected, selected, model.ranked_source_indices.size(), width));
     }
   }
-
   return lines;
+}
+
+std::optional<std::string> disabled_visible_completion_selection_status(ComposerSnapshot const& snapshot, CompletionMatchCache const& cache)
+{
+  if (snapshot.slash_palette_suppressed)
+    return std::nullopt;
+  if (slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands))
+  {
+    if (auto const reason =
+            slash_command_selection_disabled_reason(snapshot.input, snapshot.input_cursor, snapshot.slash_commands, snapshot.selected_slash_command_index))
+    {
+      return "command disabled: " + *reason;
+    }
+    return std::nullopt;
+  }
+  if (!cache.model || !cache.model->palette_visible)
+    return std::nullopt;
+  if (auto const reason = completion_selection_disabled_reason(cache, snapshot.file_references, snapshot.selected_slash_command_index))
+  {
+    return (cache.model->surface == CompletionSurface::FileReference ? "reference disabled: " : "path disabled: ") + *reason;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> disabled_visible_completion_selection_status(ComposerSnapshot const& snapshot)
+{
+  CompletionMatchCache cache;
+  refresh_completion_match_cache(cache, snapshot, snapshot.file_references_generation);
+  return disabled_visible_completion_selection_status(snapshot, cache);
 }
 
 }  // namespace detail
 
 namespace {
 
-std::optional<std::size_t> palette_selection_for_screen_row(ComposerSnapshot const& snapshot, std::size_t row,
-                                                            std::size_t item_count, std::size_t selected_index)
+std::optional<std::size_t> palette_selection_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column, std::size_t item_count,
+                                                                 std::size_t selected_index, detail::CompletionMatchCache& completion_cache,
+                                                                 std::size_t source_revision)
 {
-  if (row == 0 || snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list ||
-      snapshot.slash_palette_suppressed || item_count == 0)
-  {
+  if (row == 0 || column == 0 || item_count == 0)
     return std::nullopt;
-  }
-
-  auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
-  auto const fixed_lines = detail::composer_block_line_count(snapshot, height, composer_main_width(snapshot));
-  auto const palette_line_budget =
-      height > fixed_lines ? std::min(detail::kMaxPaletteLines, height - fixed_lines) : 0;
-  if (palette_line_budget == 0)
+  auto const canvas = composer_canvas_layout(snapshot);
+  if (column <= canvas.left || column > canvas.left + canvas.content_width)
     return std::nullopt;
-
-  auto const visible_items = std::min(item_count, palette_line_budget);
-  if (visible_items == 0)
+  auto const layout = detail::composer_palette_screen_layout_cached(snapshot, completion_cache, source_revision);
+  if (!layout || layout->item_count == 0)
     return std::nullopt;
-
+  auto const visible_items = std::min(item_count, layout->item_count);
   auto const selected = std::min(selected_index, item_count - 1);
   auto start = selected >= visible_items ? selected - visible_items + 1 : std::size_t{0};
   if (start + visible_items > item_count)
     start = item_count - visible_items;
-
-  auto const non_transcript_lines = fixed_lines + visible_items;
-  auto const transcript_height = height > non_transcript_lines ? height - non_transcript_lines : 0;
-  auto const first_item_row = transcript_height + 1;
-  if (row < first_item_row)
+  if (row < layout->first_item_row || row >= layout->first_item_row + visible_items)
     return std::nullopt;
-  auto const item_offset = row - first_item_row;
-  if (item_offset >= visible_items)
-    return std::nullopt;
-  return start + item_offset;
+  return start + row - layout->first_item_row;
 }
 
 }  // namespace
 
-std::vector<SlashCommandItem> filter_slash_commands(std::string_view input, std::size_t cursor,
-                                                    std::vector<SlashCommandItem> const& commands)
+std::vector<SlashCommandItem> filter_slash_commands(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands)
 {
   input = detail::input_before_cursor(input, cursor);
   if (!input.starts_with('/'))
@@ -1142,8 +1238,7 @@ bool slash_palette_visible(std::string_view input, std::vector<SlashCommandItem>
   return slash_palette_visible(input, input.size(), commands);
 }
 
-std::size_t clamp_slash_palette_selection(std::string_view input, std::size_t cursor,
-                                          std::vector<SlashCommandItem> const& commands, std::size_t selected_index)
+std::size_t clamp_slash_palette_selection(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands, std::size_t selected_index)
 {
   auto const matches = filter_slash_commands(input, cursor, commands);
   if (matches.empty())
@@ -1156,8 +1251,8 @@ std::size_t clamp_slash_palette_selection(std::string_view input, std::vector<Sl
   return clamp_slash_palette_selection(input, input.size(), commands, selected_index);
 }
 
-std::size_t previous_slash_palette_selection(std::string_view input, std::size_t cursor,
-                                             std::vector<SlashCommandItem> const& commands, std::size_t selected_index)
+std::size_t previous_slash_palette_selection(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands,
+                                             std::size_t selected_index)
 {
   auto const matches = filter_slash_commands(input, cursor, commands);
   if (matches.empty())
@@ -1171,8 +1266,7 @@ std::size_t previous_slash_palette_selection(std::string_view input, std::vector
   return previous_slash_palette_selection(input, input.size(), commands, selected_index);
 }
 
-std::size_t next_slash_palette_selection(std::string_view input, std::size_t cursor,
-                                         std::vector<SlashCommandItem> const& commands, std::size_t selected_index)
+std::size_t next_slash_palette_selection(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands, std::size_t selected_index)
 {
   auto const matches = filter_slash_commands(input, cursor, commands);
   if (matches.empty())
@@ -1186,8 +1280,7 @@ std::size_t next_slash_palette_selection(std::string_view input, std::vector<Sla
   return next_slash_palette_selection(input, input.size(), commands, selected_index);
 }
 
-SlashCommandSelectionText slash_command_selection_text(std::string_view input, std::size_t cursor,
-                                                       std::vector<SlashCommandItem> const& commands,
+SlashCommandSelectionText slash_command_selection_text(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands,
                                                        std::size_t selected_index)
 {
   auto const effective = detail::effective_cursor(input, cursor);
@@ -1222,8 +1315,7 @@ std::string slash_command_selection_text(std::string_view input, std::vector<Sla
   return slash_command_selection_text(input, input.size(), commands, selected_index).text;
 }
 
-std::optional<std::string> slash_command_selection_disabled_reason(std::string_view input, std::size_t cursor,
-                                                                   std::vector<SlashCommandItem> const& commands,
+std::optional<std::string> slash_command_selection_disabled_reason(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands,
                                                                    std::size_t selected_index)
 {
   auto const matches = filter_slash_commands(input, cursor, commands);
@@ -1245,31 +1337,13 @@ std::optional<std::string> slash_command_selection_disabled_reason(std::string_v
 
 std::vector<FileReferenceItem> filter_file_references(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references)
 {
-  std::vector<detail::ScoredFileReference> scored;
   auto const prefix = detail::find_file_reference_prefix(input, cursor);
   if (!prefix)
     return {};
-  for (auto const& reference : references)
-  {
-    auto score = detail::file_reference_match_score(prefix->value, reference.value);
-    if (!score)
-      continue;
-    scored.push_back(detail::ScoredFileReference{.item = reference, .score = *score});
-  }
-  std::ranges::sort(scored, [](detail::ScoredFileReference const& left, detail::ScoredFileReference const& right) {
-    if (left.item.directory != right.item.directory)
-      return left.item.directory > right.item.directory;
-    if (left.score != right.score)
-      return left.score < right.score;
-    return detail::ascii_lower(left.item.value) < detail::ascii_lower(right.item.value);
-  });
-
+  auto const indices = detail::rank_file_reference_indices(prefix->value, references);
   std::vector<FileReferenceItem> matches;
-  matches.reserve(scored.size());
-  for (auto const& match : scored)
-  {
-    matches.push_back(match.item);
-  }
+  matches.reserve(indices.size());
+  for (auto const index : indices) matches.push_back(references[index]);
   return matches;
 }
 
@@ -1317,23 +1391,20 @@ std::size_t next_file_reference_selection(std::string_view input, std::size_t cu
   return (selected + 1) % matches.size();
 }
 
-FileReferenceSelectionText file_reference_selection_text(std::string_view input, std::size_t cursor,
-                                                         std::vector<FileReferenceItem> const& references,
+FileReferenceSelectionText file_reference_selection_text(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
                                                          std::size_t selected_index)
 {
   auto const prefix = detail::find_file_reference_prefix(input, cursor);
   auto const matches = filter_file_references(input, cursor, references);
   if (!prefix || matches.empty())
-    return FileReferenceSelectionText{.text = std::string(input),
-                                      .cursor = cursor == std::string::npos ? input.size() : std::min(cursor, input.size())};
+    return FileReferenceSelectionText{.text = std::string(input), .cursor = cursor == std::string::npos ? input.size() : std::min(cursor, input.size())};
   auto const selected = std::min(selected_index, matches.size() - 1);
   auto replacement = detail::file_reference_token_text(matches[selected], prefix->quoted);
   auto cursor_after_replacement = prefix->start + replacement.size();
   if (matches[selected].directory && replacement.ends_with('"'))
     --cursor_after_replacement;
-  if (!matches[selected].directory &&
-      (prefix->cursor >= input.size() ||
-       (!detail::is_ascii_space(input[prefix->cursor]) && !detail::is_file_reference_closing_boundary(input[prefix->cursor]))))
+  if (!matches[selected].directory && (prefix->cursor >= input.size() ||
+                                       (!detail::is_ascii_space(input[prefix->cursor]) && !detail::is_file_reference_closing_boundary(input[prefix->cursor]))))
   {
     replacement.push_back(' ');
     cursor_after_replacement = prefix->start + replacement.size();
@@ -1347,55 +1418,48 @@ FileReferenceSelectionText file_reference_selection_text(std::string_view input,
   return FileReferenceSelectionText{.text = std::move(text), .cursor = cursor_after_replacement};
 }
 
-std::optional<std::size_t> file_reference_palette_selection_for_screen_row(ComposerSnapshot const& snapshot,
-                                                                           std::size_t row)
+std::optional<std::string> file_reference_selection_disabled_reason(std::string_view input, std::size_t cursor,
+                                                                    std::vector<FileReferenceItem> const& references, std::size_t selected_index)
 {
-  if (slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands) ||
-      !file_reference_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.file_references))
-  {
+  auto const matches = filter_file_references(input, cursor, references);
+  if (matches.empty())
     return std::nullopt;
-  }
-  auto const matches = filter_file_references(snapshot.input, snapshot.input_cursor, snapshot.file_references);
-  auto const selected =
-      clamp_file_reference_selection(snapshot.input, snapshot.input_cursor, snapshot.file_references,
-                                     snapshot.selected_slash_command_index);
-  return palette_selection_for_screen_row(snapshot, row, matches.size(), selected);
+  auto const& selected = matches[std::min(selected_index, matches.size() - 1)];
+  if (selected.enabled)
+    return std::nullopt;
+  return selected.disabled_reason.empty() ? std::optional<std::string>{"reference is disabled"} : selected.disabled_reason;
 }
 
-std::vector<FileReferenceItem> filter_path_completions(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
-                                                       bool force)
+std::optional<std::size_t> detail::file_reference_palette_selection_for_screen_position_cached(ComposerSnapshot const& snapshot, std::size_t row,
+                                                                                               std::size_t column, CompletionMatchCache& cache,
+                                                                                               std::size_t source_revision)
 {
-  std::vector<detail::ScoredFileReference> scored;
+  refresh_completion_match_cache(cache, snapshot, source_revision);
+  if (!cache.model || cache.model->surface != CompletionSurface::FileReference || !cache.model->palette_visible)
+    return std::nullopt;
+  auto const selected = clamp_completion_selection(cache, snapshot.selected_slash_command_index);
+  return palette_selection_for_screen_position(snapshot, row, column, cache.model->ranked_source_indices.size(), selected, cache, source_revision);
+}
+
+std::optional<std::size_t> file_reference_palette_selection_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column)
+{
+  detail::CompletionMatchCache cache;
+  return detail::file_reference_palette_selection_for_screen_position_cached(snapshot, row, column, cache, snapshot.file_references_generation);
+}
+
+std::vector<FileReferenceItem> filter_path_completions(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references, bool force)
+{
   auto const prefix = detail::find_path_completion_prefix(input, cursor, force);
   if (!prefix)
     return {};
-  auto const query = detail::path_completion_query_value(*prefix);
-  for (auto const& reference : references)
-  {
-    auto score = detail::file_reference_match_score(query, reference.value);
-    if (!score)
-      continue;
-    scored.push_back(detail::ScoredFileReference{.item = reference, .score = *score});
-  }
-  std::ranges::sort(scored, [](detail::ScoredFileReference const& left, detail::ScoredFileReference const& right) {
-    if (left.item.directory != right.item.directory)
-      return left.item.directory > right.item.directory;
-    if (left.score != right.score)
-      return left.score < right.score;
-    return detail::ascii_lower(left.item.value) < detail::ascii_lower(right.item.value);
-  });
-
+  auto const indices = detail::rank_file_reference_indices(detail::path_completion_query_value(*prefix), references);
   std::vector<FileReferenceItem> matches;
-  matches.reserve(scored.size());
-  for (auto const& match : scored)
-  {
-    matches.push_back(match.item);
-  }
+  matches.reserve(indices.size());
+  for (auto const index : indices) matches.push_back(references[index]);
   return matches;
 }
 
-bool path_completion_palette_visible(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
-                                     bool force)
+bool path_completion_palette_visible(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references, bool force)
 {
   if (references.empty())
     return false;
@@ -1440,16 +1504,13 @@ std::size_t next_path_completion_selection(std::string_view input, std::size_t c
   return (selected + 1) % matches.size();
 }
 
-PathCompletionSelectionText path_completion_selection_text(std::string_view input, std::size_t cursor,
-                                                           std::vector<FileReferenceItem> const& references,
-                                                           std::size_t selected_index,
-                                                           bool force)
+PathCompletionSelectionText path_completion_selection_text(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
+                                                           std::size_t selected_index, bool force)
 {
   auto const prefix = detail::find_path_completion_prefix(input, cursor, force);
   auto const matches = filter_path_completions(input, cursor, references, force);
   if (!prefix || matches.empty())
-    return PathCompletionSelectionText{.text = std::string(input),
-                                       .cursor = cursor == std::string::npos ? input.size() : std::min(cursor, input.size())};
+    return PathCompletionSelectionText{.text = std::string(input), .cursor = cursor == std::string::npos ? input.size() : std::min(cursor, input.size())};
   auto const selected = std::min(selected_index, matches.size() - 1);
   auto replacement = detail::path_completion_token_text(matches[selected], *prefix);
   auto cursor_after_replacement = prefix->start + replacement.size();
@@ -1464,62 +1525,43 @@ PathCompletionSelectionText path_completion_selection_text(std::string_view inpu
   return PathCompletionSelectionText{.text = std::move(text), .cursor = cursor_after_replacement};
 }
 
-std::optional<std::size_t> path_completion_palette_selection_for_screen_row(ComposerSnapshot const& snapshot,
-                                                                            std::size_t row)
+std::optional<std::string> path_completion_selection_disabled_reason(std::string_view input, std::size_t cursor,
+                                                                     std::vector<FileReferenceItem> const& references, std::size_t selected_index, bool force)
 {
-  if (slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands) ||
-      file_reference_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.file_references) ||
-      !path_completion_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.file_references,
-                                       snapshot.path_completion_force_active))
-  {
-    return std::nullopt;
-  }
-  auto const matches = filter_path_completions(snapshot.input, snapshot.input_cursor, snapshot.file_references,
-                                              snapshot.path_completion_force_active);
-  auto const selected = clamp_path_completion_selection(snapshot.input, snapshot.input_cursor,
-                                                       snapshot.file_references,
-                                                       snapshot.selected_slash_command_index,
-                                                       snapshot.path_completion_force_active);
-  return palette_selection_for_screen_row(snapshot, row, matches.size(), selected);
-}
-
-std::optional<std::size_t> slash_palette_selection_for_screen_row(ComposerSnapshot const& snapshot, std::size_t row)
-{
-  if (row == 0 || snapshot.permission_prompt || snapshot.question_prompt || snapshot.slash_palette_suppressed ||
-      !slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands))
-  {
-    return std::nullopt;
-  }
-  auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
-  auto const matches = filter_slash_commands(snapshot.input, snapshot.input_cursor, snapshot.slash_commands);
+  auto const matches = filter_path_completions(input, cursor, references, force);
   if (matches.empty())
     return std::nullopt;
-
-  auto const fixed_lines = detail::composer_block_line_count(snapshot, height, composer_main_width(snapshot));
-  auto const palette_line_budget = height > fixed_lines ? std::min(detail::kMaxPaletteLines, height - fixed_lines) : 0;
-  if (palette_line_budget == 0)
+  auto const& selected = matches[std::min(selected_index, matches.size() - 1)];
+  if (selected.enabled)
     return std::nullopt;
+  return selected.disabled_reason.empty() ? std::optional<std::string>{"path is disabled"} : selected.disabled_reason;
+}
 
-  auto const item_budget = palette_line_budget;
-  auto const visible_items = std::min(matches.size(), item_budget);
-  if (visible_items == 0)
+std::optional<std::size_t> detail::path_completion_palette_selection_for_screen_position_cached(ComposerSnapshot const& snapshot, std::size_t row,
+                                                                                                std::size_t column, CompletionMatchCache& cache,
+                                                                                                std::size_t source_revision)
+{
+  refresh_completion_match_cache(cache, snapshot, source_revision);
+  if (!cache.model || cache.model->surface != CompletionSurface::PathCompletion || !cache.model->palette_visible)
     return std::nullopt;
+  auto const selected = clamp_completion_selection(cache, snapshot.selected_slash_command_index);
+  return palette_selection_for_screen_position(snapshot, row, column, cache.model->ranked_source_indices.size(), selected, cache, source_revision);
+}
 
+std::optional<std::size_t> path_completion_palette_selection_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column)
+{
+  detail::CompletionMatchCache cache;
+  return detail::path_completion_palette_selection_for_screen_position_cached(snapshot, row, column, cache, snapshot.file_references_generation);
+}
+
+std::optional<std::size_t> slash_palette_selection_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column)
+{
+  if (!slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands))
+    return std::nullopt;
+  auto const matches = filter_slash_commands(snapshot.input, snapshot.input_cursor, snapshot.slash_commands);
   auto const selected = clamp_slash_palette_selection(snapshot.input, snapshot.input_cursor, snapshot.slash_commands, snapshot.selected_slash_command_index);
-  auto start = selected >= visible_items ? selected - visible_items + 1 : 0;
-  if (start + visible_items > matches.size())
-    start = matches.size() - visible_items;
-
-  auto const palette_lines = visible_items;
-  auto const non_transcript_lines = fixed_lines + palette_lines;
-  auto const transcript_height = height > non_transcript_lines ? height - non_transcript_lines : 0;
-  auto const first_item_row = transcript_height + 1;
-  if (row < first_item_row)
-    return std::nullopt;
-  auto const item_offset = row - first_item_row;
-  if (item_offset >= visible_items)
-    return std::nullopt;
-  return start + item_offset;
+  detail::CompletionMatchCache completion_cache;
+  return palette_selection_for_screen_position(snapshot, row, column, matches.size(), selected, completion_cache, snapshot.file_references_generation);
 }
 
 }  // namespace ava::tui

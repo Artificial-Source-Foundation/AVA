@@ -611,6 +611,7 @@ if(Python3_Interpreter_FOUND)
     main_editor_input
     main_slash_completions
     main_permission_flow
+    main_question_flow
     main_session_mgmt
     main_paste_scrollback_attach)
   foreach(AVA_TUI_TMUX_SMOKE_SCENARIO IN LISTS AVA_TUI_TMUX_SMOKE_SCENARIOS)
@@ -637,9 +638,45 @@ if(Python3_Interpreter_FOUND)
     NAME ava_tui.kitty_image_smoke
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tui_kitty_image_smoke.py
+            --protocol kitty
             --ava $<TARGET_FILE:ava>
             --root ${CMAKE_BINARY_DIR}/tui-kitty-image-smoke)
-  set_tests_properties(ava_tui.kitty_image_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 20)
+  set_tests_properties(
+    ava_tui.kitty_image_smoke
+    PROPERTIES
+      SKIP_RETURN_CODE 77
+      TIMEOUT 35
+      LABELS "tui;pty;graphics;kitty;smoke;opt-in"
+      ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tui.iterm2_image_smoke
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tui_kitty_image_smoke.py
+            --protocol iterm2
+            --ava $<TARGET_FILE:ava>
+            --root ${CMAKE_BINARY_DIR}/tui-iterm2-image-smoke)
+  set_tests_properties(
+    ava_tui.iterm2_image_smoke
+    PROPERTIES
+      SKIP_RETURN_CODE 77
+      TIMEOUT 35
+      LABELS "tui;pty;graphics;iterm2;smoke;opt-in"
+      ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tui.terminal_lifecycle_smoke
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tui_terminal_lifecycle_smoke.py
+            --ava $<TARGET_FILE:ava>
+            --root ${CMAKE_BINARY_DIR}/tui-terminal-lifecycle-smoke)
+  set_tests_properties(
+    ava_tui.terminal_lifecycle_smoke
+    PROPERTIES
+      SKIP_RETURN_CODE 77
+      TIMEOUT 75
+      LABELS "tui;pty;terminal-lifecycle;smoke;opt-in"
+      ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
     NAME ava_tui.osc8_smoke
@@ -648,7 +685,13 @@ if(Python3_Interpreter_FOUND)
             --ava $<TARGET_FILE:ava>
             --fake-provider $<TARGET_FILE:ava_fake_provider_server>
             --root ${CMAKE_BINARY_DIR}/tui-osc8-smoke)
-  set_tests_properties(ava_tui.osc8_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 20)
+  set_tests_properties(
+    ava_tui.osc8_smoke
+    PROPERTIES
+      SKIP_RETURN_CODE 77
+      TIMEOUT 60
+      LABELS "tui;pty;osc8;osc52;smoke;opt-in"
+      ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   if(OptionEnableLibcwd)
     # The debug-printer coverage check requires the `ctags-json` target and the generated tags.json,

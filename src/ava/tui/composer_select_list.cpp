@@ -85,29 +85,12 @@ std::string select_title_line(SelectListView const& view, std::size_t width)
 {
   auto title = view.title.empty() ? std::string("Select") : sanitize_terminal_text(view.title);
   std::string line = std::string(detail::kSgrBold) + title + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
-  std::string const esc = std::string(detail::kSgrMuted) + "esc" + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
-  auto const line_cols = detail::terminal_text_columns(line);
-  auto const esc_cols = detail::terminal_text_columns(esc);
-  if (line_cols + esc_cols + 3 < width)
-    line += std::string(width - line_cols - esc_cols - 2, ' ') + esc;
-  return select_modal_line(std::move(line), width);
-}
-
-std::vector<std::string> select_wrapped_lines(std::string_view text, std::size_t width)
-{
-  std::vector<std::string> lines;
-  auto const content_width = width > 4 ? width - 4 : width;
-  auto const sanitized = sanitize_terminal_text(text);
-  for (auto const& raw_line : split_lines(sanitized))
+  if (!view.subtitle.empty())
   {
-    for (auto const& wrapped : detail::wrap_transcript_text(raw_line, content_width))
-    {
-      lines.push_back(select_modal_line(wrapped, width));
-    }
+    line +=
+        "  " + std::string(detail::kSgrMuted) + sanitize_terminal_text(view.subtitle) + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   }
-  if (lines.empty())
-    lines.push_back(select_modal_line("", width));
-  return lines;
+  return select_modal_line(detail::fit_line_preserving_sgr(std::move(line), width > 4 ? width - 4 : width), width);
 }
 
 std::string select_search_line(SelectListView const& view, std::size_t width)
@@ -118,24 +101,27 @@ std::string select_search_line(SelectListView const& view, std::size_t width)
     query = std::string(detail::kSgrMuted) + sanitize_terminal_text(view.placeholder) + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   }
   query += std::string(detail::kSgrAccent) + "█" + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
-  return select_modal_line("Search: " + std::move(query), width);
+  return select_modal_line(
+      std::string(detail::kSgrMuted) + "filter  " + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg) + std::move(query), width);
 }
 
 std::string select_group_line(std::string_view group, std::size_t width)
 {
   return select_modal_line(
-      std::string(detail::kSgrWarning) + sanitize_terminal_text(group) + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg), width);
+      std::string(detail::kSgrMuted) + sanitize_terminal_text(group) + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg), width);
 }
 
 std::string select_item_line(SelectListItemView const& item, bool selected, std::size_t width)
 {
-  std::string line = selected ? "› " : "  ";
+  std::string line = selected ? std::string(detail::kSgrAccent) + "› " + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg) : "  ";
   line += item.current ? "● " : "  ";
-  line += sanitize_terminal_text(item.label.empty() ? item.value : item.label);
-  if (item.current)
-    line += "  current";
+  auto const label = sanitize_terminal_text(item.label.empty() ? item.value : item.label);
+  if (selected)
+    line += std::string(detail::kSgrBold) + label + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
+  else
+    line += label;
   if (!item.badge.empty())
-    line += "  " + sanitize_terminal_text(item.badge);
+    line += "  " + std::string(detail::kSgrMuted) + sanitize_terminal_text(item.badge) + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   if (!item.description.empty())
   {
     line +=
@@ -153,17 +139,31 @@ std::string select_item_line(SelectListItemView const& item, bool selected, std:
     line += std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   }
   line = detail::fit_line_preserving_sgr(std::move(line), width > 4 ? width - 4 : width);
-  if (selected)
-    line = std::string(detail::kReverseVideo) + line + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
-  if (!item.enabled && !selected)
+  if (!item.enabled)
     line = std::string(detail::kSgrDim) + line + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   return select_modal_line(std::move(line), width);
 }
 
 std::string select_footer_line(SelectListView const& view, std::size_t width)
 {
-  auto hint = view.footer_hint.empty() ? std::string("↑/↓ select  PgUp/PgDn page  Enter confirm  Type to search  Esc cancel")
-                                       : sanitize_terminal_text(view.footer_hint);
+  auto const content_width = width > 4 ? width - 4 : width;
+  auto const session_selector = view.title.find("session") != std::string::npos || view.title.find("Session") != std::string::npos;
+  auto const scoped_models = view.title.find("Scoped model") != std::string::npos;
+  std::string hint;
+  if (session_selector && content_width >= 67)
+    hint = "↑↓ navigate · Enter open · type filter · Esc close · Ctrl+D archive";
+  else if (session_selector && content_width >= 53)
+    hint = "↑↓ navigate · Enter open · Esc close · Ctrl+D archive";
+  else if (!session_selector && content_width >= 52)
+  {
+    hint = "↑↓ navigate · Enter select · type filter · Esc close";
+    if (scoped_models && content_width >= 67)
+      hint += " · Enter toggle";
+  }
+  else if (content_width >= 44)
+    hint = "↑↓ navigate · Enter " + std::string(session_selector ? "open" : "select") + " · Esc close";
+  else
+    hint = "↑↓ · Enter · Esc";
   return select_modal_line(std::string(detail::kSgrMuted) + std::move(hint) + std::string(detail::kSgrReset), width);
 }
 
@@ -626,33 +626,9 @@ std::vector<std::string> select_list_modal_prefix(SelectListView const& view, st
   std::vector<std::string> lines;
   if (max_lines == 0)
     return lines;
-
-  lines.push_back(composer_surface_line("", width));
-  if (lines.size() >= max_lines)
-    return lines;
   lines.push_back(select_title_line(view, width));
-  if (lines.size() >= max_lines)
-    return lines;
-
-  constexpr std::size_t kRowsAfterSubtitle = 6;  // spacer, search, spacer, one item, spacer, footer
-  if (!view.subtitle.empty())
-  {
-    for (auto const& line : select_wrapped_lines(view.subtitle, width))
-    {
-      if (lines.size() + 1 + kRowsAfterSubtitle > max_lines)
-        break;
-      lines.push_back(line);
-    }
-  }
-  if (lines.size() >= max_lines)
-    return lines;
-  lines.push_back(composer_surface_line("", width));
-  if (lines.size() >= max_lines)
-    return lines;
-  lines.push_back(select_search_line(view, width));
-  if (lines.size() >= max_lines)
-    return lines;
-  lines.push_back(composer_surface_line("", width));
+  if (lines.size() < max_lines)
+    lines.push_back(select_search_line(view, width));
   return lines;
 }
 
@@ -665,7 +641,7 @@ std::optional<std::size_t> select_list_item_for_modal_row(SelectListView const& 
   if (modal_row < content_start)
     return std::nullopt;
 
-  auto const reserved_footer = std::size_t{2};
+  auto const reserved_footer = std::size_t{1};
   auto const budget = max_lines > content_start + reserved_footer ? max_lines - content_start - reserved_footer : 0;
   auto const content_rows = select_list_content_rows(view, budget);
   auto const content_row = modal_row - content_start;
@@ -682,13 +658,13 @@ std::vector<std::string> render_select_list_modal(SelectListView const& view, st
 
   auto const matches = filter_select_list_items(view);
   auto const selected = clamp_select_list_selection(view, view.selected_item_index);
-  auto const reserved_footer = std::size_t{2};
+  auto const reserved_footer = std::size_t{1};
   auto const budget = max_lines > lines.size() + reserved_footer ? max_lines - lines.size() - reserved_footer : 0;
   auto const content_rows = select_list_content_rows(view, budget);
 
   if (matches.empty())
   {
-    if (lines.size() + reserved_footer < max_lines)
+    if (lines.size() + reserved_footer <= max_lines)
     {
       auto empty = view.empty_text.empty() ? std::string("No matches") : sanitize_terminal_text(view.empty_text);
       lines.push_back(select_modal_line(std::string(kSgrMuted) + std::move(empty) + std::string(kSgrReset), width));
@@ -711,10 +687,7 @@ std::vector<std::string> render_select_list_modal(SelectListView const& view, st
   }
 
   if (lines.size() < max_lines)
-    lines.push_back(composer_surface_line("", width));
-  if (lines.size() < max_lines)
     lines.push_back(select_footer_line(view, width));
-  while (lines.size() < max_lines) lines.push_back(composer_surface_line("", width));
   return lines;
 }
 

@@ -429,6 +429,15 @@ void validate_compaction_entry(SessionReplayValidation& validation, std::size_t 
     return;
   }
 
+  auto const projection_present = ava::core::json::field_value_start(entry.data_json, "history_projection");
+  auto const history_projection = ava::core::json::string_field(entry.data_json, "history_projection");
+  if (projection_present && (!history_projection || *history_projection != "portable-v1"))
+  {
+    add_error(validation, SessionReplayIssueKind::InvalidCompactionEntry, index, entry, "",
+              "compaction entry history_projection must be portable-v1 when present");
+    return;
+  }
+
   auto const reason = ava::core::json::string_field(entry.data_json, "reason");
   auto const threshold_type = ava::core::json::string_field(entry.data_json, "threshold_type");
   auto const retry_outcome = ava::core::json::string_field(entry.data_json, "overflow_retry_outcome");
@@ -1171,7 +1180,7 @@ void validate_reasoning_change_entry(SessionReplayValidation& validation, Active
   }
 }
 
-void validate_reasoning_block_entry(SessionReplayValidation& validation, std::size_t index, SessionEntry const& entry)
+void validate_reasoning_block_entry(SessionReplayValidation& validation, ActiveModelState const& active_model, std::size_t index, SessionEntry const& entry)
 {
   if (!ava::core::json::is_valid_object(entry.data_json))
   {
@@ -1190,6 +1199,11 @@ void validate_reasoning_block_entry(SessionReplayValidation& validation, std::si
       (text.empty() && signature.empty() && redacted_data.empty() && (!native_item_json || native_item_json->empty())))
   {
     add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "", "reasoning_block entry is missing provider/model/content metadata");
+  }
+  if ((!active_model.provider_id.empty() || !active_model.model_id.empty()) && (provider != active_model.provider_id || model != active_model.model_id))
+  {
+    add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "",
+              "reasoning_block provider/model does not match active session model");
   }
   // Version 3 OpenAI writers can only persist native replay metadata after the
   // strict provider validator accepts it. Older sessions keep readable text as
@@ -1451,7 +1465,7 @@ SessionReplayValidation validate_session_replay(std::vector<SessionEntry> const&
       }
       if (entry.type == EntryType::ReasoningBlock)
       {
-        validate_reasoning_block_entry(validation, index, entry);
+        validate_reasoning_block_entry(validation, active_model, index, entry);
         continue;
       }
     }

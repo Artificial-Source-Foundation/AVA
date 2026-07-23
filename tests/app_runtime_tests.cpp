@@ -3,6 +3,7 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/observability/run_observer.h"
+#include "ava/app/EventEnvelope.h"
 #include "ava/app/clipboard_image.h"
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_palette.h"
@@ -12,6 +13,7 @@
 #include "ava/app/display_settings.h"
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
+#include "ava/app/line_shell.h"
 #include "ava/app/onboarding.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/project_trust.h"
@@ -22,6 +24,7 @@
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_retry.h"
+#include "ava/app/session_title_coordinator.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/message_builder.h"
@@ -31,6 +34,8 @@
 #include "ava/tools/file_tools.h"
 #include "ava/tools/search_tools.h"
 #include "ava/tui/composer.h"
+#include "ava/tui/composer_internal.h"
+#include "ava/tui/event_state.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/theme.h"
@@ -68,6 +73,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <iostream>
 #include <iterator>
 #include <mutex>
@@ -1825,11 +1831,9 @@ void test_app_first_run_auth_onboarding()
 
   unsetenv("OPENAI_API_KEY");
   auto missing = ava::app::first_run_auth_onboarding_message(*session);
-  expect(missing && missing->find("Provider auth is not configured for `openai`") != std::string::npos &&
-             missing->find("Connect with /connect or /login") != std::string::npos &&
-             missing->find("ava connect openai --headless-oauth") != std::string::npos && missing->find("OPENAI_API_KEY") != std::string::npos &&
-             missing->find(paths.auth_file.string()) != std::string::npos,
-         "first-run onboarding explains missing OpenAI auth with TUI, CLI, env, and auth-file paths");
+  expect(missing && *missing == "! OpenAI not connected · /connect" && missing->find(paths.auth_file.string()) == std::string::npos &&
+             std::ranges::count(*missing, '\n') == 0,
+         "first-run TUI onboarding is one actionable advisory row without auth paths or environment dumps");
 
   auto required = ava::app::provider_auth_required_message(*session, "\nslash tool commands still work offline.");
   expect(required.find("Auth is required for provider `openai`") != std::string::npos &&
@@ -2020,12 +2024,12 @@ void test_app_command_dispatcher()
 
   expect(ava::app::is_backend_command("/model") && ava::app::is_backend_command("/models") && ava::app::is_backend_command("/providers") &&
              ava::app::is_backend_command("/hotkeys") && ava::app::is_backend_command("/keybindings") && ava::app::is_backend_command("/theme") &&
-             ava::app::is_backend_command("/details") && ava::app::is_backend_command("/tool") && ava::app::is_backend_command("/tools write") &&
-             ava::app::is_backend_command("/diff") && ava::app::is_backend_command("/copy") && ava::app::is_backend_command("/find src/*.cpp") &&
-             ava::app::is_backend_command("/ls src") && ava::app::is_backend_command("/thinking") && ava::app::is_backend_command("/status") &&
-             ava::app::is_backend_command("/reload") && ava::app::is_backend_command("/plugins") && ava::app::is_backend_command("/packages") &&
-             ava::app::is_backend_command("/permissions") && ava::app::is_backend_command("/permission-rules") && ava::app::is_backend_command("!pwd") &&
-             ava::app::is_backend_command("!!pwd"),
+             ava::app::is_backend_command("/details") && ava::app::is_backend_command("/sidebar") && ava::app::is_backend_command("/tool") &&
+             ava::app::is_backend_command("/tools write") && ava::app::is_backend_command("/diff") && ava::app::is_backend_command("/copy") &&
+             ava::app::is_backend_command("/find src/*.cpp") && ava::app::is_backend_command("/ls src") && ava::app::is_backend_command("/thinking") &&
+             ava::app::is_backend_command("/status") && ava::app::is_backend_command("/reload") && ava::app::is_backend_command("/plugins") &&
+             ava::app::is_backend_command("/packages") && ava::app::is_backend_command("/permissions") && ava::app::is_backend_command("/permission-rules") &&
+             ava::app::is_backend_command("!pwd") && ava::app::is_backend_command("!!pwd"),
          "command catalog classifies display toggles, status aliases, disabled aliases, hotkeys, and shell helpers as backend commands");
 
   std::vector<ava::app::CommandHotkey> const custom_hotkeys = {
@@ -2306,6 +2310,11 @@ void test_app_command_dispatcher()
   auto details = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/details"});
   expect(details && details->handled && !details->output.empty() && details->output[0].find("TUI display toggle") != std::string::npos,
          "command dispatcher recognizes /details without inventing backend tool metadata");
+  auto sidebar = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sidebar"});
+  expect(sidebar && sidebar->handled && !sidebar->output.empty() && sidebar->output[0].find("interactive TUI") != std::string::npos &&
+             sidebar->output[0].find("session overview") != std::string::npos && sidebar->output[0].find("session_id") == std::string::npos &&
+             sidebar->output[0].find("workspace") == std::string::npos,
+         "command dispatcher describes /sidebar as a TUI-only view without inventing sidebar data");
   auto tool = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/tools write"});
   expect(tool && tool->handled && !tool->output.empty() &&
              tool->output[0].find("/tool [query] to show the latest or matching expanded tool card") != std::string::npos &&
@@ -2361,10 +2370,10 @@ void test_app_command_dispatcher()
          "command dispatcher reports unsupported reload targets");
   auto help = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/help", .hotkeys = custom_hotkeys});
   expect(help && help->handled && !help->output.empty() && help->output[0].find("/hotkeys") != std::string::npos &&
-             help->output[0].find("/keybindings") != std::string::npos && help->output[0].find("/connect") != std::string::npos &&
-             help->output[0].find("/plugins") != std::string::npos && help->output[0].find("!<command>") != std::string::npos &&
-             help->output[0].find("!!<command>") != std::string::npos && help->output[0].find("Unavailable commands") != std::string::npos &&
-             help->output[0].find("Ctrl+M") != std::string::npos,
+             help->output[0].find("/keybindings") != std::string::npos && help->output[0].find("/sidebar") != std::string::npos &&
+             help->output[0].find("/connect") != std::string::npos && help->output[0].find("/plugins") != std::string::npos &&
+             help->output[0].find("!<command>") != std::string::npos && help->output[0].find("!!<command>") != std::string::npos &&
+             help->output[0].find("Unavailable commands") != std::string::npos && help->output[0].find("Ctrl+M") != std::string::npos,
          "command dispatcher /help includes catalog commands and effective hotkeys");
 
   int shell_prompts = 0;
@@ -3063,6 +3072,66 @@ void test_app_command_dispatcher()
              command_tool_events[1].tool_structured_result_json.find("\"tool\":\"glob\"") != std::string::npos && command_tool_events[1].total_matches > 0,
          "command dispatcher emits structured tool result runtime events");
 
+  auto const fallback_timeline = ava::app::tool_timeline_for_tui({
+      {.status = ava::agent::ToolTimelineStatus::Running,
+       .call_id = "running-only",
+       .name = "read",
+       .argument_summary = "pending.txt",
+       .arguments_json = "{\"path\":\"pending.txt\"}"},
+      {.status = ava::agent::ToolTimelineStatus::Running,
+       .call_id = "success",
+       .name = "write",
+       .argument_summary = "src/main.cpp",
+       .arguments_json = "{\"path\":\"src/main.cpp\"}"},
+      {.status = ava::agent::ToolTimelineStatus::Running,
+       .call_id = "error",
+       .name = "bash",
+       .argument_summary = "git push origin main",
+       .arguments_json = "{\"command\":\"git push origin main\"}"},
+      {.status = ava::agent::ToolTimelineStatus::Success, .call_id = "success", .name = "write", .result_summary = "wrote file"},
+      {.status = ava::agent::ToolTimelineStatus::Error, .call_id = "error", .name = "bash", .result_summary = "permission denied"},
+      {.status = ava::agent::ToolTimelineStatus::Running,
+       .call_id = "argument-conflict",
+       .name = "write",
+       .argument_summary = "first running summary",
+       .arguments_json = "{\"path\":\"first-running.json\"}"},
+      {.status = ava::agent::ToolTimelineStatus::Running,
+       .call_id = "argument-conflict",
+       .name = "write",
+       .argument_summary = "later running summary",
+       .arguments_json = "{\"path\":\"later-running.json\"}"},
+      {.status = ava::agent::ToolTimelineStatus::Success,
+       .call_id = "argument-conflict",
+       .name = "write",
+       .argument_summary = "settled summary",
+       .arguments_json = "{\"path\":\"settled.json\"}"},
+      {.status = ava::agent::ToolTimelineStatus::Running, .call_id = "argument-independent", .name = "write", .argument_summary = "first summary only"},
+      {.status = ava::agent::ToolTimelineStatus::Running,
+       .call_id = "argument-independent",
+       .name = "write",
+       .argument_summary = "later summary",
+       .arguments_json = "{\"path\":\"first-json-for-field\"}"},
+      {.status = ava::agent::ToolTimelineStatus::Success,
+       .call_id = "argument-independent",
+       .name = "write",
+       .argument_summary = "settled independent summary",
+       .arguments_json = "{\"path\":\"settled-independent.json\"}"},
+      {.status = ava::agent::ToolTimelineStatus::Running, .name = "empty-start", .argument_summary = "first empty id"},
+      {.status = ava::agent::ToolTimelineStatus::Success, .name = "empty-result", .result_summary = "second empty id"},
+  });
+  expect(fallback_timeline.size() == 7 && fallback_timeline[0].call_id == "running-only" &&
+             fallback_timeline[0].status == ava::tui::ToolTimelineStatus::Running && fallback_timeline[1].call_id == "success" &&
+             fallback_timeline[1].status == ava::tui::ToolTimelineStatus::Success && fallback_timeline[1].argument_summary == "src/main.cpp" &&
+             fallback_timeline[1].arguments_json == "{\"path\":\"src/main.cpp\"}" && fallback_timeline[2].call_id == "error" &&
+             fallback_timeline[2].status == ava::tui::ToolTimelineStatus::Error && fallback_timeline[2].argument_summary == "git push origin main" &&
+             fallback_timeline[2].arguments_json == "{\"command\":\"git push origin main\"}" && fallback_timeline[3].call_id == "argument-conflict" &&
+             fallback_timeline[3].argument_summary == "first running summary" && fallback_timeline[3].arguments_json == "{\"path\":\"first-running.json\"}" &&
+             fallback_timeline[4].call_id == "argument-independent" && fallback_timeline[4].argument_summary == "first summary only" &&
+             fallback_timeline[4].arguments_json == "{\"path\":\"first-json-for-field\"}" && fallback_timeline[5].call_id.empty() &&
+             fallback_timeline[5].name == "empty-start" && fallback_timeline[6].call_id.empty() && fallback_timeline[6].name == "empty-result",
+         "fallback TUI timeline retains first nonempty running arguments per field across later running and settled replacements while keeping empty ids "
+         "separate");
+
   std::vector<ava::app::runtime::Event> write_tool_events;
   auto write = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/write src/main.cpp int changed() { return 1; }",
                                                                         .event_sink = [&write_tool_events](ava::app::runtime::Event const& event) {
@@ -3075,13 +3144,50 @@ void test_app_command_dispatcher()
              write_tool_events[1].diff.find("+int changed()") != std::string::npos &&
              std::ranges::any_of(write_tool_events[1].changed_paths, [](std::string const& path) { return path.ends_with("src/main.cpp"); }),
          "command dispatcher /write forwards successful mutation diffs and changed paths into tool events");
+  if (write && write_tool_events.size() == 2)
+  {
+    auto tui_timeline = ava::app::tool_timeline_for_tui(write->tool_timeline);
+    ava::tui::TuiEventState event_state;
+    for (auto const& event : write_tool_events) ava::tui::apply_event_envelope(event_state, ava::app::to_event_envelope(event));
+    auto event_transcript = ava::tui::event_state_transcript_snapshot(event_state);
+    std::vector<ava::tui::TranscriptItem> timeline_transcript;
+    if (!tui_timeline.empty())
+      timeline_transcript.push_back(ava::tui::TranscriptItem{.tool = tui_timeline.back()});
+    auto const timeline_lines = ava::tui::detail::render_transcript_lines(timeline_transcript, 100, false, true, false);
+    auto const event_lines = ava::tui::detail::render_transcript_lines(event_transcript, 100, false, true, false);
+    auto join_lines = [](std::vector<std::string> const& lines) {
+      std::string joined;
+      for (auto const& line : lines) joined += line + '\n';
+      return joined;
+    };
+    auto const timeline_card = join_lines(timeline_lines);
+    auto const event_card = join_lines(event_lines);
+    auto count_text = [](std::string_view text, std::string_view needle) {
+      std::size_t count = 0;
+      for (auto position = text.find(needle); position != std::string_view::npos; position = text.find(needle, position + needle.size())) ++count;
+      return count;
+    };
+    auto const absolute_target = (workspace / "src/main.cpp").generic_string();
+    expect(tui_timeline.size() == 1 && tui_timeline.front().status == ava::tui::ToolTimelineStatus::Success &&
+               tui_timeline.front().argument_summary == "src/main.cpp" && timeline_lines.size() <= 2 && event_lines.size() <= 2 &&
+               timeline_card.find("src/main.cpp · wrote 27 bytes") != std::string::npos &&
+               event_card.find("src/main.cpp · wrote 27 bytes") != std::string::npos && count_text(timeline_card, "src/main.cpp") == 1 &&
+               count_text(event_card, "src/main.cpp") == 1 && timeline_card.find(absolute_target) == std::string::npos &&
+               event_card.find(absolute_target) == std::string::npos,
+           "real /write command source timeline retains two lifecycle entries while fallback TUI conversion matches the live settled card: timeline=" +
+               timeline_card + " event=" + event_card);
+  }
 
   std::size_t compact_generator_calls = 0;
   auto compact_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
                                std::string_view instructions, std::size_t estimated_tokens) -> ava::core::Result<std::string> {
     ++compact_generator_calls;
     static_cast<void>(instructions);
-    expect(!entries.empty() && config.max_summary_bytes > 0, "command dispatcher /compact passes session source data to summary generator");
+    auto const portable_entries = std::ranges::all_of(entries, [](auto const& entry) {
+      return entry.type == ava::session::EntryType::UserMessage || entry.type == ava::session::EntryType::AssistantMessage;
+    });
+    expect(portable_entries && config.max_summary_bytes > 0,
+           "command dispatcher /compact passes only portable request projection records to summary generator call " + std::to_string(compact_generator_calls));
     static_cast<void>(estimated_tokens);
     return std::string(
         "# Goal\nKeep key facts\n# Constraints / Preferences\nNone noted.\n# Decisions\nNone noted.\n"
@@ -3696,6 +3802,10 @@ void test_app_session_new_resume_commands()
     return;
 
   auto const source_session_id = session->store.session_id();
+  auto named_source = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/name Old title"});
+  expect(named_source && named_source->handled && !named_source->output.empty() && named_source->output[0] == "session name set: \"Old title\"",
+         "slash new/resume command test names the source session for title-first lifecycle receipts");
+
   auto missing_resume = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/resume"});
   expect(missing_resume && missing_resume->handled && !missing_resume->output.empty() && missing_resume->output[0] == "usage: /resume <id>",
          "slash /resume without an id returns usage text");
@@ -3704,13 +3814,13 @@ void test_app_session_new_resume_commands()
   auto const fresh_session_id = session->store.session_id();
   auto fresh_metadata = ava::session::load_session_metadata(session->store);
   auto fresh_entries = session->store.load();
-  expect(fresh && fresh->handled && !fresh->output.empty() && fresh_session_id != source_session_id &&
-             fresh->output[0].find("started session " + fresh_session_id) != std::string::npos &&
-             fresh->output[0].find("name=\"Fresh session\"") != std::string::npos &&
-             fresh->output[0].find("previous session " + source_session_id) != std::string::npos &&
-             fresh->output[0].find("switched to " + fresh_session_id) != std::string::npos && fresh_metadata && fresh_metadata->name == "Fresh session" &&
+  auto const expected_fresh_receipt = "started session \"Fresh session\" · id " + fresh_session_id + "\nprevious session \"Old title\" · id " +
+                                      source_session_id + "\nswitched to \"Fresh session\"";
+  expect(fresh && fresh->handled && fresh->output.size() == 1 && fresh_session_id != source_session_id && fresh->output[0] == expected_fresh_receipt &&
+             fresh->output[0].find("previous session " + source_session_id) == std::string::npos &&
+             fresh->output[0].find("switched to " + fresh_session_id) == std::string::npos && fresh_metadata && fresh_metadata->name == "Fresh session" &&
              fresh_metadata->actor == "tui" && fresh_entries && fresh_entries->size() >= 2,
-         "slash /new creates a fresh named session, records metadata, and switches runtime session");
+         "slash /new emits title-first lifecycle receipts with each actionable full id exactly once, records metadata, and switches runtime session");
 
   auto resumed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/resume " + source_session_id});
   expect(resumed && resumed->handled && !resumed->output.empty() && session->store.session_id() == source_session_id &&
@@ -3721,6 +3831,13 @@ void test_app_session_new_resume_commands()
   expect(sessions && sessions->handled && !sessions->output.empty() && sessions->output[0].find("Fresh session") != std::string::npos &&
              sessions->output[0].find(fresh_session_id) != std::string::npos,
          "slash /sessions shows named sessions created through /new");
+
+  auto unnamed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/new"});
+  auto const unnamed_session_id = session->store.session_id();
+  auto const expected_unnamed_receipt = "started session \"Untitled session\" · id " + unnamed_session_id + "\nprevious session \"Old title\" · id " +
+                                        source_session_id + "\nswitched to \"Untitled session\"";
+  expect(unnamed && unnamed->handled && unnamed->output.size() == 1 && unnamed->output[0] == expected_unnamed_receipt,
+         "slash /new uses the selector's Untitled session fallback in title-first lifecycle receipts");
 }
 
 void test_app_session_metadata_commands()
@@ -3742,24 +3859,28 @@ void test_app_session_metadata_commands()
     return;
 
   auto missing_name = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/name"});
-  expect(missing_name && missing_name->handled && !missing_name->output.empty() && missing_name->output[0] == "usage: /name <name|--clear>",
+  expect(missing_name && missing_name->handled && !missing_name->session_tree_changed && !missing_name->output.empty() &&
+             missing_name->output[0] == "usage: /name <name|--clear>",
          "slash /name without a name returns usage text");
 
   auto no_labels = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/labels"});
-  expect(no_labels && no_labels->handled && !no_labels->output.empty() && no_labels->output[0].find("session labels: <none>") != std::string::npos,
+  expect(no_labels && no_labels->handled && !no_labels->session_tree_changed && !no_labels->output.empty() &&
+             no_labels->output[0].find("session labels: <none>") != std::string::npos,
          "slash /labels without arguments reports current labels and usage");
 
   auto renamed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/rename Auth follow-up"});
   auto metadata_after_name = ava::session::load_session_metadata(session->store);
-  expect(renamed && renamed->handled && !renamed->output.empty() && renamed->output[0].find("session name set: \"Auth follow-up\"") != std::string::npos &&
-             metadata_after_name && metadata_after_name->name == "Auth follow-up" && metadata_after_name->actor == "tui",
+  expect(renamed && renamed->handled && renamed->session_tree_changed && !renamed->output.empty() &&
+             renamed->output[0].find("session name set: \"Auth follow-up\"") != std::string::npos && metadata_after_name &&
+             metadata_after_name->name == "Auth follow-up" && metadata_after_name->actor == "tui",
          "slash /rename alias appends current-session name metadata");
 
   auto labeled = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/label auth bug"});
   auto metadata_after_labels = ava::session::load_session_metadata(session->store);
-  expect(labeled && labeled->handled && !labeled->output.empty() && labeled->output[0].find("session labels set: auth,bug") != std::string::npos &&
-             metadata_after_labels && metadata_after_labels->name == "Auth follow-up" && metadata_after_labels->labels.size() == 2 &&
-             metadata_after_labels->labels[0] == "auth" && metadata_after_labels->labels[1] == "bug" && metadata_after_labels->actor == "tui",
+  expect(labeled && labeled->handled && labeled->session_tree_changed && !labeled->output.empty() &&
+             labeled->output[0].find("session labels set: auth,bug") != std::string::npos && metadata_after_labels &&
+             metadata_after_labels->name == "Auth follow-up" && metadata_after_labels->labels.size() == 2 && metadata_after_labels->labels[0] == "auth" &&
+             metadata_after_labels->labels[1] == "bug" && metadata_after_labels->actor == "tui",
          "slash /label alias appends current-session label metadata without losing the session name");
 
   auto const slash_items = ava::app::command_catalog_slash_items(*session);
@@ -3778,17 +3899,23 @@ void test_app_session_metadata_commands()
                     completion.description.find(description_fragment) != std::string::npos;
            });
   };
-  expect(has_session_completion(find_slash_item("/resume"), 0, session->store.session_id(), "Auth follow-up") &&
+  auto has_named_session_label = [&](ava::tui::SlashCommandItem const* item, std::size_t argument_index, std::vector<std::string> previous_args = {}) {
+    return item != nullptr && std::ranges::any_of(item->argument_completions, [&](auto const& completion) {
+             return completion.argument_index == argument_index && completion.value == session->store.session_id() &&
+                    completion.display_label == "Auth follow-up" && completion.description.find(session->store.session_id()) != std::string::npos &&
+                    completion.required_previous_args == previous_args;
+           });
+  };
+  expect(has_named_session_label(find_slash_item("/resume"), 0) &&
              has_session_completion(find_slash_item("/resume"), 0, session->store.session_id(), "labels=auth, bug") &&
-             has_session_completion(find_slash_item("/sessions"), 0, session->store.session_id(), "Auth follow-up") &&
+             has_named_session_label(find_slash_item("/sessions"), 0) &&
              has_session_completion(find_slash_item("/sessions"), 0, "rename", "Rename a session") &&
              has_session_completion(find_slash_item("/sessions"), 0, "labels", "Set or clear labels") &&
              has_session_completion(find_slash_item("/sessions"), 0, "archive", "Archive a session") &&
              has_session_completion(find_slash_item("/sessions"), 0, "unarchive", "Restore an archived session") &&
-             has_session_completion(find_slash_item("/sessions"), 1, session->store.session_id(), "Auth follow-up", {"rename"}) &&
-             has_session_completion(find_slash_item("/sessions"), 1, session->store.session_id(), "Auth follow-up", {"labels"}) &&
+             has_named_session_label(find_slash_item("/sessions"), 1, {"rename"}) && has_named_session_label(find_slash_item("/sessions"), 1, {"labels"}) &&
              has_session_completion(find_slash_item("/sessions"), 2, "--clear", "Clear labels", {"labels", session->store.session_id()}) &&
-             has_session_completion(find_slash_item("/sessions"), 1, session->store.session_id(), "Auth follow-up", {"archive"}) &&
+             has_named_session_label(find_slash_item("/sessions"), 1, {"archive"}) &&
              has_session_completion(find_slash_item("/sessions"), 2, "--confirm", "Confirm archive", {"archive", session->store.session_id()}),
          "slash palette session completions expose session archive, rename, resume, and tree workflows");
 
@@ -3824,7 +3951,7 @@ void test_app_session_metadata_commands()
          "slash /name --clear appends empty name metadata");
 }
 
-void test_runtime_model_switch_rejects_committed_v4_history()
+void test_request_projection_validates_committed_v4_history()
 {
   auto const workspace = create_empty_root("runtime-model-v4-history");
   std::filesystem::create_directories(workspace);
@@ -3883,25 +4010,28 @@ void test_runtime_model_switch_rejects_committed_v4_history()
                                                                        .timestamp = "2026-07-18T00:00:02Z",
                                                                        .data_json = *commit_data})
                              : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "v4 commit append failed")));
-  auto authority = ava::session::SessionReadAuthority::create_ephemeral(*store);
-  auto no_tools = ava::config::ModelInfo{};
-  no_tools.provider_id = "openai";
-  no_tools.model_id = "no-tools";
-  no_tools.api_family = "openai_responses";
-  no_tools.supports_tools = false;
-  auto other_provider = ava::config::ModelInfo{};
-  other_provider.provider_id = "anthropic";
-  other_provider.model_id = "other";
-  other_provider.api_family = "anthropic_messages";
-  other_provider.supports_tools = true;
-  auto rejected_no_tools = authority ? ava::app::runtime::validate_runtime_model_history(*authority, no_tools)
-                                     : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "missing authority")));
-  auto rejected_provider = authority ? ava::app::runtime::validate_runtime_model_history(*authority, other_provider)
-                                     : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "missing authority")));
-  expect(appended_function && appended_reasoning && appended_commit && authority && !rejected_no_tools &&
-             rejected_no_tools.error().format().find("tool support") != std::string::npos && !rejected_provider &&
-             rejected_provider.error().format().find("another provider") != std::string::npos,
-         "runtime model switch inspects committed v4 functions and provider-native reasoning after the compaction boundary");
+  auto entries = store->load();
+  auto no_tools = entries ? ava::agent::build_provider_messages_from_entries(
+                                *entries, ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "openai",
+                                                                                                                    .model_id = "no-tools",
+                                                                                                                    .api_family = "openai_responses",
+                                                                                                                    .reasoning_format = "openai_responses",
+                                                                                                                    .supports_tools = false,
+                                                                                                                    .supports_images = false}})
+                          : ava::core::Result<std::vector<ava::provider::ChatMessage>>(std::unexpected(entries.error()));
+  auto other_provider = entries
+                            ? ava::agent::build_provider_messages_from_entries(
+                                  *entries, ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "anthropic",
+                                                                                                                      .model_id = "other",
+                                                                                                                      .api_family = "anthropic_messages",
+                                                                                                                      .reasoning_format = "anthropic_thinking",
+                                                                                                                      .supports_tools = true,
+                                                                                                                      .supports_images = false}})
+                            : ava::core::Result<std::vector<ava::provider::ChatMessage>>(std::unexpected(entries.error()));
+  expect(appended_function && appended_reasoning && appended_commit && entries && !no_tools && !other_provider &&
+             no_tools.error().format().find("no exact bound tool result") != std::string::npos &&
+             other_provider.error().format().find("no exact bound tool result") != std::string::npos,
+         "request projection validates unresolved committed v4 functions independently of model-switch acceptance");
 
   auto incomplete = ava::session::SessionStore::create_ephemeral(workspace / "incomplete");
   if (!incomplete || !function_data)
@@ -3914,13 +4044,444 @@ void test_runtime_model_switch_rejects_committed_v4_history()
                                                                                          .timestamp = "2026-07-18T00:00:03Z",
                                                                                          .data_json = *function_data})
                                                : ava::core::VoidResult(std::unexpected(incomplete_target.error()));
-  auto incomplete_authority = ava::session::SessionReadAuthority::create_ephemeral(*incomplete);
-  auto rejected_incomplete = incomplete_authority
-                                 ? ava::app::runtime::validate_runtime_model_history(*incomplete_authority, other_provider)
-                                 : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "missing authority")));
-  expect(appended_incomplete && incomplete_authority && !rejected_incomplete &&
-             rejected_incomplete.error().format().find("incomplete assistant-output history") != std::string::npos,
-         "runtime model switch fails closed on incomplete v4 staging rather than treating it as empty history");
+  auto incomplete_entries = incomplete->load();
+  auto projected_incomplete = incomplete_entries ? ava::agent::build_provider_messages_from_entries(*incomplete_entries)
+                                                 : ava::core::Result<std::vector<ava::provider::ChatMessage>>(std::unexpected(incomplete_entries.error()));
+  expect(appended_incomplete && incomplete_entries && projected_incomplete && projected_incomplete->empty(),
+         "request projection strictly classifies but does not expose a structurally valid uncommitted v4 staging suffix");
+}
+
+void test_runtime_model_switch_accepts_committed_openai_responses_reasoning()
+{
+  auto const root = temp_root() / "runtime-model-openai-responses-replay";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions options;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
+  auto session = ava::app::open_runtime_session(options);
+  expect(session.has_value(), "OpenAI Responses replay model-switch test opens a runtime session");
+  if (!session)
+    return;
+
+  auto reasoning_data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+      .assistant_turn_id = "turn_openai_replay",
+      .sequence = 0,
+      .kind = ava::session::AssistantOutputItemKind::Reasoning,
+      .provider_item_id = "rs_openai_replay",
+      .provider_output_index = 0,
+      .payload = ava::session::AssistantOutputReasoning{
+          .text = "inspect first",
+          .format = "openai_responses",
+          .redacted = false,
+          .signature = "",
+          .redacted_data = std::nullopt,
+          .native_item_json =
+              R"({"id":"rs_openai_replay","type":"reasoning","summary":[{"type":"summary_text","text":"inspect first"}],"status":"completed","encrypted_content":"cipher-replay"})"}});
+  auto text_data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
+      .assistant_turn_id = "turn_openai_replay",
+      .sequence = 1,
+      .kind = ava::session::AssistantOutputItemKind::Text,
+      .provider_item_id = "msg_openai_replay",
+      .provider_output_index = 1,
+      .payload = ava::session::AssistantOutputText{.text = "done", .assistant_phase = ava::session::AssistantOutputTextPhase::FinalAnswer}});
+  auto commit_data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{.assistant_turn_id = "turn_openai_replay",
+                                                                                                               .item_count = 2,
+                                                                                                               .provider = "openai",
+                                                                                                               .model = "gpt-5.5",
+                                                                                                               .finish_reason = "completed",
+                                                                                                               .usage_json = std::nullopt});
+  auto appended_user = session->append_owned(ava::session::SessionEntry{.id = "user_openai_replay",
+                                                                        .parent_id = "",
+                                                                        .type = ava::session::EntryType::UserMessage,
+                                                                        .timestamp = "2026-07-18T00:00:00Z",
+                                                                        .data_json = R"({"text":"continue"})"});
+  auto appended_reasoning = reasoning_data && appended_user
+                                ? session->append_owned(ava::session::SessionEntry{.id = "reasoning_openai_replay",
+                                                                                   .parent_id = "user_openai_replay",
+                                                                                   .type = ava::session::EntryType::AssistantOutputItem,
+                                                                                   .timestamp = "2026-07-18T00:00:01Z",
+                                                                                   .data_json = *reasoning_data})
+                                : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "reasoning append failed")));
+  auto appended_text = text_data && appended_reasoning
+                           ? session->append_owned(ava::session::SessionEntry{.id = "text_openai_replay",
+                                                                              .parent_id = "reasoning_openai_replay",
+                                                                              .type = ava::session::EntryType::AssistantOutputItem,
+                                                                              .timestamp = "2026-07-18T00:00:02Z",
+                                                                              .data_json = *text_data})
+                           : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "text append failed")));
+  auto appended_commit = commit_data && appended_text
+                             ? session->append_owned(ava::session::SessionEntry{.id = "commit_openai_replay",
+                                                                                .parent_id = "text_openai_replay",
+                                                                                .type = ava::session::EntryType::AssistantTurnCommit,
+                                                                                .timestamp = "2026-07-18T00:00:03Z",
+                                                                                .data_json = *commit_data})
+                             : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "commit append failed")));
+  auto target = ava::app::resolve_runtime_model(paths, "openai", "gpt-5.6-sol");
+  expect(reasoning_data.has_value(), "OpenAI Responses replay test serializes a valid native reasoning item");
+  expect(text_data.has_value(), "OpenAI Responses replay test serializes the committed answer text");
+  expect(commit_data.has_value(), "OpenAI Responses replay test serializes the production-shaped turn commit");
+  expect(appended_user.has_value(), "OpenAI Responses replay test appends the user turn");
+  expect(appended_reasoning.has_value(), "OpenAI Responses replay test appends native reasoning");
+  expect(appended_text.has_value(), "OpenAI Responses replay test appends answer text");
+  expect(appended_commit.has_value(), "OpenAI Responses replay test commits the assistant turn");
+  expect(target.has_value(), "OpenAI Responses replay test resolves GPT-5.6 Sol");
+  if (!appended_commit || !target)
+    return;
+
+  auto physical_entries = session->store.load();
+  auto project_for = [&](ava::config::ModelInfo const& model) {
+    return physical_entries
+               ? ava::agent::build_provider_messages_from_entries(
+                     *physical_entries,
+                     ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = model.provider_id,
+                                                                                               .model_id = model.model_id,
+                                                                                               .api_family = model.api_family,
+                                                                                               .reasoning_format = model.reasoning_format,
+                                                                                               .supports_tools = model.supports_tools.value_or(false),
+                                                                                               .supports_images = false}})
+               : ava::core::Result<std::vector<ava::provider::ChatMessage>>(std::unexpected(physical_entries.error()));
+  };
+  auto wrong_format = *target;
+  wrong_format.reasoning_format = "anthropic_thinking";
+  auto projected_wrong_format = project_for(wrong_format);
+  auto other_provider = ava::app::resolve_runtime_model(paths, "anthropic", "claude-sonnet-4-5");
+  auto projected_other_provider =
+      other_provider ? project_for(*other_provider) : ava::core::Result<std::vector<ava::provider::ChatMessage>>(std::unexpected(other_provider.error()));
+  auto portable_without_reasoning = [](auto const& projected) {
+    return projected && std::ranges::any_of(*projected, [](auto const& message) { return message.content.find("done") != std::string::npos; }) &&
+           std::ranges::none_of(*projected, [](auto const& message) {
+             return std::ranges::any_of(message.content_parts, [](auto const& part) {
+               return part.type == ava::provider::ContentPartType::Reasoning || !part.provider_item_id.empty();
+             });
+           });
+  };
+  expect(portable_without_reasoning(projected_wrong_format) && portable_without_reasoning(projected_other_provider),
+         "foreign reasoning format and cross-provider targets receive visible answer text through portable request projection");
+
+  auto controller = std::move(session->run_controller);
+  auto rejected_append_switch = ava::app::switch_runtime_model(*session, *target);
+  session->run_controller = std::move(controller);
+  expect(!rejected_append_switch && session->model.provider_id == "openai" && session->model.model_id == "gpt-5.5",
+         "a model_change append failure is reported truthfully and leaves active runtime model state unchanged");
+
+  auto switched = ava::app::switch_runtime_model(*session, *target);
+  auto entries = session->store.load();
+  auto const appended_model_change = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+                                       return entry.type == ava::session::EntryType::ModelChange &&
+                                              entry.data_json.find(R"("previous_model":"gpt-5.5")") != std::string::npos &&
+                                              entry.data_json.find(R"("model":"gpt-5.6-sol")") != std::string::npos;
+                                     });
+  expect(switched && *switched && session->model.provider_id == "openai" && session->model.model_id == "gpt-5.6-sol" && appended_model_change,
+         "committed GPT-5.5 OpenAI Responses native reasoning safely switches to GPT-5.6 Sol and appends model_change");
+}
+
+void test_application_catalog_cache_reuses_workspace_and_session_indexes()
+{
+  auto const root = temp_root() / "application-catalog-cache";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions options;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
+  auto session = ava::app::open_runtime_session(options);
+  expect(session.has_value(), "application catalog cache test opens a runtime session");
+  if (!session)
+    return;
+
+  std::size_t workspace_walks = 0;
+  std::size_t session_tree_builds = 0;
+  auto workspace_walker = [&](ava::app::runtime::Session const&) {
+    ++workspace_walks;
+    return std::vector<ava::app::WorkspacePathCandidate>{
+        ava::app::WorkspacePathCandidate{.value = "src/", .description = "directory", .directory = true},
+        ava::app::WorkspacePathCandidate{.value = "src/main.cpp", .description = "file 20 bytes", .directory = false},
+        ava::app::WorkspacePathCandidate{.value = "my folder/space file.txt", .description = "file 5 bytes", .directory = false}};
+  };
+  auto tree_builder = [&](ava::app::runtime::Session const& current) -> ava::core::Result<ava::session::SessionTreeIndex> {
+    ++session_tree_builds;
+    ava::session::SessionTreeIndex tree;
+    tree.current_session_id = current.store.session_id();
+    tree.roots = {current.store.session_id()};
+    tree.leaves = tree.roots;
+    tree.current_path = tree.roots;
+    tree.sessions.push_back(ava::session::SessionTreeNode{.summary = ava::session::SessionSummary{.session_id = current.store.session_id(),
+                                                                                                  .path = current.store.session_path().string(),
+                                                                                                  .last_updated = "2026-07-22T00:00:00Z",
+                                                                                                  .entry_count = 1},
+                                                          .metadata = {},
+                                                          .children = {},
+                                                          .current = true});
+    return tree;
+  };
+
+  auto cache = ava::app::build_application_catalog_cache(*session, {}, workspace_walker, tree_builder);
+  auto find_slash_item = [&](std::string_view command) -> ava::tui::SlashCommandItem const* {
+    auto const found = std::ranges::find_if(cache.slash_commands, [&](auto const& item) { return item.command == command; });
+    return found == cache.slash_commands.end() ? nullptr : &*found;
+  };
+  auto has_completion = [](ava::tui::SlashCommandItem const* item, std::size_t argument_index, std::string_view value) {
+    return item && std::ranges::any_of(item->argument_completions,
+                                       [&](auto const& completion) { return completion.argument_index == argument_index && completion.value == value; });
+  };
+  auto const* read_item = find_slash_item("/read");
+  auto const* sessions_item = find_slash_item("/sessions");
+  auto const* resume_item = find_slash_item("/resume");
+  expect(workspace_walks == 1 && session_tree_builds == 1 && cache.operations.workspace_walks == 1 && cache.operations.session_tree_builds == 1 &&
+             has_completion(read_item, 0, "src/main.cpp") && !has_completion(read_item, 0, "my folder/space file.txt") &&
+             std::ranges::any_of(cache.file_references, [](auto const& item) { return item.value == "my folder/space file.txt"; }) &&
+             has_completion(sessions_item, 0, session->store.session_id()) && has_completion(resume_item, 0, session->store.session_id()),
+         "one application catalog build walks the workspace and session tree once while feeding both completion surfaces");
+
+  for (int pass = 0; pass < 100; ++pass)
+  {
+    auto slash_snapshot = cache.slash_commands;
+    auto reference_snapshot = cache.file_references;
+    auto model_view = ava::app::model_selector_view(*session, {});
+    static_cast<void>(slash_snapshot);
+    static_cast<void>(reference_snapshot);
+    static_cast<void>(model_view);
+  }
+  auto recent = ava::app::session_selector_view(*cache.session_tree, ava::app::SessionSelectorSort::Recent, {});
+  auto named = ava::app::session_selector_view(*cache.session_tree, ava::app::SessionSelectorSort::Name, {}, true, false, true, true);
+  auto path = ava::app::session_selector_view(*cache.session_tree, ava::app::SessionSelectorSort::Path, {}, false, true, false, false);
+  expect(workspace_walks == 1 && session_tree_builds == 1 && !recent.items.empty() && !named.items.empty() && !path.items.empty(),
+         "state snapshots and every selector filter or toggle reuse cached catalogs without filesystem enumeration");
+
+  auto const operation_counts_before_retarget = cache.operations;
+  ava::app::retarget_application_session(cache, session->store.session_id());
+  expect(cache.operations.workspace_walks == operation_counts_before_retarget.workspace_walks &&
+             cache.operations.session_tree_builds == operation_counts_before_retarget.session_tree_builds &&
+             cache.operations.value_refreshes == operation_counts_before_retarget.value_refreshes,
+         "current-session retarget changes only cached tree values and performs no catalog rebuild");
+
+  ava::app::refresh_application_catalog_values(cache, *session, {});
+  expect(workspace_walks == 1 && session_tree_builds == 1, "display and model-equivalent catalog refreshes do not walk workspace or session metadata");
+  ava::app::refresh_application_workspace_catalog(cache, *session, {}, workspace_walker);
+  expect(workspace_walks == 2 && session_tree_builds == 1 && cache.operations.workspace_walks == 2,
+         "explicit workspace mutation invalidation performs exactly one fresh walk");
+  ava::app::refresh_application_session_tree(cache, *session, {}, tree_builder);
+  expect(workspace_walks == 2 && session_tree_builds == 2 && cache.operations.session_tree_builds == 2,
+         "explicit session metadata mutation invalidation performs exactly one fresh tree build");
+}
+
+void test_application_catalog_coordinator_serializes_refresh_and_snapshot()
+{
+  auto const root = temp_root() / "application-catalog-coordinator";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions options;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
+  auto session = ava::app::open_runtime_session(options);
+  expect(session.has_value(), "application catalog coordinator test opens a runtime session");
+  if (!session)
+    return;
+
+  auto cache = ava::app::build_application_catalog_cache(*session, {}, [](ava::app::runtime::Session const&) {
+    return std::vector<ava::app::WorkspacePathCandidate>{ava::app::WorkspacePathCandidate{.value = "old.cpp", .description = "old file", .directory = false}};
+  });
+  ava::app::ApplicationCatalogCoordinator catalog(std::move(cache));
+  auto const initial_delivery = catalog.delivery_snapshot();
+  expect(!initial_delivery.slash_commands.empty() && initial_delivery.file_references.size() == 1 &&
+             initial_delivery.file_references.front().value == "old.cpp" && initial_delivery.slash_catalog_generation != 0 &&
+             initial_delivery.workspace_catalog_generation != 0,
+         "catalog coordinator delivers the complete initial completion generations exactly once");
+
+  std::mutex mutex;
+  std::condition_variable changed;
+  bool walker_started = false;
+  bool display_refresh_started = false;
+  bool snapshot_started = false;
+  bool release_walker = false;
+  bool refresh_finished = false;
+  std::thread refresh([&]() {
+    catalog.refresh_workspace(*session, {}, [&](ava::app::runtime::Session const&) {
+      std::unique_lock lock(mutex);
+      walker_started = true;
+      changed.notify_all();
+      if (!changed.wait_for(lock, std::chrono::seconds(2), [&] { return release_walker; }))
+        return std::vector<ava::app::WorkspacePathCandidate>{};
+      return std::vector<ava::app::WorkspacePathCandidate>{ava::app::WorkspacePathCandidate{.value = "new.cpp", .description = "new file", .directory = false}};
+    });
+    std::lock_guard lock(mutex);
+    refresh_finished = true;
+    changed.notify_all();
+  });
+
+  {
+    std::unique_lock lock(mutex);
+    expect(changed.wait_for(lock, std::chrono::seconds(2), [&] { return walker_started; }), "catalog refresh reaches the deterministic blocked workspace walk");
+  }
+  auto display_refresh = std::async(std::launch::async, [&] {
+    {
+      std::lock_guard lock(mutex);
+      display_refresh_started = true;
+      changed.notify_all();
+    }
+    catalog.refresh_values(*session, {});
+  });
+  {
+    std::unique_lock lock(mutex);
+    expect(changed.wait_for(lock, std::chrono::seconds(2), [&] { return display_refresh_started; }),
+           "overlapping display refresh reaches the catalog operation boundary");
+  }
+  auto const display_refresh_serialized = display_refresh.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready;
+  auto snapshot_future = std::async(std::launch::async, [&] {
+    {
+      std::lock_guard lock(mutex);
+      snapshot_started = true;
+      changed.notify_all();
+    }
+    return catalog.snapshot();
+  });
+  {
+    std::unique_lock lock(mutex);
+    expect(changed.wait_for(lock, std::chrono::seconds(2), [&] { return snapshot_started; }), "overlapping snapshot reaches the catalog operation boundary");
+  }
+  auto const snapshot_serialized = snapshot_future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready;
+
+  {
+    std::lock_guard lock(mutex);
+    release_walker = true;
+    changed.notify_all();
+  }
+  {
+    std::unique_lock lock(mutex);
+    expect(changed.wait_for(lock, std::chrono::seconds(2), [&] { return refresh_finished; }), "catalog refresh completes before its finite deadline");
+  }
+  refresh.join();
+  auto const display_refresh_finished = display_refresh.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+  if (display_refresh_finished)
+    display_refresh.get();
+  auto const snapshot_finished = snapshot_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+  auto during = snapshot_finished ? snapshot_future.get() : ava::app::ApplicationCatalogCache{};
+  auto after = catalog.snapshot();
+  expect(display_refresh_serialized && snapshot_serialized && display_refresh_finished && snapshot_finished && during.workspace_path_candidates.size() == 1 &&
+             during.workspace_path_candidates.front().value == "new.cpp" && during.file_references.size() == 1 &&
+             during.file_references.front().value == "new.cpp" && after.workspace_path_candidates.size() == 1 &&
+             after.workspace_path_candidates.front().value == "new.cpp" && after.file_references.size() == 1 &&
+             after.file_references.front().value == "new.cpp" && after.operations.workspace_walks == 2 && after.operations.value_refreshes == 3,
+         "submit, display refresh, and snapshot operations serialize before one coherent locked catalog generation is published");
+}
+
+void test_application_catalog_current_session_incremental_refresh()
+{
+  auto const root = temp_root() / "application-catalog-current-session";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions options;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
+  auto session = ava::app::open_runtime_session(options);
+  auto other = ava::session::SessionStore::create(workspace, paths.sessions_dir);
+  expect(session.has_value() && other.has_value(), "incremental catalog refresh creates current and comparison sessions");
+  if (!session || !other)
+    return;
+
+  std::size_t workspace_walks = 0;
+  auto cache = ava::app::build_application_catalog_cache(*session, {}, [&](ava::app::runtime::Session const&) {
+    ++workspace_walks;
+    return std::vector<ava::app::WorkspacePathCandidate>{};
+  });
+  ava::app::ApplicationCatalogCoordinator catalog(std::move(cache));
+  auto const initial = catalog.snapshot();
+  auto const initial_current =
+      std::ranges::find_if(initial.session_tree->sessions, [&](auto const& node) { return node.summary.session_id == session->store.session_id(); });
+  auto const initial_current_entry_count = initial_current == initial.session_tree->sessions.end() ? std::size_t{0} : initial_current->summary.entry_count;
+
+  ava::session::SessionMetadataUpdate fallback_update;
+  fallback_update.actor = "auto-title";
+  fallback_update.generated_title = "Fallback catalog title";
+  auto fallback = ava::session::make_session_metadata_entry(std::move(fallback_update));
+  auto activity = ava::session::SessionEntry{.id = "catalog_activity_1",
+                                             .parent_id = fallback ? fallback->id : std::string{},
+                                             .type = ava::session::EntryType::UserMessage,
+                                             .timestamp = "2099-01-01T00:00:00Z",
+                                             .data_json = R"({"text":"ordinary turn"})"};
+  auto fallback_appended = fallback ? session->append_target->append(*fallback) : ava::core::VoidResult(std::unexpected(fallback.error()));
+  auto activity_appended = fallback_appended ? session->append_target->append(activity) : fallback_appended;
+  auto refreshed = activity_appended ? catalog.refresh_current_session(*session, {}) : ava::core::Result<bool>(std::unexpected(activity_appended.error()));
+  auto after_fallback = catalog.snapshot();
+  auto fallback_view = catalog.session_view(ava::app::SessionSelectorSort::Recent, {});
+  auto current =
+      std::ranges::find_if(after_fallback.session_tree->sessions, [&](auto const& node) { return node.summary.session_id == session->store.session_id(); });
+  expect(refreshed && *refreshed && current != after_fallback.session_tree->sessions.end() && current->summary.title == "Fallback catalog title" &&
+             current->summary.entry_count == initial_current_entry_count + 2 && current->summary.last_updated == "2099-01-01T00:00:00Z" &&
+             !fallback_view.items.empty() && fallback_view.items.front().value == session->store.session_id() && workspace_walks == 1 &&
+             after_fallback.operations.workspace_walks == initial.operations.workspace_walks &&
+             after_fallback.operations.session_tree_builds == initial.operations.session_tree_builds &&
+             after_fallback.operations.session_node_refreshes == initial.operations.session_node_refreshes + 1,
+         "ordinary-turn incremental refresh exposes fallback title, current summary, and Recent ordering without workspace or tree walks");
+
+  ava::session::SessionMetadataUpdate refined_update;
+  refined_update.actor = "auto-title";
+  refined_update.generated_title = "Refined catalog title";
+  auto refined = ava::session::make_session_metadata_entry(std::move(refined_update), activity.id);
+  auto refined_appended = refined ? session->append_target->append(*refined) : ava::core::VoidResult(std::unexpected(refined.error()));
+  auto const title_changes = ava::app::SessionTitleCatalogChanges{.cursor = 7, .dirty_session_ids = {session->store.session_id()}};
+  auto generation_refresh =
+      refined_appended ? catalog.refresh_title_changes(*session, title_changes) : ava::core::Result<bool>(std::unexpected(refined_appended.error()));
+  auto duplicate_generation = generation_refresh ? catalog.refresh_title_changes(*session, title_changes) : generation_refresh;
+  auto after_refinement = catalog.snapshot();
+  auto refined_current =
+      std::ranges::find_if(after_refinement.session_tree->sessions, [&](auto const& node) { return node.summary.session_id == session->store.session_id(); });
+  expect(generation_refresh && *generation_refresh && duplicate_generation && !*duplicate_generation &&
+             refined_current != after_refinement.session_tree->sessions.end() && refined_current->summary.title == "Refined catalog title" &&
+             after_refinement.operations.session_node_refreshes == after_fallback.operations.session_node_refreshes + 1 && workspace_walks == 1 &&
+             after_refinement.operations.session_tree_builds == initial.operations.session_tree_builds,
+         "asynchronous title generation is consumed once at catalog access and updates the cached selector without broad rescans");
+
+  std::size_t topology_build_calls = 0;
+  auto successful_tree_builder = [&](ava::app::runtime::Session const& current) {
+    ++topology_build_calls;
+    return ava::session::build_session_tree(current.workspace_dir, current.paths.sessions_dir, current.store.session_id());
+  };
+  auto const captured_before_topology = ava::app::SessionTitleCatalogChanges{.cursor = 8, .dirty_session_ids = {"old_session_dirty_before_switch"}};
+  auto topology_refresh = catalog.refresh_session_tree_and_consume_title_changes(*session, captured_before_topology, {}, successful_tree_builder);
+  auto duplicate_after_topology = topology_refresh ? catalog.refresh_title_changes(*session, captured_before_topology, {}, successful_tree_builder)
+                                                   : ava::core::Result<bool>(std::unexpected(topology_refresh.error()));
+  auto const late_notification = ava::app::SessionTitleCatalogChanges{.cursor = 9, .dirty_session_ids = {session->store.session_id()}};
+  auto late_refresh = duplicate_after_topology ? catalog.refresh_title_changes(*session, late_notification, {}, successful_tree_builder)
+                                               : ava::core::Result<bool>(std::unexpected(duplicate_after_topology.error()));
+
+  auto const failed_capture = ava::app::SessionTitleCatalogChanges{.cursor = 10, .dirty_session_ids = {"old_session_dirty_before_failed_rebuild"}};
+  auto failed_refresh = catalog.refresh_session_tree_and_consume_title_changes(
+      *session, failed_capture, {}, [&](ava::app::runtime::Session const&) -> ava::core::Result<ava::session::SessionTreeIndex> {
+        ++topology_build_calls;
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "deterministic topology rebuild failure"));
+      });
+  auto const cursor_after_failure = catalog.title_catalog_cursor();
+  auto retry_refresh = catalog.refresh_session_tree_and_consume_title_changes(*session, failed_capture, {}, successful_tree_builder);
+  auto const after_topology_retry = catalog.snapshot();
+  auto retry_current = std::ranges::find_if(after_topology_retry.session_tree->sessions,
+                                            [&](auto const& node) { return node.summary.session_id == session->store.session_id(); });
+  expect(topology_refresh && *topology_refresh && duplicate_after_topology && !*duplicate_after_topology && catalog.title_catalog_cursor() == 10 &&
+             late_refresh && *late_refresh && cursor_after_failure == 9 && !failed_refresh && retry_refresh && *retry_refresh && topology_build_calls == 3 &&
+             workspace_walks == 1 && after_topology_retry.operations.session_tree_builds == initial.operations.session_tree_builds + 3 &&
+             retry_current != after_topology_retry.session_tree->sessions.end() && retry_current->summary.title == "Refined catalog title",
+         "captured topology refreshes consume only their cursor, leave later notifications pending, avoid duplicate builds, and preserve failed cursors for "
+         "retry");
 }
 
 void test_app_runtime_model_switch_persists_and_reopens()
@@ -4053,7 +4614,7 @@ void test_app_runtime_model_switch_persists_and_reopens()
   }
 }
 
-void test_app_runtime_model_switch_rejects_incompatible_history()
+void test_app_runtime_model_switch_projects_incompatible_history_at_request_time()
 {
   auto const root = create_empty_root("app-runtime-model-switch-compatibility");
 
@@ -4108,6 +4669,21 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
   if (!session)
     return;
 
+  auto project_current_request = [&]() {
+    auto physical = session->store.load();
+    bool const supports_images = std::ranges::find(session->model.input_modalities, "image") != session->model.input_modalities.end();
+    return physical
+               ? ava::agent::build_provider_messages_from_entries(
+                     *physical,
+                     ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = session->model.provider_id,
+                                                                                               .model_id = session->model.model_id,
+                                                                                               .api_family = session->model.api_family,
+                                                                                               .reasoning_format = session->model.reasoning_format,
+                                                                                               .supports_tools = session->model.supports_tools.value_or(false),
+                                                                                               .supports_images = supports_images}})
+               : ava::core::Result<std::vector<ava::provider::ChatMessage>>(std::unexpected(std::move(physical.error())));
+  };
+
   auto appended_tool_call = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                              .parent_id = "",
                                                                              .type = ava::session::EntryType::ToolCall,
@@ -4126,11 +4702,15 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
   expect(no_tools_model.has_value(), "runtime resolves no-tools model");
   if (!no_tools_model)
     return;
-  auto rejected_tools = ava::app::switch_runtime_model(*session, *no_tools_model);
-  expect(!rejected_tools.has_value(), "runtime rejects switch to model without tool support after tool history");
-  expect(!rejected_tools && rejected_tools.error().format().find("tool support") != std::string::npos,
-         "runtime tool-history switch error explains missing tool support");
-  expect(session->model.provider_id == "openai" && session->model.model_id == "gpt-5.5", "rejected tool-history switch leaves active model unchanged");
+  auto switched_no_tools = ava::app::switch_runtime_model(*session, *no_tools_model);
+  expect(switched_no_tools.has_value() && *switched_no_tools, "runtime switches immediately to a model without tool support after tool history");
+  expect(session->model.provider_id == "openai" && session->model.model_id == "no-tools",
+         "tool-history model switch updates active state without scanning history");
+  auto no_tools_request = project_current_request();
+  expect(no_tools_request &&
+             std::ranges::any_of(*no_tools_request, [](auto const& message) { return message.content.find("Tool call") != std::string::npos; }) &&
+             std::ranges::all_of(*no_tools_request, [](auto const& message) { return message.content_parts.empty(); }),
+         "the request immediately after a no-tools switch textualizes complete historical tool semantics");
 
   auto appended_reasoning = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                              .parent_id = "",
@@ -4155,11 +4735,18 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
   expect(kimi_model.has_value(), "runtime resolves Kimi model");
   if (!kimi_model)
     return;
-  auto rejected_reasoning = ava::app::switch_runtime_model(*session, *kimi_model);
-  expect(!rejected_reasoning.has_value(), "runtime rejects incompatible reasoning provider switch");
-  expect(!rejected_reasoning && rejected_reasoning.error().format().find("anthropic_thinking") != std::string::npos,
-         "runtime reasoning switch error includes incompatible reasoning format");
-  expect(session->model.provider_id == "anthropic" && session->model.model_id == "claude-replay", "rejected reasoning switch leaves active model unchanged");
+  auto switched_reasoning = ava::app::switch_runtime_model(*session, *kimi_model);
+  expect(switched_reasoning.has_value() && *switched_reasoning, "runtime switches immediately across incompatible reasoning providers");
+  expect(session->model.provider_id == "kimi" && session->model.model_id == "kimi-k2-thinking",
+         "cross-provider reasoning switch updates active state without scanning history");
+  auto cross_reasoning_request = project_current_request();
+  expect(cross_reasoning_request && std::ranges::none_of(*cross_reasoning_request,
+                                                         [](auto const& message) {
+                                                           return std::ranges::any_of(message.content_parts, [](auto const& part) {
+                                                             return part.type == ava::provider::ContentPartType::Reasoning;
+                                                           });
+                                                         }),
+         "the request immediately after a cross-provider switch drops historical reasoning instead of blocking selection");
 
   auto appended_compaction = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                               .parent_id = "",
@@ -4184,10 +4771,20 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
   expect(anthropic_image.has_value(), "runtime resolves Anthropic image model");
   if (!anthropic_image)
     return;
-  auto rejected_large_image = ava::app::switch_runtime_model(*session, *anthropic_image);
-  expect(!rejected_large_image.has_value() && rejected_large_image.error().format().find("byte-size") != std::string::npos,
-         "runtime rejects model switches that exceed provider-specific image limits");
-  expect(session->model.provider_id == "openai" && session->model.model_id == "no-tools", "rejected image-limit switch leaves active model unchanged");
+  auto switched_large_image = ava::app::switch_runtime_model(*session, *anthropic_image);
+  expect(switched_large_image.has_value() && *switched_large_image,
+         "runtime switches immediately despite historical images exceeding the target's provider-specific limit");
+  expect(session->model.provider_id == "anthropic" && session->model.model_id == "claude-image",
+         "image-history model switch updates active state without scanning history");
+  auto anthropic_image_request = project_current_request();
+  expect(anthropic_image_request &&
+             std::ranges::any_of(*anthropic_image_request,
+                                 [](auto const& message) {
+                                   return message.content.find("[historical image omitted: mime=image/png bytes=6291456]") != std::string::npos &&
+                                          std::ranges::none_of(message.content_parts,
+                                                               [](auto const& part) { return part.type == ava::provider::ContentPartType::Image; });
+                                 }),
+         "the request immediately after an Anthropic switch replaces an oversized historical image with a safe placeholder");
   auto appended_post_image_compaction = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                          .parent_id = "",
                                                                                          .type = ava::session::EntryType::Compaction,
@@ -4204,12 +4801,11 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
                                                                                                    "\"format\":\"reasoning_content\","
                                                                                                    "\"text\":\"display-only deepseek reasoning\"}"});
   expect(appended_deepseek_reasoning.has_value(), "model switch compatibility test seeds DeepSeek reasoning history");
-  auto rejected_deepseek_to_kimi = ava::app::switch_runtime_model(*session, *kimi_model);
-  expect(!rejected_deepseek_to_kimi.has_value() && rejected_deepseek_to_kimi.error().format().find("another provider") != std::string::npos &&
-             rejected_deepseek_to_kimi.error().format().find("reasoning_provider: deepseek") != std::string::npos,
-         "runtime rejects same-format reasoning replay from DeepSeek into Kimi");
-  expect(session->model.provider_id == "openai" && session->model.model_id == "no-tools",
-         "rejected cross-provider compatible reasoning switch leaves active model unchanged");
+  auto switched_deepseek_to_kimi = ava::app::switch_runtime_model(*session, *kimi_model);
+  expect(switched_deepseek_to_kimi.has_value() && *switched_deepseek_to_kimi,
+         "runtime switches immediately across providers that use the same reasoning format");
+  expect(session->model.provider_id == "kimi" && session->model.model_id == "kimi-k2-thinking",
+         "same-format cross-provider switch updates active state without replaying native reasoning");
 
   auto appended_deepseek_compaction = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                        .parent_id = "",
@@ -4229,24 +4825,24 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
   expect(appended_kimi_reasoning.has_value(), "model switch compatibility test seeds Kimi reasoning history");
 
   auto switched_kimi = ava::app::switch_runtime_model(*session, *kimi_model);
-  expect(switched_kimi.has_value() && *switched_kimi, "runtime allows switch to Kimi model with explicit reasoning preservation support");
-  expect(session->model.provider_id == "kimi" && session->model.model_id == "kimi-k2-thinking", "Kimi reasoning-compatible switch updates active model");
+  expect(switched_kimi.has_value() && !*switched_kimi, "switching to the already-active Kimi model remains an accepted no-op");
+  expect(session->model.provider_id == "kimi" && session->model.model_id == "kimi-k2-thinking", "accepted Kimi no-op preserves the active model");
 
   auto moonshot_model = ava::app::resolve_runtime_model(paths, "moonshot", "kimi-k2.6");
   expect(moonshot_model.has_value(), "runtime resolves Moonshot model");
   if (!moonshot_model)
     return;
-  auto rejected_moonshot = ava::app::switch_runtime_model(*session, *moonshot_model);
-  expect(!rejected_moonshot.has_value(), "runtime rejects reasoning_content switch without preservation quirk");
-  expect(session->model.provider_id == "kimi" && session->model.model_id == "kimi-k2-thinking",
-         "rejected Moonshot reasoning switch leaves active model unchanged");
+  auto switched_moonshot = ava::app::switch_runtime_model(*session, *moonshot_model);
+  expect(switched_moonshot.has_value() && *switched_moonshot, "runtime switches immediately without a native-reasoning preservation quirk");
+  expect(session->model.provider_id == "moonshot" && session->model.model_id == "kimi-k2.6",
+         "Moonshot switch updates active state while request projection owns replay safety");
 
   auto entries = session->store.load();
   expect(entries.has_value(), "model switch compatibility test reloads entries");
   if (entries)
   {
     auto const model_changes = std::ranges::count_if(*entries, [](auto const& entry) { return entry.type == ava::session::EntryType::ModelChange; });
-    expect(model_changes == 3, "rejected model switches do not append model_change entries");
+    expect(model_changes == 7, "every effective immediate model switch appends one truthful model_change entry");
   }
 }
 
@@ -4634,9 +5230,13 @@ void run_app_runtime_tests()
   test_app_session_branch_commands();
   test_app_session_new_resume_commands();
   test_app_session_metadata_commands();
-  test_runtime_model_switch_rejects_committed_v4_history();
+  test_application_catalog_cache_reuses_workspace_and_session_indexes();
+  test_application_catalog_coordinator_serializes_refresh_and_snapshot();
+  test_application_catalog_current_session_incremental_refresh();
+  test_request_projection_validates_committed_v4_history();
+  test_runtime_model_switch_accepts_committed_openai_responses_reasoning();
   test_app_runtime_model_switch_persists_and_reopens();
-  test_app_runtime_model_switch_rejects_incompatible_history();
+  test_app_runtime_model_switch_projects_incompatible_history_at_request_time();
   test_app_runtime_reasoning_selection_persists_and_requests();
   test_app_runtime_branch_construction_failure_rolls_back_created_file();
   test_app_runtime_initial_reasoning_level_option();

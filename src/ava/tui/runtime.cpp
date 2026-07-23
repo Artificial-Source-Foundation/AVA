@@ -6,6 +6,7 @@
 #include "ava/tui/event_state.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/runtime_internal.h"
 #include "ava/tui/session_grants.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
@@ -42,10 +43,8 @@ namespace {
 
 constexpr std::size_t kMaxBracketedPasteBytes = 1024 * 1024;
 constexpr std::size_t kMaxEscapeSequenceBytes = 16 * 1024;
-constexpr std::size_t kMaxTranscriptItems = 1000;
 constexpr std::size_t kKeyboardScrollRows = 3;
 constexpr std::size_t kMouseWheelScrollRows = 1;
-constexpr auto kSpinnerFrameDelay = std::chrono::milliseconds(80);
 constexpr auto kIdleInputPollDelay = std::chrono::milliseconds(250);
 constexpr auto kDisplayReloadPollInterval = std::chrono::milliseconds(500);
 constexpr std::string_view kCopyOptionPrefix = "copy:";
@@ -98,6 +97,17 @@ class SignalBlockGuard
  private:
   sigset_t previous_{};
   bool active_ = false;
+};
+
+class ComposerTerminalGraphicsGuard
+{
+ public:
+  ComposerTerminalGraphicsGuard() = default;
+  ComposerTerminalGraphicsGuard(ComposerTerminalGraphicsGuard const&) = delete;
+  ComposerTerminalGraphicsGuard& operator=(ComposerTerminalGraphicsGuard const&) = delete;
+  ~ComposerTerminalGraphicsGuard() { detail::clear_composer_terminal_graphics(); }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 std::pair<std::size_t, std::size_t> terminal_size()
@@ -354,44 +364,6 @@ bool is_compact_command(std::string_view line) noexcept
   return line == "/compact" || (line.starts_with("/compact") && line.size() > 8 && line[8] == ' ');
 }
 
-std::size_t transcript_height_for_snapshot(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height)
-{
-  auto const normal_composer_lines = detail::composer_block_line_count(snapshot, height, width);
-  auto const modal_question = snapshot.question_prompt && snapshot.question_prompt->modal;
-  auto const prompt_active = snapshot.permission_prompt.has_value() || (snapshot.question_prompt && !modal_question);
-  auto const fixed_lines = prompt_active ? std::size_t{0} : normal_composer_lines;
-  auto const max_prompt_lines = height > fixed_lines ? height - fixed_lines : 0;
-  auto const prompt_line_budget = prompt_active ? std::min<std::size_t>({7, max_prompt_lines}) : 0;
-  auto const permission_lines =
-      snapshot.permission_prompt ? detail::render_permission_prompt(*snapshot.permission_prompt, width, prompt_line_budget) : std::vector<std::string>{};
-  auto const question_lines = snapshot.question_prompt && !modal_question ? detail::render_question_prompt(*snapshot.question_prompt, width, prompt_line_budget)
-                                                                          : std::vector<std::string>{};
-  auto const fixed_and_prompt_lines = fixed_lines + permission_lines.size() + question_lines.size();
-  auto const palette_line_budget = (height > fixed_and_prompt_lines && !prompt_active && !snapshot.slash_palette_suppressed)
-                                       ? std::min(detail::kMaxPaletteLines, height - fixed_and_prompt_lines)
-                                       : 0;
-  auto const palette_lines = detail::render_slash_palette(snapshot, width, palette_line_budget);
-  auto const file_reference_palette_lines =
-      palette_lines.empty() ? detail::render_file_reference_palette(snapshot, width, palette_line_budget) : std::vector<std::string>{};
-  auto const path_completion_palette_lines = palette_lines.empty() && file_reference_palette_lines.empty()
-                                                 ? detail::render_path_completion_palette(snapshot, width, palette_line_budget)
-                                                 : std::vector<std::string>{};
-  auto const active_palette_lines = !palette_lines.empty()                  ? palette_lines.size()
-                                    : !file_reference_palette_lines.empty() ? file_reference_palette_lines.size()
-                                                                            : path_completion_palette_lines.size();
-  auto const non_transcript_lines = fixed_lines + active_palette_lines + permission_lines.size() + question_lines.size();
-  return height > non_transcript_lines ? height - non_transcript_lines : 0;
-}
-
-std::size_t max_transcript_scroll_offset_for_snapshot(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height)
-{
-  auto const transcript_height = transcript_height_for_snapshot(snapshot, width, height);
-  if (transcript_height == 0)
-    return 0;
-  auto const rendered_transcript = detail::render_transcript_lines(snapshot.transcript, width, snapshot.tool_details_visible, snapshot.thinking_visible);
-  return rendered_transcript.size() > transcript_height ? rendered_transcript.size() - transcript_height : 0;
-}
-
 std::optional<std::string> encode_wide_character(wchar_t character)
 {
   std::mbstate_t state{};
@@ -485,19 +457,47 @@ std::optional<std::string> latest_tool_copy_text(std::vector<TranscriptItem> con
   return std::nullopt;
 }
 
-std::optional<ToolTimelineItem> latest_tool_detail_card(std::vector<TranscriptItem> const& transcript, std::string_view query = {})
+std::string tool_card_identity_key(ToolTimelineItem const& item)
 {
-  for (auto item = transcript.rbegin(); item != transcript.rend(); ++item)
+  if (!item.call_id.empty())
+    return "call\n" + item.call_id;
+  if (!item.request_id.empty())
+    return "request\n" + item.request_id;
+  if (!item.correlation_id.empty())
+    return "correlation\n" + item.correlation_id;
+  return "fallback\n" + item.name + "\n" + item.argument_summary;
+}
+
+std::vector<std::pair<std::string, bool>> capture_tool_detail_visibility(std::vector<TranscriptItem> const& transcript)
+{
+  std::vector<std::pair<std::string, bool>> overrides;
+  for (auto const& item : transcript)
   {
-    if (!item->tool)
-      continue;
-    if (!detail::tool_card_matches_copy_query(*item->tool, query))
-      continue;
-    auto card = *item->tool;
-    card.details_visible = true;
-    return card;
+    if (item.tool && item.tool->details_visible)
+      overrides.emplace_back(tool_card_identity_key(*item.tool), *item.tool->details_visible);
   }
-  return std::nullopt;
+  return overrides;
+}
+
+void carry_tool_detail_visibility(std::vector<std::pair<std::string, bool>> const& overrides, std::vector<TranscriptItem>& transcript)
+{
+  std::vector<bool> used(overrides.size(), false);
+  for (std::size_t item_index = transcript.size(); item_index > 0; --item_index)
+  {
+    auto& item = transcript[item_index - 1];
+    if (!item.tool)
+      continue;
+    auto const key = tool_card_identity_key(*item.tool);
+    for (std::size_t override_index = overrides.size(); override_index > 0; --override_index)
+    {
+      auto const index = override_index - 1;
+      if (used[index] || overrides[index].first != key)
+        continue;
+      item.tool->details_visible = overrides[index].second;
+      used[index] = true;
+      break;
+    }
+  }
 }
 
 std::optional<std::string> latest_tool_diff_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query = {})
@@ -592,6 +592,23 @@ std::vector<std::string> split_key_display(std::string_view keys)
     start = comma + 1;
   }
   return parts;
+}
+
+std::string first_key_display(TuiKeyBindings const& bindings, TuiAction action)
+{
+  for (auto const& [configured_action, keys] : bindings.bindings)
+  {
+    if (configured_action == action && !keys.empty())
+      return key_display(keys.front());
+  }
+  return {};
+}
+
+ActiveRunHint active_run_hint_for(TuiKeyBindings const& bindings)
+{
+  return ActiveRunHint{.submit_or_queue = first_key_display(bindings, TuiAction::Submit),
+                       .follow_up = first_key_display(bindings, TuiAction::MessageFollowUp),
+                       .dequeue = first_key_display(bindings, TuiAction::MessageDequeue)};
 }
 
 std::size_t shared_key_count(std::vector<TuiKeyBindingHelpItem> const& items, std::string_view key)
@@ -1338,18 +1355,20 @@ std::optional<CursesInput> read_curses_input_with_timeout(std::chrono::milliseco
   return input;
 }
 
-void truncate_transcript(std::vector<TranscriptItem>& transcript)
+std::size_t truncate_transcript(std::vector<TranscriptItem>& transcript)
 {
-  if (transcript.size() > kMaxTranscriptItems)
-  {
-    transcript.erase(transcript.begin(), transcript.begin() + static_cast<std::ptrdiff_t>(transcript.size() - kMaxTranscriptItems));
-  }
+  if (transcript.size() <= kMaxTranscriptItems)
+    return 0;
+  auto const removed = transcript.size() - kMaxTranscriptItems;
+  transcript.erase(transcript.begin(), transcript.begin() + static_cast<std::ptrdiff_t>(removed));
+  return removed;
 }
 
 void push_transcript(ComposerSnapshot& snapshot, TranscriptItem item)
 {
   snapshot.transcript.push_back(std::move(item));
   truncate_transcript(snapshot.transcript);
+  ++snapshot.transcript_generation;
 }
 
 void push_history(std::vector<std::string>& history, std::string input)
@@ -1424,6 +1443,48 @@ ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_view(Question
 }
 
 }  // namespace
+
+void apply_reasoning_cycle_success(ComposerSnapshot& snapshot, std::string feedback)
+{
+  snapshot.status.clear();
+  snapshot.reasoning_feedback = std::move(feedback);
+}
+
+void clear_reasoning_feedback_for_user_input(ComposerSnapshot& snapshot)
+{
+  snapshot.reasoning_feedback.reset();
+}
+
+CappedTranscriptSnapshotUpdate apply_capped_transcript_snapshot(std::vector<TranscriptItem>& destination,
+                                                                std::vector<TranscriptItem> const& submitted_transcript,
+                                                                std::vector<TranscriptItem> const& turn_transcript, std::size_t previous_leading_evictions)
+{
+  destination = submitted_transcript;
+  destination.insert(destination.end(), turn_transcript.begin(), turn_transcript.end());
+  auto const leading_evictions = destination.size() > kMaxTranscriptItems ? destination.size() - kMaxTranscriptItems : std::size_t{0};
+  if (leading_evictions > 0)
+    destination.erase(destination.begin(), destination.begin() + static_cast<std::ptrdiff_t>(leading_evictions));
+  auto const item_index_shift = static_cast<std::ptrdiff_t>(previous_leading_evictions) - static_cast<std::ptrdiff_t>(leading_evictions);
+  return CappedTranscriptSnapshotUpdate{.leading_evictions = leading_evictions, .item_index_shift = item_index_shift};
+}
+
+std::optional<std::string> parse_tui_tool_command_argument(std::string_view submitted)
+{
+  return tool_command_argument(submitted);
+}
+
+std::optional<std::size_t> toggle_latest_matching_tool_details(std::vector<TranscriptItem>& transcript, std::string_view query, bool global_details_visible)
+{
+  for (std::size_t index = transcript.size(); index > 0; --index)
+  {
+    auto& item = transcript[index - 1];
+    if (!item.tool || !detail::tool_card_matches_copy_query(*item.tool, query))
+      continue;
+    item.tool->details_visible = !detail::tool_card_details_visible(*item.tool, global_details_visible);
+    return index - 1;
+  }
+  return std::nullopt;
+}
 
 ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_prompt_view(QuestionPromptView const& prompt)
 {
@@ -1589,6 +1650,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     std::cerr << curses.error().format() << '\n';
     return 1;
   }
+  ComposerTerminalGraphicsGuard graphics_cleanup;
 
   ComposerSnapshot snapshot{.mode = options.mode,
                             .provider = options.provider,
@@ -1602,6 +1664,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
                             .file_references = std::move(options.file_references),
                             .custom_themes = options.custom_themes,
                             .project_trust = options.project_trust};
+  snapshot.active_run_hint = active_run_hint_for(options.key_bindings);
+  auto applied_slash_catalog_generation = options.slash_catalog_generation;
+  auto applied_workspace_catalog_generation = options.workspace_catalog_generation;
   SidebarSnapshot sidebar{.session_id = options.session_id,
                           .mode = options.mode,
                           .provider = options.provider,
@@ -1634,8 +1699,22 @@ int run_interactive_composer(TuiRuntimeOptions options)
     snapshot.model = std::move(state.model);
     snapshot.session_id = std::move(state.session_id);
     snapshot.status = std::move(state.status);
-    snapshot.slash_commands = std::move(state.slash_commands);
-    snapshot.file_references = std::move(state.file_references);
+    bool completion_sources_changed = false;
+    if (!state.slash_catalog_generation || !applied_slash_catalog_generation || *state.slash_catalog_generation != *applied_slash_catalog_generation)
+    {
+      snapshot.slash_commands = std::move(state.slash_commands);
+      applied_slash_catalog_generation = state.slash_catalog_generation;
+      completion_sources_changed = true;
+    }
+    if (!state.workspace_catalog_generation || !applied_workspace_catalog_generation ||
+        *state.workspace_catalog_generation != *applied_workspace_catalog_generation)
+    {
+      snapshot.file_references = std::move(state.file_references);
+      applied_workspace_catalog_generation = state.workspace_catalog_generation;
+      completion_sources_changed = true;
+    }
+    if (completion_sources_changed)
+      ++snapshot.file_references_generation;
     snapshot.custom_themes = std::move(state.custom_themes);
     snapshot.project_trust = std::move(state.project_trust);
     snapshot.context_source_count = state.context_source_count;
@@ -1665,6 +1744,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
   bool path_completion_force_active = false;
   std::size_t transcript_scroll_offset = 0;
   std::size_t detached_new_output_count = 0;
+  detail::CompletionMatchCache completion_cache;
+  detail::TranscriptLayoutCache transcript_layout_cache;
   std::optional<SidebarSnapshot> detached_sidebar_snapshot;
   std::size_t draft_scroll_offset = 0;
   std::size_t draft_selection_anchor = std::string::npos;
@@ -1702,10 +1783,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
   };
 
   auto max_draft_scroll_offset = [&](std::size_t height) {
-    auto draft_snapshot = snapshot;
-    draft_snapshot.input = draft.text;
-    auto const main_width = composer_main_width(draft_snapshot);
-    auto const composer_lines = detail::composer_block_line_count(draft_snapshot, height, main_width);
+    auto const main_width = composer_main_width(snapshot);
+    auto const composer_lines = detail::composer_block_line_count(snapshot, height, main_width);
     auto const input_lines = detail::input_render_line_spans(draft.text, main_width).size();
     auto const layout = detail::composer_input_layout(input_lines, composer_lines, 0);
     return input_lines > layout.visible_input_lines ? input_lines - layout.visible_input_lines : std::size_t{0};
@@ -1867,10 +1946,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
       auto const [width, height] = terminal_size();
       snapshot.width = width;
       snapshot.height = height;
+      snapshot.sidebar_drawer_scroll_offset = std::min(snapshot.sidebar_drawer_scroll_offset, sidebar_drawer_max_scroll_offset(snapshot));
       draft_scroll_offset = std::min(draft_scroll_offset, max_draft_scroll_offset(height));
       snapshot.draft_scroll_offset = draft_scroll_offset;
-      auto const main_width = composer_main_width(snapshot);
-      transcript_scroll_offset = std::min(transcript_scroll_offset, max_transcript_scroll_offset_for_snapshot(snapshot, main_width, height));
+      if (transcript_scroll_offset > 0)
+      {
+        transcript_scroll_offset = std::min(transcript_scroll_offset, detail::composer_max_transcript_scroll_offset_cached(
+                                                                          snapshot, width, height, completion_cache, snapshot.file_references_generation,
+                                                                          transcript_layout_cache, snapshot.transcript_generation));
+      }
       if (transcript_scroll_offset == 0)
       {
         detached_new_output_count = 0;
@@ -1879,7 +1963,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
       }
       snapshot.transcript_scroll_offset = transcript_scroll_offset;
       snapshot.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
-      wrote = draw_screen(snapshot);
+      wrote =
+          detail::draw_screen_cached(snapshot, completion_cache, snapshot.file_references_generation, transcript_layout_cache, snapshot.transcript_generation);
     }
     return wrote && !terminal_signal_received();
   };
@@ -1928,13 +2013,19 @@ int run_interactive_composer(TuiRuntimeOptions options)
   };
 
   auto render_processing_frame = [&]() -> bool {
+    if (terminal_signal_received())
+      return false;
+    bool wrote = false;
     {
       std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-      if (snapshot.permission_prompt || snapshot.question_prompt)
+      SignalBlockGuard block_signals;
+      if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.sidebar_drawer_visible || !snapshot.processing)
         return true;
       ++snapshot.spinner_frame;
+      wrote = detail::draw_processing_footer_cached(snapshot, completion_cache, snapshot.file_references_generation, transcript_layout_cache,
+                                                    snapshot.transcript_generation);
     }
-    return render();
+    return wrote && !terminal_signal_received();
   };
   auto insert_newline = [&]() {
     pending_escape_clear = false;
@@ -2309,8 +2400,16 @@ int run_interactive_composer(TuiRuntimeOptions options)
       if (prompt.auto_resolve && no_input(question_input))
         continue;
 
-      auto input_result =
-          snapshot.question_prompt ? handle_question_prompt_input(*snapshot.question_prompt, question_input.event) : QuestionPromptInputResult{};
+      auto input_result = [&]() {
+        if (!snapshot.question_prompt)
+          return QuestionPromptInputResult{};
+        if (question_input.event.key == Key::MouseLeftClick)
+        {
+          if (auto const clicked = question_option_for_screen_position(snapshot, question_input.event.mouse_row, question_input.event.mouse_column))
+            return activate_question_option(*snapshot.question_prompt, *clicked);
+        }
+        return handle_question_prompt_input(*snapshot.question_prompt, question_input.event);
+      }();
       if (input_result.action == QuestionPromptInputAction::Cancel)
         return cancel_question();
 
@@ -2641,6 +2740,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   };
 
   auto cycle_reasoning = [&]() {
+    clear_reasoning_feedback_for_user_input(snapshot);
     if (!options.on_cycle_reasoning)
     {
       snapshot.status = "reasoning cycling unavailable";
@@ -2652,7 +2752,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       snapshot.status = result.error().format();
       return;
     }
-    snapshot.status = *result;
+    apply_reasoning_cycle_success(snapshot, std::move(*result));
     refresh_reasoning_status();
   };
 
@@ -2728,13 +2828,46 @@ int run_interactive_composer(TuiRuntimeOptions options)
     transcript_scroll_offset = 0;
   };
 
+  auto refresh_completion_cache = [&]() -> detail::CompletionMatchModel const* {
+    snapshot.input = draft.text;
+    snapshot.input_cursor = draft.cursor;
+    snapshot.slash_palette_suppressed = slash_palette_suppressed;
+    snapshot.path_completion_force_active = path_completion_force_active;
+    detail::refresh_completion_match_cache(completion_cache, snapshot, snapshot.file_references_generation);
+    return completion_cache.model ? &*completion_cache.model : nullptr;
+  };
   auto slash_palette_active = [&]() { return !slash_palette_suppressed && slash_palette_visible(draft.text, draft.cursor, snapshot.slash_commands); };
   auto file_reference_palette_active = [&]() {
-    return !slash_palette_suppressed && !slash_palette_active() && file_reference_palette_visible(draft.text, draft.cursor, snapshot.file_references);
+    auto const* model = refresh_completion_cache();
+    return model && model->surface == detail::CompletionSurface::FileReference && model->palette_visible;
   };
   auto path_completion_palette_active = [&]() {
-    return !slash_palette_suppressed && !slash_palette_active() && !file_reference_palette_active() &&
-           path_completion_palette_visible(draft.text, draft.cursor, snapshot.file_references, path_completion_force_active);
+    auto const* model = refresh_completion_cache();
+    return model && model->surface == detail::CompletionSurface::PathCompletion && model->palette_visible;
+  };
+  auto completion_match_count = [&]() {
+    auto const* model = refresh_completion_cache();
+    return model ? model->ranked_source_indices.size() : std::size_t{0};
+  };
+  auto clamp_completion = [&](std::size_t selected) {
+    static_cast<void>(refresh_completion_cache());
+    return detail::clamp_completion_selection(completion_cache, selected);
+  };
+  auto previous_completion = [&](std::size_t selected) {
+    static_cast<void>(refresh_completion_cache());
+    return detail::previous_completion_selection(completion_cache, selected);
+  };
+  auto next_completion = [&](std::size_t selected) {
+    static_cast<void>(refresh_completion_cache());
+    return detail::next_completion_selection(completion_cache, selected);
+  };
+  auto selected_completion_disabled_reason = [&](std::size_t selected) {
+    static_cast<void>(refresh_completion_cache());
+    return detail::completion_selection_disabled_reason(completion_cache, snapshot.file_references, selected);
+  };
+  auto selected_completion_text = [&](std::size_t selected) {
+    static_cast<void>(refresh_completion_cache());
+    return detail::completion_selection_text(completion_cache, snapshot, selected);
   };
 
   auto scroll_up = [&](std::size_t amount) {
@@ -2742,7 +2875,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
     auto const [width, height] = terminal_size();
     snapshot.width = width;
     snapshot.height = height;
-    auto const max_scroll = max_transcript_scroll_offset_for_snapshot(snapshot, composer_main_width(snapshot), height);
+    auto const max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot, width, height, completion_cache, snapshot.file_references_generation,
+                                                                                 transcript_layout_cache, snapshot.transcript_generation);
     auto const clamped_scroll = std::min(transcript_scroll_offset, max_scroll);
     transcript_scroll_offset = std::min(max_scroll, clamped_scroll + amount);
     if (transcript_scroll_offset > 0 && !detached_sidebar_snapshot)
@@ -2754,7 +2888,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
     auto const [width, height] = terminal_size();
     snapshot.width = width;
     snapshot.height = height;
-    auto const max_scroll = max_transcript_scroll_offset_for_snapshot(snapshot, composer_main_width(snapshot), height);
+    auto const max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot, width, height, completion_cache, snapshot.file_references_generation,
+                                                                                 transcript_layout_cache, snapshot.transcript_generation);
     auto const clamped_scroll = std::min(transcript_scroll_offset, max_scroll);
     transcript_scroll_offset = amount >= clamped_scroll ? 0 : clamped_scroll - amount;
     if (transcript_scroll_offset == 0)
@@ -2762,6 +2897,122 @@ int run_interactive_composer(TuiRuntimeOptions options)
       detached_new_output_count = 0;
       detached_sidebar_snapshot.reset();
     }
+  };
+
+  auto toggle_tool_details_at = [&](std::size_t item_index) {
+    if (item_index >= snapshot.transcript.size() || !snapshot.transcript[item_index].tool)
+      return false;
+    auto anchor = detail::TranscriptViewportAnchor{};
+    auto const preserve_viewport = transcript_scroll_offset > 0;
+    if (preserve_viewport)
+    {
+      auto const old_max_scroll =
+          detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache, snapshot.file_references_generation,
+                                                               transcript_layout_cache, snapshot.transcript_generation);
+      anchor = detail::capture_transcript_viewport_anchor(transcript_layout_cache.layout, old_max_scroll, transcript_scroll_offset);
+    }
+    auto& tool = *snapshot.transcript[item_index].tool;
+    tool.details_visible = !detail::tool_card_details_visible(tool, snapshot.tool_details_visible);
+    ++snapshot.transcript_generation;
+    if (preserve_viewport)
+    {
+      auto const new_max_scroll =
+          detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache, snapshot.file_references_generation,
+                                                               transcript_layout_cache, snapshot.transcript_generation);
+      transcript_scroll_offset = detail::restore_transcript_viewport_anchor(anchor, transcript_layout_cache.layout, new_max_scroll, 0);
+    }
+    snapshot.status = detail::tool_card_details_visible(tool, snapshot.tool_details_visible) ? "tool details visible" : "tool details compact";
+    return true;
+  };
+
+  auto toggle_matching_tool_details = [&](std::string_view query) -> std::optional<std::size_t> {
+    auto anchor = detail::TranscriptViewportAnchor{};
+    auto const preserve_viewport = transcript_scroll_offset > 0;
+    if (preserve_viewport)
+    {
+      auto const old_max_scroll =
+          detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache, snapshot.file_references_generation,
+                                                               transcript_layout_cache, snapshot.transcript_generation);
+      anchor = detail::capture_transcript_viewport_anchor(transcript_layout_cache.layout, old_max_scroll, transcript_scroll_offset);
+    }
+    auto const item_index = toggle_latest_matching_tool_details(snapshot.transcript, query, snapshot.tool_details_visible);
+    if (!item_index)
+      return std::nullopt;
+    ++snapshot.transcript_generation;
+    if (preserve_viewport)
+    {
+      auto const new_max_scroll =
+          detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache, snapshot.file_references_generation,
+                                                               transcript_layout_cache, snapshot.transcript_generation);
+      transcript_scroll_offset = detail::restore_transcript_viewport_anchor(anchor, transcript_layout_cache.layout, new_max_scroll, 0);
+    }
+    return item_index;
+  };
+
+  auto sidebar_drawer_focused = [&]() {
+    return snapshot.sidebar_drawer_visible && snapshot.sidebar.has_value() && !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list;
+  };
+
+  auto close_sidebar_drawer = [&]() {
+    snapshot.sidebar_drawer_visible = false;
+    snapshot.sidebar_drawer_scroll_offset = 0;
+    pending_escape_clear = false;
+    snapshot.status = "session overview closed";
+  };
+
+  auto sidebar_drawer_page_size = [&]() {
+    auto const [width, height] = terminal_size();
+    auto drawer_snapshot = snapshot;
+    drawer_snapshot.width = width;
+    drawer_snapshot.height = height;
+    auto const composer_lines = detail::composer_block_line_count(drawer_snapshot, height, width);
+    return height > composer_lines + 2 ? height - composer_lines - 2 : std::size_t{1};
+  };
+
+  auto handle_sidebar_drawer_input = [&](InputEvent const& event) -> std::optional<bool> {
+    if (!sidebar_drawer_focused())
+      return std::nullopt;
+    if (event.key == Key::Escape || key_matches_action(options.key_bindings, TuiAction::Cancel, event.key))
+    {
+      close_sidebar_drawer();
+      return render();
+    }
+
+    auto const max_scroll = sidebar_drawer_max_scroll_offset(snapshot);
+    if (key_matches_action(options.key_bindings, TuiAction::PageUp, event.key))
+    {
+      auto const page = sidebar_drawer_page_size();
+      snapshot.sidebar_drawer_scroll_offset = page >= snapshot.sidebar_drawer_scroll_offset ? 0 : snapshot.sidebar_drawer_scroll_offset - page;
+      return render();
+    }
+    if (key_matches_action(options.key_bindings, TuiAction::PageDown, event.key))
+    {
+      snapshot.sidebar_drawer_scroll_offset = std::min(max_scroll, snapshot.sidebar_drawer_scroll_offset + sidebar_drawer_page_size());
+      return render();
+    }
+    if (event.key == Key::Home)
+    {
+      snapshot.sidebar_drawer_scroll_offset = 0;
+      return render();
+    }
+    if (event.key == Key::End)
+    {
+      snapshot.sidebar_drawer_scroll_offset = max_scroll;
+      return render();
+    }
+    if (event.key == Key::MouseWheelUp)
+    {
+      if (snapshot.sidebar_drawer_scroll_offset > 0)
+        --snapshot.sidebar_drawer_scroll_offset;
+      return render();
+    }
+    if (event.key == Key::MouseWheelDown)
+    {
+      snapshot.sidebar_drawer_scroll_offset = std::min(max_scroll, snapshot.sidebar_drawer_scroll_offset + 1);
+      return render();
+    }
+    static_cast<void>(beep());
+    return true;
   };
 
   auto jump_to_bottom = [&](std::string status) {
@@ -2777,10 +3028,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
     auto const [width, height] = terminal_size();
     snapshot.width = width;
     snapshot.height = height;
-    auto const main_width = composer_main_width(snapshot);
-    auto const transcript_height = transcript_height_for_snapshot(snapshot, main_width, height);
-    auto const rendered_transcript = detail::render_transcript_lines(snapshot.transcript, main_width, snapshot.tool_details_visible, snapshot.thinking_visible);
-    if (transcript_height == 0 || rendered_transcript.size() <= transcript_height)
+    auto const max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot, width, height, completion_cache, snapshot.file_references_generation,
+                                                                                 transcript_layout_cache, snapshot.transcript_generation);
+    if (max_scroll == 0)
     {
       transcript_scroll_offset = 0;
       detached_new_output_count = 0;
@@ -2789,10 +3039,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
       return;
     }
 
-    auto const max_scroll = rendered_transcript.size() - transcript_height;
     auto const clamped_scroll = std::min(transcript_scroll_offset, max_scroll);
     auto const current_start = max_scroll - clamped_scroll;
-    auto const starts = detail::transcript_message_start_lines(snapshot.transcript, main_width, snapshot.tool_details_visible, snapshot.thinking_visible);
+    auto const& starts = transcript_layout_cache.layout.message_starts;
     if (starts.empty())
     {
       snapshot.status = "no message boundaries";
@@ -2913,8 +3162,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     if (file_reference_palette_active())
     {
-      selected_slash_command_index = clamp_file_reference_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
-      auto selection = file_reference_selection_text(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
+      selected_slash_command_index = clamp_completion(selected_slash_command_index);
+      if (auto const disabled_reason = selected_completion_disabled_reason(selected_slash_command_index))
+      {
+        snapshot.status = "reference disabled: " + *disabled_reason;
+        static_cast<void>(beep());
+        return InputLoopAction::ContinueLoop;
+      }
+      auto selection = selected_completion_text(selected_slash_command_index);
       clear_draft_selection();
       static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
       selected_slash_command_index = 0;
@@ -2933,10 +3188,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     if (path_completion_palette_active())
     {
-      selected_slash_command_index =
-          clamp_path_completion_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index, path_completion_force_active);
-      auto selection =
-          path_completion_selection_text(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index, path_completion_force_active);
+      selected_slash_command_index = clamp_completion(selected_slash_command_index);
+      if (auto const disabled_reason = selected_completion_disabled_reason(selected_slash_command_index))
+      {
+        snapshot.status = "path disabled: " + *disabled_reason;
+        static_cast<void>(beep());
+        return InputLoopAction::ContinueLoop;
+      }
+      auto selection = selected_completion_text(selected_slash_command_index);
       clear_draft_selection();
       static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
       selected_slash_command_index = 0;
@@ -3104,6 +3363,22 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         return InputLoopAction::ContinueLoop;
       }
+      if (submitted == "/sidebar")
+      {
+        push_history(input_history, submitted);
+        snapshot.sidebar_drawer_visible = true;
+        snapshot.sidebar_drawer_scroll_offset = 0;
+        transcript_scroll_offset = 0;
+        detached_new_output_count = 0;
+        detached_sidebar_snapshot.reset();
+        snapshot.status = "session overview opened";
+        if (!render())
+        {
+          terminal_write_failed = true;
+          return InputLoopAction::BreakLoop;
+        }
+        return InputLoopAction::ContinueLoop;
+      }
       if (submitted == "/settings")
       {
         push_history(input_history, submitted);
@@ -3177,22 +3452,19 @@ int run_interactive_composer(TuiRuntimeOptions options)
       if (auto tool_query = tool_command_argument(submitted))
       {
         push_history(input_history, submitted);
-        auto tool_card = latest_tool_detail_card(snapshot.transcript, *tool_query);
-        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-        if (tool_card)
+        auto const tool_index = toggle_matching_tool_details(*tool_query);
+        if (tool_index)
         {
-          auto status = tool_query->empty() ? std::string("showing latest tool details") : std::string("showing matching tool details");
-          push_transcript(snapshot, TranscriptItem{.label = "status", .text = status});
-          push_transcript(snapshot, TranscriptItem{.tool = std::move(*tool_card)});
-          snapshot.status = std::move(status);
+          auto const& tool = *snapshot.transcript[*tool_index].tool;
+          snapshot.status = detail::tool_card_details_visible(tool, snapshot.tool_details_visible)
+                                ? (tool_query->empty() ? "latest tool details visible" : "matching tool details visible")
+                                : (tool_query->empty() ? "latest tool details compact" : "matching tool details compact");
         }
         else
         {
           snapshot.status = tool_query->empty() ? "no tool details to show" : "no matching tool details to show";
-          push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
           static_cast<void>(beep());
         }
-        transcript_scroll_offset = 0;
         if (!render())
         {
           terminal_write_failed = true;
@@ -3235,7 +3507,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         std::string missing_status;
         bool valid_target = true;
         bool copied = false;
-        if (target.name.empty())
+        if (target.name.empty() || target.name == "last")
         {
           copy_text = latest_ava_message_copy_text(snapshot.transcript);
           copied_status = "copied last AVA message to clipboard";
@@ -3331,6 +3603,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       auto const supports_active_queue = !is_command_submission || is_compact_command(submitted);
       auto const transcript_before_submit = snapshot.transcript;
       auto submitted_transcript = transcript_before_submit;
+      std::size_t turn_snapshot_leading_evictions = 0;
       auto submit_image_attachments = std::vector<ava::session::ImageAttachmentRef>{};
       if (!is_command_submission && !pending_image_attachments.empty())
       {
@@ -3451,16 +3724,26 @@ int run_interactive_composer(TuiRuntimeOptions options)
         {
           std::lock_guard<std::recursive_mutex> lock(ui_mutex);
           auto const preserve_viewport = transcript_scroll_offset > 0;
-          auto const old_rendered_lines = preserve_viewport ? detail::render_transcript_lines(snapshot.transcript, composer_main_width(snapshot),
-                                                                                              snapshot.tool_details_visible, snapshot.thinking_visible)
-                                                                  .size()
-                                                            : std::size_t{0};
+          auto old_anchor = detail::TranscriptViewportAnchor{};
+          std::size_t old_rendered_lines = 0;
+          if (preserve_viewport)
+          {
+            auto const old_max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache,
+                                                                                             snapshot.file_references_generation, transcript_layout_cache,
+                                                                                             snapshot.transcript_generation);
+            old_anchor = detail::capture_transcript_viewport_anchor(transcript_layout_cache.layout, old_max_scroll, transcript_scroll_offset);
+            old_rendered_lines = transcript_layout_cache.layout.lines.size();
+          }
           if (preserve_viewport && !detached_sidebar_snapshot)
             detached_sidebar_snapshot = sidebar;
           apply_assistant_turn_meta(turn_transcript, assistant_meta_for_snapshot(snapshot, std::chrono::steady_clock::now() - turn_started_at));
-          snapshot.transcript = submitted_transcript;
-          snapshot.transcript.insert(snapshot.transcript.end(), turn_transcript.begin(), turn_transcript.end());
-          truncate_transcript(snapshot.transcript);
+          auto const tool_detail_overrides = capture_tool_detail_visibility(snapshot.transcript);
+          auto const capped_update =
+              apply_capped_transcript_snapshot(snapshot.transcript, submitted_transcript, turn_transcript, turn_snapshot_leading_evictions);
+          carry_tool_detail_visibility(tool_detail_overrides, snapshot.transcript);
+          auto const item_index_shift = capped_update.item_index_shift;
+          turn_snapshot_leading_evictions = capped_update.leading_evictions;
+          ++snapshot.transcript_generation;
           snapshot.queued_messages = event_state.queued_messages;
           sidebar.activity = event_state.activity;
           if (run_cancel_requested.load() && event_state.run_status == TuiEventRunStatus::Running)
@@ -3482,21 +3765,13 @@ int run_interactive_composer(TuiRuntimeOptions options)
           }
           if (preserve_viewport)
           {
-            auto const new_rendered_lines =
-                detail::render_transcript_lines(snapshot.transcript, composer_main_width(snapshot), snapshot.tool_details_visible, snapshot.thinking_visible)
-                    .size();
-            if (new_rendered_lines > old_rendered_lines)
-            {
-              auto const added_lines = new_rendered_lines - old_rendered_lines;
-              detached_new_output_count += added_lines;
-              detached_indicator_changed = true;
-              transcript_scroll_offset += new_rendered_lines - old_rendered_lines;
-            }
-            else
-            {
-              ++detached_new_output_count;
-              detached_indicator_changed = true;
-            }
+            auto const new_max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache,
+                                                                                             snapshot.file_references_generation, transcript_layout_cache,
+                                                                                             snapshot.transcript_generation);
+            transcript_scroll_offset = detail::restore_transcript_viewport_anchor(old_anchor, transcript_layout_cache.layout, new_max_scroll, item_index_shift);
+            auto const new_rendered_lines = transcript_layout_cache.layout.lines.size();
+            detached_new_output_count += new_rendered_lines > old_rendered_lines ? new_rendered_lines - old_rendered_lines : std::size_t{1};
+            detached_indicator_changed = true;
           }
           else
           {
@@ -3507,8 +3782,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
             auto const [width, height] = terminal_size();
             snapshot.width = width;
             snapshot.height = height;
-            auto const main_width = composer_main_width(snapshot);
-            transcript_scroll_offset = std::min(transcript_scroll_offset, max_transcript_scroll_offset_for_snapshot(snapshot, main_width, height));
+            transcript_scroll_offset = std::min(transcript_scroll_offset, detail::composer_max_transcript_scroll_offset_cached(
+                                                                              snapshot, width, height, completion_cache, snapshot.file_references_generation,
+                                                                              transcript_layout_cache, snapshot.transcript_generation));
             snapshot.transcript_scroll_offset = transcript_scroll_offset;
           }
         }
@@ -3586,16 +3862,51 @@ int run_interactive_composer(TuiRuntimeOptions options)
             snapshot.status = restored->steering ? "steering restored" : "follow-up restored";
             return render();
           };
+          auto completion_snapshot = [&]() -> ComposerSnapshot const& {
+            snapshot.input = draft.text;
+            snapshot.input_cursor = draft.cursor;
+            snapshot.selected_slash_command_index = selected_slash_command_index;
+            snapshot.slash_palette_suppressed = slash_palette_suppressed;
+            snapshot.path_completion_force_active = path_completion_force_active;
+            detail::refresh_completion_match_cache(completion_cache, snapshot, snapshot.file_references_generation);
+            return snapshot;
+          };
           auto run_active_command = [&]() -> std::optional<bool> {
+            if (draft.text == "/sidebar")
+            {
+              push_history(input_history, draft.text);
+              clear_draft_selection();
+              reset_composer_draft(draft);
+              jump_mode = ComposerJumpMode::None;
+              draft_scroll_offset = 0;
+              history_index.reset();
+              draft_input.clear();
+              selected_slash_command_index = 0;
+              slash_palette_suppressed = false;
+              path_completion_force_active = false;
+              snapshot.sidebar_drawer_visible = true;
+              snapshot.sidebar_drawer_scroll_offset = 0;
+              transcript_scroll_offset = 0;
+              detached_new_output_count = 0;
+              detached_sidebar_snapshot.reset();
+              snapshot.status = "session overview opened";
+              return render();
+            }
             if (!active_queues || !active_queues->run_nonblocking_command || draft.text.empty())
               return std::nullopt;
             auto const submitted_command = expanded_composer_draft_text(draft);
-            auto command_output = dispatch_tui_active_nonblocking_command(*active_queues, submitted_command);
-            if (!command_output)
+            auto const dispatch = dispatch_tui_active_nonblocking_command_gated(completion_snapshot(), *active_queues, submitted_command);
+            if (dispatch.kind == TuiActiveNonblockingCommandDispatchKind::Unrecognized)
               return std::nullopt;
+            if (dispatch.kind == TuiActiveNonblockingCommandDispatchKind::Blocked)
+            {
+              snapshot.status = dispatch.status;
+              static_cast<void>(beep());
+              return render();
+            }
             push_history(input_history, submitted_command);
             push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted_command});
-            for (auto const& output : *command_output)
+            for (auto const& output : dispatch.output)
               push_transcript(snapshot, TranscriptItem{.label = "ava", .text = output, .meta = assistant_meta_for_snapshot(snapshot)});
             clear_draft_selection();
             reset_composer_draft(draft);
@@ -3607,10 +3918,22 @@ int run_interactive_composer(TuiRuntimeOptions options)
             selected_slash_command_index = 0;
             slash_palette_suppressed = false;
             path_completion_force_active = false;
-            snapshot.status = command_output->empty() ? "job command complete" : command_output->back();
+            snapshot.status = dispatch.output.empty() ? "job command complete" : dispatch.output.back();
             return render();
           };
+          auto reject_disabled_visible_completion = [&]() -> std::optional<bool> {
+            auto const& current = completion_snapshot();
+            if (auto const disabled_status = detail::disabled_visible_completion_selection_status(current, completion_cache))
+            {
+              snapshot.status = *disabled_status;
+              static_cast<void>(beep());
+              return render();
+            }
+            return std::nullopt;
+          };
           auto queue_active_draft = [&](bool follow_up_only) {
+            if (auto handled = reject_disabled_visible_completion())
+              return *handled;
             if (draft.text.empty())
             {
               snapshot.status = "type a follow-up before queueing";
@@ -3669,6 +3992,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
             snapshot.status = steering_draft ? "steering queued" : "follow-up queued";
             return render();
           };
+          if (auto handled = handle_sidebar_drawer_input(active_event))
+            return *handled;
           if (jump_mode != ComposerJumpMode::None)
           {
             if (active_is_action(TuiAction::JumpForward) || active_is_action(TuiAction::JumpBackward))
@@ -3792,8 +4117,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
           }
           if (active_is_action(TuiAction::AutocompleteAccept) && file_reference_palette_active())
           {
-            selected_slash_command_index = clamp_file_reference_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
-            auto selection = file_reference_selection_text(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
+            selected_slash_command_index = clamp_completion(selected_slash_command_index);
+            if (auto const disabled_reason = selected_completion_disabled_reason(selected_slash_command_index))
+            {
+              snapshot.status = "reference disabled: " + *disabled_reason;
+              static_cast<void>(beep());
+              return render();
+            }
+            auto selection = selected_completion_text(selected_slash_command_index);
             clear_draft_selection();
             static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
             selected_slash_command_index = 0;
@@ -3806,10 +4137,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
           }
           if (active_is_action(TuiAction::AutocompleteAccept) && path_completion_palette_active())
           {
-            selected_slash_command_index =
-                clamp_path_completion_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index, path_completion_force_active);
-            auto selection =
-                path_completion_selection_text(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index, path_completion_force_active);
+            selected_slash_command_index = clamp_completion(selected_slash_command_index);
+            if (auto const disabled_reason = selected_completion_disabled_reason(selected_slash_command_index))
+            {
+              snapshot.status = "path disabled: " + *disabled_reason;
+              static_cast<void>(beep());
+              return render();
+            }
+            auto selection = selected_completion_text(selected_slash_command_index);
             clear_draft_selection();
             static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
             selected_slash_command_index = 0;
@@ -3819,6 +4154,43 @@ int run_interactive_composer(TuiRuntimeOptions options)
             draft_input.clear();
             snapshot.status = "path selected";
             return render();
+          }
+          if (active_is_action(TuiAction::AutocompleteAccept))
+          {
+            auto const was_suppressed = slash_palette_suppressed;
+            slash_palette_suppressed = false;
+            path_completion_force_active = true;
+            auto const match_count = completion_match_count();
+            if (match_count == 0)
+            {
+              slash_palette_suppressed = was_suppressed;
+              path_completion_force_active = false;
+            }
+            else
+            {
+              if (match_count == 1)
+              {
+                if (auto const disabled_reason = selected_completion_disabled_reason(0))
+                {
+                  path_completion_force_active = false;
+                  snapshot.status = "path disabled: " + *disabled_reason;
+                  static_cast<void>(beep());
+                  return render();
+                }
+                auto selection = selected_completion_text(0);
+                clear_draft_selection();
+                static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
+                path_completion_force_active = false;
+                draft_scroll_offset = 0;
+                snapshot.status = "path selected";
+              }
+              else
+              {
+                selected_slash_command_index = 0;
+                snapshot.status = "path suggestions";
+              }
+              return render();
+            }
           }
           if (active_is_action(TuiAction::NewLine))
           {
@@ -3859,6 +4231,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
           }
           if (active_is_action(TuiAction::Submit))
           {
+            if (auto handled = reject_disabled_visible_completion())
+              return *handled;
             if (active_event.key == Key::Enter && convert_backslash_enter_to_newline())
               return render();
             if (auto handled = run_active_command())
@@ -3996,47 +4370,45 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (active_is_action(TuiAction::PalettePrev) && slash_palette_active())
           {
             pending_escape_clear = false;
-            auto const matches = filter_slash_commands(draft.text, draft.cursor, snapshot.slash_commands);
-            if (matches.empty())
+            auto const match_count = filter_slash_commands(draft.text, draft.cursor, snapshot.slash_commands).size();
+            if (match_count == 0)
             {
               snapshot.status = "no matching slash commands";
             }
             else
             {
               selected_slash_command_index = previous_slash_palette_selection(draft.text, draft.cursor, snapshot.slash_commands, selected_slash_command_index);
-              snapshot.status = "command " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+              snapshot.status = "command " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
             }
             return render();
           }
           if (active_is_action(TuiAction::PalettePrev) && file_reference_palette_active())
           {
             pending_escape_clear = false;
-            auto const matches = filter_file_references(draft.text, draft.cursor, snapshot.file_references);
-            if (matches.empty())
+            auto const match_count = completion_match_count();
+            if (match_count == 0)
             {
               snapshot.status = "no matching file references";
             }
             else
             {
-              selected_slash_command_index =
-                  previous_file_reference_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
-              snapshot.status = "reference " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+              selected_slash_command_index = previous_completion(selected_slash_command_index);
+              snapshot.status = "reference " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
             }
             return render();
           }
           if (active_is_action(TuiAction::PalettePrev) && path_completion_palette_active())
           {
             pending_escape_clear = false;
-            auto const matches = filter_path_completions(draft.text, draft.cursor, snapshot.file_references);
-            if (matches.empty())
+            auto const match_count = completion_match_count();
+            if (match_count == 0)
             {
               snapshot.status = "no matching paths";
             }
             else
             {
-              selected_slash_command_index =
-                  previous_path_completion_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
-              snapshot.status = "path " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+              selected_slash_command_index = previous_completion(selected_slash_command_index);
+              snapshot.status = "path " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
             }
             return render();
           }
@@ -4076,45 +4448,45 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (active_is_action(TuiAction::PaletteNext) && slash_palette_active())
           {
             pending_escape_clear = false;
-            auto const matches = filter_slash_commands(draft.text, draft.cursor, snapshot.slash_commands);
-            if (matches.empty())
+            auto const match_count = filter_slash_commands(draft.text, draft.cursor, snapshot.slash_commands).size();
+            if (match_count == 0)
             {
               snapshot.status = "no matching slash commands";
             }
             else
             {
               selected_slash_command_index = next_slash_palette_selection(draft.text, draft.cursor, snapshot.slash_commands, selected_slash_command_index);
-              snapshot.status = "command " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+              snapshot.status = "command " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
             }
             return render();
           }
           if (active_is_action(TuiAction::PaletteNext) && file_reference_palette_active())
           {
             pending_escape_clear = false;
-            auto const matches = filter_file_references(draft.text, draft.cursor, snapshot.file_references);
-            if (matches.empty())
+            auto const match_count = completion_match_count();
+            if (match_count == 0)
             {
               snapshot.status = "no matching file references";
             }
             else
             {
-              selected_slash_command_index = next_file_reference_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
-              snapshot.status = "reference " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+              selected_slash_command_index = next_completion(selected_slash_command_index);
+              snapshot.status = "reference " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
             }
             return render();
           }
           if (active_is_action(TuiAction::PaletteNext) && path_completion_palette_active())
           {
             pending_escape_clear = false;
-            auto const matches = filter_path_completions(draft.text, draft.cursor, snapshot.file_references);
-            if (matches.empty())
+            auto const match_count = completion_match_count();
+            if (match_count == 0)
             {
               snapshot.status = "no matching paths";
             }
             else
             {
-              selected_slash_command_index = next_path_completion_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
-              snapshot.status = "path " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+              selected_slash_command_index = next_completion(selected_slash_command_index);
+              snapshot.status = "path " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
             }
             return render();
           }
@@ -4150,6 +4522,78 @@ int run_interactive_composer(TuiRuntimeOptions options)
             selected_slash_command_index = 0;
             slash_palette_suppressed = false;
             return render();
+          }
+          if (active_event.key == Key::MouseLeftClick)
+          {
+            if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
+            {
+              selected_slash_command_index = *clicked;
+              if (auto const disabled_reason = slash_command_selection_disabled_reason(draft.text, draft.cursor, snapshot.slash_commands, *clicked))
+              {
+                snapshot.status = "command disabled: " + *disabled_reason;
+                static_cast<void>(beep());
+              }
+              else
+              {
+                auto selection = slash_command_selection_text(draft.text, draft.cursor, snapshot.slash_commands, *clicked);
+                clear_draft_selection();
+                static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
+                selected_slash_command_index = 0;
+                snapshot.status = "command selected - press Enter to queue";
+              }
+              return render();
+            }
+            if (auto const clicked = detail::file_reference_palette_selection_for_screen_position_cached(
+                    snapshot, active_event.mouse_row, active_event.mouse_column, completion_cache, snapshot.file_references_generation))
+            {
+              selected_slash_command_index = *clicked;
+              if (auto const disabled_reason = selected_completion_disabled_reason(*clicked))
+              {
+                snapshot.status = "reference disabled: " + *disabled_reason;
+                static_cast<void>(beep());
+              }
+              else
+              {
+                auto selection = selected_completion_text(*clicked);
+                clear_draft_selection();
+                static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
+                selected_slash_command_index = 0;
+                snapshot.status = "file reference selected";
+              }
+              return render();
+            }
+            if (auto const clicked = detail::path_completion_palette_selection_for_screen_position_cached(
+                    snapshot, active_event.mouse_row, active_event.mouse_column, completion_cache, snapshot.file_references_generation))
+            {
+              selected_slash_command_index = *clicked;
+              if (auto const disabled_reason = selected_completion_disabled_reason(*clicked))
+              {
+                snapshot.status = "path disabled: " + *disabled_reason;
+                static_cast<void>(beep());
+              }
+              else
+              {
+                auto selection = selected_completion_text(*clicked);
+                clear_draft_selection();
+                static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
+                selected_slash_command_index = 0;
+                path_completion_force_active = false;
+                snapshot.status = "path selected";
+              }
+              return render();
+            }
+            if (auto const tool_index = detail::transcript_tool_card_header_for_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
+            {
+              if (toggle_tool_details_at(*tool_index))
+                return render();
+            }
+            if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
+            {
+              draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, *cursor);
+              clear_draft_selection();
+              snapshot.status = "cursor moved";
+              return render();
+            }
           }
           if (active_event.key == Key::MouseWheelUp)
           {
@@ -4200,7 +4644,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           return true;
         };
         bool render_failed = false;
-        while (submit_future.wait_for(kSpinnerFrameDelay) != std::future_status::ready)
+        while (submit_future.wait_for(detail::kProcessingIndicatorFrameDelay) != std::future_status::ready)
         {
           if (terminal_signal_received())
           {
@@ -4334,7 +4778,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
           {
             push_transcript(snapshot, TranscriptItem{.tool = tool});
           }
-          if (!should_show_slash_command_output_as_status(submitted))
+          auto const bounded_bash_output_is_in_card =
+              std::ranges::any_of(result.tool_timeline, [](auto const& tool) { return tool.name == "bash" && tool.truncated && !tool.spill_path.empty(); });
+          if (!should_show_slash_command_output_as_status(submitted) && !bounded_bash_output_is_in_card)
           {
             for (auto const& output : result.output)
             {
@@ -4416,6 +4862,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       }
       continue;
     }
+    clear_reasoning_feedback_for_user_input(snapshot);
     if (snapshot.select_list)
     {
       auto input_result = [&]() {
@@ -4521,6 +4968,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       auto apply_opened_session_snapshot = [&](TuiRuntimeStateSnapshot state, bool announce) {
         auto status = state.status;
         snapshot.transcript.clear();
+        ++snapshot.transcript_generation;
         clear_draft_selection();
         reset_composer_draft(draft);
         jump_mode = ComposerJumpMode::None;
@@ -4778,8 +5226,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         else
         {
-          auto opened = input_result.action == SelectListInputAction::BranchParent ? options.on_session_selector_branch_parent(selected_item->value)
-                                                                                   : options.on_session_selector_branch_child(selected_item->value);
+          auto const selected_value = selected_item->value;
+          auto opened = dispatch_tui_selector_authority(snapshot, "opening session…", render, [&]() {
+            return input_result.action == SelectListInputAction::BranchParent ? options.on_session_selector_branch_parent(selected_value)
+                                                                              : options.on_session_selector_branch_child(selected_value);
+          });
           if (opened)
           {
             snapshot.select_list.reset();
@@ -4938,6 +5389,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
             else
             {
               options.key_bindings = std::move(reloaded->key_bindings);
+              snapshot.active_run_hint = active_run_hint_for(options.key_bindings);
               apply_runtime_state_snapshot(std::move(reloaded->state));
               push_transcript(snapshot, TranscriptItem{.label = "ava", .text = "keybindings reloaded", .meta = assistant_meta_for_snapshot(snapshot)});
               transcript_scroll_offset = 0;
@@ -4946,7 +5398,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         else if (resolved_list == ActiveSelectList::Model && options.on_model_selected)
         {
-          auto selected = options.on_model_selected(selected_value);
+          auto selected = dispatch_tui_selector_authority(snapshot, "switching model…", render, [&]() { return options.on_model_selected(selected_value); });
           if (selected)
           {
             apply_runtime_state_snapshot(std::move(*selected));
@@ -4959,7 +5411,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         else if (resolved_list == ActiveSelectList::Session && options.on_session_selected)
         {
-          auto selected = options.on_session_selected(selected_value);
+          auto selected = dispatch_tui_selector_authority(snapshot, "opening session…", render, [&]() { return options.on_session_selected(selected_value); });
           if (selected)
           {
             apply_opened_session_snapshot(std::move(*selected), false);
@@ -5002,6 +5454,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
       continue;
     }
     auto const event = input.event;
+    if (auto handled = handle_sidebar_drawer_input(event))
+    {
+      if (!*handled)
+      {
+        terminal_write_failed = true;
+        break;
+      }
+      continue;
+    }
     auto is_action = [&](TuiAction action) { return key_matches_action(options.key_bindings, action, event.key); };
     auto select_slash_command = [&]() {
       selected_slash_command_index = clamp_slash_palette_selection(draft.text, draft.cursor, snapshot.slash_commands, selected_slash_command_index);
@@ -5022,8 +5483,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
       snapshot.status = "command selected - press Enter to run";
     };
     auto select_file_reference = [&]() {
-      selected_slash_command_index = clamp_file_reference_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
-      auto selection = file_reference_selection_text(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
+      selected_slash_command_index = clamp_completion(selected_slash_command_index);
+      if (auto const disabled_reason = selected_completion_disabled_reason(selected_slash_command_index))
+      {
+        snapshot.status = "reference disabled: " + *disabled_reason;
+        static_cast<void>(beep());
+        return;
+      }
+      auto selection = selected_completion_text(selected_slash_command_index);
       clear_draft_selection();
       static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
       selected_slash_command_index = 0;
@@ -5034,10 +5501,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
       snapshot.status = "file reference selected";
     };
     auto select_path_completion = [&]() {
-      selected_slash_command_index =
-          clamp_path_completion_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index, path_completion_force_active);
-      auto selection =
-          path_completion_selection_text(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index, path_completion_force_active);
+      selected_slash_command_index = clamp_completion(selected_slash_command_index);
+      if (auto const disabled_reason = selected_completion_disabled_reason(selected_slash_command_index))
+      {
+        snapshot.status = "path disabled: " + *disabled_reason;
+        static_cast<void>(beep());
+        return;
+      }
+      auto selection = selected_completion_text(selected_slash_command_index);
       clear_draft_selection();
       static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
       selected_slash_command_index = 0;
@@ -5048,17 +5519,30 @@ int run_interactive_composer(TuiRuntimeOptions options)
       snapshot.status = "path selected";
     };
     auto force_path_completion = [&]() {
-      auto const matches = filter_path_completions(draft.text, draft.cursor, snapshot.file_references, true);
-      if (matches.empty())
+      auto const was_suppressed = slash_palette_suppressed;
+      slash_palette_suppressed = false;
+      path_completion_force_active = true;
+      auto const match_count = completion_match_count();
+      if (match_count == 0)
+      {
+        slash_palette_suppressed = was_suppressed;
+        path_completion_force_active = false;
         return false;
+      }
       pending_escape_clear = false;
       history_index.reset();
       draft_input.clear();
-      slash_palette_suppressed = false;
       selected_slash_command_index = 0;
-      if (matches.size() == 1)
+      if (match_count == 1)
       {
-        auto selection = path_completion_selection_text(draft.text, draft.cursor, snapshot.file_references, 0, true);
+        if (auto const disabled_reason = selected_completion_disabled_reason(0))
+        {
+          path_completion_force_active = false;
+          snapshot.status = "path disabled: " + *disabled_reason;
+          static_cast<void>(beep());
+          return true;
+        }
+        auto selection = selected_completion_text(0);
         clear_draft_selection();
         static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
         path_completion_force_active = false;
@@ -5066,7 +5550,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
         snapshot.status = "path selected";
         return true;
       }
-      path_completion_force_active = true;
       draft_scroll_offset = 0;
       snapshot.status = "path suggestions";
       return true;
@@ -5408,23 +5891,29 @@ int run_interactive_composer(TuiRuntimeOptions options)
     else if (event.key == Key::MouseLeftClick)
     {
       pending_escape_clear = false;
-      if (auto const clicked = slash_palette_selection_for_screen_row(snapshot, event.mouse_row))
+      if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
       {
         clear_draft_selection();
         selected_slash_command_index = *clicked;
         select_slash_command();
       }
-      else if (auto const clicked = file_reference_palette_selection_for_screen_row(snapshot, event.mouse_row))
+      else if (auto const clicked = detail::file_reference_palette_selection_for_screen_position_cached(snapshot, event.mouse_row, event.mouse_column,
+                                                                                                        completion_cache, snapshot.file_references_generation))
       {
         clear_draft_selection();
         selected_slash_command_index = *clicked;
         select_file_reference();
       }
-      else if (auto const clicked = path_completion_palette_selection_for_screen_row(snapshot, event.mouse_row))
+      else if (auto const clicked = detail::path_completion_palette_selection_for_screen_position_cached(snapshot, event.mouse_row, event.mouse_column,
+                                                                                                         completion_cache, snapshot.file_references_generation))
       {
         clear_draft_selection();
         selected_slash_command_index = *clicked;
         select_path_completion();
+      }
+      else if (auto const tool_index = detail::transcript_tool_card_header_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+      {
+        static_cast<void>(toggle_tool_details_at(*tool_index));
       }
       else if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
       {
@@ -5518,43 +6007,43 @@ int run_interactive_composer(TuiRuntimeOptions options)
     else if (is_action(TuiAction::PalettePrev) && slash_palette_active())
     {
       pending_escape_clear = false;
-      auto const matches = filter_slash_commands(draft.text, draft.cursor, snapshot.slash_commands);
-      if (matches.empty())
+      auto const match_count = filter_slash_commands(draft.text, draft.cursor, snapshot.slash_commands).size();
+      if (match_count == 0)
       {
         snapshot.status = "no matching slash commands";
       }
       else
       {
         selected_slash_command_index = previous_slash_palette_selection(draft.text, draft.cursor, snapshot.slash_commands, selected_slash_command_index);
-        snapshot.status = "command " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+        snapshot.status = "command " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
       }
     }
     else if (is_action(TuiAction::PalettePrev) && file_reference_palette_active())
     {
       pending_escape_clear = false;
-      auto const matches = filter_file_references(draft.text, draft.cursor, snapshot.file_references);
-      if (matches.empty())
+      auto const match_count = completion_match_count();
+      if (match_count == 0)
       {
         snapshot.status = "no matching file references";
       }
       else
       {
-        selected_slash_command_index = previous_file_reference_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
-        snapshot.status = "reference " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+        selected_slash_command_index = previous_completion(selected_slash_command_index);
+        snapshot.status = "reference " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
       }
     }
     else if (is_action(TuiAction::PalettePrev) && path_completion_palette_active())
     {
       pending_escape_clear = false;
-      auto const matches = filter_path_completions(draft.text, draft.cursor, snapshot.file_references);
-      if (matches.empty())
+      auto const match_count = completion_match_count();
+      if (match_count == 0)
       {
         snapshot.status = "no matching paths";
       }
       else
       {
-        selected_slash_command_index = previous_path_completion_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
-        snapshot.status = "path " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+        selected_slash_command_index = previous_completion(selected_slash_command_index);
+        snapshot.status = "path " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
       }
     }
     else if (is_action(TuiAction::HistoryPrev))
@@ -5590,43 +6079,43 @@ int run_interactive_composer(TuiRuntimeOptions options)
     else if (is_action(TuiAction::PaletteNext) && slash_palette_active())
     {
       pending_escape_clear = false;
-      auto const matches = filter_slash_commands(draft.text, draft.cursor, snapshot.slash_commands);
-      if (matches.empty())
+      auto const match_count = filter_slash_commands(draft.text, draft.cursor, snapshot.slash_commands).size();
+      if (match_count == 0)
       {
         snapshot.status = "no matching slash commands";
       }
       else
       {
         selected_slash_command_index = next_slash_palette_selection(draft.text, draft.cursor, snapshot.slash_commands, selected_slash_command_index);
-        snapshot.status = "command " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+        snapshot.status = "command " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
       }
     }
     else if (is_action(TuiAction::PaletteNext) && file_reference_palette_active())
     {
       pending_escape_clear = false;
-      auto const matches = filter_file_references(draft.text, draft.cursor, snapshot.file_references);
-      if (matches.empty())
+      auto const match_count = completion_match_count();
+      if (match_count == 0)
       {
         snapshot.status = "no matching file references";
       }
       else
       {
-        selected_slash_command_index = next_file_reference_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
-        snapshot.status = "reference " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+        selected_slash_command_index = next_completion(selected_slash_command_index);
+        snapshot.status = "reference " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
       }
     }
     else if (is_action(TuiAction::PaletteNext) && path_completion_palette_active())
     {
       pending_escape_clear = false;
-      auto const matches = filter_path_completions(draft.text, draft.cursor, snapshot.file_references);
-      if (matches.empty())
+      auto const match_count = completion_match_count();
+      if (match_count == 0)
       {
         snapshot.status = "no matching paths";
       }
       else
       {
-        selected_slash_command_index = next_path_completion_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
-        snapshot.status = "path " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+        selected_slash_command_index = next_completion(selected_slash_command_index);
+        snapshot.status = "path " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
       }
     }
     else if (is_action(TuiAction::HistoryNext))
@@ -5776,6 +6265,37 @@ int run_interactive_composer(TuiRuntimeOptions options)
 std::optional<std::vector<std::string>> dispatch_tui_active_nonblocking_command(TuiActiveRunQueues const& queues, std::string const& submitted)
 {
   return queues.run_nonblocking_command ? queues.run_nonblocking_command(submitted) : std::nullopt;
+}
+
+TuiActiveNonblockingCommandDispatchResult dispatch_tui_active_nonblocking_command_gated(ComposerSnapshot const& completion_snapshot,
+                                                                                        TuiActiveRunQueues const& queues, std::string const& submitted)
+{
+  if (auto const disabled_status = detail::disabled_visible_completion_selection_status(completion_snapshot))
+  {
+    return TuiActiveNonblockingCommandDispatchResult{.kind = TuiActiveNonblockingCommandDispatchKind::Blocked, .status = *disabled_status};
+  }
+  auto output = dispatch_tui_active_nonblocking_command(queues, submitted);
+  if (!output)
+    return {};
+  return TuiActiveNonblockingCommandDispatchResult{.kind = TuiActiveNonblockingCommandDispatchKind::Handled, .output = std::move(*output)};
+}
+
+ava::core::Result<TuiRuntimeStateSnapshot> dispatch_tui_selector_authority(ComposerSnapshot& snapshot, std::string pending_status,
+                                                                           std::function<bool()> const& render,
+                                                                           std::function<ava::core::Result<TuiRuntimeStateSnapshot>()> const& callback)
+{
+  snapshot.select_list.reset();
+  snapshot.status = std::move(pending_status);
+  if (!render())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to paint selector authority status");
+    snapshot.status = error.format();
+    return std::unexpected(std::move(error));
+  }
+  auto result = callback();
+  if (!result)
+    snapshot.status = result.error().format();
+  return result;
 }
 
 }  // namespace ava::tui

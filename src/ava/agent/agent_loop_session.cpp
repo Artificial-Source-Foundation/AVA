@@ -113,7 +113,9 @@ bool has_reasoning_payload(ParsedReasoningBlock const& reasoning)
 
 ava::core::Result<PersistedAssistantTurn> append_assistant_turn_impl(SessionAppendBatchSink const& sink, ParsedAssistantTurn const& turn,
                                                                      std::string_view provider_id, std::string_view model_id,
-                                                                     ava::provider::TokenUsage const& usage, std::optional<long double> const& cost_usd)
+                                                                     ava::provider::TokenUsage const& usage, std::optional<long double> const& cost_usd,
+                                                                     std::optional<std::string_view> api_family,
+                                                                     std::optional<std::string_view> reasoning_format)
 {
   if (!sink)
   {
@@ -199,13 +201,15 @@ ava::core::Result<PersistedAssistantTurn> append_assistant_turn_impl(SessionAppe
                                                  .data_json = std::move(*data)});
   }
 
-  auto commit_data = ava::session::serialize_assistant_turn_commit_data_json(
-      ava::session::AssistantTurnCommit{.assistant_turn_id = assistant_turn_id,
-                                        .item_count = entries.size(),
-                                        .provider = std::string(provider_id),
-                                        .model = std::string(model_id),
-                                        .finish_reason = std::string(ava::provider::to_string(*turn.finish_reason)),
-                                        .usage_json = usage_json(usage, cost_usd)});
+  auto commit_data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{
+      .assistant_turn_id = assistant_turn_id,
+      .item_count = entries.size(),
+      .provider = std::string(provider_id),
+      .model = std::string(model_id),
+      .api_family = api_family && !api_family->empty() ? std::optional<std::string>(*api_family) : std::nullopt,
+      .reasoning_format = reasoning_format && !reasoning_format->empty() ? std::optional<std::string>(*reasoning_format) : std::nullopt,
+      .finish_reason = std::string(ava::provider::to_string(*turn.finish_reason)),
+      .usage_json = usage_json(usage, cost_usd)});
   if (!commit_data)
     return std::unexpected(std::move(commit_data.error()));
   persisted.committed_turn_id = ava::core::make_id("entry");
@@ -237,18 +241,20 @@ std::string tool_result_data_json(ToolDispatchResult const& result, std::optiona
 
 ava::core::Result<PersistedAssistantTurn> append_assistant_turn(SessionAppendBatchSink const& sink, ParsedAssistantTurn const& turn,
                                                                 std::string_view provider_id, std::string_view model_id, ava::provider::TokenUsage const& usage,
-                                                                std::optional<long double> const& cost_usd)
+                                                                std::optional<long double> const& cost_usd, std::optional<std::string_view> api_family,
+                                                                std::optional<std::string_view> reasoning_format)
 {
   if (!turn.finish_reason)
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "assistant turn has no normalized finish reason"));
   }
-  return append_assistant_turn_impl(sink, turn, provider_id, model_id, usage, cost_usd);
+  return append_assistant_turn_impl(sink, turn, provider_id, model_id, usage, cost_usd, api_family, reasoning_format);
 }
 
 ava::core::Result<PersistedAssistantTurn> append_assistant_turn(ava::session::SessionStore& store, ParsedAssistantTurn const& turn,
                                                                 std::string_view provider_id, std::string_view model_id, ava::provider::TokenUsage const& usage,
-                                                                std::optional<long double> const& cost_usd)
+                                                                std::optional<long double> const& cost_usd, std::optional<std::string_view> api_family,
+                                                                std::optional<std::string_view> reasoning_format)
 {
   if (!store.is_ephemeral())
   {
@@ -260,7 +266,7 @@ ava::core::Result<PersistedAssistantTurn> append_assistant_turn(ava::session::Se
     return std::unexpected(std::move(target.error()));
   return append_assistant_turn(
       [target = std::move(*target)](std::vector<ava::session::SessionEntry> entries) { return target->append_batch(std::move(entries)); }, turn, provider_id,
-      model_id, usage, cost_usd);
+      model_id, usage, cost_usd, api_family, reasoning_format);
 }
 
 ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text)

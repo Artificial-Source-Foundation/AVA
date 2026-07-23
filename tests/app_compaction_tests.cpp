@@ -116,9 +116,9 @@ void test_app_compact_provider_summary_success()
   expect(compact && compact->handled && !compact->output.empty() && compact->output[0].find("compaction summary recorded") != std::string::npos,
          "/compact records a provider-generated summary");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("Goal: refactor compaction") != std::string::npos &&
-             transport.requests()[0].body.find("visible compact reasoning") != std::string::npos &&
+             transport.requests()[0].body.find("visible compact reasoning") == std::string::npos &&
              transport.requests()[0].body.find("hidden redacted compact reasoning") == std::string::npos &&
-             transport.requests()[0].body.find("signature_present") != std::string::npos &&
+             transport.requests()[0].body.find("signature_present") == std::string::npos &&
              transport.requests()[0].body.find("compact-secret-signature") == std::string::npos &&
              transport.requests()[0].body.find("redacted-compact-secret") == std::string::npos &&
              transport.requests()[0].body.find("opaque-compaction-redacted") == std::string::npos &&
@@ -136,6 +136,7 @@ void test_app_compact_provider_summary_success()
                                      std::string::npos &&
                                  entry.data_json.find("\"reason\":\"manual\"") != std::string::npos &&
                                  entry.data_json.find("\"provider\":\"openai\"") != std::string::npos &&
+                                 entry.data_json.find("\"history_projection\":\"portable-v1\"") != std::string::npos &&
                                  entry.data_json.find("\"summary_unavailable\":false") != std::string::npos;
                         }),
          "/compact appends the returned summary and the shared bounded recent-turn projection");
@@ -473,7 +474,7 @@ void test_app_compaction_prompt_builder_sections()
                                                          .parent_id = "",
                                                          .type = ava::session::EntryType::Compaction,
                                                          .timestamp = "2026-05-01T00:00:02Z",
-                                                         .data_json = "{\"summary\":\"ACTIVE_BOUNDARY_SUMMARY\"}"});
+                                                         .data_json = "{\"summary\":\"ACTIVE_BOUNDARY_SUMMARY\",\"history_projection\":\"portable-v1\"}"});
   compacted_entries.push_back(ava::session::SessionEntry{.id = "active_user",
                                                          .parent_id = "",
                                                          .type = ava::session::EntryType::UserMessage,
@@ -545,10 +546,11 @@ void test_app_compaction_recent_tail_preserves_tool_group()
                                  .timestamp = "2026-05-01T00:00:03Z",
                                  .data_json = "{\"call_id\":\"call_safe_tail\",\"name\":\"read_file\",\"success\":true,\"result\":\"SAFE_RESULT\"}"}};
   auto prepared = ava::app::prepare_compaction_context(entries, config);
-  expect(prepared && prepared->recent_context.find("call_safe_tail") != std::string::npos &&
+  expect(prepared && prepared->recent_context.find("Tool call (read_file)") != std::string::npos &&
              prepared->recent_context.find("SAFE_RESULT") != std::string::npos &&
-             prepared->recent_context.find("call_safe_tail") < prepared->recent_context.find("SAFE_RESULT"),
-         "legacy message retention expands a selected tool result backward to keep its complete call/result group");
+             prepared->recent_context.find("Tool call (read_file)") < prepared->recent_context.find("SAFE_RESULT") &&
+             prepared->recent_context.find("call_safe_tail") == std::string::npos,
+         "portable compaction retention expands a selected tool result backward while removing persisted call ids");
 }
 
 void test_app_compaction_recent_tail_budget_never_orphans_tools()
@@ -579,10 +581,11 @@ void test_app_compaction_recent_tail_budget_never_orphans_tools()
   auto exact = ava::app::prepare_compaction_context(entries, config);
   config.keep_recent_tokens = exact_tokens > 0 ? exact_tokens - 1 : 0;
   auto tight = ava::app::prepare_compaction_context(entries, config);
-  expect(exact && !exact->recent_context_omitted && exact->recent_context.find("call_exact_budget") != std::string::npos &&
-             exact->recent_context.find("EXACT_TOOL_RESULT") != std::string::npos && ava::session::estimate_tokens(exact->recent_context) <= exact_tokens,
-         "an exact recent-context budget retains a complete tool call/result group");
-  expect(tight && tight->recent_context_omitted && tight->recent_context.find("call_exact_budget") == std::string::npos &&
+  expect(exact && !exact->recent_context_omitted && exact->recent_context.find("Tool call (read_file)") != std::string::npos &&
+             exact->recent_context.find("EXACT_TOOL_RESULT") != std::string::npos && exact->recent_context.find("call_exact_budget") == std::string::npos &&
+             ava::session::estimate_tokens(exact->recent_context) <= exact_tokens,
+         "an exact recent-context budget retains a complete portable tool call/result group");
+  expect(tight && tight->recent_context_omitted && tight->recent_context.find("Tool call (read_file)") == std::string::npos &&
              tight->recent_context.find("EXACT_TOOL_RESULT") == std::string::npos &&
              ava::session::estimate_tokens(tight->recent_context) <= config.keep_recent_tokens,
          "a budget too tight for a structured tool group omits the whole group instead of retaining an orphan or truncating JSON");
@@ -633,11 +636,12 @@ void test_app_manual_compaction_uses_only_active_context()
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = "2026-05-01T00:00:00Z",
                                                                      .data_json = "{\"text\":\"REPLACED_OLD_CONTEXT\"}"}));
-  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "existing_boundary",
-                                                                     .parent_id = "",
-                                                                     .type = ava::session::EntryType::Compaction,
-                                                                     .timestamp = "2026-05-01T00:00:01Z",
-                                                                     .data_json = "{\"summary\":\"EXISTING_ACTIVE_SUMMARY\"}"}));
+  static_cast<void>(
+      session->append_owned(ava::session::SessionEntry{.id = "existing_boundary",
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::Compaction,
+                                                       .timestamp = "2026-05-01T00:00:01Z",
+                                                       .data_json = "{\"summary\":\"EXISTING_ACTIVE_SUMMARY\",\"history_projection\":\"portable-v1\"}"}));
   static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "active_new_user",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
@@ -650,8 +654,9 @@ void test_app_manual_compaction_uses_only_active_context()
                     .command = "/compact",
                     .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const&,
                                                         std::string_view, std::size_t estimated_tokens) -> ava::core::Result<std::string> {
-                      saw_active_projection =
-                          entries.size() == 2 && entries.front().id == "existing_boundary" && entries.back().id == "active_new_user" && estimated_tokens > 0;
+                      saw_active_projection = entries.size() == 2 && entries.front().type == ava::session::EntryType::UserMessage &&
+                                              entries.front().data_json.find("EXISTING_ACTIVE_SUMMARY") != std::string::npos &&
+                                              entries.back().data_json.find("ACTIVE_NEW_CONTEXT") != std::string::npos && estimated_tokens > 0;
                       return std::string("NEXT ACTIVE SUMMARY");
                     }});
   auto entries = session->store.load();
@@ -1249,23 +1254,22 @@ void test_app_compaction_projects_committed_v4_and_ignores_incomplete_staging()
 
   auto const prompt = ava::app::build_compaction_summary_prompt(entries, config, "", 42);
   expect(prompt && prompt->find("safe compaction context") != std::string::npos && prompt->find("visible v4 commentary") != std::string::npos &&
-             prompt->find("visible v4 reasoning") != std::string::npos && prompt->find("src/main.cpp") != std::string::npos &&
+             prompt->find("visible v4 reasoning") == std::string::npos && prompt->find("src/main.cpp") != std::string::npos &&
              prompt->find("V4_COMPACTION_PRIVATE_SIGNATURE") == std::string::npos && prompt->find("V4_COMPACTION_PRIVATE_REDACTED") == std::string::npos &&
              prompt->find("rs_compaction") == std::string::npos && prompt->find("V4_COMPACTION_STAGED_CANARY") == std::string::npos &&
              prompt->find("assistant_output_entry_id") == std::string::npos,
-         "compaction prompt uses the committed v4 logical projection and excludes private/incomplete staging data");
+         "compaction prompt uses forced-portable committed v4 projection and excludes reasoning, private, and incomplete staging data");
 
   auto prepared = ava::app::prepare_compaction_context(entries, config);
-  auto const reasoning = prepared ? prepared->recent_context.find("visible v4 reasoning") : std::string::npos;
-  auto const function = prepared ? prepared->recent_context.find("call_compaction_v4") : std::string::npos;
+  auto const function = prepared ? prepared->recent_context.find("Tool call (read_file)") : std::string::npos;
   auto const text = prepared ? prepared->recent_context.find("visible v4 commentary") : std::string::npos;
   auto const result = prepared ? prepared->recent_context.find("BOUND_V4_RESULT") : std::string::npos;
-  expect(prepared && reasoning != std::string::npos && function != std::string::npos && text != std::string::npos && result != std::string::npos &&
-             reasoning < function && function < text && text < result &&
+  expect(prepared && prepared->recent_context.find("visible v4 reasoning") == std::string::npos && function != std::string::npos && text != std::string::npos &&
+             result != std::string::npos && function < text && text < result && prepared->recent_context.find("call_compaction_v4") == std::string::npos &&
              prepared->recent_context.find("V4_COMPACTION_PRIVATE_SIGNATURE") == std::string::npos &&
              prepared->recent_context.find("V4_COMPACTION_PRIVATE_REDACTED") == std::string::npos &&
              prepared->recent_context.find("V4_COMPACTION_STAGED_CANARY") == std::string::npos,
-         "retained compaction tail rebuilds the physical committed v4 reasoning/function/text group in order with its exact bound tool result");
+         "retained compaction tail keeps forced-portable function/text/result order while dropping reasoning and persisted call ids");
 }
 
 void test_app_context_overflow_retry_is_bounded()

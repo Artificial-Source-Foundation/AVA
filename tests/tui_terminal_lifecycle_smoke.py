@@ -1,0 +1,368 @@
+#!/usr/bin/env python3
+import argparse
+import errno
+import fcntl
+import os
+import pathlib
+import pty
+import select
+import shutil
+import signal
+import struct
+import subprocess
+import sys
+import termios
+import time
+
+
+SKIP = 77
+MAX_CAPTURE_BYTES = 2 * 1024 * 1024
+ENVIRONMENT_ALLOWLIST = (
+    "PATH",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "LC_NUMERIC",
+    "LC_TIME",
+    "LC_COLLATE",
+    "LC_MONETARY",
+    "TERMINFO",
+    "TERMINFO_DIRS",
+    "LD_LIBRARY_PATH",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "ASAN_OPTIONS",
+    "UBSAN_OPTIONS",
+    "LSAN_OPTIONS",
+    "TSAN_OPTIONS",
+    "MSAN_OPTIONS",
+    "HWASAN_OPTIONS",
+    "ASAN_SYMBOLIZER_PATH",
+    "UBSAN_SYMBOLIZER_PATH",
+    "LSAN_SYMBOLIZER_PATH",
+    "TSAN_SYMBOLIZER_PATH",
+    "MSAN_SYMBOLIZER_PATH",
+    "HWASAN_SYMBOLIZER_PATH",
+    "LLVM_SYMBOLIZER_PATH",
+    "TMPDIR",
+    "TZ",
+)
+BRACKETED_PASTE_ENABLE = b"\x1b[?2004h"
+BRACKETED_PASTE_DISABLE = b"\x1b[?2004l"
+KITTY_KEYBOARD_PUSH = b"\x1b[>5u"
+KITTY_KEYBOARD_QUERY = b"\x1b[?u"
+DEVICE_ATTRIBUTES_QUERY = b"\x1b[c"
+MODIFY_OTHER_KEYS_ENABLE = b"\x1b[>4;2m"
+MODIFY_OTHER_KEYS_DISABLE = b"\x1b[>4;0m"
+KITTY_KEYBOARD_POP = b"\x1b[<u"
+ALT_SCREEN_ENTER = b"\x1b[?1049h"
+ALT_SCREEN_EXIT = b"\x1b[?1049l"
+CURSOR_HIDE = b"\x1b[?25l"
+CURSOR_SHOW = b"\x1b[?25h"
+CONTROL_CHARACTER_NAMES = {}
+for control_name in (
+    "VINTR", "VQUIT", "VERASE", "VKILL", "VEOF", "VTIME", "VMIN", "VSWTC", "VSTART", "VSTOP",
+    "VSUSP", "VEOL", "VREPRINT", "VDISCARD", "VWERASE", "VLNEXT", "VEOL2",
+):
+    if hasattr(termios, control_name):
+        CONTROL_CHARACTER_NAMES.setdefault(getattr(termios, control_name), control_name)
+
+
+def enabled(value: str | None) -> bool:
+    return value is not None and value.lower() in {"1", "true", "yes", "on"}
+
+
+def set_winsize(fd: int, rows: int, cols: int) -> None:
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+
+def allowlisted_environment() -> dict[str, str]:
+    return {key: os.environ[key] for key in ENVIRONMENT_ALLOWLIST if key in os.environ}
+
+
+def read_until(master_fd: int, process: subprocess.Popen[bytes], predicate, label: str, timeout: float = 8.0) -> bytes:
+    deadline = time.monotonic() + timeout
+    captured = bytearray()
+    while time.monotonic() < deadline:
+        if predicate(bytes(captured)):
+            return bytes(captured)
+        ready, _, _ = select.select([master_fd], [], [], min(0.1, max(0.0, deadline - time.monotonic())))
+        if ready:
+            try:
+                chunk = os.read(master_fd, 16384)
+            except OSError as error:
+                if error.errno != errno.EIO:
+                    raise
+                chunk = b""
+            if chunk:
+                captured.extend(chunk)
+                if len(captured) > MAX_CAPTURE_BYTES:
+                    raise RuntimeError(f"terminal output exceeded {MAX_CAPTURE_BYTES} bytes while waiting for {label}")
+                continue
+        if process.poll() is not None:
+            raise RuntimeError(f"AVA exited before {label} with code {process.returncode}; captured={bytes(captured)!r}")
+    raise RuntimeError(f"timed out waiting for {label}; captured={bytes(captured)!r}")
+
+
+def drain_exit(master_fd: int, process: subprocess.Popen[bytes], timeout: float = 6.0) -> tuple[int, bytes]:
+    deadline = time.monotonic() + timeout
+    captured = bytearray()
+    eof = False
+    while time.monotonic() < deadline:
+        ready, _, _ = select.select([master_fd], [], [], min(0.1, max(0.0, deadline - time.monotonic())))
+        if ready:
+            try:
+                chunk = os.read(master_fd, 16384)
+            except OSError as error:
+                if error.errno != errno.EIO:
+                    raise
+                chunk = b""
+            if chunk:
+                captured.extend(chunk)
+                if len(captured) > MAX_CAPTURE_BYTES:
+                    raise RuntimeError(f"terminal teardown exceeded {MAX_CAPTURE_BYTES} bytes")
+            else:
+                eof = True
+        returncode = process.poll()
+        if returncode is not None and eof:
+            return returncode, bytes(captured)
+        if returncode is not None and not ready:
+            # This driver intentionally retains the slave descriptor for post-exit
+            # termios inspection, so the master cannot report EOF here. A completed
+            # select cycle with no readable bytes is the bounded drain condition.
+            return returncode, bytes(captured)
+    raise RuntimeError(f"AVA did not exit and drain within {timeout:.1f}s; captured={bytes(captured)!r}")
+
+
+def process_group_exists(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def wait_for_no_process_group(pgid: int, timeout: float = 1.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not process_group_exists(pgid):
+            return
+        select.select([], [], [], min(0.05, max(0.0, deadline - time.monotonic())))
+    raise RuntimeError(f"AVA process group {pgid} remained after exit")
+
+
+def terminate_group(process: subprocess.Popen[bytes], pgid: int) -> None:
+    if not process_group_exists(pgid):
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline and process_group_exists(pgid):
+        process.poll()
+        select.select([], [], [], 0.05)
+    if process_group_exists(pgid):
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def canonical_control_character(value: int | bytes) -> int | tuple[int, ...]:
+    if isinstance(value, int):
+        return value
+    if len(value) == 1:
+        return value[0]
+    return tuple(value)
+
+
+def normalized_termios(attrs: list) -> tuple[int, int, int, int, int, int, tuple[int | tuple[int, ...], ...]]:
+    return (
+        int(attrs[0]),
+        int(attrs[1]),
+        int(attrs[2]),
+        int(attrs[3]),
+        int(attrs[4]),
+        int(attrs[5]),
+        tuple(canonical_control_character(value) for value in attrs[6]),
+    )
+
+
+def termios_differences(before: tuple, after: tuple) -> list[str]:
+    names = ("iflag", "oflag", "cflag", "lflag", "ispeed", "ospeed")
+    differences = [f"{name}: before={before[index]!r} after={after[index]!r}" for index, name in enumerate(names) if before[index] != after[index]]
+    before_cc = before[6]
+    after_cc = after[6]
+    for index in range(max(len(before_cc), len(after_cc))):
+        old = before_cc[index] if index < len(before_cc) else "<missing>"
+        new = after_cc[index] if index < len(after_cc) else "<missing>"
+        if old != new:
+            label = CONTROL_CHARACTER_NAMES.get(index, f"index {index}")
+            differences.append(f"cc[{index}/{label}]: before={old!r} after={new!r}")
+    return differences
+
+
+def require_order(data: bytes, sequences: list[tuple[str, bytes]]) -> None:
+    previous = -1
+    for label, sequence in sequences:
+        position = data.find(sequence)
+        if position < 0:
+            raise RuntimeError(f"missing {label} sequence {sequence!r}; teardown={data!r}")
+        if position <= previous:
+            raise RuntimeError(f"{label} sequence was out of teardown order at {position}; teardown={data!r}")
+        previous = position
+
+
+def run_case(ava_exe: pathlib.Path, case_root: pathlib.Path, case: str) -> None:
+    workspace = case_root / "workspace"
+    home = case_root / "home"
+    config = case_root / "config"
+    state = case_root / "state"
+    data = case_root / "data"
+    cache = case_root / "cache"
+    runtime = case_root / "runtime"
+    for path in (workspace, home, config, state, data, cache, runtime):
+        path.mkdir(parents=True, exist_ok=True)
+    runtime.chmod(0o700)
+    (workspace / "AGENTS.md").write_text(f"terminal lifecycle {case}\n", encoding="utf-8")
+
+    env = allowlisted_environment()
+    env.update(
+        {
+            "HOME": str(home),
+            "XDG_CONFIG_HOME": str(config),
+            "XDG_STATE_HOME": str(state),
+            "XDG_DATA_HOME": str(data),
+            "XDG_CACHE_HOME": str(cache),
+            "XDG_RUNTIME_DIR": str(runtime),
+            "TERM": "xterm-256color",
+            "TERM_PROGRAM": "xterm",
+            "COLORTERM": "truecolor",
+        }
+    )
+    for key in (
+        "TMUX", "TMUX_PANE", "NO_COLOR", "AVA_TUI_THEME", "KITTY_WINDOW_ID", "GHOSTTY_RESOURCES_DIR",
+        "WEZTERM_PANE", "WARP_SESSION_ID", "WARP_TERMINAL_SESSION_UUID", "ITERM_SESSION_ID", "WT_SESSION",
+    ):
+        env.pop(key, None)
+
+    master_fd, slave_fd = pty.openpty()
+    set_winsize(slave_fd, 28, 100)
+    before = termios.tcgetattr(slave_fd)
+    process = subprocess.Popen(
+        [str(ava_exe)],
+        cwd=workspace,
+        env=env,
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        start_new_session=True,
+    )
+    pgid = process.pid
+    try:
+        startup = read_until(
+            master_fd,
+            process,
+            lambda output: (
+                (b"Type a message" in output or b"live session" in output)
+                and BRACKETED_PASTE_ENABLE in output
+                and KITTY_KEYBOARD_PUSH in output
+                and KITTY_KEYBOARD_QUERY in output
+                and DEVICE_ATTRIBUTES_QUERY in output
+            ),
+            f"{case} synchronized startup",
+        )
+        if not (startup.find(KITTY_KEYBOARD_PUSH) < startup.find(KITTY_KEYBOARD_QUERY) < startup.find(DEVICE_ATTRIBUTES_QUERY)):
+            raise RuntimeError(f"keyboard push/query/device-attributes order was invalid; startup={startup!r}")
+
+        os.write(master_fd, b"\x1b[?1;2c")
+        negotiation = read_until(
+            master_fd,
+            process,
+            lambda output: MODIFY_OTHER_KEYS_ENABLE in output,
+            f"{case} modifyOtherKeys fallback enable",
+        )
+        if MODIFY_OTHER_KEYS_ENABLE not in negotiation:
+            raise RuntimeError("device-attributes response did not enable modifyOtherKeys fallback")
+
+        if case == "ctrl_d":
+            os.write(master_fd, b"\x04")
+        else:
+            os.kill(process.pid, signal.SIGTERM)
+        returncode, teardown = drain_exit(master_fd, process)
+        expected_returncode = 0 if case == "ctrl_d" else 130
+        if returncode != expected_returncode:
+            raise RuntimeError(f"{case} exited with {returncode}, expected {expected_returncode}; teardown={teardown!r}")
+
+        require_order(
+            teardown,
+            [
+                ("modifyOtherKeys disable", MODIFY_OTHER_KEYS_DISABLE),
+                ("Kitty keyboard pop", KITTY_KEYBOARD_POP),
+                ("bracketed-paste disable", BRACKETED_PASTE_DISABLE),
+            ],
+        )
+        if ALT_SCREEN_ENTER in startup and ALT_SCREEN_EXIT not in teardown:
+            raise RuntimeError(f"xterm alternate-screen entry was not paired with exit; teardown={teardown!r}")
+        cursor_show_at = teardown.find(CURSOR_SHOW)
+        if cursor_show_at < 0:
+            raise RuntimeError(
+                f"{case} teardown did not explicitly restore the cursor with {CURSOR_SHOW!r}; "
+                f"teardown={teardown!r}"
+            )
+
+        after = termios.tcgetattr(slave_fd)
+        normalized_before = normalized_termios(before)
+        normalized_after = normalized_termios(after)
+        if normalized_after != normalized_before:
+            differences = "; ".join(termios_differences(normalized_before, normalized_after))
+            raise RuntimeError(f"{case} did not exactly restore normalized termios state: {differences}")
+        wait_for_no_process_group(pgid)
+        print(
+            f"{case}: exit={returncode} startup={len(startup)} teardown={len(teardown)} "
+            f"disable_at={teardown.find(MODIFY_OTHER_KEYS_DISABLE)} pop_at={teardown.find(KITTY_KEYBOARD_POP)} "
+            f"paste_disable_at={teardown.find(BRACKETED_PASTE_DISABLE)} cursor_show_at={cursor_show_at} "
+            f"alt_exit_at={teardown.find(ALT_SCREEN_EXIT)} termios_exact=True"
+        )
+    finally:
+        terminate_group(process, pgid)
+        os.close(master_fd)
+        os.close(slave_fd)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ava", required=True)
+    parser.add_argument("--root", required=True)
+    args = parser.parse_args()
+
+    if not enabled(os.environ.get("AVA_TUI_TERMINAL_LIFECYCLE_SMOKE")):
+        print("skipping terminal lifecycle PTY smoke; set AVA_TUI_TERMINAL_LIFECYCLE_SMOKE=1 to run")
+        return SKIP
+
+    ava_exe = pathlib.Path(args.ava).resolve()
+    if not ava_exe.exists():
+        raise RuntimeError(f"AVA executable does not exist: {ava_exe}")
+    root = pathlib.Path(args.root).resolve()
+    if root.exists():
+        if root.name != "tui-terminal-lifecycle-smoke":
+            raise RuntimeError(f"refusing to clear unexpected smoke root: {root}")
+        shutil.rmtree(root)
+    root.mkdir(parents=True, mode=0o700)
+
+    run_case(ava_exe, root / "ctrl-d", "ctrl_d")
+    run_case(ava_exe, root / "sigterm", "sigterm")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

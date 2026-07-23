@@ -2052,18 +2052,18 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                              .parent_id = "",
                                                                              .type = ava::session::EntryType::ReasoningBlock,
                                                                              .timestamp = ava::session::now_timestamp(),
-                                                                             .data_json = "{\"provider\":\"anthropic\","
-                                                                                          "\"model\":\"claude-sonnet-4-5\","
-                                                                                          "\"format\":\"anthropic_thinking\","
+                                                                             .data_json = "{\"provider\":\"openai\","
+                                                                                          "\"model\":\"gpt-5.5\","
+                                                                                          "\"format\":\"openai_responses\","
                                                                                           "\"text\":\"visible reasoning\","
                                                                                           "\"signature\":\"rpc-secret-signature\"}"});
   auto appended_redacted_reasoning = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                       .parent_id = "",
                                                                                       .type = ava::session::EntryType::ReasoningBlock,
                                                                                       .timestamp = ava::session::now_timestamp(),
-                                                                                      .data_json = "{\"provider\":\"anthropic\","
-                                                                                                   "\"model\":\"claude-sonnet-4-5\","
-                                                                                                   "\"format\":\"anthropic_thinking\","
+                                                                                      .data_json = "{\"provider\":\"openai\","
+                                                                                                   "\"model\":\"gpt-5.5\","
+                                                                                                   "\"format\":\"openai_responses\","
                                                                                                    "\"text\":\"hidden redacted rpc reasoning\","
                                                                                                    "\"signature\":\"rpc-redacted-secret-signature\","
                                                                                                    "\"redacted\": true }"});

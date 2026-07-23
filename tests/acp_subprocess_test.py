@@ -19,11 +19,17 @@ def environment(root):
     root.mkdir(parents=True, exist_ok=True)
     temporary = root / "tmp"
     temporary.mkdir(parents=True, exist_ok=True)
+    # The bash command planner resolves the trusted home from HOME, so the
+    # isolated HOME must exist and be owner-only (as a real user home would be)
+    # for command sealing's safe-directory check to pass.
+    home = root / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    os.chmod(home, 0o700)
     libcwd_rcfile = (root / "libcwdrc").absolute()
     libcwd_rcfile.write_text(
         "silent = on\nchannels_default = off\n", encoding="utf-8")
     return {
-        "HOME": str(root / "home"),
+        "HOME": str(home),
         "XDG_CONFIG_HOME": str(root / "config"),
         "XDG_DATA_HOME": str(root / "data"),
         "XDG_STATE_HOME": str(root / "state"),

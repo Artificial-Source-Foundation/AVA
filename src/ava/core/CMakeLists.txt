@@ -10,6 +10,7 @@ add_library(ava_core
   "process_args.cpp"
   "strict_json.cpp"
   "string_utils.cpp"
+  "trusted_home.cpp"
 )
 
 target_include_directories(ava_core PUBLIC "${CMAKE_SOURCE_DIR}/src")

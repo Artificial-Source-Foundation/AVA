@@ -17,6 +17,7 @@
 #include "ava/session/session_metadata.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/ids.h"
+#include "ava/core/trusted_home.h"
 
 #include <filesystem>
 #include <memory>
@@ -342,6 +343,23 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
         std::ranges::any_of(options.additional_writable_dirs, [&](auto const& directory) { return !anchor_set->find_anchor(directory); }))
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to retain all required runtime anchors"));
   }
+
+  // Resolve the trusted local account once per process and freeze it. The home
+  // directory is read from HOME (passwd fallback) here, at startup, so that
+  // later command planning reuses the cached value (ava::core::cached_trusted_account)
+  // instead of re-reading the sensitive HOME environment variable after the AI
+  // or user shell commands may have run. open_runtime_session is invoked for
+  // every session (interactive, print, rpc, ACP, and forked/subagent sessions),
+  // so the cache check keeps the actual HOME read to the very first call and
+  // lets later sessions reuse the frozen result without tripping the freeze
+  // assertion.
+  if (!ava::core::cached_trusted_account())
+  {
+    auto resolved = ava::core::resolve_trusted_account();
+    if (!resolved)
+      return std::unexpected(std::move(resolved.error()));
+  }
+  ava::core::freeze_trusted_account();
 
   if (options.diagnostics)
   {

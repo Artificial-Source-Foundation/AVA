@@ -2,6 +2,7 @@
 #include "ava/containment/containment.h"
 #include "ava/core/AnchorOpen.h"
 #include "ava/core/AnchorSet.h"
+#include "ava/core/trusted_home.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/spill_files.h"
 
@@ -22,7 +23,6 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <pwd.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -536,26 +536,24 @@ class SyntheticEnvironmentRoot final
   ino_t inode_ = 0;
 };
 
-ava::core::Result<std::pair<std::filesystem::path, std::string>> trusted_home_and_user()
+// Resolve the trusted local account for a sealed command plan.
+//
+// Prefer the process-wide account cached by open_runtime_session() at startup
+// (ava::core::cached_trusted_account): that value was read once from HOME and
+// frozen, so using it never re-reads the sensitive HOME environment variable.
+// When no runtime session has initialized the cache (for example, in unit tests
+// that call run_bash directly), fall back to resolving it now; the freeze guard
+// in resolve_trusted_account() still ensures HOME is read at most once.
+ava::core::Result<ava::core::TrustedAccount> trusted_account_for_command()
 {
-  long const suggested = ::sysconf(_SC_GETPW_R_SIZE_MAX);
-  std::vector<char> storage(static_cast<std::size_t>(suggested > 0 ? suggested : 16 * 1024));
-  passwd record{};
-  passwd* resolved = nullptr;
-  int const status = ::getpwuid_r(::geteuid(), &record, storage.data(), storage.size(), &resolved);
-  if (status != 0 || !resolved || !resolved->pw_dir || !resolved->pw_name || resolved->pw_dir[0] == '\0' || resolved->pw_name[0] == '\0')
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to discover the trusted local account for command planning");
-    if (status != 0)
-      error.with_context("cause", std::strerror(status));
-    return std::unexpected(std::move(error));
-  }
-  return std::pair{std::filesystem::path(resolved->pw_dir), std::string(resolved->pw_name)};
+  if (auto const cached = ava::core::cached_trusted_account())
+    return *cached;
+  return ava::core::resolve_trusted_account();
 }
 
 ava::core::Result<ava::command::CommandBuildOptions> local_command_build_options(ToolContext const& context, SyntheticEnvironmentRoot const& synthetic)
 {
-  auto account = trusted_home_and_user();
+  auto account = trusted_account_for_command();
   if (!account)
     return std::unexpected(std::move(account.error()));
   // Read exactly one inherited value: startup PATH. Bound the read before
@@ -576,14 +574,14 @@ ava::core::Result<ava::command::CommandBuildOptions> local_command_build_options
   auto const& root = synthetic.root();
   return ava::command::CommandBuildOptions{.workspace = context.workspace_dir,
                                            .anchor_set = context.anchor_set,
-                                           .trusted_home = account->first,
+                                           .trusted_home = account->home,
                                            .discover_host_user_toolchains = !static_cast<bool>(context.command_executor),
                                            .startup_path = std::move(startup_path),
                                            .shell = "/bin/sh",
                                            .ava_authority_roots = context.ava_authority_roots,
                                            .environment = ava::command::CommandEnvironmentOptions{.profile_id = "ava-local-bash-prompt-v1",
-                                                                                                  .user = account->second,
-                                                                                                  .logname = account->second,
+                                                                                                  .user = account->user,
+                                                                                                  .logname = account->user,
                                                                                                   .home = root / "home",
                                                                                                   .xdg_config_home = root / "xdg-config",
                                                                                                   .xdg_cache_home = root / "xdg-cache",

@@ -1962,11 +1962,20 @@ def run_package_tests(
     in_repo_result = run(package_command(script, fixture, in_repo), env=env, check=False)
     require_failure(in_repo_result, "outside the repository", "in-repository output was not rejected")
 
-    opened_in_repo = in_repo_parent / f"publisher-opened-in-repo-{secrets.token_hex(8)}"
+    publisher_fake_repo = root / f"publisher-check-repository-{secrets.token_hex(8)}"
+    publisher_fake_repo.mkdir(mode=0o700)
+    opened_in_repo = publisher_fake_repo / f"publisher-opened-in-repo-{secrets.token_hex(8)}"
     opened_in_repo.mkdir(mode=0o700)
     try:
         opened_in_repo_result = run(
-            [sys.executable, str(publisher), "--check", str(opened_in_repo), "--repository-root", str(repo)],
+            [
+                sys.executable,
+                str(publisher),
+                "--check",
+                str(opened_in_repo),
+                "--repository-root",
+                str(publisher_fake_repo),
+            ],
             env=env,
             check=False,
         )
@@ -1978,6 +1987,7 @@ def run_package_tests(
         assert_output_empty(opened_in_repo, "rejected publisher --check modified an in-repository directory")
     finally:
         opened_in_repo.rmdir()
+        publisher_fake_repo.rmdir()
 
     symlink_checkout = root / "symlinked-checkout"
     symlink_checkout.symlink_to(repo, target_is_directory=True)

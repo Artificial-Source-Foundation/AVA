@@ -152,6 +152,15 @@ set(AVA_TEST_SUITES
 )
 foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
+  # The ava_tests binary calls Debug(NAMESPACE_DEBUG::init()), which reads a
+  # libcwd rcfile. A developer host may have ~/.libcwdrc that turns debug
+  # channels on, leaking Dout output into captured command output and breaking
+  # exact-output assertions (e.g. ava_tests.tools spill-file checks). Force a
+  # silent rcfile and clear LIBCWD_RCFILE_OVERRIDE_NAME (read after
+  # LIBCWD_RCFILE_NAME and could re-enable channels) so ava_tests stays
+  # output-quiet regardless of the host configuration.
+  set_tests_properties(ava_tests.${AVA_TEST_SUITE} PROPERTIES
+    ENVIRONMENT "LIBCWD_RCFILE_NAME=${CMAKE_CURRENT_SOURCE_DIR}/libcwdrc.silent;LIBCWD_RCFILE_OVERRIDE_NAME=")
 endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.containment PROPERTIES SKIP_RETURN_CODE 77)

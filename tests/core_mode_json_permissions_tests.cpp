@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/Application.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
@@ -27,6 +28,7 @@
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/context/context_loader.h"
+#include "ava/core/Application.h"
 #include "ava/core/atomic_file.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -34,8 +36,10 @@
 #include "ava/core/process_args.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <climits>
+#include <csignal>
 #include <cstdlib>
 #include <cwchar>
 #include <filesystem>
@@ -45,9 +49,11 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace {
@@ -62,6 +68,126 @@ void test_mode_parsing()
   expect(plan && *plan == ava::agent::Mode::Plan, "plan mode parses");
   expect(!bad, "unknown mode fails");
   expect(ava::agent::toggle_mode(ava::agent::Mode::Build) == ava::agent::Mode::Plan, "build toggles to plan");
+}
+
+class TestApplication final : public ava::core::Application
+{
+ public:
+  [[nodiscard]] std::string_view application_name() const noexcept override { return "test application"; }
+};
+
+struct ChildWaitResult
+{
+  bool reaped = false;
+  bool timed_out = false;
+  int status = 0;
+};
+
+ChildWaitResult wait_for_child_until(pid_t child, std::chrono::steady_clock::duration timeout)
+{
+  auto const deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline)
+  {
+    int status = 0;
+    auto const waited = ::waitpid(child, &status, WNOHANG);
+    if (waited == child)
+      return {.reaped = true, .status = status};
+    if (waited < 0 && errno != EINTR)
+      return {};
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return {.timed_out = true};
+}
+
+void expect_lifecycle_death(void (*child_action)(), std::string_view description)
+{
+  auto const child = ::fork();
+  if (child < 0)
+  {
+    expect(false, "Application lifecycle death test could not fork: " + std::string(description));
+    return;
+  }
+  if (child == 0)
+  {
+    child_action();
+    _exit(EXIT_SUCCESS);
+  }
+
+  auto result = wait_for_child_until(child, std::chrono::seconds(2));
+  if (result.timed_out)
+  {
+    static_cast<void>(::kill(child, SIGKILL));
+    auto const cleanup = wait_for_child_until(child, std::chrono::seconds(2));
+    expect(false, "Application lifecycle death test timed out and required SIGKILL cleanup: " + std::string(description));
+    expect(cleanup.reaped, "Application lifecycle death test reaped its SIGKILL cleanup child: " + std::string(description));
+    return;
+  }
+  if (!result.reaped)
+  {
+    expect(false, "Application lifecycle death test could not observe its child: " + std::string(description));
+    return;
+  }
+
+  expect(WIFSIGNALED(result.status) && WTERMSIG(result.status) == SIGABRT, "Application lifecycle invariant aborts: " + std::string(description));
+}
+
+void initialize_test_application(ava::core::Application& application)
+{
+  char executable[] = "ava-test";
+  char* argv[] = {executable, nullptr};
+  application.initialize(1, argv);
+}
+
+void child_instance_before_initialize()
+{
+  static_cast<void>(ava::core::Application::instance());
+}
+
+void child_instance_after_destruction()
+{
+  {
+    TestApplication application;
+    initialize_test_application(application);
+  }
+  static_cast<void>(ava::core::Application::instance());
+}
+
+void child_duplicate_live_application()
+{
+  TestApplication first;
+  TestApplication second;
+  static_cast<void>(first);
+  static_cast<void>(second);
+}
+
+void child_repeated_initialize()
+{
+  TestApplication application;
+  initialize_test_application(application);
+  initialize_test_application(application);
+}
+
+void child_invalid_main_arguments()
+{
+  TestApplication application;
+  application.initialize(0, nullptr);
+}
+
+void test_application_lifecycle()
+{
+  {
+    ava::app::Application application;
+    initialize_test_application(application);
+    auto const& instance = ava::core::Application::instance();
+    expect(&instance == &application && instance.application_name() == "AVA",
+           "Application publishes its initialized concrete AVA instance and virtual application name");
+  }
+
+  expect_lifecycle_death(child_instance_before_initialize, "instance access before initialize");
+  expect_lifecycle_death(child_instance_after_destruction, "instance access after destruction");
+  expect_lifecycle_death(child_duplicate_live_application, "duplicate live Application construction");
+  expect_lifecycle_death(child_repeated_initialize, "repeated Application initialization");
+  expect_lifecycle_death(child_invalid_main_arguments, "invalid standard main argument shape");
 }
 
 void test_json_escape_control_characters()
@@ -160,7 +286,6 @@ void test_process_arg_workspace_relative_detection()
   expect(ava::core::is_workspace_relative_process_arg("--loader=.ava/loader.js"), "flag value paths are checked for workspace-relative launches");
 
   auto const root = create_empty_root("core-process-cwd");
-
 
   auto const workspace = root / "workspace";
   auto const global_config_dir = root / "config";
@@ -333,6 +458,7 @@ void test_permission_defaults()
 void run_core_mode_tests()
 {
   test_mode_parsing();
+  test_application_lifecycle();
 }
 
 void run_core_json_permission_tests()

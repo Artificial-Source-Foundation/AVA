@@ -168,7 +168,7 @@ void append_input_text(std::string& line, ComposerSnapshot const& snapshot, std:
   append_input_text_segment(line, text.substr(selected_end), false);
 }
 
-std::string render_status_line(ComposerSnapshot const& snapshot, std::size_t width)
+std::string render_composer_footer_line_impl(ComposerSnapshot const& snapshot, std::size_t width)
 {
   auto const model = model_label(snapshot.model);
   auto context_source_count = snapshot.context_source_count;
@@ -293,6 +293,11 @@ std::size_t composer_input_prefix_columns(bool /*first_line*/)
   return 3;
 }
 
+std::string render_composer_footer_line(ComposerSnapshot const& snapshot, std::size_t width)
+{
+  return render_composer_footer_line_impl(snapshot, width);
+}
+
 std::vector<std::string> input_render_lines(std::string_view input)
 {
   auto lines = split_lines(input);
@@ -368,7 +373,7 @@ std::vector<std::string> render_composer_block(ComposerSnapshot const& snapshot,
     if (max_lines == 1)
       return {render_input_line(snapshot, width)};
     if (max_lines == 2)
-      return {render_input_line(snapshot, width), render_status_line(snapshot, width)};
+      return {render_input_line(snapshot, width), render_composer_footer_line(snapshot, width)};
     std::vector<std::string> lines;
     auto const layout = composer_input_layout(1, max_lines, 0);
     while (lines.size() < layout.top_padding)
@@ -376,7 +381,7 @@ std::vector<std::string> render_composer_block(ComposerSnapshot const& snapshot,
       lines.push_back(composer_surface_line("", width));
     }
     lines.push_back(render_input_line(snapshot, width));
-    lines.push_back(render_status_line(snapshot, width));
+    lines.push_back(render_composer_footer_line(snapshot, width));
     while (lines.size() < max_lines)
     {
       lines.push_back(composer_surface_line("", width));
@@ -398,7 +403,7 @@ std::vector<std::string> render_composer_block(ComposerSnapshot const& snapshot,
     lines.push_back(render_input_fragment_line(snapshot, input_line.text, input_line.first_line, width, input_line.start));
   }
   if (max_lines > 1)
-    lines.push_back(render_status_line(snapshot, width));
+    lines.push_back(render_composer_footer_line(snapshot, width));
   while (lines.size() < max_lines)
   {
     lines.push_back(composer_surface_line("", width));

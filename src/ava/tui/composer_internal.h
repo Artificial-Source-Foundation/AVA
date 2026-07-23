@@ -38,13 +38,18 @@ inline constexpr std::string_view kSgrAccent = "\x1b[38;2;77;158;246m";
 inline constexpr std::string_view kSgrScreenBg = "\x1b[48;2;11;14;20m";
 inline constexpr std::string_view kSgrComposerBg = "\x1b[48;2;26;31;46m";
 inline constexpr std::string_view kComposerBar = "│";
-inline constexpr std::array<std::string_view, 12> kProcessingIndicatorFrames = {
-    "▁", "▂", "▃", "▄", "▅", "▆", "▇", "▆", "▅", "▄", "▃", "▂"};
+inline constexpr std::array<std::string_view, 12> kProcessingIndicatorFrames = {"▁", "▂", "▃", "▄", "▅", "▆", "▇", "▆", "▅", "▄", "▃", "▂"};
 inline constexpr auto kProcessingIndicatorFrameDelay = std::chrono::milliseconds(120);
 
 [[nodiscard]] inline std::string_view processing_indicator_frame(std::size_t frame)
 {
   return kProcessingIndicatorFrames[frame % kProcessingIndicatorFrames.size()];
+}
+
+[[nodiscard]] inline std::size_t processing_indicator_elapsed_frames(std::chrono::steady_clock::duration elapsed)
+{
+  auto const interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(kProcessingIndicatorFrameDelay);
+  return elapsed > std::chrono::steady_clock::duration::zero() ? static_cast<std::size_t>(elapsed / interval) : 0;
 }
 
 enum class NcursesColorRole
@@ -313,12 +318,12 @@ void refresh_transcript_layout_cache(TranscriptLayoutCache& cache, std::vector<T
                                                                                                       std::size_t source_revision);
 [[nodiscard]] bool draw_screen_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
                                       TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation);
-[[nodiscard]] bool draw_processing_footer_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache,
-                                                 std::size_t source_revision, TranscriptLayoutCache& transcript_cache,
-                                                 std::size_t transcript_generation);
+[[nodiscard]] bool draw_processing_footer_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
+                                                 TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation);
 void clear_composer_terminal_graphics() noexcept;
 
 [[nodiscard]] std::size_t composer_input_prefix_columns(bool first_line);
+[[nodiscard]] std::string render_composer_footer_line(ComposerSnapshot const& snapshot, std::size_t width);
 [[nodiscard]] std::vector<std::string> input_render_lines(std::string_view input);
 [[nodiscard]] std::vector<ComposerInputRenderLine> input_render_line_spans(std::string_view input, std::size_t width);
 [[nodiscard]] std::size_t composer_block_line_count(ComposerSnapshot const& snapshot, std::size_t height);

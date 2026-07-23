@@ -1167,15 +1167,20 @@ void test_tui_composer_rendering_and_input()
          "tui distinguishes user messages with a quiet blue chevron and bright text without a composer surface or role header");
 
   auto const wrapped_user_rows =
-      ava::tui::detail::render_transcript_lines({ava::tui::TranscriptItem{.label = "you", .text = "one two three four five six seven eight"}}, 16);
+      ava::tui::detail::render_transcript_lines({ava::tui::TranscriptItem{.label = "you", .text = "one two three four five six seven eight\x1b[31m"}}, 16);
+  auto const available_width_user_rows = ava::tui::detail::render_transcript_lines({ava::tui::TranscriptItem{.label = "you", .text = "abcdefghijkl"}}, 16);
+  auto const empty_user_rows = ava::tui::detail::render_transcript_lines({ava::tui::TranscriptItem{.label = "you", .text = ""}}, 16);
   expect(
       wrapped_user_rows.size() > 1 &&
           std::ranges::all_of(wrapped_user_rows,
                               [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") == std::string::npos && visible_columns(line) <= 16; }) &&
-          strip_sgr(wrapped_user_rows.front()).starts_with("  › ") &&
+          strip_sgr(wrapped_user_rows.front()).starts_with("  › ") && wrapped_user_rows.front().find("\x1b[31m") == std::string::npos &&
           std::ranges::all_of(std::next(wrapped_user_rows.begin()), wrapped_user_rows.end(),
-                              [](std::string const& line) { return strip_sgr(line).starts_with("    "); }),
-      "tui user chevron uses available width, keeps wrapped continuations aligned under its text, and never paints a composer background");
+                              [](std::string const& line) { return strip_sgr(line).starts_with("    "); }) &&
+          available_width_user_rows.size() == 1 && strip_sgr(available_width_user_rows.front()) == "  › abcdefghijkl" && empty_user_rows.size() == 1 &&
+          strip_sgr(empty_user_rows.front()).starts_with("  › "),
+      "tui user chevron uses all available text width, sanitizes terminal escapes, preserves empty messages, aligns continuations, and never paints a composer "
+      "background");
   {
     ScopedEnvVar no_color_guard("NO_COLOR", "1");
     auto const plain_user_rows = ava::tui::render_composer(
@@ -1250,12 +1255,16 @@ void test_tui_composer_rendering_and_input()
                                  }),
          "tui processing composer adds only a contextual active-run row while the footer remains model metadata plus a calm blue indicator");
   expect(ava::tui::detail::kProcessingIndicatorFrameDelay == std::chrono::milliseconds(120) &&
-             std::ranges::all_of(
-                 ava::tui::detail::kProcessingIndicatorFrames,
-                 [](std::string_view frame) { return ava::tui::detail::terminal_text_columns(frame) == 1 && frame.find("⠋") == std::string_view::npos; }) &&
+             std::ranges::all_of(ava::tui::detail::kProcessingIndicatorFrames,
+                                 [](std::string_view frame) {
+                                   return ava::tui::detail::terminal_text_columns(frame) == 1 && frame.find("\xE2\xA0") == std::string_view::npos;
+                                 }) &&
              ava::tui::detail::processing_indicator_frame(0) == "▁" && ava::tui::detail::processing_indicator_frame(6) == "▇" &&
-             ava::tui::detail::processing_indicator_frame(12) == "▁",
-         "tui processing indicator has a shared 120ms one-cell lower-block breathing sequence without braille frames");
+             ava::tui::detail::processing_indicator_frame(12) == "▁" &&
+             ava::tui::detail::processing_indicator_elapsed_frames(std::chrono::milliseconds(119)) == 0 &&
+             ava::tui::detail::processing_indicator_elapsed_frames(std::chrono::milliseconds(120)) == 1 &&
+             ava::tui::detail::processing_indicator_elapsed_frames(std::chrono::milliseconds(365)) == 3,
+         "tui processing indicator has a shared 120ms one-cell lower-block sequence and advances by elapsed intervals independent of redraws");
 
   auto narrow_footer_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
                                                            .provider = "openai",
@@ -1287,6 +1296,29 @@ void test_tui_composer_rendering_and_input()
                                       visible_columns(line) == 20;
                              }),
          "tui preserves multi-digit context metadata and the blue breathing indicator beside a shortened model at the supported minimum width");
+
+  auto expect_direct_footer_matches_frame = [&](ava::tui::ComposerSnapshot footer_snapshot, std::string const& layout_name) {
+    footer_snapshot.processing = true;
+    auto const canvas = ava::tui::composer_canvas_layout(footer_snapshot);
+    auto const composer_lines = ava::tui::detail::composer_block_line_count(footer_snapshot, footer_snapshot.height, canvas.content_width);
+    auto const direct_footer = ava::tui::detail::render_composer_footer_line(footer_snapshot, canvas.content_width);
+    auto const input_footer = ava::tui::detail::render_composer_block(footer_snapshot, canvas.content_width, composer_lines).back();
+    auto const full_footer = ava::tui::render_composer_frame(footer_snapshot).lines.back();
+    expect(direct_footer == input_footer && full_footer.find(direct_footer) != std::string::npos,
+           "tui direct footer renderer matches the full composer footer for " + layout_name);
+  };
+  expect_direct_footer_matches_frame(idle_two_row_snapshot, "ordinary canvas");
+  auto centered_footer_snapshot = idle_two_row_snapshot;
+  centered_footer_snapshot.width = 160;
+  centered_footer_snapshot.height = 14;
+  expect_direct_footer_matches_frame(centered_footer_snapshot, "centered canvas");
+  auto rail_footer_snapshot = centered_footer_snapshot;
+  rail_footer_snapshot.width = 176;
+  rail_footer_snapshot.height = 16;
+  rail_footer_snapshot.sidebar = ava::tui::SidebarSnapshot{
+      .activity = {ava::tui::SidebarActivityItem{.id = "running", .label = "run", .detail = "active", .status = ava::tui::ToolTimelineStatus::Running}}};
+  expect_direct_footer_matches_frame(rail_footer_snapshot, "automatic sidebar rail");
+  expect_direct_footer_matches_frame(narrow_footer_snapshot, "narrow canvas");
 
   auto const queued_lines = ava::tui::render_composer(
       ava::tui::ComposerSnapshot{.mode = "build",
@@ -10131,6 +10163,7 @@ struct VirtualTerminalResult
   bool modal_drawn = false;
   bool cursor_restored_after_modal = false;
   bool processing_footer_updates_stable = false;
+  bool processing_footer_output_is_quiet = false;
   bool cursor_forced_visible_for_teardown = false;
 };
 
@@ -10215,8 +10248,32 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
       footer_snapshot.processing = true;
       footer_snapshot.input = "cursor";
       footer_snapshot.input_cursor = footer_snapshot.input.size();
-      if (!ava::tui::draw_screen(footer_snapshot))
+      footer_snapshot.pending_attachments = {ava::tui::PendingAttachmentItem{
+          .label = "footer-preview.png",
+          .detail = "(image/png) footer-only graphic regression",
+          .preview = ava::tui::PendingAttachmentItem::Preview{.protocol = ava::tui::TerminalImageProtocol::Kitty,
+                                                              .base64_data = std::make_shared<std::string const>("FOOTER_ONLY_KITTY_MARKER"),
+                                                              .dimensions = ava::tui::ImageDimensions{.width_px = 20, .height_px = 20},
+                                                              .image_id = 31337}}};
+      auto const saved_stdout = dup(STDOUT_FILENO);
+      if (saved_stdout < 0 || std::fflush(stdout) != 0 || dup2(fileno(output), STDOUT_FILENO) < 0)
+      {
+        if (saved_stdout >= 0)
+          static_cast<void>(close(saved_stdout));
         return false;
+      }
+      auto restore_stdout = [&]() {
+        static_cast<void>(std::fflush(stdout));
+        static_cast<void>(dup2(saved_stdout, STDOUT_FILENO));
+        static_cast<void>(close(saved_stdout));
+      };
+      if (!ava::tui::draw_screen(footer_snapshot))
+      {
+        restore_stdout();
+        return false;
+      }
+      static_cast<void>(std::fflush(output));
+      auto const output_before_footer = std::ftell(output);
       auto const footer_canvas = ava::tui::composer_canvas_layout(footer_snapshot);
       auto const expected_footer_column = footer_canvas.left + ava::tui::detail::input_cursor_column(footer_snapshot, footer_canvas.content_width);
       ava::tui::detail::CompletionMatchCache completion_cache;
@@ -10226,14 +10283,37 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
         footer_snapshot.spinner_frame = frame;
         if (!ava::tui::detail::draw_processing_footer_cached(footer_snapshot, completion_cache, footer_snapshot.file_references_generation, transcript_cache,
                                                              footer_snapshot.transcript_generation))
+        {
+          restore_stdout();
           return false;
+        }
         int footer_cursor_y = 0;
         int footer_cursor_x = 0;
         getyx(stdscr, footer_cursor_y, footer_cursor_x);
         if (footer_cursor_x != static_cast<int>(expected_footer_column - 1) || footer_cursor_y < 0 || footer_cursor_y >= LINES)
+        {
+          restore_stdout();
           return false;
+        }
       }
-      return true;
+      static_cast<void>(std::fflush(output));
+      auto const output_after_footer = std::ftell(output);
+      std::string footer_output;
+      bool footer_output_read = false;
+      if (output_before_footer >= 0 && output_after_footer >= output_before_footer && std::fseek(output, output_before_footer, SEEK_SET) == 0)
+      {
+        footer_output.resize(static_cast<std::size_t>(output_after_footer - output_before_footer));
+        footer_output_read = std::fread(footer_output.data(), 1, footer_output.size(), output) == footer_output.size();
+        static_cast<void>(std::fseek(output, 0, SEEK_END));
+      }
+      restore_stdout();
+      result.processing_footer_output_is_quiet =
+          result.processing_footer_output_is_quiet && footer_output_read &&
+          (footer_output.find("\x1b[?25l") == std::string::npos && footer_output.find("\x1b[?25h") == std::string::npos &&
+           footer_output.find("\x1b[2J") == std::string::npos && footer_output.find("FOOTER_ONLY_KITTY_MARKER") == std::string::npos);
+      return output_before_footer >= 0 && output_after_footer >= output_before_footer && footer_output_read &&
+             footer_output.find("\x1b[?25l") == std::string::npos && footer_output.find("\x1b[?25h") == std::string::npos &&
+             footer_output.find("\x1b[2J") == std::string::npos && footer_output.find("FOOTER_ONLY_KITTY_MARKER") == std::string::npos;
     };
     auto ordinary_footer_snapshot = snapshot;
     ordinary_footer_snapshot.width = 80;
@@ -10246,6 +10326,7 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
     auto narrow_footer_snapshot = ordinary_footer_snapshot;
     narrow_footer_snapshot.width = 20;
     narrow_footer_snapshot.height = 8;
+    result.processing_footer_output_is_quiet = true;
     result.processing_footer_updates_stable = exercise_processing_footer(ordinary_footer_snapshot) && exercise_processing_footer(centered_footer_snapshot) &&
                                               exercise_processing_footer(rail_footer_snapshot) && exercise_processing_footer(narrow_footer_snapshot);
     result.cursor_forced_visible_for_teardown = ava::tui::detail::force_terminal_cursor_visible();
@@ -10289,8 +10370,9 @@ void test_ncurses_newterm_smoke_without_real_tty()
       ++exercised;
     expect(result.screen_created, "ncurses smoke test creates a screen without a real terminal for " + profile.name);
     expect(result.base_drawn && result.modal_drawn && result.cursor_restored_after_modal && result.processing_footer_updates_stable &&
-               result.cursor_forced_visible_for_teardown,
-           "ncurses smoke test draws base/modal frames, updates only processing footers with a stable composer cursor, and forces the cursor visible for "
+               result.processing_footer_output_is_quiet && result.cursor_forced_visible_for_teardown,
+           "ncurses smoke test draws base/modal frames, updates processing footers without terminal clears, cursor toggles, or graphics, and forces the cursor "
+           "visible for "
            "teardown for " +
                profile.name);
   }

@@ -397,7 +397,7 @@ void add_text_chunk(std::string_view text, CursesStyle style)
   static_cast<void>(addnstr(text.data(), static_cast<int>(std::min<std::size_t>(text.size(), INT_MAX))));
 }
 
-void draw_styled_line(std::string_view line)
+void draw_styled_line(std::string_view line, bool clear_to_end = true)
 {
   CursesStyle style{.attributes = A_NORMAL, .color = NcursesColorRole::Text, .background = BackgroundRole::Screen};
   std::vector<int> codes;
@@ -442,7 +442,8 @@ void draw_styled_line(std::string_view line)
   }
   add_text_chunk(line.substr(chunk_start), style);
   attrset(curses_attributes(CursesStyle{.attributes = A_NORMAL, .color = NcursesColorRole::Text, .background = BackgroundRole::Screen}));
-  clrtoeol();
+  if (clear_to_end)
+    clrtoeol();
 }
 
 CursorPlacement input_cursor_placement(ComposerSnapshot const& snapshot, std::size_t rendered_line_count, std::size_t width)
@@ -1722,8 +1723,6 @@ bool detail::draw_screen_cached(ComposerSnapshot const& snapshot, CompletionMatc
   auto const cursor_visible = !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list && !sidebar_drawer_active(snapshot);
   if (!cursor_visible)
     static_cast<void>(curs_set(0));
-  else
-    static_cast<void>(curs_set(1));
   static_cast<void>(leaveok(stdscr, cursor_visible ? FALSE : TRUE));
 
   // Every visible row is repainted below. Avoid a full-screen blank pass because it makes
@@ -1814,23 +1813,21 @@ bool detail::draw_screen_cached(ComposerSnapshot const& snapshot, CompletionMatc
   return true;
 }
 
-bool detail::draw_processing_footer_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
-                                           TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation)
+bool detail::draw_processing_footer_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& /*completion_cache*/, std::size_t /*source_revision*/,
+                                           TranscriptLayoutCache& /*transcript_cache*/, std::size_t /*transcript_generation*/)
 {
   if (!snapshot.processing || snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || sidebar_drawer_active(snapshot))
     return false;
 
-  auto const width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
-  auto const frame = detail::render_composer_frame_cached(snapshot, completion_cache, source_revision, &transcript_cache, transcript_generation);
-  if (frame.lines.empty())
-    return false;
-
-  auto const row = std::min<std::size_t>(frame.lines.size() - 1, LINES > 0 ? LINES - 1 : 0);
-  move(static_cast<int>(row), 0);
-  draw_styled_line(detail::screen_surface_line(frame.lines.back(), width));
-
+  auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
   auto const canvas = composer_canvas_layout(snapshot);
-  auto cursor = input_cursor_placement(snapshot, frame.lines.size(), canvas.content_width);
+  auto const footer = detail::render_composer_footer_line(snapshot, canvas.content_width);
+  auto const row = std::min<std::size_t>(height - 1, LINES > 0 ? LINES - 1 : 0);
+  move(static_cast<int>(row), static_cast<int>(canvas.left));
+  // Do not clear past the main canvas: that would erase a visible sidebar on every tick.
+  draw_styled_line(footer, false);
+
+  auto cursor = input_cursor_placement(snapshot, height, canvas.content_width);
   cursor.column += canvas.left;
   move(static_cast<int>(std::min<std::size_t>(cursor.row, LINES > 0 ? LINES - 1 : 0)),
        static_cast<int>(std::min<std::size_t>(cursor.column, COLS > 0 ? COLS - 1 : 0)));

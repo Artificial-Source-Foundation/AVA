@@ -2021,7 +2021,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
       SignalBlockGuard block_signals;
       if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.sidebar_drawer_visible || !snapshot.processing)
         return true;
-      ++snapshot.spinner_frame;
       wrote = detail::draw_processing_footer_cached(snapshot, completion_cache, snapshot.file_references_generation, transcript_layout_cache,
                                                     snapshot.transcript_generation);
     }
@@ -4644,8 +4643,20 @@ int run_interactive_composer(TuiRuntimeOptions options)
           return true;
         };
         bool render_failed = false;
+        auto last_processing_indicator_tick = std::chrono::steady_clock::now();
         while (submit_future.wait_for(detail::kProcessingIndicatorFrameDelay) != std::future_status::ready)
         {
+          auto const now = std::chrono::steady_clock::now();
+          auto const elapsed = now - last_processing_indicator_tick;
+          auto const elapsed_frames = detail::processing_indicator_elapsed_frames(elapsed);
+          if (elapsed_frames > 0)
+          {
+            std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+            if (snapshot.processing)
+              snapshot.spinner_frame += elapsed_frames;
+            last_processing_indicator_tick += detail::kProcessingIndicatorFrameDelay * elapsed_frames;
+          }
+
           if (terminal_signal_received())
           {
             if (terminal_signal_number() == SIGINT && !draft.text.empty())
@@ -4698,9 +4709,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
             fail_pending_prompt_requests();
             break;
           }
-          if (drain_result == RuntimeEventDrainResult::Rendered)
-            continue;
-          if (drain_result == RuntimeEventDrainResult::UpdatedNoRender || transcript_scroll_offset > 0)
+          if (drain_result == RuntimeEventDrainResult::Rendered || transcript_scroll_offset > 0)
             continue;
           if (!maybe_reload_display_settings())
           {

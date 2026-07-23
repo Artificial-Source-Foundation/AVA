@@ -1547,12 +1547,11 @@ void Info::print_on(std::ostream& os) const
 //   - open_writable: in-anchor open + identity; outside -> PermissionDenied;
 //     O_CREAT creates beneath the anchor; a cross-anchor escaping symlink is
 //     rejected.
-//   - open_readable: in-anchor open; external (outside-all-anchors) open, the
-//     capability that distinguishes reads from writes; O_WRONLY/O_RDWR are
-//     rejected; an escaping symlink inside an anchor is rejected.
+//   - open_readable: in-anchor and ordinary external opens; descriptor-resolved
+//     direct, chained, and ancestor aliases that enter an anchor are rejected;
+//     O_WRONLY/O_RDWR are rejected; an escaping symlink inside an anchor is
+//     rejected.
 //   - AnchorOpen owns its descriptor: move transfers it, the source goes empty.
-// The "external symlink that enters a writable anchor" hardening is deferred
-// (see the marker in AnchorOpen.cpp) and is intentionally not asserted here.
 void test_anchor_open()
 {
   namespace fs = std::filesystem;
@@ -1834,11 +1833,45 @@ void test_anchor_open()
     }
   }
 
+  auto const ordinary_external_path = external / "subdir" / "ordinary.txt";
+  {
+    std::ofstream ordinary(ordinary_external_path, std::ios::binary | std::ios::trunc);
+    ordinary << "ordinary external";
+  }
+  auto const anchor_secret_path = ws_a / "subdir" / "anchor-secret.txt";
+  {
+    std::ofstream secret(anchor_secret_path, std::ios::binary | std::ios::trunc);
+    secret << "anchor secret";
+  }
+  auto ordinary_external = ava::core::open_readable(anchor_set, ordinary_external_path, O_RDONLY | O_CLOEXEC);
+  expect(ordinary_external && ordinary_external->absolute() == ordinary_external_path && read_all_from_fd(ordinary_external->fd()) == "ordinary external",
+         ordinary_external ? "open_readable preserves ordinary external reads and their logical absolute identity"
+                           : "open_readable preserves ordinary external reads and their logical absolute identity: " + ordinary_external.error().format());
+
+  std::error_code alias_error;
+  fs::create_symlink(anchor_secret_path, external / "direct-anchor-alias", alias_error);
+  expect(!alias_error, "anchor-open creates a direct external alias into an anchor");
+  auto direct_alias = ava::core::open_readable(anchor_set, external / "direct-anchor-alias", O_RDONLY | O_CLOEXEC);
+  expect(!direct_alias, "open_readable rejects a direct external alias entering an anchor");
+
+  alias_error.clear();
+  fs::create_symlink("direct-anchor-alias", external / "first-chain-alias", alias_error);
+  expect(!alias_error, "anchor-open creates a chained external alias into an anchor");
+  auto chained_alias = ava::core::open_readable(anchor_set, external / "first-chain-alias", O_RDONLY | O_CLOEXEC);
+  expect(!chained_alias, "open_readable rejects chained external aliases entering an anchor");
+
+  alias_error.clear();
+  fs::create_directory_symlink(root, external / "ancestor-alias", alias_error);
+  expect(!alias_error, "anchor-open creates an external alias to an anchor ancestor");
+  auto ancestor_alias =
+      ava::core::open_readable(anchor_set, external / "ancestor-alias" / "workspace-a" / "subdir" / "anchor-secret.txt", O_RDONLY | O_CLOEXEC);
+  expect(!ancestor_alias, "open_readable rejects an ancestor alias followed by normal components that enter an anchor");
+
   // open_readable rejects write access modes.
   auto const write_mode = ava::core::open_readable(anchor_set, ws_a / "subdir" / "file.txt", O_WRONLY | O_CLOEXEC);
   auto const rdwr_mode = ava::core::open_readable(anchor_set, ws_a / "subdir" / "file.txt", O_RDWR | O_CLOEXEC);
-  expect(!write_mode && write_mode.error().category() == ava::core::ErrorCategory::InvalidArgument &&
-      !rdwr_mode && rdwr_mode.error().category() == ava::core::ErrorCategory::InvalidArgument,
+  expect(!write_mode && write_mode.error().category() == ava::core::ErrorCategory::InvalidArgument && !rdwr_mode &&
+             rdwr_mode.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "open_readable rejects O_WRONLY and O_RDWR with InvalidArgument");
 }
 

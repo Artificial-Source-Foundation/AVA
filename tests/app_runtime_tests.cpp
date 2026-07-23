@@ -1168,15 +1168,20 @@ void test_app_runtime_enabled_plugin_resource_failures_are_context_visible()
                                       : "plugin resource failure test trusts project resources: " + trusted.error().format());
 
   write_app_test_file(plugin_dir / "plugin.json", app_plugin_resource_manifest_json("com.example.failedresources", "Failed Resource Plugin", marker,
-                                                                                    "missing-review", "Missing review prompt", "prompts/missing.md",
+                                                                                    "missing-review", "Missing review prompt", "prompts/review.md",
                                                                                     "broken-skill", "Broken plugin skill", "skills/broken.md"));
+  write_app_test_file(root / "outside-prompts" / "review.md", "Outside prompt target must not load through an intermediate symlink.\n");
   write_app_test_file(root / "outside-skill.md", "Outside skill target must not load.\n");
   std::error_code dir_error;
   std::filesystem::create_directories(plugin_dir / "skills", dir_error);
   expect(!dir_error, "plugin resource failure test creates skill directory");
   std::error_code symlink_error;
+  std::filesystem::create_directory_symlink(root / "outside-prompts", plugin_dir / "prompts", symlink_error);
+  expect(!symlink_error, "plugin resource failure test creates escaping intermediate prompt symlink fixture");
+  if (symlink_error)
+    return;
   std::filesystem::create_symlink(root / "outside-skill.md", plugin_dir / "skills" / "broken.md", symlink_error);
-  expect(!symlink_error, "plugin resource failure test creates symlink skill fixture");
+  expect(!symlink_error, "plugin resource failure test creates final symlink skill fixture");
   if (symlink_error)
     return;
 
@@ -1197,16 +1202,18 @@ void test_app_runtime_enabled_plugin_resource_failures_are_context_visible()
   auto missing_prompt = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context missing-review"});
   expect(missing_prompt && missing_prompt->handled && !missing_prompt->output.empty() &&
              missing_prompt->output[0].find("plugin_prompt  project  com.example.failedresources/missing-review") != std::string::npos &&
-             missing_prompt->output[0].find("status=missing") != std::string::npos,
-         "failed enabled plugin prompt resources remain visible in /context as missing");
+             missing_prompt->output[0].find("status=unavailable") != std::string::npos,
+         "failed enabled plugin prompt resources remain visible in /context without re-reading the escaped path: " +
+             (missing_prompt ? (missing_prompt->output.empty() ? std::string("empty output") : missing_prompt->output[0]) : missing_prompt.error().format()));
 
   auto broken_skill = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context broken-skill"});
   expect(broken_skill && broken_skill->handled && !broken_skill->output.empty() &&
              broken_skill->output[0].find("plugin_skill  project  com.example.failedresources/broken-skill") != std::string::npos &&
-             broken_skill->output[0].find("cause=symlink") != std::string::npos,
-         "failed enabled plugin skill resources remain visible in /context as symlink failures");
-  expect(session->system_prompt.find("Outside skill target must not load") == std::string::npos && !std::filesystem::exists(marker),
-         "failed plugin static resources do not load content or execute plugin entrypoints");
+             broken_skill->output[0].find("status=unavailable") != std::string::npos,
+         "failed enabled plugin skill resources remain visible in /context without re-reading the rejected final symlink");
+  expect(session->system_prompt.find("Outside prompt target must not load") == std::string::npos &&
+             session->system_prompt.find("Outside skill target must not load") == std::string::npos && !std::filesystem::exists(marker),
+         "failed plugin static resources never consume outside content through intermediate or final symlinks and do not execute plugin entrypoints");
 }
 
 void test_app_runtime_plugin_install_remove_commands()

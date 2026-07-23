@@ -14,6 +14,7 @@
 #include "ava/plugin/manifest.h"
 #include "ava/plugin/runner.h"
 #include "ava/plugin/runner_protocol.h"
+#include "ava/plugin/static_resources.h"
 #include "ava/plugin/tool_broker.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/json.h"
@@ -21,16 +22,21 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
+#include <fcntl.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #ifndef AVA_SAMPLE_TODO_PLUGIN_DIR
 #define AVA_SAMPLE_TODO_PLUGIN_DIR ""
@@ -434,6 +440,82 @@ void test_plugin_manifest_parsing()
   auto deep = ava::plugin::parse_plugin_manifest(deeply_nested_manifest, {});
   expect(!deep && deep.error().message().find("maximum JSON depth") != std::string::npos,
          "plugin manifest rejects excessive JSON nesting before recursive validation");
+}
+
+void test_static_plugin_resource_loader_is_descriptor_anchored()
+{
+  auto const root = create_empty_root("plugin-static-resource-containment");
+  auto const plugin_dir = root / "plugin";
+  auto const outside = root / "outside";
+  write_text(plugin_dir / "resources" / "inside.md", "inside content\n");
+  write_text(outside / "secret.md", "OUTSIDE STATIC RESOURCE MUST NOT LOAD\n");
+
+  ava::plugin::PluginManifest manifest;
+  manifest.id = "com.example.static-containment";
+  manifest.directory = plugin_dir;
+  ava::plugin::PluginResourceContribution regular{.name = "regular", .description = "regular", .path = "resources/inside.md"};
+  auto loaded = ava::plugin::load_plugin_static_resource(manifest, regular);
+  expect(loaded && loaded->content == "inside content\n" && loaded->path == (plugin_dir / regular.path).lexically_normal(),
+         "static plugin resource loader returns bounded content with its logical display path");
+
+  std::error_code link_error;
+  auto const plugin_alias = root / "plugin-alias";
+  std::filesystem::create_directory_symlink(plugin_dir, plugin_alias, link_error);
+  expect(!link_error, "static plugin resource test creates a plugin-directory symlink");
+  if (!link_error)
+  {
+    auto alias_manifest = manifest;
+    alias_manifest.directory = plugin_alias;
+    auto aliased_root = ava::plugin::load_plugin_static_resource(alias_manifest, regular);
+    expect(!aliased_root, "static plugin resource loader rejects a symlink replacing the plugin directory authority");
+  }
+
+  link_error.clear();
+  std::filesystem::create_directory_symlink(outside, plugin_dir / "escape", link_error);
+  expect(!link_error, "static plugin resource test creates escaping intermediate symlink");
+  if (!link_error)
+  {
+    ava::plugin::PluginResourceContribution escaping{.name = "escaping", .description = "escaping", .path = "escape/secret.md"};
+    auto escaped = ava::plugin::load_plugin_static_resource(manifest, escaping);
+    expect(!escaped, "static plugin resource loader rejects an intermediate symlink that exits the plugin directory");
+  }
+
+  link_error.clear();
+  std::filesystem::create_symlink(outside / "secret.md", plugin_dir / "resources" / "final-link.md", link_error);
+  expect(!link_error, "static plugin resource test creates final symlink");
+  if (!link_error)
+  {
+    ava::plugin::PluginResourceContribution final_link{.name = "final-link", .description = "final-link", .path = "resources/final-link.md"};
+    auto linked = ava::plugin::load_plugin_static_resource(manifest, final_link);
+    expect(!linked, "static plugin resource loader preserves final-symlink rejection");
+  }
+
+  auto const fifo_path = plugin_dir / "resources" / "blocking-fifo.md";
+  expect(::mkfifo(fifo_path.c_str(), 0600) == 0, "static plugin resource test creates a manifest-declared FIFO");
+  ava::plugin::PluginResourceContribution fifo{.name = "blocking-fifo", .description = "blocking-fifo", .path = "resources/blocking-fifo.md"};
+  manifest.contributes.prompts.push_back(fifo);
+  std::mutex fifo_mutex;
+  std::condition_variable fifo_changed;
+  bool fifo_read_finished = false;
+  std::jthread fifo_unblocker([&] {
+    std::unique_lock lock(fifo_mutex);
+    if (fifo_changed.wait_for(lock, std::chrono::seconds(5), [&] { return fifo_read_finished; }))
+      return;
+    lock.unlock();
+    int const writer = ::open(fifo_path.c_str(), O_WRONLY | O_CLOEXEC);
+    if (writer >= 0)
+      ::close(writer);
+  });
+  auto const fifo_start = std::chrono::steady_clock::now();
+  auto loaded_fifo = ava::plugin::load_plugin_static_resource(manifest, manifest.contributes.prompts.back());
+  auto const fifo_elapsed = std::chrono::steady_clock::now() - fifo_start;
+  {
+    std::lock_guard lock(fifo_mutex);
+    fifo_read_finished = true;
+  }
+  fifo_changed.notify_all();
+  expect(!loaded_fifo && loaded_fifo.error().message().find("regular file") != std::string::npos && fifo_elapsed < std::chrono::seconds(4),
+         "static plugin resource loader rejects a FIFO as nonregular without blocking");
 }
 
 void test_sample_todo_plugin_manifest_and_resources()
@@ -2177,6 +2259,7 @@ void test_plugin_tool_registry_skips_name_collisions()
 void run_plugin_tests()
 {
   test_plugin_manifest_parsing();
+  test_static_plugin_resource_loader_is_descriptor_anchored();
   test_sample_todo_plugin_manifest_and_resources();
   test_sample_todo_plugin_protocol_path();
   test_plugin_runner_protocol_parsing();

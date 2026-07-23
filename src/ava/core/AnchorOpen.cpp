@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
-#include <optional>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -58,6 +57,7 @@ class UniqueFd
   }
 
   int get() const { return fd_; }
+  int release() { return std::exchange(fd_, -1); }
 
  private:
   int fd_ = -1;
@@ -205,57 +205,9 @@ std::vector<std::filesystem::path> path_components(std::filesystem::path const& 
 {
   std::vector<std::filesystem::path> result;
 
-  for (auto const& component : path.relative_path())
-    result.push_back(component);
+  for (auto const& component : path.relative_path()) result.push_back(component);
 
   return result;
-}
-
-ResolvedPath resolve_path(int base_directory, int root_directory, std::filesystem::path const& path, unsigned int& followed_symlinks)
-{
-  UniqueFd current = duplicate_fd(path.is_absolute() ? root_directory : base_directory);
-
-  auto const components = path_components(path);
-
-  for (std::size_t i = 0; i != components.size(); ++i)
-  {
-    auto const& component = components[i];
-
-    if (component.empty() || component == ".")
-      continue;
-
-    if (component == "..")
-    {
-      current = open_parent(current.get());
-      continue;
-    }
-
-    UniqueFd object = open_nofollow(current.get(), component);
-    mode_t const type = file_type(object.get());
-    ResolvedPath resolved;
-
-    if (type == S_IFLNK)
-    {
-      if (++followed_symlinks > 40)
-        throw_error(ELOOP, "symbolic-link resolution");
-
-      std::string const target = read_link(object.get());
-
-      resolved = resolve_path(current.get(), root_directory, std::filesystem::path(target), followed_symlinks);
-    }
-    else
-      resolved = {std::move(object), duplicate_fd(current.get()), type == S_IFDIR};
-
-    if (i + 1 == components.size())
-      return resolved;
-
-    if (!resolved.is_directory)
-      throw_error(ENOTDIR, "non-directory pathname component");
-
-    current = std::move(resolved.object);
-  }
-
-  return {std::move(current), UniqueFd(), true};
 }
 
 bool is_beneath_any_anchor(ResolvedPath const& path, std::vector<FileId> const& anchor_ids)
@@ -265,96 +217,79 @@ bool is_beneath_any_anchor(ResolvedPath const& path, std::vector<FileId> const& 
   return is_beneath_any_anchor(directory, anchor_ids);
 }
 
-// Walk an normalized absolute path component by component, checking each symlink's
-// resolved target against the anchor set. Returns a Configuration error if
-// any symlink in the path enters a writable anchor; returns nullopt if no
-// symlink enters an anchor (or if the walk cannot proceed due to a missing
-// or inaccessible component, in which case the subsequent open() will report
-// the real error).
-//
-// This is the "enter-anchor" check for open_readable's external branch: the
-// candidate is lexically outside all anchors, but a symlink along the path
-// may redirect resolution into an anchor. Each symlink's target is resolved
-// (relative targets against the link's parent directory, absolute targets
-// from root), normalized, and checked with find_anchor. Chained symlinks
-// (external -> external -> anchor) are caught by prepending the target's
-// components to the worklist and continuing the walk.
-std::optional<Error> external_path_enters_anchor(AnchorSet const& anchors, std::filesystem::path const& absolute)
+Result<ResolvedPath> resolve_external_path(AnchorSet const& anchors, std::filesystem::path const& absolute)
 {
-  DoutEntering(dc::core, "external_path_enters_anchor(" << anchors << ", " << absolute << ")");
-
   auto const& anchor_list = anchors.anchors();
-
-  // This should never happen, of course.
-  if (anchor_list.empty())
-    return std::nullopt;
-
   std::vector<FileId> anchor_ids;
   anchor_ids.reserve(anchor_list.size());
-
   for (auto const& anchor : anchor_list)
   {
     if (file_type(anchor.fd) != S_IFDIR)
-    {
       throw_error(ENOTDIR, "anchor file descriptor");
-    }
-
     anchor_ids.push_back(file_id(anchor.fd));
   }
 
   UniqueFd root = open_root();
   UniqueFd current = duplicate_fd(root.get());
-  auto const components = path_components(absolute);
+  std::deque<std::filesystem::path> components;
+  for (auto const& component : path_components(absolute)) components.push_back(component);
   unsigned int followed_symlinks = 0;
 
-  for (std::size_t i = 0; i != components.size(); ++i)
+  while (!components.empty())
   {
-    auto const& component = components[i];
-
-    if (component.empty())
+    auto component = std::move(components.front());
+    components.pop_front();
+    if (component.empty() || component == ".")
+      continue;
+    if (component == "..")
     {
+      current = open_parent(current.get());
+      if (is_beneath_any_anchor(current.get(), anchor_ids))
+        return std::unexpected(Error(ErrorCategory::Configuration, "external path resolution enters a writable anchor"));
       continue;
     }
 
     UniqueFd object = open_nofollow(current.get(), component);
     mode_t const type = file_type(object.get());
-
     if (type == S_IFLNK)
     {
       if (++followed_symlinks > 40)
         throw_error(ELOOP, "symbolic-link resolution");
-
-      std::string const target = read_link(object.get());
-
-      ResolvedPath resolved = resolve_path(current.get(), root.get(), std::filesystem::path(target), followed_symlinks);
-
-      if (is_beneath_any_anchor(resolved, anchor_ids))
-      {
-        auto error = Error(ErrorCategory::Configuration, "external path contains a symlink that enters a writable anchor");
-        return error;
-      }
-
-      if (i + 1 == components.size())
-        return std::nullopt;
-
-      if (!resolved.is_directory)
-        throw_error(ENOTDIR, "non-directory pathname component");
-
-      current = std::move(resolved.object);
+      auto const target = std::filesystem::path(read_link(object.get()));
+      if (target.is_absolute())
+        current = duplicate_fd(root.get());
+      auto const target_components = path_components(target);
+      for (auto it = target_components.rbegin(); it != target_components.rend(); ++it) components.push_front(*it);
+      continue;
     }
-    else
-    {
-      if (i + 1 == components.size())
-        return std::nullopt;
 
-      if (type != S_IFDIR)
-        throw_error(ENOTDIR, "non-directory pathname component");
-
-      current = std::move(object);
-    }
+    ResolvedPath resolved{std::move(object), duplicate_fd(current.get()), type == S_IFDIR};
+    if (is_beneath_any_anchor(resolved, anchor_ids))
+      return std::unexpected(Error(ErrorCategory::Configuration, "external path resolution enters a writable anchor"));
+    if (components.empty())
+      return resolved;
+    if (!resolved.is_directory)
+      throw_error(ENOTDIR, "non-directory pathname component");
+    current = std::move(resolved.object);
   }
 
-  return std::nullopt;
+  ResolvedPath resolved{std::move(current), UniqueFd(), true};
+  if (is_beneath_any_anchor(resolved, anchor_ids))
+    return std::unexpected(Error(ErrorCategory::Configuration, "external path resolution enters a writable anchor"));
+  return resolved;
+}
+
+UniqueFd reopen_resolved_object(ResolvedPath const& resolved, int flags)
+{
+  auto const expected = file_id(resolved.object.get());
+  auto const proc_path = std::string("/proc/self/fd/") + std::to_string(resolved.object.get());
+  int const fd = ::open(proc_path.c_str(), (flags & ~O_NOFOLLOW) | O_CLOEXEC);
+  if (fd == -1)
+    throw_errno("open(/proc/self/fd)");
+  UniqueFd reopened(fd);
+  if (file_id(reopened.get()) != expected)
+    throw_error(EIO, "/proc/self/fd identity mismatch");
+  return reopened;
 }
 
 // Build an error for a failed open, translating the errno into the category
@@ -516,23 +451,20 @@ Result<AnchorOpen> open_readable(AnchorSet const& anchors, std::filesystem::path
 
   try
   {
-    // Reject the path if it contains symlinks that enter a writable anchor.
-    // The candidate is lexically outside all anchors, but a symlink along the
-    // path may redirect resolution into an anchor. This is a configuration
-    // issue (the symlink's existence crosses the anchor safety boundary) rather
-    // than a permission violation, so it is reported as Configuration.
-    if (auto enters = external_path_enters_anchor(anchors, absolute))
-      return std::unexpected(std::move(*enters));
+    auto resolved = resolve_external_path(anchors, absolute);
+    if (!resolved)
+    {
+      auto error = std::move(resolved.error());
+      error.with_context("path", absolute.string());
+      return std::unexpected(std::move(error));
+    }
+    auto opened = reopen_resolved_object(*resolved, flags);
+    return AnchorOpen(opened.release(), {}, std::move(absolute), {});
   }
   catch (std::system_error const& error)
   {
-    Dout(dc::warning, "external_path_enters_anchor threw exception: " << error.what());
+    return std::unexpected(open_path_error("open_readable failed to inspect and open external path", error.code().value(), absolute, {}));
   }
-
-  int const fd = ::open(absolute.c_str(), flags | O_CLOEXEC, mode);
-  if (fd < 0)
-    return std::unexpected(open_path_error("open_readable failed to open external path", errno, absolute, {}));
-  return AnchorOpen(fd, {}, std::move(absolute), {});
 }
 
 }  // namespace ava::core

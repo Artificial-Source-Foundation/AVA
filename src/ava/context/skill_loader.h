@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -44,8 +45,9 @@ struct DeclaredSkillFileOptions
   std::string name;
   std::string description;
   SkillSourceType source_type = SkillSourceType::Project;
+  std::optional<std::string> preloaded_content;
   std::size_t max_file_bytes = 64 * 1024;
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct SkillLoadOptions
@@ -72,6 +74,7 @@ struct SkillLoadResult
 [[nodiscard]] std::vector<std::filesystem::path> default_global_skill_dirs();
 [[nodiscard]] std::vector<std::filesystem::path> default_project_skill_dirs(std::filesystem::path const& workspace_root);
 [[nodiscard]] ava::core::Result<LoadedSkill> load_declared_skill_file(DeclaredSkillFileOptions options);
+[[nodiscard]] ava::core::Result<LoadedSkill> load_declared_skill_content(DeclaredSkillFileOptions options, std::string content);
 [[nodiscard]] SkillLoadResult load_skills(SkillLoadOptions options);
 [[nodiscard]] std::string format_available_skills_for_prompt(std::vector<LoadedSkill> const& skills);
 [[nodiscard]] std::string format_loaded_skill_for_tool(LoadedSkill const& skill, std::vector<std::filesystem::path> const& sampled_files);

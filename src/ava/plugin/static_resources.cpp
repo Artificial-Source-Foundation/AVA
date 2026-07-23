@@ -1,50 +1,146 @@
 #include "sys.h"
 #include "ava/plugin/static_resources.h"
 #include "ava/core/error.h"
+#include "ava/core/open_beneath.h"
 #include "ava/core/path.h"
 
+#include <array>
+#include <cerrno>
 #include <system_error>
+#include <utility>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace ava::plugin {
 namespace {
 
-bool path_is_within(std::filesystem::path const& base, std::filesystem::path const& target)
+class UniqueFd
 {
-  if (target == base)
-    return true;
-  std::error_code relative_error;
-  auto const relative = std::filesystem::relative(target, base, relative_error);
-  if (relative_error || relative.empty())
-    return false;
+ public:
+  explicit UniqueFd(int fd = -1) : fd_(fd) { }
+  UniqueFd(UniqueFd const&) = delete;
+  UniqueFd& operator=(UniqueFd const&) = delete;
+  UniqueFd(UniqueFd&& other) noexcept : fd_(std::exchange(other.fd_, -1)) { }
+  UniqueFd& operator=(UniqueFd&& other) noexcept
+  {
+    if (this != &other)
+    {
+      if (fd_ >= 0)
+        ::close(fd_);
+      fd_ = std::exchange(other.fd_, -1);
+    }
+    return *this;
+  }
+  ~UniqueFd()
+  {
+    if (fd_ >= 0)
+      ::close(fd_);
+  }
+
+  [[nodiscard]] int get() const noexcept { return fd_; }
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+ private:
+  int fd_;
+};
+
+ava::core::Error resource_error(ava::core::ErrorCategory category, std::string message, PluginManifest const& manifest,
+                                PluginResourceContribution const& resource, std::filesystem::path const& path, int error_number = 0)
+{
+  auto error = ava::core::Error(category, std::move(message));
+  error.with_context("plugin", manifest.id);
+  error.with_context("resource", resource.name);
+  error.with_context("path", path.string());
+  if (error_number != 0)
+    error.with_context("cause", std::generic_category().message(error_number));
+  return error;
+}
+
+ava::core::Result<std::filesystem::path> relative_resource_path(PluginManifest const& manifest, PluginResourceContribution const& resource)
+{
+  auto const relative = std::filesystem::path(resource.path).lexically_normal();
   auto const first = relative.begin();
-  if (first == relative.end())
-    return false;
-  auto const first_part = *first;
-  return first_part != ".." && !first_part.is_absolute();
+  if (relative.empty() || relative.is_absolute() || (first != relative.end() && *first == ".."))
+  {
+    return std::unexpected(resource_error(ava::core::ErrorCategory::InvalidArgument, "plugin resource path escapes plugin directory", manifest, resource,
+                                          plugin_static_resource_display_path(manifest, resource)));
+  }
+  return relative;
 }
 
 }  // namespace
 
 std::filesystem::path plugin_static_resource_display_path(PluginManifest const& manifest, PluginResourceContribution const& resource)
 {
-  std::error_code error;
-  return std::filesystem::absolute(manifest.directory / resource.path, error).lexically_normal();
+  return (ava::core::normalized_absolute_path(manifest.directory) / resource.path).lexically_normal();
 }
 
-ava::core::Result<std::filesystem::path> plugin_static_resource_path(PluginManifest const& manifest, PluginResourceContribution const& resource)
+ava::core::Result<LoadedPluginStaticResource> load_plugin_static_resource(PluginManifest const& manifest, PluginResourceContribution const& resource,
+                                                                          std::size_t max_bytes)
 {
-  auto const base_path = ava::core::normalized_absolute_path(manifest.directory);
-  auto const raw_target = plugin_static_resource_display_path(manifest, resource);
-  auto const target_path = ava::core::normalized_absolute_path(raw_target);
-  if (!path_is_within(base_path, target_path))
+  auto const display_path = plugin_static_resource_display_path(manifest, resource);
+  auto relative = relative_resource_path(manifest, resource);
+  if (!relative)
+    return std::unexpected(std::move(relative.error()));
+
+  UniqueFd plugin_directory(::open(manifest.directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
+  if (plugin_directory.get() < 0)
   {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin resource path escapes plugin directory");
-    error.with_context("plugin", manifest.id);
-    error.with_context("resource", resource.name);
-    error.with_context("path", resource.path);
+    return std::unexpected(resource_error(ava::core::ErrorCategory::Io, "failed to open plugin directory", manifest, resource, manifest.directory, errno));
+  }
+
+  UniqueFd resource_fd(ava::core::open_beneath(plugin_directory.get(), *relative, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC));
+  if (resource_fd.get() < 0)
+  {
+    int const error_number = errno;
+    auto const category = (error_number == ELOOP || error_number == EXDEV) ? ava::core::ErrorCategory::PermissionDenied : ava::core::ErrorCategory::Io;
+    return std::unexpected(resource_error(category, "failed to open plugin resource beneath plugin directory", manifest, resource, display_path, error_number));
+  }
+
+  struct stat status{};
+  if (::fstat(resource_fd.get(), &status) < 0)
+  {
+    return std::unexpected(resource_error(ava::core::ErrorCategory::Io, "failed to inspect plugin resource", manifest, resource, display_path, errno));
+  }
+  if (!S_ISREG(status.st_mode))
+  {
+    return std::unexpected(
+        resource_error(ava::core::ErrorCategory::InvalidArgument, "plugin resource must be a regular file", manifest, resource, display_path));
+  }
+  if (status.st_size < 0 || static_cast<std::uintmax_t>(status.st_size) > max_bytes)
+  {
+    auto error = resource_error(ava::core::ErrorCategory::InvalidArgument, "plugin resource exceeds size cap", manifest, resource, display_path);
+    error.with_context("max_bytes", std::to_string(max_bytes));
     return std::unexpected(std::move(error));
   }
-  return raw_target;
+
+  std::string content;
+  content.reserve(static_cast<std::size_t>(status.st_size));
+  std::array<char, 4096> buffer{};
+  for (;;)
+  {
+    ssize_t const count = ::read(resource_fd.get(), buffer.data(), buffer.size());
+    if (count < 0)
+    {
+      if (errno == EINTR)
+        continue;
+      return std::unexpected(resource_error(ava::core::ErrorCategory::Io, "failed to read plugin resource", manifest, resource, display_path, errno));
+    }
+    if (count == 0)
+      break;
+    if (content.size() + static_cast<std::size_t>(count) > max_bytes)
+    {
+      auto error =
+          resource_error(ava::core::ErrorCategory::InvalidArgument, "plugin resource exceeds size cap while reading", manifest, resource, display_path);
+      error.with_context("max_bytes", std::to_string(max_bytes));
+      return std::unexpected(std::move(error));
+    }
+    content.append(buffer.data(), static_cast<std::size_t>(count));
+  }
+
+  return LoadedPluginStaticResource{.path = display_path, .content = std::move(content)};
 }
 
 std::vector<PluginStaticSkillFile> enabled_plugin_static_skill_files(PluginDiagnostics const& diagnostics)
@@ -57,14 +153,15 @@ std::vector<PluginStaticSkillFile> enabled_plugin_static_skill_files(PluginDiagn
     auto const& manifest = status.plugin.manifest;
     for (auto const& skill : manifest.contributes.skills)
     {
-      auto path = plugin_static_resource_path(manifest, skill);
-      if (!path)
+      auto loaded = load_plugin_static_resource(manifest, skill);
+      if (!loaded)
         continue;
       files.push_back(PluginStaticSkillFile{.scope = std::string(to_string(status.plugin.scope)),
                                             .plugin_id = manifest.id,
                                             .name = skill.name,
                                             .description = skill.description,
-                                            .path = std::move(*path)});
+                                            .path = std::move(loaded->path),
+                                            .content = std::move(loaded->content)});
     }
   }
   return files;

@@ -12,13 +12,17 @@
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/open_beneath.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <future>
 #include <system_error>
 #include <utility>
+#include <fcntl.h>
 #include <nlohmann/json.hpp>
+#include <unistd.h>
 
 namespace ava::app::acp {
 namespace {
@@ -118,7 +122,9 @@ ava::core::VoidResult SessionUpdateGateway::send(std::string_view session_id, st
   return sender(session_id, update_json);
 }
 
-ava::core::Result<std::filesystem::path> resolve_session_cwd(std::filesystem::path const& launch_root, std::string_view requested)
+namespace {
+
+ava::core::Result<std::filesystem::path> resolve_session_cwd_lexically(std::filesystem::path const& launch_root, std::string_view requested)
 {
   if (requested.empty())
     return std::unexpected(protocol_error("cwd is required"));
@@ -129,22 +135,10 @@ ava::core::Result<std::filesystem::path> resolve_session_cwd(std::filesystem::pa
   if (normalized != path)
     return std::unexpected(protocol_error("cwd must not contain traversal or redundant path components"));
 
-  std::error_code status_error;
-  auto status = std::filesystem::symlink_status(path, status_error);
-  if (status_error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
-  {
-    auto error = protocol_error("cwd must be an existing non-symlink directory");
-    error.with_context("cwd", path.string());
-    if (status_error)
-      error.with_context("cause", status_error.message());
-    return std::unexpected(std::move(error));
-  }
-
   // Containment is checked lexically against the launch root so a workspace
   // configured through a symlink matches the paths the client and model use.
-  // The descriptor-anchored SecureWorkspace enforces the actual filesystem
-  // containment when the path is opened, so this check only needs to keep the
-  // cwd within the configured workspace rather than re-resolve symlinks.
+  // AcpSessionRegistry::resolve_cwd performs the filesystem check against the
+  // retained launch-root descriptor before any service operation can commit.
   if (!path_is_within(launch_root, path))
   {
     auto error = protocol_error("cwd is outside the launch-approved workspace root");
@@ -154,6 +148,8 @@ ava::core::Result<std::filesystem::path> resolve_session_cwd(std::filesystem::pa
   }
   return path;
 }
+
+}  // namespace
 
 ava::core::Result<std::string_view> acp_stop_reason(ava::core::RuntimeTerminalOutcome outcome)
 {
@@ -762,6 +758,34 @@ AcpSessionRegistry::AcpSessionRegistry(AcpSessionOptions options) : options_(std
 AcpSessionRegistry::~AcpSessionRegistry()
 {
   shutdown();
+}
+
+ava::core::Result<std::filesystem::path> AcpSessionRegistry::resolve_cwd(std::string_view requested) const
+{
+  auto cwd = resolve_session_cwd_lexically(options_.launch_root, requested);
+  if (!cwd)
+    return std::unexpected(std::move(cwd.error()));
+  if (coordinator_startup_error_ || !options_.open_options.anchor_set || options_.open_options.anchor_set->anchors().empty())
+    return std::unexpected(coordinator_startup_error_.value_or(protocol_error("ACP launch workspace authority is unavailable")));
+
+  auto const& launch_anchor = options_.open_options.anchor_set->anchors().front();
+  if (launch_anchor.root != options_.launch_root.lexically_normal())
+    return std::unexpected(protocol_error("ACP launch workspace authority does not match its logical root"));
+  auto relative = cwd->lexically_relative(launch_anchor.root);
+  if (relative == "." || relative.empty())
+    relative = ".";
+  int const fd = ava::core::open_beneath(launch_anchor.fd, relative, O_RDONLY | O_DIRECTORY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0)
+  {
+    int const error_number = errno;
+    auto error = protocol_error("cwd must be an existing non-symlink directory contained by the launch workspace");
+    error.with_context("cwd", cwd->string());
+    error.with_context("workspace_root", launch_anchor.root.string());
+    error.with_context("cause", std::generic_category().message(error_number));
+    return std::unexpected(std::move(error));
+  }
+  ::close(fd);
+  return *cwd;
 }
 
 ava::core::VoidResult AcpSessionRegistry::reserve_insertion(std::optional<std::string_view> session_id)

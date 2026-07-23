@@ -361,16 +361,20 @@ std::vector<std::filesystem::path> default_project_skill_dirs(std::filesystem::p
   return {workspace_root / ".ava" / "skills", workspace_root / ".agents" / "skills", workspace_root / ".claude" / "skills"};
 }
 
-ava::core::Result<LoadedSkill> load_declared_skill_file(DeclaredSkillFileOptions options)
+ava::core::Result<LoadedSkill> load_declared_skill_content(DeclaredSkillFileOptions options, std::string content)
 {
   if (options.max_file_bytes == 0)
     options.max_file_bytes = 64 * 1024;
+  if (content.size() > options.max_file_bytes)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "skill file is too large");
+    error.with_context("path", options.path.string());
+    error.with_context("max_bytes", std::to_string(options.max_file_bytes));
+    return std::unexpected(std::move(error));
+  }
 
-  auto content = read_skill_file(options.path, options.max_file_bytes);
-  if (!content)
-    return std::unexpected(std::move(content.error()));
-
-  auto parsed = parse_skill_markdown(*content);
+  auto const byte_count = content.size();
+  auto parsed = parse_skill_markdown(content);
   auto name = core::trim(options.name);
   auto description = core::trim(options.description);
 
@@ -392,11 +396,29 @@ ava::core::Result<LoadedSkill> load_declared_skill_file(DeclaredSkillFileOptions
   auto const directory = ava::core::normalized_absolute_path(options.path.parent_path());
   return LoadedSkill{.name = std::move(name),
                      .description = std::move(description),
-                      .path = ava::core::normalized_absolute_path(options.path),
+                     .path = ava::core::normalized_absolute_path(options.path),
                      .directory = directory,
                      .source_type = options.source_type,
-                     .byte_count = content->size(),
+                     .byte_count = byte_count,
                      .content = std::move(parsed.body)};
+}
+
+ava::core::Result<LoadedSkill> load_declared_skill_file(DeclaredSkillFileOptions options)
+{
+  if (options.max_file_bytes == 0)
+    options.max_file_bytes = 64 * 1024;
+
+  if (options.preloaded_content)
+  {
+    auto content = std::move(*options.preloaded_content);
+    options.preloaded_content.reset();
+    return load_declared_skill_content(std::move(options), std::move(content));
+  }
+
+  auto content = read_skill_file(options.path, options.max_file_bytes);
+  if (!content)
+    return std::unexpected(std::move(content.error()));
+  return load_declared_skill_content(std::move(options), std::move(*content));
 }
 
 SkillLoadResult load_skills(SkillLoadOptions options)

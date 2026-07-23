@@ -442,6 +442,12 @@ std::string freshness_source_status_text(runtime::FreshnessSourceMetadata const&
 {
   if (source.path.empty())
     return "<inline>  loaded_bytes=" + std::to_string(source.byte_count) + "  status=inline";
+  if (source.kind == runtime::FreshnessSourceKind::PluginPrompt || source.kind == runtime::FreshnessSourceKind::PluginSkill)
+  {
+    bool const loaded_snapshot = source.byte_count != 0 || source.content_fingerprint != 0;
+    return source.path.string() + "  loaded_bytes=" + std::to_string(source.byte_count) +
+           (loaded_snapshot ? "  status=loaded_snapshot" : "  status=unavailable");
+  }
   return source.path.string() + "  loaded_bytes=" + std::to_string(source.byte_count) + "  " +
          context_file_status(source.path, source.byte_count, source.content_fingerprint);
 }

@@ -4200,11 +4200,11 @@ void test_acp_session_cwd_allows_symlinked_workspace_path()
   std::filesystem::create_directories(real_workspace);
   std::filesystem::create_directories(projects);
   std::error_code link_error;
-  std::filesystem::create_directory_symlink(real_target, projects / "github", link_error);
-  expect(!link_error, "test creates absolute symlink in workspace path");
+  auto const workspace_via_link = projects / "linked-workspace";
+  std::filesystem::create_directory_symlink(real_workspace, workspace_via_link, link_error);
+  expect(!link_error, "test creates a launch workspace whose configured root is an absolute symlink");
   if (link_error)
     return;
-  auto const workspace_via_link = projects / "github" / "ai-cli" / "AVA";
 
   configure_acp_test_model(root);
   auto const paths = ava::tests::app_test_paths(root);
@@ -4219,8 +4219,9 @@ void test_acp_session_cwd_allows_symlinked_workspace_path()
   // A session cwd whose path traverses the absolute symlink must be accepted;
   // only the resolved location must stay within the launch-approved root.
   auto created = service.handle_request(
-      Request{.id = std::int64_t(1), .method = "session/new",
-              .params_json = std::string("{\"cwd\":\"") + workspace_via_link.string() + "\",\"mcpServers\":[]}"}, {});
+      Request{
+          .id = std::int64_t(1), .method = "session/new", .params_json = std::string("{\"cwd\":\"") + workspace_via_link.string() + "\",\"mcpServers\":[]}"},
+      {});
   auto session_id = created ? ava::core::json::string_field(*created, "sessionId") : std::nullopt;
   expect(session_id.has_value(), "session/new accepts a cwd whose path traverses an absolute symlink");
 
@@ -4228,18 +4229,58 @@ void test_acp_session_cwd_allows_symlinked_workspace_path()
   auto const outside = root / "outside";
   std::filesystem::create_directories(outside);
   auto outside_new = service.handle_request(
-      Request{.id = std::int64_t(2), .method = "session/new",
-              .params_json = std::string("{\"cwd\":\"") + outside.string() + "\",\"mcpServers\":[]}"}, {});
+      Request{.id = std::int64_t(2), .method = "session/new", .params_json = std::string("{\"cwd\":\"") + outside.string() + "\",\"mcpServers\":[]}"}, {});
   expect(!outside_new && outside_new.error().code == -32602, "session/new still rejects a cwd outside the launch root");
 
-  // A cwd that is itself a symlink is still rejected.
-  std::filesystem::create_directory_symlink(real_workspace, projects / "linked-workspace", link_error);
+  auto const escaped_nested = outside / "nested";
+  std::filesystem::create_directories(escaped_nested);
+  std::filesystem::create_directory_symlink(outside, real_workspace / "escape", link_error);
   if (!link_error)
   {
-    auto linked_new = service.handle_request(
-        Request{.id = std::int64_t(3), .method = "session/new",
-                .params_json = std::string("{\"cwd\":\"") + (projects / "linked-workspace").string() + "\",\"mcpServers\":[]}"}, {});
-    expect(!linked_new && linked_new.error().code == -32602, "session/new still rejects a cwd that is itself a symlink");
+    auto const escaped_cwd = workspace_via_link / "escape" / "nested";
+    auto persisted_before_escape = ava::session::SessionStore::list_sessions(workspace_via_link, paths.sessions_dir);
+    auto escaped_new = service.handle_request(
+        Request{.id = std::int64_t(20), .method = "session/new", .params_json = std::string("{\"cwd\":\"") + escaped_cwd.string() + "\",\"mcpServers\":[]}"},
+        {});
+    auto escaped_list = service.handle_request(
+        Request{.id = std::int64_t(21), .method = "session/list", .params_json = std::string("{\"cwd\":\"") + escaped_cwd.string() + "\"}"}, {});
+    auto persisted = ava::session::SessionStore::list_sessions(workspace_via_link, paths.sessions_dir);
+    expect(!escaped_new && escaped_new.error().code == -32602 && !escaped_list && escaped_list.error().code == -32602,
+           "session/new and session/list reject an intermediate-symlink cwd escape as invalid parameters");
+    expect(persisted_before_escape && persisted && persisted->size() == persisted_before_escape->size(),
+           "session/new intermediate-symlink cwd escape creates no persistent session");
+
+    if (session_id)
+    {
+      auto escaped_resume = service.handle_request(
+          Request{.id = std::int64_t(22),
+                  .method = "session/resume",
+                  .params_json = std::string("{\"sessionId\":\"") + *session_id + "\",\"cwd\":\"" + escaped_cwd.string() + "\",\"mcpServers\":[]}"},
+          {});
+      expect(!escaped_resume && escaped_resume.error().code == -32602, "session/resume rejects an escaped cwd before the retained-session fast path");
+      static_cast<void>(service.handle_request(
+          Request{.id = std::int64_t(23), .method = "session/close", .params_json = std::string("{\"sessionId\":\"") + *session_id + "\"}"}, {}));
+      auto contained_resume = service.handle_request(
+          Request{.id = std::int64_t(24),
+                  .method = "session/resume",
+                  .params_json = std::string("{\"sessionId\":\"") + *session_id + "\",\"cwd\":\"" + workspace_via_link.string() + "\",\"mcpServers\":[]}"},
+          {});
+      expect(contained_resume.has_value(), "an escaped retained-session resume does not prevent a later contained resume");
+    }
+  }
+
+  auto const contained = real_workspace / "contained";
+  std::filesystem::create_directories(contained);
+  link_error.clear();
+  std::filesystem::create_directory_symlink("contained", real_workspace / "final-link", link_error);
+  if (!link_error)
+  {
+    auto linked_new =
+        service.handle_request(Request{.id = std::int64_t(3),
+                                       .method = "session/new",
+                                       .params_json = std::string("{\"cwd\":\"") + (workspace_via_link / "final-link").string() + "\",\"mcpServers\":[]}"},
+                               {});
+    expect(!linked_new && linked_new.error().code == -32602, "session/new rejects a final cwd symlink beneath the launch root");
   }
 }
 

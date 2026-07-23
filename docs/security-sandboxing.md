@@ -166,6 +166,9 @@ protocol validation, not an OS sandbox.
   until explicitly enabled on the local machine.
 - Plugin launch and contributed tools, commands, and event hooks are
   permissioned and audited.
+- Manifest-declared static prompt and skill files are bounded snapshots read
+  beneath a held plugin-directory descriptor. Escaping intermediate symlinks,
+  final symlinks, non-regular files, and pathname reopens are rejected.
 - AVA bounds plugin stdout protocol records and stderr diagnostics, enforces
   startup/request timeouts, and reports crashes, malformed records, oversized
   records, and unsupported API versions as contained plugin failures.

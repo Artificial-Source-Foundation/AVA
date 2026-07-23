@@ -84,19 +84,17 @@ for command in "${required_commands[@]}"; do
   fi
 done
 
-path_is_inside_repo() {
-  local normalized
-  normalized=$(realpath -m -- "$1")
-  [[ $normalized == "$repo_root" || $normalized == "$repo_root/"* ]]
+repository_containment() {
+  python3 "$repo_root/scripts/publish-linux-artifacts.py" --repository-containment "$repo_root" "$1"
 }
 
 choose_temp_base() {
-  local candidate normalized
+  local candidate classification
   for candidate in "${TMPDIR:-}" /var/tmp /tmp; do
     [[ -n $candidate && -d $candidate && -w $candidate ]] || continue
-    normalized=$(realpath -e -- "$candidate")
-    if ! path_is_inside_repo "$normalized"; then
-      printf '%s\n' "$normalized"
+    classification=$(repository_containment "$candidate") || return 1
+    if [[ $classification == outside ]]; then
+      printf '%s\n' "$candidate"
       return 0
     fi
   done
@@ -112,7 +110,8 @@ if [[ -z $output_dir ]]; then
   output_dir=$(mktemp -d --tmpdir="$temp_base" ava-release-output.XXXXXXXX)
   chmod 0700 -- "$output_dir"
 else
-  if path_is_inside_repo "$output_dir"; then
+  output_containment=$(repository_containment "$output_dir") || exit 1
+  if [[ $output_containment == inside ]]; then
     echo "error: output directory must be outside the repository: $output_dir" >&2
     exit 2
   fi
@@ -120,20 +119,21 @@ else
     mkdir -m 0700 -- "$output_dir"
   fi
 fi
-output_identity=$(python3 "$repo_root/scripts/publish-linux-artifacts.py" --check "$output_dir")
+output_identity=$(python3 "$repo_root/scripts/publish-linux-artifacts.py" --check "$output_dir" --repository-root "$repo_root")
 
 work_root=$(mktemp -d --tmpdir="$temp_base" ava-package-linux.XXXXXXXX)
 chmod 0700 -- "$work_root"
+work_containment=$(repository_containment "$work_root") || exit 1
+if [[ $work_containment == inside ]]; then
+  echo "error: private packaging work directory unexpectedly resolved inside the repository: $work_root" >&2
+  exit 1
+fi
 cleanup() {
   rm -rf -- "$work_root"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-if path_is_inside_repo "$work_root"; then
-  echo "error: private packaging work directory unexpectedly resolved inside the repository: $work_root" >&2
-  exit 1
-fi
 
 if [[ -z $binary ]]; then
   # A qualification build must not inherit artifacts or configuration from a
@@ -322,6 +322,7 @@ fi
 
 # Publish the checksum first and archive last; the archive is the pair's commit marker.
 python3 "$repo_root/scripts/publish-linux-artifacts.py" \
+  --repository-root "$repo_root" \
   --output "$output_dir" \
   --expected-directory-identity "$output_identity" \
   --file "$artifact_work/$checksum_name" "$checksum_name" \

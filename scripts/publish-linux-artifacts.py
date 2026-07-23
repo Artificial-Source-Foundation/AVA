@@ -47,6 +47,88 @@ def format_identity(identity: DirectoryIdentity) -> str:
     return f"{identity[0]}:{identity[1]}"
 
 
+def open_directory_identity(path: pathlib.Path, subject: str) -> tuple[int, DirectoryIdentity]:
+    flags = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        fail(f"unable to inspect {subject} directory {path}: {exc}")
+    try:
+        status = os.fstat(fd)
+        if not stat.S_ISDIR(status.st_mode):
+            fail(f"{subject} is not a directory: {path}")
+        return fd, identity_of(status)
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def nearest_existing_directory(path: pathlib.Path) -> tuple[pathlib.Path, DirectoryIdentity]:
+    candidate = pathlib.Path(os.path.abspath(path))
+    while True:
+        try:
+            status = candidate.lstat()
+        except FileNotFoundError:
+            parent = candidate.parent
+            if parent == candidate:
+                fail(f"unable to find an existing parent for path: {path}")
+            candidate = parent
+            continue
+        except OSError as exc:
+            fail(f"unable to inspect repository containment for {path}: {exc}")
+        try:
+            followed = candidate.stat()
+        except OSError as exc:
+            fail(f"unable to resolve repository containment for {candidate}: {exc}")
+        if not stat.S_ISDIR(followed.st_mode):
+            fail(f"repository containment path is not a directory: {candidate}")
+        return candidate, identity_of(followed)
+
+
+def directory_fd_is_within_repository(repository: pathlib.Path, candidate_fd: int, subject: pathlib.Path) -> bool:
+    repository_fd, repository_identity = open_directory_identity(repository, "repository root")
+    current_fd = os.dup(candidate_fd)
+    try:
+        current_identity = identity_of(os.fstat(current_fd))
+        while True:
+            if current_identity == repository_identity:
+                return True
+            try:
+                parent_fd = os.open(
+                    "..",
+                    getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC,
+                    dir_fd=current_fd,
+                )
+            except OSError as exc:
+                fail(f"unable to inspect directory ancestry for {subject}: {exc}")
+            parent_identity = identity_of(os.fstat(parent_fd))
+            if parent_identity == current_identity:
+                os.close(parent_fd)
+                return False
+            os.close(current_fd)
+            current_fd = parent_fd
+            current_identity = parent_identity
+    finally:
+        os.close(current_fd)
+        os.close(repository_fd)
+
+
+def directory_is_within_repository(repository: pathlib.Path, candidate: pathlib.Path) -> bool:
+    existing, expected_identity = nearest_existing_directory(candidate)
+    candidate_fd, current_identity = open_directory_identity(existing, "candidate or nearest existing parent")
+    try:
+        if current_identity != expected_identity:
+            fail(f"candidate or nearest existing parent changed while inspecting repository containment: {existing}")
+        return directory_fd_is_within_repository(repository, candidate_fd, candidate)
+    finally:
+        os.close(candidate_fd)
+
+
+def require_output_outside_repository(repository: pathlib.Path, output_fd: int, output: pathlib.Path) -> None:
+    if directory_fd_is_within_repository(repository, output_fd, output):
+        fail(f"output directory must be outside the repository: {output}")
+
+
 def parse_identity(value: str) -> DirectoryIdentity:
     parts = value.split(":")
     if len(parts) != 2:
@@ -104,7 +186,12 @@ def open_output_directory(
     return fd, opened
 
 
-def revalidate_namespace(path: pathlib.Path, fd: int, initial: os.stat_result) -> None:
+def revalidate_namespace(
+    path: pathlib.Path,
+    fd: int,
+    initial: os.stat_result,
+    repository: pathlib.Path | None = None,
+) -> None:
     try:
         current = path.stat(follow_symlinks=False)
     except OSError as exc:
@@ -115,6 +202,8 @@ def revalidate_namespace(path: pathlib.Path, fd: int, initial: os.stat_result) -
         fail(f"output directory identity changed during publication: {path}")
     if not stat.S_ISDIR(current.st_mode) or stat.S_ISLNK(current.st_mode):
         fail(f"output directory namespace no longer identifies a directory: {path}")
+    if repository is not None:
+        require_output_outside_repository(repository, fd, path)
 
 
 def require_safe_name(name: str) -> None:
@@ -405,6 +494,7 @@ def publish(
     output: pathlib.Path,
     pairs: list[tuple[pathlib.Path, str]],
     expected_identity: DirectoryIdentity,
+    repository: pathlib.Path,
 ) -> None:
     directory_fd, initial = open_output_directory(output, expected_identity)
     temporary_files: list[tuple[str, DirectoryIdentity]] = []
@@ -432,14 +522,15 @@ def publish(
         raise
 
     try:
-        revalidate_namespace(output, directory_fd, initial)
+        require_output_outside_repository(repository, directory_fd, output)
+        revalidate_namespace(output, directory_fd, initial, repository)
         for source, final_name in pairs:
             require_safe_name(final_name)
             destination_absent(directory_fd, final_name)
             temporary_name = f".ava-publish.{os.getpid()}.{secrets.token_hex(12)}.tmp"
             copy_to_temporary(directory_fd, source, temporary_name, temporary_files)
 
-        revalidate_namespace(output, directory_fd, initial)
+        revalidate_namespace(output, directory_fd, initial, repository)
         for (_, final_name), (temporary_name, temporary_identity) in zip(
             pairs,
             temporary_files,
@@ -450,7 +541,7 @@ def publish(
             rename_no_replace(directory_fd, temporary_name, final_name)
             published_names.append((final_name, temporary_identity))
         os.fsync(directory_fd)
-        revalidate_namespace(output, directory_fd, initial)
+        revalidate_namespace(output, directory_fd, initial, repository)
     except BaseException as exc:
         cancellation_in_progress = True
         rollback_errors = rollback_publication(
@@ -474,6 +565,8 @@ def publish(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", type=pathlib.Path)
+    parser.add_argument("--repository-root", type=pathlib.Path)
+    parser.add_argument("--repository-containment", nargs=2, metavar=("REPOSITORY", "CANDIDATE"))
     parser.add_argument("--snapshot-executable", nargs=2, metavar=("SOURCE", "DESTINATION"))
     parser.add_argument("--output", type=pathlib.Path)
     parser.add_argument("--expected-directory-identity")
@@ -481,33 +574,41 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        if args.repository_containment is not None:
+            if args.check or args.repository_root or args.snapshot_executable or args.output or args.expected_directory_identity or args.file:
+                parser.error("--repository-containment cannot be combined with other operations")
+            repository, candidate = args.repository_containment
+            print("inside" if directory_is_within_repository(pathlib.Path(repository), pathlib.Path(candidate)) else "outside")
+            return 0
+
         if args.check is not None:
             if args.snapshot_executable or args.output or args.expected_directory_identity or args.file:
                 parser.error("--check cannot be combined with snapshot/publication arguments")
             fd, initial = open_output_directory(args.check)
             try:
-                revalidate_namespace(args.check, fd, initial)
+                revalidate_namespace(args.check, fd, initial, args.repository_root)
                 print(format_identity(identity_of(initial)))
             finally:
                 os.close(fd)
             return 0
 
         if args.snapshot_executable is not None:
-            if args.output or args.expected_directory_identity or args.file:
+            if args.repository_root or args.output or args.expected_directory_identity or args.file:
                 parser.error("--snapshot-executable cannot be combined with publication arguments")
             source, destination = args.snapshot_executable
             snapshot_executable(pathlib.Path(source), pathlib.Path(destination))
             return 0
 
-        if not args.output or not args.expected_directory_identity or not args.file:
+        if not args.repository_root or not args.output or not args.expected_directory_identity or not args.file:
             parser.error(
-                "publication requires --output, --expected-directory-identity, "
+                "publication requires --repository-root, --output, --expected-directory-identity, "
                 "and at least one --file SOURCE NAME"
             )
         publish(
             args.output,
             [(pathlib.Path(source), name) for source, name in args.file],
             parse_identity(args.expected_directory_identity),
+            args.repository_root,
         )
         return 0
     except PublicationCancelled as exc:

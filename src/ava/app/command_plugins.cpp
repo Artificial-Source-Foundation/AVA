@@ -7,6 +7,7 @@
 #include "ava/plugin/enablement.h"
 #include "ava/plugin/manifest.h"
 #include "ava/plugin/runner.h"
+#include "ava/plugin/static_resources.h"
 #include "ava/plugin/tool_broker.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -18,7 +19,6 @@
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -149,96 +149,12 @@ bool path_is_within(std::filesystem::path const& base, std::filesystem::path con
   return *relative.begin() != "..";
 }
 
-ava::core::Result<std::filesystem::path> plugin_resource_path(ava::plugin::PluginManifest const& manifest,
-                                                              ava::plugin::PluginResourceContribution const& resource)
-{
-  auto const base_path = ava::core::normalized_absolute_path(manifest.directory);
-  auto const raw_target = manifest.directory / resource.path;
-  auto const target_path = ava::core::normalized_absolute_path(raw_target);
-  if (!path_is_within(base_path, target_path))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin resource path escapes plugin directory");
-    error.with_context("plugin", manifest.id);
-    error.with_context("resource", resource.name);
-    error.with_context("path", resource.path);
-    return std::unexpected(std::move(error));
-  }
-  return target_path;
-}
-
 ava::core::Result<std::string> read_plugin_resource(ava::plugin::PluginManifest const& manifest, ava::plugin::PluginResourceContribution const& resource)
 {
-  constexpr std::size_t max_resource_bytes = ava::plugin::kPluginResourceContentMaxBytes;
-  auto path = plugin_resource_path(manifest, resource);
-  if (!path)
-    return std::unexpected(std::move(path.error()));
-
-  std::error_code type_error;
-  if (!std::filesystem::is_regular_file(*path, type_error))
-  {
-    auto error =
-        ava::core::Error(type_error ? ava::core::ErrorCategory::Io : ava::core::ErrorCategory::InvalidArgument, "plugin resource must be a regular file");
-    error.with_context("plugin", manifest.id);
-    error.with_context("resource", resource.name);
-    error.with_context("path", path->string());
-    if (type_error)
-      error.with_context("cause", type_error.message());
-    return std::unexpected(std::move(error));
-  }
-
-  std::error_code size_error;
-  auto const size = std::filesystem::file_size(*path, size_error);
-  if (size_error)
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect plugin resource size")
-                               .with_context("plugin", manifest.id)
-                               .with_context("resource", resource.name)
-                               .with_context("path", path->string())
-                               .with_context("cause", size_error.message()));
-  }
-  if (size > max_resource_bytes)
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin resource exceeds size cap")
-                               .with_context("plugin", manifest.id)
-                               .with_context("resource", resource.name)
-                               .with_context("path", path->string())
-                               .with_context("max_bytes", std::to_string(max_resource_bytes)));
-  }
-
-  std::ifstream file(*path, std::ios::binary);
-  if (!file)
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to open plugin resource")
-                               .with_context("plugin", manifest.id)
-                               .with_context("resource", resource.name)
-                               .with_context("path", path->string()));
-  }
-  std::string contents;
-  std::array<char, 4096> buffer{};
-  while (file)
-  {
-    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-    auto const count = file.gcount();
-    if (count <= 0)
-      continue;
-    if (contents.size() + static_cast<std::size_t>(count) > max_resource_bytes)
-    {
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin resource exceeds size cap while reading")
-                                 .with_context("plugin", manifest.id)
-                                 .with_context("resource", resource.name)
-                                 .with_context("path", path->string())
-                                 .with_context("max_bytes", std::to_string(max_resource_bytes)));
-    }
-    contents.append(buffer.data(), static_cast<std::size_t>(count));
-  }
-  if (file.bad())
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read plugin resource")
-                               .with_context("plugin", manifest.id)
-                               .with_context("resource", resource.name)
-                               .with_context("path", path->string()));
-  }
-  return contents;
+  auto loaded = ava::plugin::load_plugin_static_resource(manifest, resource, ava::plugin::kPluginResourceContentMaxBytes);
+  if (!loaded)
+    return std::unexpected(std::move(loaded.error()));
+  return std::move(loaded->content);
 }
 
 std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& status, runtime::Session const& session, std::string_view label,

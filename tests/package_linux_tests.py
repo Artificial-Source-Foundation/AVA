@@ -1885,6 +1885,49 @@ def run_package_tests(
     in_repo_result = run(package_command(script, fixture, in_repo), env=env, check=False)
     require_failure(in_repo_result, "outside the repository", "in-repository output was not rejected")
 
+    opened_in_repo = repo / "build" / f"publisher-opened-in-repo-{secrets.token_hex(8)}"
+    opened_in_repo.mkdir(mode=0o700)
+    try:
+        opened_in_repo_result = run(
+            [sys.executable, str(publisher), "--check", str(opened_in_repo), "--repository-root", str(repo)],
+            env=env,
+            check=False,
+        )
+        require_failure(
+            opened_in_repo_result,
+            "outside the repository",
+            "publisher --check did not classify its already-opened output descriptor ancestry",
+        )
+        assert_output_empty(opened_in_repo, "rejected publisher --check modified an in-repository directory")
+    finally:
+        opened_in_repo.rmdir()
+
+    symlink_checkout = root / "symlinked-checkout"
+    symlink_checkout.symlink_to(repo, target_is_directory=True)
+    symlinked_script = symlink_checkout / "scripts" / "package-linux.sh"
+    symlinked_in_repo_output = repo / "build" / f"package-linux-symlinked-in-repo-{secrets.token_hex(8)}"
+    if symlinked_in_repo_output.exists() or symlinked_in_repo_output.is_symlink():
+        raise RuntimeError("symlinked-checkout output rejection fixture unexpectedly exists")
+    symlinked_output_result = run(package_command(symlinked_script, fixture, symlinked_in_repo_output), env=env, check=False)
+    require_failure(
+        symlinked_output_result,
+        "outside the repository",
+        "symlinked checkout did not reject a physically in-repository output",
+    )
+    if symlinked_in_repo_output.exists() or symlinked_in_repo_output.is_symlink():
+        raise RuntimeError("rejected symlinked-checkout output mutated the repository")
+
+    symlinked_external_output = root / "symlinked-checkout-external-output"
+    symlinked_external_output.mkdir(mode=0o700)
+    in_repo_temp_entries_before = set((repo / "build").glob("ava-package-linux.*"))
+    symlinked_env = dict(env)
+    symlinked_env["TMPDIR"] = str(repo / "build")
+    symlinked_external_result = run(package_command(symlinked_script, fixture, symlinked_external_output), env=symlinked_env)
+    parse_path(symlinked_external_result.stdout, "artifact")
+    in_repo_temp_entries_after = set((repo / "build").glob("ava-package-linux.*"))
+    if in_repo_temp_entries_after != in_repo_temp_entries_before:
+        raise RuntimeError("symlinked checkout used a physically in-repository TMPDIR")
+
     symlink_directory_target = root / "symlink-directory-target"
     symlink_directory_target.mkdir(mode=0o700)
     symlink_directory = root / "symlink-directory"
@@ -1963,6 +2006,8 @@ def run_package_tests(
             [
                 sys.executable,
                 str(publisher),
+                "--repository-root",
+                str(repo),
                 "--output",
                 str(fifo_publication_output),
                 "--expected-directory-identity",
@@ -2208,7 +2253,7 @@ import pathlib
 import signal
 import sys
 
-publisher_path, output_path, identity, checksum_source, archive_source = sys.argv[1:]
+publisher_path, repository_path, output_path, identity, checksum_source, archive_source = sys.argv[1:]
 spec = importlib.util.spec_from_file_location("ava_publish_interruption_test", publisher_path)
 if spec is None or spec.loader is None:
     raise SystemExit("could not load publisher")
@@ -2238,6 +2283,7 @@ try:
             (pathlib.Path(archive_source), "pair.tar.gz"),
         ],
         module.parse_identity(identity),
+        pathlib.Path(repository_path),
     )
 except module.PublicationCancelled as exc:
     if exc.signal_number != signal.SIGTERM:
@@ -2255,6 +2301,7 @@ raise SystemExit(91)
             sys.executable,
             str(cancellation_driver),
             str(publisher),
+            str(repo),
             str(cancellation_output),
             cancellation_identity,
             str(first_source),
@@ -2280,6 +2327,8 @@ raise SystemExit(91)
         [
             sys.executable,
             str(publisher),
+            "--repository-root",
+            str(repo),
             "--output",
             str(pair_output),
             "--expected-directory-identity",
@@ -2307,6 +2356,8 @@ raise SystemExit(91)
         [
             sys.executable,
             str(publisher),
+            "--repository-root",
+            str(repo),
             "--output",
             str(existing_output),
             "--expected-directory-identity",

@@ -72,6 +72,8 @@ struct LoadedPluginSkillResource
   std::string scope;
   std::string plugin_id;
   std::string name;
+  std::size_t byte_count = 0;
+  std::uint64_t content_fingerprint = 0;
   ava::context::LoadedSkill skill;
 };
 
@@ -272,35 +274,40 @@ ava::core::Result<LoadedPluginPromptResource> load_plugin_prompt_resource(ava::p
                                                                           ava::plugin::PluginResourceContribution const& resource)
 {
   auto const& manifest = status.plugin.manifest;
-  auto path = ava::plugin::plugin_static_resource_path(manifest, resource);
-  if (!path)
-    return std::unexpected(std::move(path.error()));
-  auto text = read_freshness_file(*path, kMaxPluginResourceFreshnessBytes);
-  if (!text)
-    return std::unexpected(std::move(text.error()));
+  auto loaded = ava::plugin::load_plugin_static_resource(manifest, resource, kMaxPluginResourceFreshnessBytes);
+  if (!loaded)
+    return std::unexpected(std::move(loaded.error()));
   return LoadedPluginPromptResource{.scope = std::string(ava::plugin::to_string(status.plugin.scope)),
                                     .plugin_id = manifest.id,
                                     .name = resource.name,
-                                    .path = *path,
-                                    .text = std::move(*text)};
+                                    .path = std::move(loaded->path),
+                                    .text = std::move(loaded->content)};
 }
 
 ava::core::Result<LoadedPluginSkillResource> load_plugin_skill_resource(ava::plugin::PluginStatus const& status,
                                                                         ava::plugin::PluginResourceContribution const& resource)
 {
   auto const& manifest = status.plugin.manifest;
-  auto path = ava::plugin::plugin_static_resource_path(manifest, resource);
-  if (!path)
-    return std::unexpected(std::move(path.error()));
-  auto skill = ava::context::load_declared_skill_file(ava::context::DeclaredSkillFileOptions{.path = *path,
-                                                                                             .name = resource.name,
-                                                                                             .description = resource.description,
-                                                                                             .source_type = ava::context::SkillSourceType::Plugin,
-                                                                                             .max_file_bytes = kMaxPluginResourceFreshnessBytes});
+  auto loaded = ava::plugin::load_plugin_static_resource(manifest, resource, kMaxPluginResourceFreshnessBytes);
+  if (!loaded)
+    return std::unexpected(std::move(loaded.error()));
+  auto const byte_count = loaded->content.size();
+  auto const fingerprint = ava::core::content_fingerprint(loaded->content);
+  auto skill = ava::context::load_declared_skill_content(ava::context::DeclaredSkillFileOptions{.path = loaded->path,
+                                                                                                .name = resource.name,
+                                                                                                .description = resource.description,
+                                                                                                .source_type = ava::context::SkillSourceType::Plugin,
+                                                                                                .preloaded_content = std::nullopt,
+                                                                                                .max_file_bytes = kMaxPluginResourceFreshnessBytes},
+                                                         std::move(loaded->content));
   if (!skill)
     return std::unexpected(std::move(skill.error()));
-  return LoadedPluginSkillResource{
-      .scope = std::string(ava::plugin::to_string(status.plugin.scope)), .plugin_id = manifest.id, .name = resource.name, .skill = std::move(*skill)};
+  return LoadedPluginSkillResource{.scope = std::string(ava::plugin::to_string(status.plugin.scope)),
+                                   .plugin_id = manifest.id,
+                                   .name = resource.name,
+                                   .byte_count = byte_count,
+                                   .content_fingerprint = fingerprint,
+                                   .skill = std::move(*skill)};
 }
 
 PluginRuntimeResources load_plugin_runtime_resources(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir,
@@ -397,8 +404,13 @@ void add_loaded_plugin_prompt_freshness_source(std::vector<FreshnessSourceMetada
 
 void add_loaded_plugin_skill_freshness_source(std::vector<FreshnessSourceMetadata>& sources, LoadedPluginSkillResource const& resource)
 {
-  add_freshness_file(sources, FreshnessSourceKind::PluginSkill, resource.scope, resource.plugin_id, resource.name, resource.skill.path,
-                     resource.skill.byte_count == 0 ? kMaxPluginResourceFreshnessBytes : resource.skill.byte_count);
+  sources.push_back(FreshnessSourceMetadata{.kind = FreshnessSourceKind::PluginSkill,
+                                            .scope = resource.scope,
+                                            .source_id = resource.plugin_id,
+                                            .name = resource.name,
+                                            .path = resource.skill.path,
+                                            .byte_count = resource.byte_count,
+                                            .content_fingerprint = resource.content_fingerprint});
 }
 
 void add_failed_plugin_resource_freshness_source(std::vector<FreshnessSourceMetadata>& sources, PluginResourceLoadFailure const& failure)

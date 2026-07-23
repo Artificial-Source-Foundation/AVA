@@ -518,7 +518,7 @@ RequestResult AgentService::handle_request(Request const& request, std::stop_tok
     auto cwd_text = required_string(*params, "cwd", request.method);
     if (!cwd_text)
       return std::unexpected(std::move(cwd_text.error()));
-    auto cwd = resolve_session_cwd(registry_->launch_root(), *cwd_text);
+    auto cwd = registry_->resolve_cwd(*cwd_text);
     if (!cwd)
       return core_error(cwd.error(), -32602);
     auto committed = commit_request_terminal(request.id);
@@ -585,7 +585,7 @@ RequestResult AgentService::handle_request(Request const& request, std::stop_tok
       return std::unexpected(std::move(session_id.error()));
     if (!cwd_text)
       return std::unexpected(std::move(cwd_text.error()));
-    auto cwd = resolve_session_cwd(registry_->launch_root(), *cwd_text);
+    auto cwd = registry_->resolve_cwd(*cwd_text);
     if (!cwd)
       return core_error(cwd.error(), -32602);
     auto committed = commit_request_terminal(request.id);
@@ -609,7 +609,7 @@ RequestResult AgentService::handle_request(Request const& request, std::stop_tok
     {
       if (!field->is_string())
         return service_error(-32602, "session/list cwd must be a string or null");
-      auto resolved_cwd = resolve_session_cwd(registry_->launch_root(), field->get_ref<std::string const&>());
+      auto resolved_cwd = registry_->resolve_cwd(field->get_ref<std::string const&>());
       if (!resolved_cwd)
         return core_error(resolved_cwd.error(), -32602);
       cwd = std::move(*resolved_cwd);

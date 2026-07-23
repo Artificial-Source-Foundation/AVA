@@ -348,8 +348,11 @@ std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(
   std::vector<ava::context::DeclaredSkillFileOptions> files;
   for (auto const& skill : ava::plugin::enabled_plugin_static_skill_files(diagnostics))
   {
-    files.push_back(ava::context::DeclaredSkillFileOptions{
-        .path = skill.path, .name = skill.name, .description = skill.description, .source_type = ava::context::SkillSourceType::Plugin});
+    files.push_back(ava::context::DeclaredSkillFileOptions{.path = skill.path,
+                                                           .name = skill.name,
+                                                           .description = skill.description,
+                                                           .source_type = ava::context::SkillSourceType::Plugin,
+                                                           .preloaded_content = skill.content});
   }
   return files;
 }

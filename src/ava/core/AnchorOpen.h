@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ava/core/result.h"
 #include "ava/debug/print_members_on.h"
+#include "ava/core/result.h"
 
 #include <filesystem>
 #include <sys/types.h>
@@ -60,15 +60,12 @@ class AnchorOpen
 // Open a candidate path the caller intends to read from. flags must request
 // O_RDONLY access; O_WRONLY and O_RDWR are rejected with InvalidArgument. Paths
 // inside a writable anchor are opened beneath that anchor with open_beneath
-// (escaping symlinks rejected). Paths outside all anchors are opened directly
-// so that external reads (e.g. /usr/include/errno.h) succeed; symlinks are
-// followed.
-//
-// NOTE: following an external symlink whose target enters a writable anchor is
-// not yet rejected. That check is intentionally deferred to a separate change
-// so this layer stays a single, orthogonal entry point; see the marker in the
-// implementation. It must be added before reads through the anchor set are
-// relied on for confidentiality.
+// (escaping symlinks rejected). Paths outside all anchors are resolved with
+// held descriptors and may follow symlinks only while resolution remains
+// physically outside every writable anchor. The final readable descriptor is
+// reopened from the exact inspected identity; inspection failures fail closed.
+// absolute() retains the normalized logical candidate rather than its physical
+// resolution.
 [[nodiscard]] Result<AnchorOpen> open_readable(AnchorSet const& anchors, std::filesystem::path const& candidate, int flags, mode_t mode = 0);
 
 }  // namespace ava::core

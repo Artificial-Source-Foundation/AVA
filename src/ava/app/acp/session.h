@@ -143,6 +143,7 @@ class AcpSessionRegistry
   AcpSessionRegistry& operator=(AcpSessionRegistry const&) = delete;
   ~AcpSessionRegistry();
 
+  [[nodiscard]] ava::core::Result<std::filesystem::path> resolve_cwd(std::string_view requested) const;
   [[nodiscard]] ava::core::Result<std::shared_ptr<AcpSessionHost>> create(std::filesystem::path const& cwd,
                                                                           std::shared_ptr<ava::mcp::McpConfig const> mcp_config);
   [[nodiscard]] ava::core::Result<std::shared_ptr<AcpSessionHost>> load(std::string_view session_id, std::filesystem::path const& cwd,
@@ -193,7 +194,6 @@ class AcpSessionRegistry
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
-[[nodiscard]] ava::core::Result<std::filesystem::path> resolve_session_cwd(std::filesystem::path const& launch_root, std::string_view requested);
 [[nodiscard]] ava::core::Result<std::string_view> acp_stop_reason(ava::core::RuntimeTerminalOutcome outcome);
 
 }  // namespace ava::app::acp

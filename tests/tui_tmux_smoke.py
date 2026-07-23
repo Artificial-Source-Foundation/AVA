@@ -2779,14 +2779,14 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     expanded_tool_details = wait_for(
         tmux_exe,
         session,
-        r"(?s)(?=.*command: <redacted one-shot command>)(?=.*permission: deny)(?=.*risk critical)(?=.*id permreq_)(?=.*reason command permission denied)(?=.*inspect: /permissions audit show)(?=.*diagnose: /permissions diagnose)",
+        r"(?s)(?=.*command: <redacted one-shot command>)(?=.*permission: deny)(?=.*risk: critical)(?=.*id: permreq_)(?=.*reason: command permission denied)(?=.*inspect: /permissions audit show)(?=.*diagnose: /permissions diagnose)",
         "ctrl-o tool detail expansion",
     )
     if (
         "permission: deny" not in expanded_tool_details
-        or "risk critical" not in expanded_tool_details
-        or "id permreq_" not in expanded_tool_details
-        or "reason command permission denied" not in expanded_tool_details
+        or "risk: critical" not in expanded_tool_details
+        or "id: permreq_" not in expanded_tool_details
+        or "reason: command permission denied" not in expanded_tool_details
         or "command: <redacted one-shot command>" not in expanded_tool_details
         or "inspect: /permissions audit show" not in expanded_tool_details
         or "diagnose: /permissions diagnose" not in expanded_tool_details
@@ -3331,7 +3331,14 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     named_start = next((index for index, line in enumerate(named_lines) if "Select session" in line), None)
     named_end = next((index for index, line in enumerate(named_lines) if index >= (named_start or 0) and "Ctrl+D archive" in line), None)
     named_modal = "\n".join(named_lines[named_start : named_end + 1]) if named_start is not None and named_end is not None else ""
-    if not named_modal or "session_" in named_modal or ".jsonl" in named_modal or "/home/" in named_modal or "current current" in named_modal:
+    runtime_state_root = str(ctx.state.parent)
+    if (
+        not named_modal
+        or "session_" in named_modal
+        or ".jsonl" in named_modal
+        or runtime_state_root in named_modal
+        or "current current" in named_modal
+    ):
         raise RuntimeError(f"default session selector rows exposed ids, paths, or duplicate current state\nscreen:\n{named_filter}")
     save_evidence(root, "session-selector-named-default-path-hidden", named_filter)
     send_keys(tmux_exe, session, "C-p")
@@ -3342,7 +3349,7 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     path_start = next((index for index, line in enumerate(path_lines) if "Select session" in line), None)
     path_end = next((index for index, line in enumerate(path_lines) if index >= (path_start or 0) and "Ctrl+D archive" in line), None)
     path_modal = "\n".join(path_lines[path_start : path_end + 1]) if path_start is not None and path_end is not None else ""
-    if "/home/" not in path_modal and ".jsonl" not in path_modal:
+    if runtime_state_root not in path_modal and ".jsonl" not in path_modal:
         raise RuntimeError(f"Ctrl+P did not explicitly disclose the selected session path\nscreen:\n{path_toggle}")
     save_evidence(root, "session-selector-path-disclosed", path_toggle)
     send_keys(tmux_exe, session, "C-r")

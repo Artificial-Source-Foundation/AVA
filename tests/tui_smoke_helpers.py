@@ -11,11 +11,13 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import pwd
 import re
 import shlex
 import shutil
 import signal
 import subprocess
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -420,6 +422,7 @@ class SmokeContext:
     import_keybinds_content: str = field(init=False)
     editor_command: str = field(init=False)
     _environment: dict[str, str] = field(init=False)
+    _state_directory: tempfile.TemporaryDirectory[str] | None = field(default=None, init=False, repr=False)
     _providers: list[FakeProvider] = field(default_factory=list, init=False)
     _closed: bool = field(default=False, init=False)
 
@@ -460,18 +463,32 @@ class SmokeContext:
         self.workspace = self.root / "workspace"
         self.home = self.root / "home"
         self.config = self.root / "config"
-        self.state = self.root / "state"
         self.data = self.root / "data"
         self.active_workspace = self.root / "active-workspace"
         self.active_home = self.root / "active-home"
         self.active_config = self.root / "active-config"
-        self.active_state = self.root / "active-state"
         self.active_data = self.root / "active-data"
         self.restore_workspace = self.root / "restore-workspace"
         self.restore_home = self.root / "restore-home"
         self.restore_config = self.root / "restore-config"
-        self.restore_state = self.root / "restore-state"
         self.restore_data = self.root / "restore-data"
+
+        safe_scenario = re.sub(r"[^A-Za-z0-9_.-]+", "-", self.scenario).strip("-") or "scenario"
+        self._state_directory = tempfile.TemporaryDirectory(prefix=f"ava-tui-smoke-{safe_scenario}-")
+        state_root = pathlib.Path(self._state_directory.name).resolve(strict=True)
+        real_home = pathlib.Path(pwd.getpwuid(os.geteuid()).pw_dir).resolve(strict=True)
+        workspace = self.workspace.resolve()
+        if any(
+            state_root == protected or state_root in protected.parents or protected in state_root.parents
+            for protected in (real_home, workspace)
+        ):
+            raise RuntimeError(
+                "refusing tmux smoke state root overlapping trusted paths: "
+                f"state root={state_root}, real home={real_home}, workspace={workspace}"
+            )
+        self.state = state_root / "state"
+        self.active_state = state_root / "active-state"
+        self.restore_state = state_root / "restore-state"
         for path in (
             self.workspace,
             self.home,
@@ -745,13 +762,19 @@ class SmokeContext:
                 pass
         self._providers.clear()
         tmux_client = getattr(self, "tmux", None)
-        if tmux_client is not None:
-            try:
-                tmux_client.close()
-            finally:
-                # tmux may leave a dead custom socket pathname after kill-server. It is
-                # inside this scenario's guarded leaf; never touch the shared parent.
-                tmux_client.socket_path.unlink(missing_ok=True)
+        try:
+            if tmux_client is not None:
+                try:
+                    tmux_client.close()
+                finally:
+                    # tmux may leave a dead custom socket pathname after kill-server. It is
+                    # inside this scenario's guarded leaf; never touch the shared parent.
+                    tmux_client.socket_path.unlink(missing_ok=True)
+        finally:
+            state_directory = self._state_directory
+            if state_directory is not None:
+                state_directory.cleanup()
+                self._state_directory = None
 
     def __enter__(self) -> "SmokeContext":
         return self

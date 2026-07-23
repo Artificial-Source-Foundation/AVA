@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "debug.h"
 
 namespace ava::agent {
 
@@ -24,6 +25,8 @@ struct HistoricalImagePolicy
   ava::provider::ImageInputPolicy limits = {};
 
   [[nodiscard]] bool supports_mime_type(std::string_view mime_type) const noexcept;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct HistoryReplayTarget
@@ -37,6 +40,8 @@ struct HistoryReplayTarget
 
   [[nodiscard]] bool is_complete() const noexcept;
   [[nodiscard]] HistoricalImagePolicy image_policy() const;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct MessageBuildOptions
@@ -45,12 +50,16 @@ struct MessageBuildOptions
   std::optional<HistoryReplayTarget> target = std::nullopt;
   HistoryReplayMode replay_mode = HistoryReplayMode::Automatic;
   std::vector<std::string> active_turn_user_entry_ids = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct HistoryProjection
 {
   std::vector<ava::provider::ChatMessage> messages;
   bool used_compaction = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // Strictly classifies physical v4 history before producing a request-owned

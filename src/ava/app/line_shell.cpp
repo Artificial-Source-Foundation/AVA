@@ -1145,7 +1145,7 @@ int run_tui(ShellState state)
   bool session_selector_show_archived = false;
   bool session_selector_show_label_time = false;
   auto session_selector_snapshot = [&]() {
-    refresh_title_catalog();
+    static_cast<void>(refresh_title_catalog());
     return application_catalog.session_view(session_selector_sort,
                                             session_selector_footer_hint(session_selector_sort, session_selector_named_only, session_selector_show_paths,
                                                                          session_selector_show_archived, session_selector_show_label_time),
@@ -1175,7 +1175,8 @@ int run_tui(ShellState state)
   auto open_selector_branch = [&application_catalog, &open_session_selector_target, &session_selector_sort, &session_selector_show_archived,
                                &refresh_title_catalog](std::string_view selected_session_id,
                                                        bool parent) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
-    refresh_title_catalog();
+    if (auto refreshed = refresh_title_catalog(); !refreshed)
+      return std::unexpected(std::move(refreshed.error()));
     if (selected_session_id.empty())
     {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session branch navigation is missing session id"));

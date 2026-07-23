@@ -128,6 +128,8 @@ class SessionTitleCoordinator final
   {
     std::size_t cursor = 0;
     std::string session_id;
+
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
 
   SessionTitleCoordinatorOptions options_;

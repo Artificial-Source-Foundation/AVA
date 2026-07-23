@@ -47,7 +47,8 @@ struct DeclaredSkillFileOptions
   SkillSourceType source_type = SkillSourceType::Project;
   std::optional<std::string> preloaded_content;
   std::size_t max_file_bytes = 64 * 1024;
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SkillLoadOptions

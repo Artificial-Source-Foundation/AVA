@@ -14,6 +14,7 @@ add_library(ava_test_support
   "support/app_runtime_support.cpp"
   "support/fake_transport.cpp"
   "support/libcwd_test_output.cpp"
+  "support/session_test_support.cpp"
   "support/test_harness.cpp"
 )
 target_link_libraries(ava_test_support PUBLIC ${AVA_BACKEND_LIBRARIES})
@@ -94,6 +95,15 @@ set(AVA_TESTS_SOURCES
   "provider_live_smoke_tests.cpp"
   "provider_openai_tests.cpp"
   "session_tests.cpp"
+  "session_assistant_output_tests.cpp"
+  "session_attachment_tests.cpp"
+  "session_authority_tests.cpp"
+  "session_compaction_tests.cpp"
+  "session_projection_tests.cpp"
+  "session_recovery_tests.cpp"
+  "session_stats_tests.cpp"
+  "session_store_tests.cpp"
+  "session_tree_tests.cpp"
   "session_run_controller_tests.cpp"
   "session_title_coordinator_tests.cpp"
   "subagent_coordinator_tests.cpp"

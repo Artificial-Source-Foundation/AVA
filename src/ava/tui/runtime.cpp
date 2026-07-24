@@ -13,6 +13,7 @@
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
+#include "ava/tui/runtime_submit_internal.h"
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/session_grants.h"
 #include "ava/tui/terminal.h"
@@ -32,29 +33,13 @@
 #include <curses.h>
 
 namespace ava::tui {
-using runtime_commands::attach_command_argument;
-using runtime_commands::copy_command_argument;
-using runtime_commands::diff_command_argument;
-using runtime_commands::exact_command;
-using runtime_commands::parse_copy_target;
-using runtime_commands::reload_command_argument;
-using runtime_commands::reload_target_from_argument;
-using runtime_commands::ReloadTarget;
-using runtime_commands::tool_command_argument;
 using runtime_input::printable_jump_target;
 using runtime_input::read_curses_input_with_timeout;
 using runtime_transcript::assistant_meta_for_snapshot;
 using runtime_transcript::copy_text_from_answer;
-using runtime_transcript::copy_text_to_terminal_clipboard;
-using runtime_transcript::diff_transcript_text;
-using runtime_transcript::latest_ava_message_copy_text;
-using runtime_transcript::latest_permission_copy_text;
-using runtime_transcript::latest_tool_copy_text;
-using runtime_transcript::latest_tool_diff_copy_text;
 using runtime_transcript::push_history;
 using runtime_transcript::push_transcript;
 using runtime_views::active_run_hint_for;
-using runtime_views::compact_path_leaf;
 using runtime_views::kSettingsEditKeybindings;
 using runtime_views::kSettingsOpenKeybindings;
 using runtime_views::kSettingsOpenModels;
@@ -135,9 +120,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   RuntimeRenderer renderer(snapshot, sidebar, draft_state);
   RuntimeNavigationController navigation(options, snapshot, sidebar, draft_state, renderer);
   auto& transcript_scroll_offset = renderer.transcript_scroll_offset;
-  auto& detached_new_output_count = renderer.detached_new_output_count;
   auto& completion_cache = renderer.completion_cache;
-  auto& detached_sidebar_snapshot = renderer.detached_sidebar_snapshot;
   ActiveSelectList active_select_list = ActiveSelectList::None;
   std::optional<PendingSessionArchiveAction> session_archive_confirmation;
   RuntimePromptCoordinator prompt_coordinator(options, snapshot, command_session_grants, renderer);
@@ -151,10 +134,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto clear_draft_for_interrupt = [&]() { return action_controller.clear_draft_for_interrupt(); };
   auto open_external_editor = [&]() -> bool { return action_controller.open_external_editor(); };
   auto suspend_to_background = [&]() -> bool { return action_controller.suspend_to_background(); };
-  auto queue_pending_image_attachment = [&](ava::session::ImageAttachmentRef const& imported, std::string label, std::string status,
-                                            std::string transcript_prefix) -> bool {
-    return action_controller.queue_pending_image_attachment(imported, std::move(label), std::move(status), std::move(transcript_prefix));
-  };
   auto paste_clipboard_image = [&]() -> bool { return action_controller.paste_clipboard_image(); };
   auto cycle_reasoning = [&]() { action_controller.cycle_reasoning(); };
   auto toggle_thinking_visibility = [&]() { action_controller.toggle_thinking_visibility(); };
@@ -176,521 +155,18 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto scroll_up = [&](std::size_t amount) { navigation.scroll_up(amount); };
   auto scroll_down = [&](std::size_t amount) { navigation.scroll_down(amount); };
   auto toggle_tool_details_at = [&](std::size_t item_index) { return navigation.toggle_tool_details_at(item_index); };
-  auto toggle_matching_tool_details = [&](std::string_view query) { return navigation.toggle_matching_tool_details(query); };
 
   auto handle_sidebar_drawer_input = [&](InputEvent const& event) -> std::optional<bool> { return navigation.handle_sidebar_drawer_input(event); };
 
   auto jump_to_bottom = [&](std::string status) { navigation.jump_to_bottom(std::move(status)); };
   auto scroll_to_message_boundary = [&](bool previous) { navigation.scroll_to_message_boundary(previous); };
 
-  enum class InputLoopAction
-  {
-    None,
-    ContinueLoop,
-    BreakLoop
-  };
-  std::optional<std::string> forced_slash_submission;
-  auto handle_submit = [&]() -> InputLoopAction {
-    pending_escape_clear = false;
-    std::optional<std::string> immediate_slash_submission;
-    if (forced_slash_submission)
-    {
-      immediate_slash_submission = std::move(forced_slash_submission);
-      forced_slash_submission.reset();
-    }
-    else if (((exact_command(draft.text, "/models") || exact_command(draft.text, "/model")) && options.model_selector_view) ||
-             (exact_command(draft.text, "/scoped-models") && options.scoped_model_selector_view) ||
-             ((exact_command(draft.text, "/sessions") || exact_command(draft.text, "/tree") || exact_command(draft.text, "/resume")) &&
-              options.session_selector_view))
-    {
-      immediate_slash_submission = expanded_composer_draft_text(draft);
-    }
-    else if (!slash_palette_suppressed && slash_palette_visible(draft.text, draft.cursor, snapshot.slash_commands))
-    {
-      auto const matches = filter_slash_commands(draft.text, draft.cursor, snapshot.slash_commands);
-      if (!matches.empty())
-      {
-        selected_slash_command_index = clamp_slash_palette_selection(draft.text, draft.cursor, snapshot.slash_commands, selected_slash_command_index);
-        if (auto const disabled_reason =
-                slash_command_selection_disabled_reason(draft.text, draft.cursor, snapshot.slash_commands, selected_slash_command_index))
-        {
-          snapshot.status = "command disabled: " + *disabled_reason;
-          static_cast<void>(beep());
-          if (!render())
-          {
-            terminal_write_failed = true;
-            return InputLoopAction::BreakLoop;
-          }
-          return InputLoopAction::ContinueLoop;
-        }
-        auto const& selected_item = matches[selected_slash_command_index];
-        auto const selection_text = slash_command_selection_text(draft.text, draft.cursor, snapshot.slash_commands, selected_slash_command_index);
-        if (!selected_item.argument_completion && selected_item.command == "/connect")
-        {
-          immediate_slash_submission = selection_text.text;
-        }
-        else
-        {
-          draft_state.clear_selection();
-          static_cast<void>(replace_composer_draft(draft, std::move(selection_text.text), selection_text.cursor));
-          selected_slash_command_index = 0;
-          path_completion_force_active = false;
-          draft_scroll_offset = 0;
-          history_index.reset();
-          draft_input.clear();
-          snapshot.status = "command selected - press Enter to run";
-          snapshot.selected_slash_command_index = selected_slash_command_index;
-          if (!render())
-          {
-            terminal_write_failed = true;
-            return InputLoopAction::BreakLoop;
-          }
-          return InputLoopAction::ContinueLoop;
-        }
-        selected_slash_command_index = 0;
-        path_completion_force_active = false;
-        snapshot.selected_slash_command_index = selected_slash_command_index;
-      }
-    }
-    if (file_reference_palette_active())
-    {
-      selected_slash_command_index = clamp_completion(selected_slash_command_index);
-      if (auto const disabled_reason = selected_completion_disabled_reason(selected_slash_command_index))
-      {
-        snapshot.status = "reference disabled: " + *disabled_reason;
-        static_cast<void>(beep());
-        return InputLoopAction::ContinueLoop;
-      }
-      auto selection = selected_completion_text(selected_slash_command_index);
-      draft_state.clear_selection();
-      static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
-      selected_slash_command_index = 0;
-      path_completion_force_active = false;
-      draft_scroll_offset = 0;
-      history_index.reset();
-      draft_input.clear();
-      snapshot.status = "file reference selected";
-      snapshot.selected_slash_command_index = selected_slash_command_index;
-      if (!render())
-      {
-        terminal_write_failed = true;
-        return InputLoopAction::BreakLoop;
-      }
-      return InputLoopAction::ContinueLoop;
-    }
-    if (path_completion_palette_active())
-    {
-      selected_slash_command_index = clamp_completion(selected_slash_command_index);
-      if (auto const disabled_reason = selected_completion_disabled_reason(selected_slash_command_index))
-      {
-        snapshot.status = "path disabled: " + *disabled_reason;
-        static_cast<void>(beep());
-        return InputLoopAction::ContinueLoop;
-      }
-      auto selection = selected_completion_text(selected_slash_command_index);
-      draft_state.clear_selection();
-      static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
-      selected_slash_command_index = 0;
-      path_completion_force_active = false;
-      draft_scroll_offset = 0;
-      history_index.reset();
-      draft_input.clear();
-      snapshot.status = "path selected";
-      snapshot.selected_slash_command_index = selected_slash_command_index;
-      if (!render())
-      {
-        terminal_write_failed = true;
-        return InputLoopAction::BreakLoop;
-      }
-      return InputLoopAction::ContinueLoop;
-    }
-    auto submitted = immediate_slash_submission ? *immediate_slash_submission : expanded_composer_draft_text(draft);
-    draft_state.clear_selection();
-    reset_composer_draft(draft);
-    jump_mode = ComposerJumpMode::None;
-    draft_scroll_offset = 0;
-    history_index.reset();
-    draft_input.clear();
-    selected_slash_command_index = 0;
-    path_completion_force_active = false;
-    if (!submitted.empty())
-    {
-      if ((exact_command(submitted, "/models") || exact_command(submitted, "/model")) && options.model_selector_view)
-      {
-        push_history(input_history, submitted);
-        if (!open_model_selector())
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      if (exact_command(submitted, "/scoped-models") && options.scoped_model_selector_view)
-      {
-        push_history(input_history, submitted);
-        if (!open_scoped_model_selector())
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      if ((exact_command(submitted, "/sessions") || exact_command(submitted, "/tree") || exact_command(submitted, "/resume")) && options.session_selector_view)
-      {
-        push_history(input_history, submitted);
-        if (!open_session_selector())
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      if (auto reload_target = reload_command_argument(submitted))
-      {
-        push_history(input_history, submitted);
-        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-        auto const parsed_reload_target = reload_target_from_argument(*reload_target);
-        if (!parsed_reload_target)
-        {
-          snapshot.status = "invalid_argument: unsupported reload target\n  target: " + *reload_target + "\n  supported: keybindings, theme";
-          push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-          transcript_scroll_offset = 0;
-          static_cast<void>(beep());
-          if (!render())
-          {
-            terminal_write_failed = true;
-            return InputLoopAction::BreakLoop;
-          }
-          return InputLoopAction::ContinueLoop;
-        }
-        if (*parsed_reload_target == ReloadTarget::DisplaySettings)
-        {
-          if (!options.on_reload_display_settings)
-          {
-            snapshot.status = "display reload unavailable";
-            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-            transcript_scroll_offset = 0;
-            static_cast<void>(beep());
-            if (!render())
-            {
-              terminal_write_failed = true;
-              return InputLoopAction::BreakLoop;
-            }
-            return InputLoopAction::ContinueLoop;
-          }
-          auto reloaded = options.on_reload_display_settings();
-          if (!reloaded)
-          {
-            snapshot.status = reloaded.error().format();
-            push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-            transcript_scroll_offset = 0;
-            static_cast<void>(beep());
-            if (!render())
-            {
-              terminal_write_failed = true;
-              return InputLoopAction::BreakLoop;
-            }
-            return InputLoopAction::ContinueLoop;
-          }
-          auto status = reloaded->status.empty() ? std::string("display theme reloaded") : reloaded->status;
-          apply_runtime_state_snapshot(std::move(*reloaded));
-          push_transcript(snapshot, TranscriptItem{.label = "ava", .text = std::move(status), .meta = assistant_meta_for_snapshot(snapshot)});
-          transcript_scroll_offset = 0;
-          if (!render())
-          {
-            terminal_write_failed = true;
-            return InputLoopAction::BreakLoop;
-          }
-          return InputLoopAction::ContinueLoop;
-        }
-        if (!options.on_reload_key_bindings)
-        {
-          snapshot.status = "reload unavailable";
-          push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-          transcript_scroll_offset = 0;
-          static_cast<void>(beep());
-          if (!render())
-          {
-            terminal_write_failed = true;
-            return InputLoopAction::BreakLoop;
-          }
-          return InputLoopAction::ContinueLoop;
-        }
-        auto reloaded = options.on_reload_key_bindings();
-        if (!reloaded)
-        {
-          snapshot.status = reloaded.error().format();
-          push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-          transcript_scroll_offset = 0;
-          static_cast<void>(beep());
-          if (!render())
-          {
-            terminal_write_failed = true;
-            return InputLoopAction::BreakLoop;
-          }
-          return InputLoopAction::ContinueLoop;
-        }
-        options.key_bindings = std::move(reloaded->key_bindings);
-        apply_runtime_state_snapshot(std::move(reloaded->state));
-        push_transcript(snapshot, TranscriptItem{.label = "ava", .text = "keybindings reloaded", .meta = assistant_meta_for_snapshot(snapshot)});
-        transcript_scroll_offset = 0;
-        if (!render())
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      if (submitted == "/hotkeys" || submitted == "/keybindings")
-      {
-        push_history(input_history, submitted);
-        snapshot.select_list = hotkeys_select_list_view(options.key_bindings);
-        active_select_list = ActiveSelectList::Hotkeys;
-        snapshot.status = "keybindings opened";
-        transcript_scroll_offset = 0;
-        if (!render())
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      if (submitted == "/sidebar")
-      {
-        push_history(input_history, submitted);
-        snapshot.sidebar_drawer_visible = true;
-        snapshot.sidebar_drawer_scroll_offset = 0;
-        transcript_scroll_offset = 0;
-        detached_new_output_count = 0;
-        detached_sidebar_snapshot.reset();
-        snapshot.status = "session overview opened";
-        if (!render())
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      if (submitted == "/settings")
-      {
-        push_history(input_history, submitted);
-        refresh_token_status();
-        refresh_reasoning_status();
-        auto settings_snapshot = snapshot;
-        settings_snapshot.sidebar = sidebar;
-        snapshot.select_list = settings_select_list_view(settings_snapshot, options.key_bindings);
-        active_select_list = ActiveSelectList::Settings;
-        snapshot.status = "settings opened";
-        transcript_scroll_offset = 0;
-        if (!render())
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      if (auto attach_target = attach_command_argument(submitted))
-      {
-        push_history(input_history, submitted);
-        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-        if (attach_target->empty())
-        {
-          snapshot.status = "invalid_argument: usage: /attach <image-path>";
-          push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-          transcript_scroll_offset = 0;
-          static_cast<void>(beep());
-          if (!render())
-          {
-            terminal_write_failed = true;
-            return InputLoopAction::BreakLoop;
-          }
-          return InputLoopAction::ContinueLoop;
-        }
-        if (!options.on_attach_image)
-        {
-          snapshot.status = "image attachment import unavailable";
-          push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-          transcript_scroll_offset = 0;
-          static_cast<void>(beep());
-          if (!render())
-          {
-            terminal_write_failed = true;
-            return InputLoopAction::BreakLoop;
-          }
-          return InputLoopAction::ContinueLoop;
-        }
-        auto imported = options.on_attach_image(*attach_target);
-        if (!imported)
-        {
-          snapshot.status = imported.error().format();
-          push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-          transcript_scroll_offset = 0;
-          static_cast<void>(beep());
-          if (!render())
-          {
-            terminal_write_failed = true;
-            return InputLoopAction::BreakLoop;
-          }
-          return InputLoopAction::ContinueLoop;
-        }
-        auto label = compact_path_leaf(*attach_target);
-        if (!queue_pending_image_attachment(*imported, std::move(label), "attached image for next prompt", "attached image"))
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      if (auto tool_query = tool_command_argument(submitted))
-      {
-        push_history(input_history, submitted);
-        auto const tool_index = toggle_matching_tool_details(*tool_query);
-        if (tool_index)
-        {
-          auto const& tool = *snapshot.transcript[*tool_index].tool;
-          snapshot.status = detail::tool_card_details_visible(tool, snapshot.tool_details_visible)
-                                ? (tool_query->empty() ? "latest tool details visible" : "matching tool details visible")
-                                : (tool_query->empty() ? "latest tool details compact" : "matching tool details compact");
-        }
-        else
-        {
-          snapshot.status = tool_query->empty() ? "no tool details to show" : "no matching tool details to show";
-          static_cast<void>(beep());
-        }
-        if (!render())
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      if (auto diff_query = diff_command_argument(submitted))
-      {
-        push_history(input_history, submitted);
-        auto diff_text = latest_tool_diff_copy_text(snapshot.transcript, *diff_query);
-        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-        if (diff_text)
-        {
-          auto const title = diff_query->empty() ? std::string_view("Latest tool diff:") : std::string_view("Matching tool diff:");
-          push_transcript(snapshot,
-                          TranscriptItem{.label = "ava", .text = diff_transcript_text(title, *diff_text), .meta = assistant_meta_for_snapshot(snapshot)});
-          snapshot.status = diff_query->empty() ? "showing latest tool diff" : "showing matching tool diff";
-        }
-        else
-        {
-          snapshot.status = diff_query->empty() ? "no tool diff to show" : "no matching tool diff to show";
-          push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-          static_cast<void>(beep());
-        }
-        transcript_scroll_offset = 0;
-        if (!render())
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      if (auto copy_target = copy_command_argument(submitted))
-      {
-        push_history(input_history, submitted);
-        auto const target = parse_copy_target(*copy_target);
-        std::optional<std::string> copy_text;
-        std::string copied_status;
-        std::string missing_status;
-        bool valid_target = true;
-        bool copied = false;
-        if (target.name.empty() || target.name == "last")
-        {
-          copy_text = latest_ava_message_copy_text(snapshot.transcript);
-          copied_status = "copied last AVA message to clipboard";
-          missing_status = "no AVA messages to copy";
-        }
-        else if (target.name == "tool" || target.name == "tools")
-        {
-          copy_text = latest_tool_copy_text(snapshot.transcript, target.query);
-          copied_status = target.query.empty() ? "copied latest tool details to clipboard" : "copied matching tool details to clipboard";
-          missing_status = target.query.empty() ? "no tool details to copy" : "no matching tool details to copy";
-        }
-        else if (target.name == "diff" || target.name == "diffs")
-        {
-          copy_text = latest_tool_diff_copy_text(snapshot.transcript, target.query);
-          copied_status = target.query.empty() ? "copied latest tool diff to clipboard" : "copied matching tool diff to clipboard";
-          missing_status = target.query.empty() ? "no tool diff to copy" : "no matching tool diff to copy";
-        }
-        else if (target.name == "permission" || target.name == "permissions")
-        {
-          copy_text = latest_permission_copy_text(snapshot.transcript, target.query);
-          copied_status = target.query.empty() ? "copied latest permission details to clipboard" : "copied matching permission details to clipboard";
-          missing_status = target.query.empty() ? "no permission details to copy" : "no matching permission details to copy";
-        }
-        else
-        {
-          valid_target = false;
-          snapshot.status =
-              "invalid_argument: unsupported copy target\n  target: " + target.name + "\n  supported: tool [query], diff [query], permission [query]";
-        }
-
-        if (valid_target)
-        {
-          copied = copy_text && copy_text_to_terminal_clipboard(*copy_text);
-          if (copied)
-          {
-            snapshot.status = std::move(copied_status);
-          }
-          else
-          {
-            snapshot.status = copy_text ? "clipboard copy failed" : std::move(missing_status);
-          }
-        }
-        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-        push_transcript(snapshot, TranscriptItem{.label = copied ? "status" : "error", .text = snapshot.status});
-        transcript_scroll_offset = 0;
-        if (!copied)
-          static_cast<void>(beep());
-        if (!render())
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      if (submitted == "/details")
-      {
-        push_history(input_history, submitted);
-        snapshot.tool_details_visible = !snapshot.tool_details_visible;
-        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-        push_transcript(snapshot, TranscriptItem{.label = "ava",
-                                                 .text = snapshot.tool_details_visible ? "tool details are now visible" : "tool details are now compact",
-                                                 .meta = assistant_meta_for_snapshot(snapshot)});
-        snapshot.status = snapshot.tool_details_visible ? "tool details visible" : "tool details compact";
-        transcript_scroll_offset = 0;
-        if (!render())
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      if (submitted == "/thinking")
-      {
-        push_history(input_history, submitted);
-        toggle_thinking_visibility();
-        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-        push_transcript(snapshot, TranscriptItem{.label = "ava",
-                                                 .text = snapshot.thinking_visible ? "thinking blocks are now visible" : "thinking blocks are now hidden",
-                                                 .meta = assistant_meta_for_snapshot(snapshot)});
-        if (!render())
-        {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
-        }
-        return InputLoopAction::ContinueLoop;
-      }
-      auto const outcome = active_run_controller.run(std::move(submitted));
-      terminal_write_failed = outcome.terminal_write_failed;
-      return outcome.break_loop ? InputLoopAction::BreakLoop : InputLoopAction::ContinueLoop;
-    }
-    return InputLoopAction::None;
+  RuntimeSubmitController submit_controller(options, presentation_state, draft_state, renderer, navigation, action_controller, active_run_controller,
+                                            active_select_list);
+  auto handle_submit = [&](std::optional<std::string> forced_submission = std::nullopt) {
+    auto const outcome = submit_controller.submit(std::move(forced_submission));
+    terminal_write_failed = outcome.terminal_write_failed;
+    return outcome.disposition;
   };
 
   if (terminal_signal_received())
@@ -1494,9 +970,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
     else if (is_action(TuiAction::MessageFollowUp))
     {
       auto const action = handle_submit();
-      if (action == InputLoopAction::BreakLoop)
+      if (action == RuntimeSubmitDisposition::BreakLoop)
         break;
-      if (action == InputLoopAction::ContinueLoop)
+      if (action == RuntimeSubmitDisposition::ContinueLoop)
         continue;
     }
     else if (is_action(TuiAction::NewLine))
@@ -1720,11 +1196,10 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     else if (is_action(TuiAction::SessionNew) || is_action(TuiAction::SessionFork))
     {
-      forced_slash_submission = is_action(TuiAction::SessionNew) ? "/new" : "/fork";
-      auto const action = handle_submit();
-      if (action == InputLoopAction::BreakLoop)
+      auto const action = handle_submit(is_action(TuiAction::SessionNew) ? "/new" : "/fork");
+      if (action == RuntimeSubmitDisposition::BreakLoop)
         break;
-      if (action == InputLoopAction::ContinueLoop)
+      if (action == RuntimeSubmitDisposition::ContinueLoop)
         continue;
     }
     else if (is_action(TuiAction::MessageDequeue))
@@ -2116,9 +1591,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
         continue;
       }
       auto const action = handle_submit();
-      if (action == InputLoopAction::BreakLoop)
+      if (action == RuntimeSubmitDisposition::BreakLoop)
         break;
-      if (action == InputLoopAction::ContinueLoop)
+      if (action == RuntimeSubmitDisposition::ContinueLoop)
         continue;
     }
     else if (event.key == Key::Space)

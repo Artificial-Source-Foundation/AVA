@@ -25,6 +25,7 @@ add_library(ava_tui
   "runtime_render_internal.cpp"
   "runtime_prompts_internal.cpp"
   "runtime_state.cpp"
+  "runtime_submit_internal.cpp"
   "runtime_views.cpp"
   "runtime_commands.cpp"
   "runtime_input.cpp"

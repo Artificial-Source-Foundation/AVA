@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/tui_test_support.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace tui_test_support {
@@ -29,6 +30,26 @@ std::vector<ava::tui::SlashCommandItem> const& standard_slash_commands()
       ava::tui::SlashCommandItem{.command = "/glob", .description = "List matching files", .hint = "<pattern>", .category = "Files"},
       ava::tui::SlashCommandItem{.command = "/quit", .description = "Exit", .category = "General"}};
   return commands;
+}
+
+ava::tui::SlashCommandItem const* find_slash_command_item(std::vector<ava::tui::SlashCommandItem> const& items, std::string_view command)
+{
+  auto const found = std::ranges::find_if(items, [command](auto const& item) { return item.command == command; });
+  return found == items.end() ? nullptr : &*found;
+}
+
+bool slash_argument_completion_matches(ava::tui::SlashCommandArgumentCompletion const& completion, std::size_t argument_index, std::string_view value,
+                                       std::vector<std::string> const& required_previous_args)
+{
+  return completion.argument_index == argument_index && completion.value == value && completion.required_previous_args == required_previous_args;
+}
+
+bool has_slash_argument_completion(ava::tui::SlashCommandItem const* item, std::size_t argument_index, std::string_view value,
+                                   std::vector<std::string> const& required_previous_args)
+{
+  return item != nullptr && std::ranges::any_of(item->argument_completions, [&](auto const& completion) {
+           return slash_argument_completion_matches(completion, argument_index, value, required_previous_args);
+         });
 }
 
 std::string_view tree_action_key_bindings_json() noexcept

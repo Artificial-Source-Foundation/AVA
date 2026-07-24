@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ava/config/xdg_paths.h"
 #include "ava/agent/agent_loop_session.h"
+#include "ava/config/xdg_paths.h"
 #include "ava/session/session_store.h"
 #include "ava/provider/provider.h"
 
@@ -22,6 +22,7 @@ ava::config::XdgPaths app_test_paths(std::filesystem::path const& root);
 std::string app_test_plugin_manifest_json(std::string_view id, std::string_view name = "Test Plugin");
 std::string app_test_mcp_config_json(std::string_view id, std::string_view name, std::string_view command);
 void write_app_test_file(std::filesystem::path const& path, std::string const& text);
+std::string app_read_binary_file(std::filesystem::path const& path);
 
 class BlockingInputBuf final : public std::streambuf
 {
@@ -113,8 +114,7 @@ std::optional<ava::session::SessionEntry> latest_compaction_entry(std::vector<av
 class MutatingSummaryTransport final : public ava::provider::Transport
 {
  public:
-  MutatingSummaryTransport(ava::agent::SessionAppendSink append_sink, std::vector<ava::provider::HttpResponse> responses,
-                          std::size_t mutate_requests = 1);
+  MutatingSummaryTransport(ava::agent::SessionAppendSink append_sink, std::vector<ava::provider::HttpResponse> responses, std::size_t mutate_requests = 1);
 
   ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override;
   [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept;

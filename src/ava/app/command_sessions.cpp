@@ -658,8 +658,6 @@ ava::core::Result<runtime::Session> create_fresh_session(runtime::Session const&
   runtime::OpenOptions options;
   options.continuity = current.continuity;
   options.request.sessionless = current.sessionless;
-  if (current.sessionless)
-    options.continuity.reset_ephemeral_anchor();
   return open_runtime_session(options);
 }
 

@@ -43,9 +43,7 @@ struct RuntimeContinuity
   // made available to tools via their explicit ToolContext projection.
   std::vector<std::filesystem::path> additional_writable_dirs = {};
   // Long-lived adapters may supply one immutable descriptor authority shared
-  // by every session and application-scoped background service. A generated
-  // sessionless authority also covers that ephemeral store's unique spill
-  // root, so creating another ephemeral session must rebind it.
+  // by every session and application-scoped background service.
   std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
   ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::agent::ToolVisibilityOptions tool_visibility;
@@ -74,10 +72,6 @@ struct RuntimeContinuity
   // Application-lifetime private diagnostics owner shared by visible,
   // retained, and protocol-managed runtime sessions.
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
-
-  // Drop only the descriptor authority tied to the previous ephemeral store;
-  // the next open reconstructs it around the new store's unique spill root.
-  void reset_ephemeral_anchor() noexcept { anchor_set.reset(); }
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

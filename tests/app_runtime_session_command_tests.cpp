@@ -362,11 +362,10 @@ void test_app_sessionless_new_and_resume_commands()
     return;
 
   auto const original_session_id = session->store.session_id();
-  auto const original_anchor_set = session->continuity.anchor_set;
   auto fresh = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/new Ephemeral session"});
   expect(fresh && fresh->handled && session->sessionless && session->store.is_ephemeral() && session->store.session_id() != original_session_id &&
-             !std::filesystem::exists(session->store.session_path()) && session->continuity.anchor_set != original_anchor_set,
-         "slash /new preserves sessionless navigation and rebinds authority around the new ephemeral runtime");
+             !std::filesystem::exists(session->store.session_path()),
+         "slash /new preserves sessionless navigation and creates another ephemeral runtime");
 
   auto resumed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/resume " + original_session_id});
   expect(!resumed && resumed.error().message().find("no-session") != std::string::npos && session->sessionless && session->store.is_ephemeral(),

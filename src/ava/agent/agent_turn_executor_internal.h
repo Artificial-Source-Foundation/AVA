@@ -18,6 +18,27 @@
 
 namespace ava::agent::detail {
 
+inline constexpr std::string_view kRedactedRunCommand = "<redacted one-shot command>";
+
+enum class ProviderTurnDisposition
+{
+  Parsed,
+  TerminalCancelled,
+};
+
+struct ProviderTurn
+{
+  ProviderTurnDisposition disposition = ProviderTurnDisposition::Parsed;
+  ParsedAssistantTurn assistant_turn;
+  ava::provider::TokenUsage usage;
+  std::optional<long double> cost_usd;
+  std::unordered_set<std::string> iteration_tool_call_ids;
+
+  // Contains transient tool arguments and provider-native reasoning metadata;
+  // never generate debug output for this result.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct ActiveTurnUserMessage
 {
   std::string id;
@@ -76,6 +97,7 @@ class AgentTurnExecutor final
                                                                       std::vector<ava::session::ImageAttachmentRef> const& attachments);
   [[nodiscard]] ava::core::VoidResult replay_active_turn_user_messages();
   [[nodiscard]] ava::core::Result<bool> prepare_context_overflow_retry(ava::core::Error const& error);
+  [[nodiscard]] ava::core::Result<ProviderTurn> request_provider_turn();
   [[nodiscard]] ava::core::VoidResult initialize_tools();
   [[nodiscard]] ava::core::Result<ava::tools::TaskSubagentResult> run_task_subagent(ava::tools::TaskSubagentRequest const& request);
 

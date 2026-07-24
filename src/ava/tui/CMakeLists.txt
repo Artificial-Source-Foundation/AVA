@@ -19,6 +19,7 @@ add_library(ava_tui
   "keybindings.cpp"
   "runtime.cpp"
   "runtime_draft_internal.cpp"
+  "runtime_render_internal.cpp"
   "runtime_state.cpp"
   "runtime_views.cpp"
   "runtime_commands.cpp"

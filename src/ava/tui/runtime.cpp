@@ -9,6 +9,7 @@
 #include "ava/tui/runtime_draft_internal.h"
 #include "ava/tui/runtime_input_internal.h"
 #include "ava/tui/runtime_internal.h"
+#include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/session_grants.h"
@@ -90,32 +91,6 @@ constexpr std::size_t kKeyboardScrollRows = 3;
 constexpr std::size_t kMouseWheelScrollRows = 1;
 constexpr auto kIdleInputPollDelay = std::chrono::milliseconds(250);
 constexpr auto kDisplayReloadPollInterval = std::chrono::milliseconds(500);
-class SignalBlockGuard
-{
- public:
-  SignalBlockGuard()
-  {
-    sigset_t blocked{};
-    sigemptyset(&blocked);
-    sigaddset(&blocked, SIGINT);
-    sigaddset(&blocked, SIGTERM);
-    active_ = sigprocmask(SIG_BLOCK, &blocked, &previous_) == 0;
-  }
-
-  SignalBlockGuard(SignalBlockGuard const&) = delete;
-  SignalBlockGuard& operator=(SignalBlockGuard const&) = delete;
-
-  ~SignalBlockGuard()
-  {
-    if (active_)
-      static_cast<void>(sigprocmask(SIG_SETMASK, &previous_, nullptr));
-  }
-
- private:
-  sigset_t previous_{};
-  bool active_ = false;
-};
-
 class ComposerTerminalGraphicsGuard
 {
  public:
@@ -126,16 +101,6 @@ class ComposerTerminalGraphicsGuard
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
-
-std::pair<std::size_t, std::size_t> terminal_size()
-{
-  int height = 0;
-  int width = 0;
-  getmaxyx(stdscr, height, width);
-  if (width > 0 && height > 0)
-    return {static_cast<std::size_t>(width), static_cast<std::size_t>(height)};
-  return {80, 24};
-}
 
 std::string attachment_detail(ava::session::ImageAttachmentRef const& attachment, TerminalImageCapabilities const& capabilities)
 {
@@ -248,14 +213,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto& draft_selection_anchor = draft_state.draft_selection_anchor;
   auto& draft_selection_cursor = draft_state.draft_selection_cursor;
   auto& pending_escape_clear = draft_state.pending_escape_clear;
-  std::size_t transcript_scroll_offset = 0;
-  std::size_t detached_new_output_count = 0;
-  detail::CompletionMatchCache completion_cache;
-  detail::TranscriptLayoutCache transcript_layout_cache;
-  std::optional<SidebarSnapshot> detached_sidebar_snapshot;
+  RuntimeRenderer renderer(snapshot, sidebar, draft_state);
+  auto& transcript_scroll_offset = renderer.transcript_scroll_offset;
+  auto& detached_new_output_count = renderer.detached_new_output_count;
+  auto& completion_cache = renderer.completion_cache;
+  auto& transcript_layout_cache = renderer.transcript_layout_cache;
+  auto& detached_sidebar_snapshot = renderer.detached_sidebar_snapshot;
+  auto& ui_mutex = renderer.ui_mutex;
   ActiveSelectList active_select_list = ActiveSelectList::None;
   std::optional<PendingSessionArchiveAction> session_archive_confirmation;
-  std::recursive_mutex ui_mutex;
   std::mutex prompt_request_mutex;
   std::deque<std::shared_ptr<PendingPermissionRequest>> pending_permission_requests;
   std::deque<std::shared_ptr<PendingQuestionRequest>> pending_question_requests;
@@ -284,60 +250,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     static_cast<void>(sink(event));
   };
 
-  auto render = [&]() -> bool {
-    if (terminal_signal_received())
-      return false;
-    bool wrote = false;
-    {
-      std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-      SignalBlockGuard block_signals;
-      draft.cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
-      snapshot.input = draft.text;
-      snapshot.input_cursor = draft.cursor;
-      if (auto const selection = draft_state.selection_bounds())
-      {
-        snapshot.input_selection_start = selection->first;
-        snapshot.input_selection_end = selection->second;
-      }
-      else
-      {
-        snapshot.input_selection_start = std::string::npos;
-        snapshot.input_selection_end = std::string::npos;
-      }
-      snapshot.selected_slash_command_index = selected_slash_command_index;
-      snapshot.slash_palette_suppressed = slash_palette_suppressed;
-      snapshot.path_completion_force_active = path_completion_force_active;
-      if (transcript_scroll_offset == 0)
-      {
-        detached_new_output_count = 0;
-        detached_sidebar_snapshot.reset();
-      }
-      snapshot.sidebar = transcript_scroll_offset > 0 && detached_sidebar_snapshot ? *detached_sidebar_snapshot : sidebar;
-      auto const [width, height] = terminal_size();
-      snapshot.width = width;
-      snapshot.height = height;
-      snapshot.sidebar_drawer_scroll_offset = std::min(snapshot.sidebar_drawer_scroll_offset, sidebar_drawer_max_scroll_offset(snapshot));
-      draft_scroll_offset = std::min(draft_scroll_offset, draft_state.max_draft_scroll_offset(snapshot, height));
-      snapshot.draft_scroll_offset = draft_scroll_offset;
-      if (transcript_scroll_offset > 0)
-      {
-        transcript_scroll_offset = std::min(transcript_scroll_offset, detail::composer_max_transcript_scroll_offset_cached(
-                                                                          snapshot, width, height, completion_cache, snapshot.file_references_generation,
-                                                                          transcript_layout_cache, snapshot.transcript_generation));
-      }
-      if (transcript_scroll_offset == 0)
-      {
-        detached_new_output_count = 0;
-        detached_sidebar_snapshot.reset();
-        snapshot.sidebar = sidebar;
-      }
-      snapshot.transcript_scroll_offset = transcript_scroll_offset;
-      snapshot.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
-      wrote =
-          detail::draw_screen_cached(snapshot, completion_cache, snapshot.file_references_generation, transcript_layout_cache, snapshot.transcript_generation);
-    }
-    return wrote && !terminal_signal_received();
-  };
+  auto render = [&]() -> bool { return renderer.render(); };
 
   auto next_display_reload_check = std::chrono::steady_clock::now() + kDisplayReloadPollInterval;
   std::optional<std::string> last_display_reload_error;
@@ -382,20 +295,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
     return render();
   };
 
-  auto render_processing_frame = [&]() -> bool {
-    if (terminal_signal_received())
-      return false;
-    bool wrote = false;
-    {
-      std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-      SignalBlockGuard block_signals;
-      if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.sidebar_drawer_visible || !snapshot.processing)
-        return true;
-      wrote = detail::draw_processing_footer_cached(snapshot, completion_cache, snapshot.file_references_generation, transcript_layout_cache,
-                                                    snapshot.transcript_generation);
-    }
-    return wrote && !terminal_signal_received();
-  };
   auto resolve_permission_prompt = [&](ava::permissions::PermissionPrompt const& prompt, std::function<bool()> const& stop_requested = {},
                                        std::function<bool()> const& request_stop = {}) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     auto permission_label = std::string("permission requested");
@@ -3062,7 +2961,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
             fail_pending_prompt_requests();
             break;
           }
-          if (!render_processing_frame())
+          if (!renderer.render_processing_frame())
           {
             terminal_write_failed = true;
             render_failed = true;

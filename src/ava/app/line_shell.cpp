@@ -1431,7 +1431,7 @@ int run_tui(ShellState state)
       .model_selector_view = [&state]() { return ava::app::model_selector_view(state.session, "Enter switch model · type to filter · Esc cancel"); },
       .scoped_model_selector_view = [&state]() { return ava::app::scoped_model_selector_view(state.session, scoped_model_selector_footer_hint()); },
       .session_selector_view =
-          [&application_catalog, &session_selector_sort, &session_selector_named_only, &session_selector_show_paths, &session_selector_show_archived,
+          [&session_selector_sort, &session_selector_named_only, &session_selector_show_paths, &session_selector_show_archived,
            &session_selector_show_label_time, &session_selector_snapshot]() {
             session_selector_sort = ava::app::SessionSelectorSort::Recent;
             session_selector_named_only = false;
@@ -1441,32 +1441,27 @@ int run_tui(ShellState state)
             return session_selector_snapshot();
           },
       .on_session_selector_sort_cycle =
-          [&application_catalog, &session_selector_sort, &session_selector_named_only, &session_selector_show_paths, &session_selector_show_archived,
-           &session_selector_show_label_time, &session_selector_snapshot]() {
+          [&session_selector_sort, &session_selector_snapshot]() {
             session_selector_sort = ava::app::next_session_selector_sort(session_selector_sort);
             return session_selector_snapshot();
           },
       .on_session_selector_named_filter_toggle =
-          [&application_catalog, &session_selector_sort, &session_selector_named_only, &session_selector_show_paths, &session_selector_show_archived,
-           &session_selector_show_label_time, &session_selector_snapshot]() {
+          [&session_selector_named_only, &session_selector_snapshot]() {
             session_selector_named_only = !session_selector_named_only;
             return session_selector_snapshot();
           },
       .on_session_selector_path_display_toggle =
-          [&application_catalog, &session_selector_sort, &session_selector_named_only, &session_selector_show_paths, &session_selector_show_archived,
-           &session_selector_show_label_time, &session_selector_snapshot]() {
+          [&session_selector_show_paths, &session_selector_snapshot]() {
             session_selector_show_paths = !session_selector_show_paths;
             return session_selector_snapshot();
           },
       .on_session_selector_archived_filter_toggle =
-          [&application_catalog, &session_selector_sort, &session_selector_named_only, &session_selector_show_paths, &session_selector_show_archived,
-           &session_selector_show_label_time, &session_selector_snapshot]() {
+          [&session_selector_show_archived, &session_selector_snapshot]() {
             session_selector_show_archived = !session_selector_show_archived;
             return session_selector_snapshot();
           },
       .on_session_selector_label_timestamp_toggle =
-          [&application_catalog, &session_selector_sort, &session_selector_named_only, &session_selector_show_paths, &session_selector_show_archived,
-           &session_selector_show_label_time, &session_selector_snapshot]() {
+          [&session_selector_show_label_time, &session_selector_snapshot]() {
             session_selector_show_label_time = !session_selector_show_label_time;
             return session_selector_snapshot();
           },

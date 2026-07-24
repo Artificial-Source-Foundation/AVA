@@ -107,7 +107,7 @@ class ComposerTerminalGraphicsGuard
   ComposerTerminalGraphicsGuard& operator=(ComposerTerminalGraphicsGuard const&) = delete;
   ~ComposerTerminalGraphicsGuard() { detail::clear_composer_terminal_graphics(); }
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 std::pair<std::size_t, std::size_t> terminal_size()

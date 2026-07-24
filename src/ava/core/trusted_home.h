@@ -24,37 +24,11 @@ struct TrustedAccount
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-// Resolve the trusted account by reading HOME (passwd fallback).
-//
-// This is the single function that reads the HOME environment variable. It may
-// only be called before freeze_trusted_account(): in debug builds it asserts
-// that the one-time freeze has not yet happened, so the sensitive HOME value is
-// never re-read after startup initialization. The resolved account is also
-// stored for cached_trusted_account(); after the freeze, callers must use that
-// cache instead of calling this function again.
-[[nodiscard]] Result<TrustedAccount> resolve_trusted_account();
-
-// Return the account resolved by a prior resolve_trusted_account() call, or
-// nullopt when no resolution has happened yet.
-//
-// Always safe to call: it never reads HOME and never trips the freeze
-// assertion, so it is the correct accessor for every post-startup caller
-// (including the bash command planner).
-[[nodiscard]] TrustedAccount const& cached_trusted_account();
-
-// Freeze trusted-home resolution.
-//
-// Debug builds only: after this, any call to resolve_trusted_account() trips an
-// assertion, automatically enforcing that HOME is read at most once. Called once
-// after the runtime session has performed the one-time startup initialization.
-void freeze_trusted_account();
-
-// Return the state of `g_account_frozen`, a fuzzy boolean that goes from WasFalse -> True
-// exactly once (when freeze_trusted_account is called the first time). This returns
-// true iff `g_account_frozen` WasFalse (a few microseconds ago).
-bool was_not_frozen();
-
 // Called for every session from construct_runtime_session.
-ava::core::VoidResult load_account_once_and_freeze();
+// Only reads HOME the first time that it is called; after that this is a no-op.
+[[nodiscard]] ava::core::VoidResult load_account_once_and_freeze();
+
+// Return the account resolved by a prior load_account_once_and_freeze call.
+[[nodiscard]] TrustedAccount const& cached_trusted_account();
 
 }  // namespace ava::core

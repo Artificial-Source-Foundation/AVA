@@ -71,6 +71,12 @@ Result<TrustedAccount> read_trusted_account_from_env()
 
 }  // namespace
 
+// Resolve the trusted account by reading HOME (passwd fallback).
+//
+// This is the single function that reads the HOME environment variable.
+// It may only be called once; which is asserted in debug builds, so the sensitive HOME
+// value is never re-read after startup initialization. The resolved account is also
+// stored for use with `cached_trusted_account` after the freeze.
 Result<TrustedAccount> resolve_trusted_account()
 {
   DoutEntering(dc::core|continued_cf, "resolve_trusted_account() -> ");
@@ -84,24 +90,22 @@ Result<TrustedAccount> resolve_trusted_account()
   g_cache = *account;
 
   // The environment variable HOME should *only* be read by `read_trusted_account_from_env`
-  // and that function may only be called *once*. Therefore this function may only be
-  // called once (which is currently done from `construct_runtime_session`?!)
-  //
-  // Afterwards `ava::core::freeze_trusted_account` is called, signifying that all early
-  // one-time initialization have been completed.
-  //
-  // Hence, we get here - the boolean g_account_frozen must still be (or have been) false at
-  // the moment of testing *after* calling read_trusted_account_from_env.
+  // and that function may only be called *once*. Therefore `read_trusted_account_from_env`
+  // may only be called while g_account_frozen was still false.
   ASSERT(g_account_frozen.is_momentary_false(std::memory_order::relaxed));
 
   Dout(dc::finish, *account);
+
+  // Successfully determined trusted home and user.
+  g_account_frozen.store(fuzzy::True, std::memory_order::release);
+
   return *account;
 }
 
 TrustedAccount const& cached_trusted_account()
 {
   // This function should only be called after `resolve_trusted_account` and, subsequently,
-  // `ava::core::freeze_trusted_account` were already called.
+  // `freeze_trusted_account` were already called.
   ASSERT(g_account_frozen.is_true(std::memory_order::acquire));
   // If g_account_frozen is true with memory order acquire then this must be true as well.
   ASSERT(g_cache.has_value());
@@ -109,26 +113,12 @@ TrustedAccount const& cached_trusted_account()
   return g_cache.value();
 }
 
-void freeze_trusted_account()
-{
-  DoutEntering(dc::core, "freeze_trusted_account()");
-
-  // Transition g_account_frozen from WasFalse -> True.
-  g_account_frozen.store(fuzzy::True, std::memory_order::release);
-}
-
-bool was_not_frozen()
-{
-  // If the fuzzy bool is still transitory false then a moment ago freeze_trusted_account
-  // wasn't called yet and therefore it is very likely that resolve_trusted_account wasn't
-  // called yet.
-  return g_account_frozen.is_transitory_false();
-}
-
 ava::core::VoidResult load_account_once_and_freeze()
 {
+  DoutEntering(dc::core, "load_account_once_and_freeze()");
+
   // No-op if already frozen.
-  if (ava::core::was_not_frozen())
+  if (g_account_frozen.is_transitory_false())
   {
     // Transitory false means that g_account_frozen might have become True in the meantime.
     // In other words, another thread might have entered here before us. But only one thread
@@ -137,12 +127,11 @@ ava::core::VoidResult load_account_once_and_freeze()
     std::lock_guard lock(m);
     // If now g_account_frozen is still false then we are truly the first thread because
     // inside this critial area the WasFalse can not transition to True due to another thread.
-    if (ava::core::was_not_frozen())
+    if (g_account_frozen.is_transitory_false())
     {
       auto resolved = ava::core::resolve_trusted_account();
       if (!resolved)
         return std::unexpected(std::move(resolved.error()));
-      ava::core::freeze_trusted_account();
     }
   }
   return {};

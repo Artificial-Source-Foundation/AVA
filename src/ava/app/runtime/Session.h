@@ -40,17 +40,21 @@ namespace ava::app::runtime {
 // The store may be persistent or ephemeral according to sessionless. Shared background jobs remain valid when the aggregate is moved or replaced.
 struct Session
 {
+  std::filesystem::path workspace_dir;
+  std::filesystem::path current_dir;
+  ava::agent::Mode mode = ava::agent::Mode::Build;
+  ava::agent::ToolVisibilityOptions tool_visibility;
+  ava::config::XdgPaths paths;
+  bool sessionless = false;
+  bool offline = false;
+
   ava::session::SessionStore store;
   // Persistent runtime owners hold a cross-process lease for the complete session lifetime.
   ava::session::SessionLease lease;
-  ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::config::ModelInfo model;
   BasePromptMetadata base_prompt;
-  ava::config::XdgPaths paths;
   // Resolved once at open time and reused by every runtime history reader.
   ava::session::SessionReadLimits session_read_limits = ava::session::legacy_unbounded_session_read_limits();
-  std::filesystem::path workspace_dir;
-  std::filesystem::path current_dir;
   // Additional writable directories beyond workspace_dir (e.g., user-configured
   // paths). These are opened as anchor descriptors at startup and made
   // available to tools via ToolContext::anchor_set.
@@ -60,14 +64,12 @@ struct Session
   std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
   ProjectTrustState project_trust;
   PromptOverrides prompt_overrides;
-  ava::agent::ToolVisibilityOptions tool_visibility;
   std::vector<ContextSourceMetadata> context_sources;
   std::vector<FreshnessSourceMetadata> freshness_sources;
   std::string system_prompt;
   std::optional<ReasoningSelection> reasoning = std::nullopt;
   std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
   bool created = false;
-  bool sessionless = false;
   std::shared_ptr<SessionRunController> run_controller = nullptr;
   // Immutable append target bound into the controller-owned serialized routes.
   // Tests and retained runtime capsules may inspect/copy it, but mutations flow
@@ -85,7 +87,6 @@ struct Session
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
   // Null uses normal global/project discovery; non-null is immutable session-local MCP composition.
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;
-  bool offline = false;
 
   // Bind a lifetime-safe history snapshot route to this session's exact lease
   // (or to its shared in-memory state in sessionless mode).

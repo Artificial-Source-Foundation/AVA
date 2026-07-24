@@ -123,27 +123,28 @@ runtime::RunOptions detached_run_options(runtime::RunOptions const& source)
 runtime::Session detached_session(runtime::Session const& source, ava::session::SessionLease lease, ava::session::SessionReadAuthority authority,
                                   std::shared_ptr<SubagentDeliveryManager> manager)
 {
-  return runtime::Session{.store = source.store,
-                          .lease = std::move(lease),
+  return runtime::Session{.workspace_dir = source.workspace_dir,
+                          .current_dir = source.current_dir,
                           .mode = source.mode,
+                          .tool_visibility = source.tool_visibility,
+                          .paths = source.paths,
+                          .sessionless = source.sessionless,
+                          .offline = source.offline,
+                          .store = source.store,
+                          .lease = std::move(lease),
                           .model = source.model,
                           .base_prompt = source.base_prompt,
-                          .paths = source.paths,
                           .session_read_limits = source.session_read_limits,
-                          .workspace_dir = source.workspace_dir,
-                          .current_dir = source.current_dir,
                           .additional_writable_dirs = source.additional_writable_dirs,
                           .anchor_set = source.anchor_set,
                           .project_trust = source.project_trust,
                           .prompt_overrides = source.prompt_overrides,
-                          .tool_visibility = source.tool_visibility,
                           .context_sources = source.context_sources,
                           .freshness_sources = source.freshness_sources,
                           .system_prompt = source.system_prompt,
                           .reasoning = source.reasoning,
                           .scoped_model_cycle = source.scoped_model_cycle,
                           .created = source.created,
-                          .sessionless = source.sessionless,
                           .run_controller = source.run_controller,
                           .append_target = source.append_target,
                           .bound_read_authority = std::move(authority),
@@ -151,8 +152,7 @@ runtime::Session detached_session(runtime::Session const& source, ava::session::
                           .subagent_delivery_manager = std::move(manager),
                           .session_title_coordinator = source.session_title_coordinator,
                           .diagnostics = source.diagnostics,
-                          .mcp_config = source.mcp_config,
-                          .offline = source.offline};
+                          .mcp_config = source.mcp_config};
 }
 
 std::string delivery_marker(ava::agent::SubagentJobIdentity const& identity)

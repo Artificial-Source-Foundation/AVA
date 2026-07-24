@@ -377,34 +377,34 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
     title_coordinator = std::move(*created_coordinator);
   }
 
-  runtime::Session session{.store = std::move(store),
-                           .lease = std::move(lease),
+  runtime::Session session{.workspace_dir = workspace_dir,
+                           .current_dir = current_dir,
                            .mode = options.mode,
+                           .tool_visibility = options.tool_visibility,
+                           .paths = options.paths,
+                           .sessionless = sessionless,
+                           .offline = options.offline,
+                           .store = std::move(store),
+                           .lease = std::move(lease),
                            .model = std::move(model),
                            .base_prompt = std::move(prompt_state->base_prompt),
-                           .paths = options.paths,
                            .session_read_limits = session_read_limits,
-                           .workspace_dir = workspace_dir,
-                           .current_dir = current_dir,
                            .additional_writable_dirs = options.additional_writable_dirs,
                            .anchor_set = std::move(anchor_set),
                            .project_trust = std::move(project_trust),
                            .prompt_overrides = options.prompt_overrides,
-                           .tool_visibility = options.tool_visibility,
                            .context_sources = std::move(prompt_state->context_sources),
                            .freshness_sources = std::move(prompt_state->freshness_sources),
                            .system_prompt = std::move(prompt_state->system_prompt),
                            .reasoning = std::move(reasoning),
                            .scoped_model_cycle = registry.scoped_model_cycle,
                            .created = created,
-                           .sessionless = sessionless,
                            .run_controller = std::make_shared<SessionRunController>(*append_target),
                            .append_target = std::move(*append_target),
                            .subagent_coordinator = delivery_manager->coordinator(),
                            .subagent_delivery_manager = std::move(delivery_manager),
                            .session_title_coordinator = std::move(title_coordinator),
-                           .diagnostics = options.diagnostics,
-                           .offline = options.offline};
+                           .diagnostics = options.diagnostics};
 
   if (options.initial_reasoning_level)
   {

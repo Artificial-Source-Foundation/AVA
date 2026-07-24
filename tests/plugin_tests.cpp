@@ -262,27 +262,27 @@ ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths con
   trust.workspace_dir = workspace;
   trust.trust_file = paths.ava_state_dir / "trusted-projects.json";
   trust.decision = ava::app::ProjectTrustDecision::Trusted;
-  return ava::app::runtime::Session{.store = std::move(*store),
-                                    .lease = {},
+  return ava::app::runtime::Session{.workspace_dir = workspace,
+                                    .current_dir = workspace,
                                     .mode = ava::agent::Mode::Build,
+                                    .tool_visibility = {},
+                                    .paths = paths,
+                                    .sessionless = false,
+                                    .offline = false,
+                                    .store = std::move(*store),
+                                    .lease = {},
                                     .model = std::move(model),
                                     .base_prompt = {},
-                                    .paths = paths,
-                                    .workspace_dir = workspace,
-                                    .current_dir = workspace,
                                     .project_trust = std::move(trust),
                                     .prompt_overrides = {},
-                                    .tool_visibility = {},
                                     .context_sources = {},
                                     .freshness_sources = {},
                                     .system_prompt = {},
                                     .reasoning = std::nullopt,
                                     .scoped_model_cycle = std::nullopt,
                                     .created = false,
-                                    .sessionless = false,
                                     .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr),
-                                    .subagent_coordinator = nullptr,
-                                    .offline = false};
+                                    .subagent_coordinator = nullptr};
 }
 
 std::string command_output_text(ava::core::Result<ava::app::CommandResult> const& command)

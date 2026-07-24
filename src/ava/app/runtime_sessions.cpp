@@ -36,7 +36,7 @@ runtime::OpenOptions lifecycle_options(runtime::OpenOptions options, std::filesy
 {
   options.continuity.workspace_dir = workspace_root;
   options.continuity.current_dir = current_dir;
-  options.request.reset_for_lifecycle_navigation();
+  options.request = {};
   return options;
 }
 

@@ -648,7 +648,6 @@ ava::core::Result<runtime::Session> reopen_session(runtime::Session const& curre
 {
   runtime::OpenOptions options;
   options.continuity = current.continuity;
-  options.request.sessionless = current.sessionless;
   options.request.requested_session_id = std::string(session_id);
   return open_runtime_session(options);
 }
@@ -657,7 +656,6 @@ ava::core::Result<runtime::Session> create_fresh_session(runtime::Session const&
 {
   runtime::OpenOptions options;
   options.continuity = current.continuity;
-  options.request.sessionless = current.sessionless;
   return open_runtime_session(options);
 }
 

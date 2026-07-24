@@ -344,34 +344,6 @@ void test_app_session_new_resume_commands()
          "slash /new uses the selector's Untitled session fallback in title-first lifecycle receipts");
 }
 
-void test_app_sessionless_new_and_resume_commands()
-{
-  auto const root = create_empty_root("app-sessionless-new-resume-commands");
-  auto const workspace = root / "workspace";
-  auto const paths = app_test_paths(root);
-  std::filesystem::create_directories(workspace);
-
-  ava::app::runtime::OpenOptions options;
-  options.continuity.workspace_dir = workspace;
-  options.continuity.current_dir = workspace;
-  options.continuity.paths = paths;
-  options.request.sessionless = true;
-  auto session = ava::app::open_runtime_session(options);
-  expect(session && session->sessionless && session->store.is_ephemeral(), "sessionless slash navigation test opens an ephemeral runtime");
-  if (!session)
-    return;
-
-  auto const original_session_id = session->store.session_id();
-  auto fresh = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/new Ephemeral session"});
-  expect(fresh && fresh->handled && session->sessionless && session->store.is_ephemeral() && session->store.session_id() != original_session_id &&
-             !std::filesystem::exists(session->store.session_path()),
-         "slash /new preserves sessionless navigation and creates another ephemeral runtime");
-
-  auto resumed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/resume " + original_session_id});
-  expect(!resumed && resumed.error().message().find("no-session") != std::string::npos && session->sessionless && session->store.is_ephemeral(),
-         "slash /resume from a sessionless runtime retains the no-session conflict instead of opening persistent state");
-}
-
 void test_app_session_metadata_commands()
 {
   auto const root = create_empty_root("app-session-metadata-commands");

@@ -124,9 +124,11 @@ runtime::Session detached_session(runtime::Session const& source, ava::session::
                                   std::shared_ptr<SubagentDeliveryManager> manager)
 {
   auto continuity = source.continuity;
-  continuity.subagent_delivery_manager = std::move(manager);
-  if (continuity.subagent_delivery_manager)
+  if (manager)
+  {
+    continuity.subagent_delivery_manager = std::move(manager);
     continuity.subagent_coordinator = continuity.subagent_delivery_manager->coordinator();
+  }
   return runtime::Session{.store = source.store,
                           .lease = std::move(lease),
                           .continuity = std::move(continuity),

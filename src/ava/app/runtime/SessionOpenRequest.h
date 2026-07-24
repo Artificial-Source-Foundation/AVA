@@ -26,18 +26,6 @@ struct SessionOpenRequest
   // acquisition inside the protocol-neutral runtime ownership boundary.
   std::optional<std::filesystem::path> expected_original_cwd = std::nullopt;
 
-  // Clear one-navigation selections and initialization choices while keeping
-  // initial_session_name plus strict adapter policy (exact_session_id and
-  // expected_original_cwd) across lifecycle directory rebinding.
-  void reset_for_lifecycle_navigation() noexcept
-  {
-    requested_session_id.reset();
-    fork_session_id.reset();
-    continue_last_session = false;
-    sessionless = false;
-    initial_reasoning_level.reset();
-  }
-
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 

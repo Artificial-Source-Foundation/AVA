@@ -8,7 +8,6 @@
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/OpenOptions.h"
 #include "ava/app/runtime/Session.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
@@ -149,55 +148,6 @@ void test_app_runtime_no_session_mode()
   continue_conflict.request.continue_last_session = true;
   auto continue_result = ava::app::open_runtime_session(continue_conflict);
   expect(!continue_result && continue_result.error().message().find("no-session") != std::string::npos, "runtime rejects no-session with continue");
-}
-
-void test_app_runtime_lifecycle_adapters_preserve_strict_open_policy()
-{
-  auto const root = create_empty_root("app-runtime-lifecycle-strict-open");
-  auto const workspace = root / "workspace";
-  auto const nested = workspace / "nested";
-  auto const paths = app_test_paths(root);
-  std::filesystem::create_directories(nested);
-
-  ava::app::runtime::OpenOptions seed_options;
-  seed_options.continuity.workspace_dir = workspace;
-  seed_options.continuity.current_dir = nested;
-  seed_options.continuity.paths = paths;
-  std::string session_id;
-  {
-    auto seeded = ava::app::open_runtime_session(seed_options);
-    expect(seeded.has_value(), "strict lifecycle adapter test creates a nested-cwd source session");
-    if (!seeded)
-      return;
-    session_id = seeded->store.session_id();
-  }
-
-  ava::app::runtime::OpenOptions exact_prefix_options;
-  exact_prefix_options.continuity.paths = paths;
-  exact_prefix_options.request.exact_session_id = true;
-  exact_prefix_options.request.expected_original_cwd = nested;
-  {
-    auto prefix = ava::app::open_runtime_session_at(std::move(exact_prefix_options), workspace, nested, session_id.substr(0, session_id.size() - 2));
-    expect(!prefix, "runtime _at adapter retains strict exact-id lookup instead of resolving a unique prefix");
-  }
-
-  ava::app::runtime::OpenOptions mismatched_cwd_options;
-  mismatched_cwd_options.continuity.paths = paths;
-  mismatched_cwd_options.request.exact_session_id = true;
-  mismatched_cwd_options.request.expected_original_cwd = workspace;
-  {
-    auto mismatched = ava::app::open_runtime_session_at(std::move(mismatched_cwd_options), workspace, nested, session_id);
-    expect(!mismatched && mismatched.error().message().find("does not match persisted session cwd") != std::string::npos,
-           "runtime _at adapter retains the strict persisted-cwd policy");
-  }
-
-  ava::app::runtime::OpenOptions matching_options;
-  matching_options.continuity.paths = paths;
-  matching_options.request.exact_session_id = true;
-  matching_options.request.expected_original_cwd = nested;
-  auto matching = ava::app::open_runtime_session_at(std::move(matching_options), workspace, nested, session_id);
-  expect(matching && !matching->created && matching->store.session_id() == session_id,
-         "runtime _at adapter opens the exact session when its persisted cwd matches");
 }
 
 void test_app_runtime_session_startup_options()

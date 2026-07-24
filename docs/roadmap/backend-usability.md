@@ -264,7 +264,6 @@ A recipe is a finite AVA-owned schema derived from a validated command plan, not
 - `CMakeBuild(workspace, build_directory)`
 - `CTest(workspace, test_directory)`
 - `PackageScript(workspace, manager, exact_script_name)`
-- `CargoAction(workspace, build|check|test)`
 - `WorkspaceScript(workspace, interpreter_family, exact_script_path)`
 
 Recipes match structured fields, permitted argument classes, executable origin, workspace identity, working-directory policy, environment-policy version, and effect class. They never fall back to "first executable token plus any arguments." Existing deny rules are evaluated first.

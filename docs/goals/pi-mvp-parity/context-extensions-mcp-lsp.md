@@ -50,7 +50,7 @@ AVA has strong context, skills, plugin, MCP, and LSP foundations, including stat
 | Skill UX | Skills are discoverable, loadable, bounded, trust-aware, and documented. The model-visible `skill` tool behavior is tested. |
 | Plugin parity decision | Pi extension capabilities are mapped to AVA plugin equivalents: tools, commands, prompts, skills, events, UI, keybindings, custom providers. Each is implemented, AVA-superior, deferred, or excluded. |
 | MCP parity decision | Tools/resources/prompts are documented and tested. Advanced transports/OAuth/subscriptions/sampling/templates/binary resources are implemented or explicitly deferred. |
-| LSP maturity | Diagnostics, symbols, definition, references, config, server launch permissions, and TUI/headless display are covered. Automatic recipes/unsaved sync are implemented or deferred. |
+| LSP maturity | Diagnostics, symbols, definition, references, config, server launch permissions, and TUI/headless display are covered. Installed-only `clangd` is the sole automatic recipe; every other server requires explicit configuration, and unsaved sync remains deferred. |
 | Trust policy | Project-local executable/config resources cannot become active without explicit outside-workspace trust. |
 | Tests | Plugin/MCP/LSP/context changes have unit tests plus CLI/RPC smoke coverage where user-visible. |
 

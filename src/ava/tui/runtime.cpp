@@ -9,6 +9,7 @@
 #include "ava/tui/runtime_draft_internal.h"
 #include "ava/tui/runtime_input_internal.h"
 #include "ava/tui/runtime_internal.h"
+#include "ava/tui/runtime_navigation_internal.h"
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
@@ -209,6 +210,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto& draft_selection_cursor = draft_state.draft_selection_cursor;
   auto& pending_escape_clear = draft_state.pending_escape_clear;
   RuntimeRenderer renderer(snapshot, sidebar, draft_state);
+  RuntimeNavigationController navigation(options, snapshot, sidebar, draft_state, renderer);
   auto& transcript_scroll_offset = renderer.transcript_scroll_offset;
   auto& detached_new_output_count = renderer.detached_new_output_count;
   auto& completion_cache = renderer.completion_cache;
@@ -496,268 +498,25 @@ int run_interactive_composer(TuiRuntimeOptions options)
     transcript_scroll_offset = 0;
   };
 
-  auto refresh_completion_cache = [&]() -> detail::CompletionMatchModel const* {
-    snapshot.input = draft.text;
-    snapshot.input_cursor = draft.cursor;
-    snapshot.slash_palette_suppressed = slash_palette_suppressed;
-    snapshot.path_completion_force_active = path_completion_force_active;
-    detail::refresh_completion_match_cache(completion_cache, snapshot, snapshot.file_references_generation);
-    return completion_cache.model ? &*completion_cache.model : nullptr;
-  };
-  auto slash_palette_active = [&]() { return !slash_palette_suppressed && slash_palette_visible(draft.text, draft.cursor, snapshot.slash_commands); };
-  auto file_reference_palette_active = [&]() {
-    auto const* model = refresh_completion_cache();
-    return model && model->surface == detail::CompletionSurface::FileReference && model->palette_visible;
-  };
-  auto path_completion_palette_active = [&]() {
-    auto const* model = refresh_completion_cache();
-    return model && model->surface == detail::CompletionSurface::PathCompletion && model->palette_visible;
-  };
-  auto completion_match_count = [&]() {
-    auto const* model = refresh_completion_cache();
-    return model ? model->ranked_source_indices.size() : std::size_t{0};
-  };
-  auto clamp_completion = [&](std::size_t selected) {
-    static_cast<void>(refresh_completion_cache());
-    return detail::clamp_completion_selection(completion_cache, selected);
-  };
-  auto previous_completion = [&](std::size_t selected) {
-    static_cast<void>(refresh_completion_cache());
-    return detail::previous_completion_selection(completion_cache, selected);
-  };
-  auto next_completion = [&](std::size_t selected) {
-    static_cast<void>(refresh_completion_cache());
-    return detail::next_completion_selection(completion_cache, selected);
-  };
-  auto selected_completion_disabled_reason = [&](std::size_t selected) {
-    static_cast<void>(refresh_completion_cache());
-    return detail::completion_selection_disabled_reason(completion_cache, snapshot.file_references, selected);
-  };
-  auto selected_completion_text = [&](std::size_t selected) {
-    static_cast<void>(refresh_completion_cache());
-    return detail::completion_selection_text(completion_cache, snapshot, selected);
-  };
+  auto slash_palette_active = [&]() { return navigation.slash_palette_active(); };
+  auto file_reference_palette_active = [&]() { return navigation.file_reference_palette_active(); };
+  auto path_completion_palette_active = [&]() { return navigation.path_completion_palette_active(); };
+  auto completion_match_count = [&]() { return navigation.completion_match_count(); };
+  auto clamp_completion = [&](std::size_t selected) { return navigation.clamp_completion(selected); };
+  auto previous_completion = [&](std::size_t selected) { return navigation.previous_completion(selected); };
+  auto next_completion = [&](std::size_t selected) { return navigation.next_completion(selected); };
+  auto selected_completion_disabled_reason = [&](std::size_t selected) { return navigation.selected_completion_disabled_reason(selected); };
+  auto selected_completion_text = [&](std::size_t selected) { return navigation.selected_completion_text(selected); };
 
-  auto scroll_up = [&](std::size_t amount) {
-    pending_escape_clear = false;
-    auto const [width, height] = terminal_size();
-    snapshot.width = width;
-    snapshot.height = height;
-    auto const max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot, width, height, completion_cache, snapshot.file_references_generation,
-                                                                                 transcript_layout_cache, snapshot.transcript_generation);
-    auto const clamped_scroll = std::min(transcript_scroll_offset, max_scroll);
-    transcript_scroll_offset = std::min(max_scroll, clamped_scroll + amount);
-    if (transcript_scroll_offset > 0 && !detached_sidebar_snapshot)
-      detached_sidebar_snapshot = sidebar;
-  };
+  auto scroll_up = [&](std::size_t amount) { navigation.scroll_up(amount); };
+  auto scroll_down = [&](std::size_t amount) { navigation.scroll_down(amount); };
+  auto toggle_tool_details_at = [&](std::size_t item_index) { return navigation.toggle_tool_details_at(item_index); };
+  auto toggle_matching_tool_details = [&](std::string_view query) { return navigation.toggle_matching_tool_details(query); };
 
-  auto scroll_down = [&](std::size_t amount) {
-    pending_escape_clear = false;
-    auto const [width, height] = terminal_size();
-    snapshot.width = width;
-    snapshot.height = height;
-    auto const max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot, width, height, completion_cache, snapshot.file_references_generation,
-                                                                                 transcript_layout_cache, snapshot.transcript_generation);
-    auto const clamped_scroll = std::min(transcript_scroll_offset, max_scroll);
-    transcript_scroll_offset = amount >= clamped_scroll ? 0 : clamped_scroll - amount;
-    if (transcript_scroll_offset == 0)
-    {
-      detached_new_output_count = 0;
-      detached_sidebar_snapshot.reset();
-    }
-  };
+  auto handle_sidebar_drawer_input = [&](InputEvent const& event) -> std::optional<bool> { return navigation.handle_sidebar_drawer_input(event); };
 
-  auto toggle_tool_details_at = [&](std::size_t item_index) {
-    if (item_index >= snapshot.transcript.size() || !snapshot.transcript[item_index].tool)
-      return false;
-    auto anchor = detail::TranscriptViewportAnchor{};
-    auto const preserve_viewport = transcript_scroll_offset > 0;
-    if (preserve_viewport)
-    {
-      auto const old_max_scroll =
-          detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache, snapshot.file_references_generation,
-                                                               transcript_layout_cache, snapshot.transcript_generation);
-      anchor = detail::capture_transcript_viewport_anchor(transcript_layout_cache.layout, old_max_scroll, transcript_scroll_offset);
-    }
-    auto& tool = *snapshot.transcript[item_index].tool;
-    tool.details_visible = !detail::tool_card_details_visible(tool, snapshot.tool_details_visible);
-    ++snapshot.transcript_generation;
-    if (preserve_viewport)
-    {
-      auto const new_max_scroll =
-          detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache, snapshot.file_references_generation,
-                                                               transcript_layout_cache, snapshot.transcript_generation);
-      transcript_scroll_offset = detail::restore_transcript_viewport_anchor(anchor, transcript_layout_cache.layout, new_max_scroll, 0);
-    }
-    snapshot.status = detail::tool_card_details_visible(tool, snapshot.tool_details_visible) ? "tool details visible" : "tool details compact";
-    return true;
-  };
-
-  auto toggle_matching_tool_details = [&](std::string_view query) -> std::optional<std::size_t> {
-    auto anchor = detail::TranscriptViewportAnchor{};
-    auto const preserve_viewport = transcript_scroll_offset > 0;
-    if (preserve_viewport)
-    {
-      auto const old_max_scroll =
-          detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache, snapshot.file_references_generation,
-                                                               transcript_layout_cache, snapshot.transcript_generation);
-      anchor = detail::capture_transcript_viewport_anchor(transcript_layout_cache.layout, old_max_scroll, transcript_scroll_offset);
-    }
-    auto const item_index = toggle_latest_matching_tool_details(snapshot.transcript, query, snapshot.tool_details_visible);
-    if (!item_index)
-      return std::nullopt;
-    ++snapshot.transcript_generation;
-    if (preserve_viewport)
-    {
-      auto const new_max_scroll =
-          detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache, snapshot.file_references_generation,
-                                                               transcript_layout_cache, snapshot.transcript_generation);
-      transcript_scroll_offset = detail::restore_transcript_viewport_anchor(anchor, transcript_layout_cache.layout, new_max_scroll, 0);
-    }
-    return item_index;
-  };
-
-  auto sidebar_drawer_focused = [&]() {
-    return snapshot.sidebar_drawer_visible && snapshot.sidebar.has_value() && !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list;
-  };
-
-  auto close_sidebar_drawer = [&]() {
-    snapshot.sidebar_drawer_visible = false;
-    snapshot.sidebar_drawer_scroll_offset = 0;
-    pending_escape_clear = false;
-    snapshot.status = "session overview closed";
-  };
-
-  auto sidebar_drawer_page_size = [&]() {
-    auto const [width, height] = terminal_size();
-    auto drawer_snapshot = snapshot;
-    drawer_snapshot.width = width;
-    drawer_snapshot.height = height;
-    auto const composer_lines = detail::composer_block_line_count(drawer_snapshot, height, width);
-    return height > composer_lines + 2 ? height - composer_lines - 2 : std::size_t{1};
-  };
-
-  auto handle_sidebar_drawer_input = [&](InputEvent const& event) -> std::optional<bool> {
-    if (!sidebar_drawer_focused())
-      return std::nullopt;
-    if (event.key == Key::Escape || key_matches_action(options.key_bindings, TuiAction::Cancel, event.key))
-    {
-      close_sidebar_drawer();
-      return render();
-    }
-
-    auto const max_scroll = sidebar_drawer_max_scroll_offset(snapshot);
-    if (key_matches_action(options.key_bindings, TuiAction::PageUp, event.key))
-    {
-      auto const page = sidebar_drawer_page_size();
-      snapshot.sidebar_drawer_scroll_offset = page >= snapshot.sidebar_drawer_scroll_offset ? 0 : snapshot.sidebar_drawer_scroll_offset - page;
-      return render();
-    }
-    if (key_matches_action(options.key_bindings, TuiAction::PageDown, event.key))
-    {
-      snapshot.sidebar_drawer_scroll_offset = std::min(max_scroll, snapshot.sidebar_drawer_scroll_offset + sidebar_drawer_page_size());
-      return render();
-    }
-    if (event.key == Key::Home)
-    {
-      snapshot.sidebar_drawer_scroll_offset = 0;
-      return render();
-    }
-    if (event.key == Key::End)
-    {
-      snapshot.sidebar_drawer_scroll_offset = max_scroll;
-      return render();
-    }
-    if (event.key == Key::MouseWheelUp)
-    {
-      if (snapshot.sidebar_drawer_scroll_offset > 0)
-        --snapshot.sidebar_drawer_scroll_offset;
-      return render();
-    }
-    if (event.key == Key::MouseWheelDown)
-    {
-      snapshot.sidebar_drawer_scroll_offset = std::min(max_scroll, snapshot.sidebar_drawer_scroll_offset + 1);
-      return render();
-    }
-    static_cast<void>(beep());
-    return true;
-  };
-
-  auto jump_to_bottom = [&](std::string status) {
-    pending_escape_clear = false;
-    transcript_scroll_offset = 0;
-    detached_new_output_count = 0;
-    detached_sidebar_snapshot.reset();
-    snapshot.status = std::move(status);
-  };
-
-  auto scroll_to_message_boundary = [&](bool previous) {
-    pending_escape_clear = false;
-    auto const [width, height] = terminal_size();
-    snapshot.width = width;
-    snapshot.height = height;
-    auto const max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot, width, height, completion_cache, snapshot.file_references_generation,
-                                                                                 transcript_layout_cache, snapshot.transcript_generation);
-    if (max_scroll == 0)
-    {
-      transcript_scroll_offset = 0;
-      detached_new_output_count = 0;
-      detached_sidebar_snapshot.reset();
-      snapshot.status = "transcript fits on screen";
-      return;
-    }
-
-    auto const clamped_scroll = std::min(transcript_scroll_offset, max_scroll);
-    auto const current_start = max_scroll - clamped_scroll;
-    auto const& starts = transcript_layout_cache.layout.message_starts;
-    if (starts.empty())
-    {
-      snapshot.status = "no message boundaries";
-      return;
-    }
-
-    auto target_start = std::optional<std::size_t>{};
-    if (previous)
-    {
-      for (auto const start : starts)
-      {
-        if (start >= current_start)
-          break;
-        target_start = start;
-      }
-      if (!target_start)
-      {
-        snapshot.status = "oldest message visible";
-        return;
-      }
-    }
-    else
-    {
-      for (auto const start : starts)
-      {
-        if (start > current_start)
-        {
-          target_start = start;
-          break;
-        }
-      }
-      if (!target_start || *target_start >= max_scroll)
-      {
-        jump_to_bottom("live tail");
-        return;
-      }
-    }
-
-    transcript_scroll_offset = max_scroll > *target_start ? max_scroll - *target_start : 0;
-    if (transcript_scroll_offset > 0 && !detached_sidebar_snapshot)
-      detached_sidebar_snapshot = sidebar;
-    if (transcript_scroll_offset == 0)
-    {
-      detached_new_output_count = 0;
-      detached_sidebar_snapshot.reset();
-    }
-    snapshot.status = previous ? "previous message" : "next message";
-  };
+  auto jump_to_bottom = [&](std::string status) { navigation.jump_to_bottom(std::move(status)); };
+  auto scroll_to_message_boundary = [&](bool previous) { navigation.scroll_to_message_boundary(previous); };
 
   enum class InputLoopAction
   {

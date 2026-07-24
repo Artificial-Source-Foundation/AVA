@@ -25,6 +25,7 @@ add_library(ava_tui
   "runtime_views.cpp"
   "runtime_commands.cpp"
   "runtime_input.cpp"
+  "runtime_navigation_internal.cpp"
   "runtime_transcript.cpp"
   "session_grants.cpp"
   "terminal.cpp"

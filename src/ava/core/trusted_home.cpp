@@ -4,6 +4,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string_view>
 #include <vector>
 #include <pwd.h>

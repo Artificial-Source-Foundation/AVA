@@ -92,11 +92,10 @@ void append_synthetic_environment_roots(detail::Sha256Builder& hash, SyntheticEn
 
 std::string compute_fingerprint(CommandPlan const& plan, PathMetadata const& workspace_metadata, PathMetadata const& cwd_metadata,
                                 PathMetadata const& trusted_home_metadata, std::vector<std::filesystem::path> const& ava_authority_roots,
-                                std::vector<PathMetadata> const& ava_authority_root_metadata, SyntheticEnvironmentRoots const& synthetic_environment_roots,
-                                std::optional<PathMetadata> const& rustup_home_metadata)
+                                std::vector<PathMetadata> const& ava_authority_root_metadata, SyntheticEnvironmentRoots const& synthetic_environment_roots)
 {
   detail::Sha256Builder hash;
-  hash.append_field("ava-command-plan-v4");
+  hash.append_field("ava-command-plan-v5");
   hash.append_field(to_string(plan.intent_lane()));
   hash.append_field(to_string(plan.execution_domain()));
   hash.append_field(plan.workspace().string());
@@ -109,9 +108,6 @@ std::string compute_fingerprint(CommandPlan const& plan, PathMetadata const& wor
   hash.append_number(ava_authority_root_metadata.size());
   for (auto const& root : ava_authority_root_metadata) append_path_metadata(hash, root);
   append_synthetic_environment_roots(hash, synthetic_environment_roots);
-  hash.append_field(rustup_home_metadata ? "rustup-home-present" : "rustup-home-absent");
-  if (rustup_home_metadata)
-    append_path_metadata(hash, *rustup_home_metadata);
   hash.append_number(plan.argv().size());
   for (auto const& argument : plan.argv()) hash.append_field(argument);
   hash.append_field(plan.raw_shell_text());
@@ -159,7 +155,7 @@ std::string compute_fingerprint(CommandPlan const& plan, PathMetadata const& wor
   }
   hash.append_field(plan.environment_profile_id());
   hash.append_field(plan.environment_digest());
-  return "sha256:ava-command-plan-v4:" + hash.hex();
+  return "sha256:ava-command-plan-v5:" + hash.hex();
 }
 
 std::string json_escape(std::string_view value)
@@ -224,30 +220,20 @@ ava::core::Result<bool> fresh(ExecutableMetadata const& metadata, std::shared_pt
   return *result;
 }
 
-ava::core::Result<bool> fresh_user_toolchain_or_strict(PathMetadata const& metadata, PathMetadata const& trusted_home,
-                                                       std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
+ava::core::Result<bool> fresh_user_tool_or_strict(PathMetadata const& metadata, PathMetadata const& trusted_home,
+                                                  std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
 {
-  if (!detail::is_sealed_user_toolchain_path(metadata.requested_path, trusted_home))
+  if (!detail::is_sealed_user_tool_path(metadata.requested_path, trusted_home))
     return fresh(metadata, anchor_set);
-  return detail::user_toolchain_path_metadata_is_fresh(metadata, trusted_home, anchor_set);
+  return detail::user_tool_path_metadata_is_fresh(metadata, trusted_home, anchor_set);
 }
 
-ava::core::Result<bool> fresh_user_toolchain_or_strict(ExecutableMetadata const& metadata, PathMetadata const& trusted_home,
-                                                       std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
+ava::core::Result<bool> fresh_user_tool_or_strict(ExecutableMetadata const& metadata, PathMetadata const& trusted_home,
+                                                  std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
 {
-  if (!detail::is_sealed_user_toolchain_path(metadata.requested_path, trusted_home))
+  if (!detail::is_sealed_user_tool_path(metadata.requested_path, trusted_home))
     return fresh(metadata, anchor_set);
-  return detail::user_toolchain_executable_metadata_is_fresh(metadata, trusted_home, anchor_set);
-}
-
-ava::core::Result<bool> fresh_rustup_home(PathMetadata const& metadata, PathMetadata const& trusted_home,
-                                          std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
-{
-  if (metadata.requested_path != (trusted_home.requested_path / ".rustup").lexically_normal())
-    return false;
-  if (!detail::is_sealed_user_toolchain_path(metadata.requested_path, trusted_home))
-    return fresh(metadata, anchor_set);
-  return detail::user_toolchain_path_metadata_is_fresh(metadata, trusted_home, anchor_set);
+  return detail::user_tool_executable_metadata_is_fresh(metadata, trusted_home, anchor_set);
 }
 
 bool paths_overlap(std::filesystem::path const& first, std::filesystem::path const& second)
@@ -293,9 +279,9 @@ ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const& intent, Co
   auto context = detail::discover_command_context(intent, options);
   if (!context)
     return std::unexpected(std::move(context.error()));
-  auto environment = detail::EnvironmentFactory::make(options.environment, context->path_entries, context->cwd, context->trusted_home_metadata,
-                                                      context->synthetic_environment_roots, context->rustup_home_metadata, options.limits, options.anchor_set,
-                                                      CommandEnvironment::make_factory_passkey());
+  auto environment =
+      detail::EnvironmentFactory::make(options.environment, context->path_entries, context->cwd, context->trusted_home_metadata,
+                                       context->synthetic_environment_roots, options.limits, options.anchor_set, CommandEnvironment::make_factory_passkey());
   if (!environment)
     return std::unexpected(std::move(environment.error()));
 
@@ -310,7 +296,6 @@ ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const& intent, Co
   plan.ava_authority_roots_ = std::move(context->ava_authority_roots);
   plan.ava_authority_root_metadata_ = std::move(context->ava_authority_root_metadata);
   plan.synthetic_environment_roots_ = std::move(context->synthetic_environment_roots);
-  plan.rustup_home_metadata_ = std::move(context->rustup_home_metadata);
   plan.path_entries_ = std::move(context->path_entries);
   plan.environment_profile_id_ = environment->profile_id();
   plan.environment_digest_ = environment->digest();
@@ -348,7 +333,7 @@ ava::core::Result<CommandPlan> seal_command_plan(CommandIntent const& intent, Co
     plan.resolved_executable_ = std::move(*resolved);
   }
   plan.fingerprint_ = compute_fingerprint(plan, plan.workspace_metadata_, plan.cwd_metadata_, plan.trusted_home_metadata_, plan.ava_authority_roots_,
-                                          plan.ava_authority_root_metadata_, plan.synthetic_environment_roots_, plan.rustup_home_metadata_);
+                                          plan.ava_authority_root_metadata_, plan.synthetic_environment_roots_);
   return plan;
 }
 
@@ -359,7 +344,7 @@ ava::core::Result<CommandPreparation> prepare_command(CommandIntent const& inten
     return std::unexpected(std::move(plan.error()));
   auto environment =
       detail::EnvironmentFactory::make(options.environment, plan->path_entries(), plan->cwd(), plan->trusted_home_metadata_, plan->synthetic_environment_roots_,
-                                       plan->rustup_home_metadata_, options.limits, plan->anchor_set_, CommandEnvironment::make_factory_passkey());
+                                       options.limits, plan->anchor_set_, CommandEnvironment::make_factory_passkey());
   if (!environment)
     return std::unexpected(std::move(environment.error()));
   if (auto valid = detail::validate_environment_matches_plan(*environment, *plan); !valid)
@@ -374,14 +359,14 @@ ava::core::Result<bool> plan_is_fresh(CommandPlan const& plan)
   // masking it as a stale PATH directory caused by the same unlink.
   if (plan.resolved_executable_)
   {
-    auto result = fresh_user_toolchain_or_strict(plan.resolved_executable_->executable, plan.trusted_home_metadata_, plan.anchor_set_);
+    auto result = fresh_user_tool_or_strict(plan.resolved_executable_->executable, plan.trusted_home_metadata_, plan.anchor_set_);
     if (!result)
       return std::unexpected(std::move(result.error()));
     if (!*result)
       return false;
     for (auto const& interpreter : plan.resolved_executable_->shebang_interpreters)
     {
-      result = fresh_user_toolchain_or_strict(interpreter.interpreter, plan.trusted_home_metadata_, plan.anchor_set_);
+      result = fresh_user_tool_or_strict(interpreter.interpreter, plan.trusted_home_metadata_, plan.anchor_set_);
       if (!result)
         return std::unexpected(std::move(result.error()));
       if (!*result)
@@ -423,19 +408,6 @@ ava::core::Result<bool> plan_is_fresh(CommandPlan const& plan)
       return std::unexpected(detail::command_error(ava::core::ErrorCategory::Io, "failed to revalidate an absent AVA authority root"));
     return false;
   }
-  if (plan.rustup_home_metadata_)
-  {
-    auto result = fresh_rustup_home(*plan.rustup_home_metadata_, plan.trusted_home_metadata_, plan.anchor_set_);
-    if (!result)
-      return std::unexpected(std::move(result.error()));
-    if (!*result || paths_overlap(plan.rustup_home_metadata_->canonical_path, plan.workspace_metadata_.canonical_path))
-      return false;
-    for (auto const& authority_root : plan.ava_authority_root_metadata_)
-    {
-      if (paths_overlap(plan.rustup_home_metadata_->canonical_path, authority_root.canonical_path))
-        return false;
-    }
-  }
   for (auto const* root :
        {&plan.synthetic_environment_roots_.home, &plan.synthetic_environment_roots_.xdg_config_home, &plan.synthetic_environment_roots_.xdg_cache_home,
         &plan.synthetic_environment_roots_.xdg_data_home, &plan.synthetic_environment_roots_.xdg_state_home, &plan.synthetic_environment_roots_.tmpdir})
@@ -446,13 +418,12 @@ ava::core::Result<bool> plan_is_fresh(CommandPlan const& plan)
     if (!*result)
       return false;
     if (paths_overlap(root->canonical_path, plan.workspace_metadata_.canonical_path) ||
-        paths_overlap(root->canonical_path, plan.trusted_home_metadata_.canonical_path) ||
-        (plan.rustup_home_metadata_ && paths_overlap(root->canonical_path, plan.rustup_home_metadata_->canonical_path)))
+        paths_overlap(root->canonical_path, plan.trusted_home_metadata_.canonical_path))
       return false;
   }
   for (auto const& entry : plan.path_entries_)
   {
-    auto result = fresh_user_toolchain_or_strict(entry.metadata, plan.trusted_home_metadata_, plan.anchor_set_);
+    auto result = fresh_user_tool_or_strict(entry.metadata, plan.trusted_home_metadata_, plan.anchor_set_);
     if (!result)
       return std::unexpected(std::move(result.error()));
     if (!*result)
@@ -535,11 +506,6 @@ std::optional<ResolvedExecutable> const& CommandPlan::resolved_executable() cons
 CommandClassification const& CommandPlan::classification() const noexcept
 {
   return classification_;
-}
-
-std::optional<PathMetadata> const& CommandPlan::rustup_home_metadata() const noexcept
-{
-  return rustup_home_metadata_;
 }
 
 std::string const& CommandPlan::environment_profile_id() const noexcept
@@ -658,8 +624,6 @@ std::string_view to_string(PathProvenance value) noexcept
       return "startup_path";
     case PathProvenance::UserLocal:
       return "user_local";
-    case PathProvenance::UserCargo:
-      return "user_cargo";
     case PathProvenance::WorkspaceVenv:
       return "workspace_venv";
     case PathProvenance::WorkspaceNodeModules:
@@ -710,8 +674,6 @@ std::string_view to_string(CommandFamily value) noexcept
       return "ninja";
     case CommandFamily::Make:
       return "make";
-    case CommandFamily::Cargo:
-      return "cargo";
     case CommandFamily::PackageManagerScript:
       return "package_manager_script";
     case CommandFamily::Pytest:
@@ -764,12 +726,6 @@ std::string_view to_string(CommandRecipe value) noexcept
       return "ninja";
     case CommandRecipe::Make:
       return "make";
-    case CommandRecipe::CargoBuild:
-      return "cargo_build";
-    case CommandRecipe::CargoCheck:
-      return "cargo_check";
-    case CommandRecipe::CargoTest:
-      return "cargo_test";
     case CommandRecipe::PackageManagerRunScript:
       return "package_manager_run_script";
     case CommandRecipe::Pytest:

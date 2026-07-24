@@ -43,6 +43,18 @@ std::string provider_connect_command(std::string_view provider_id)
   return "printf '%s\\n' \"$" + provider_env_key(provider_id) + "\" | ava connect " + std::string(provider_id) + " --api-key-stdin";
 }
 
+std::string provider_display_name(std::string_view provider_id)
+{
+  if (provider_id == "openai")
+    return "OpenAI";
+  if (provider_id == "anthropic")
+    return "Anthropic";
+  auto display = std::string(provider_id);
+  if (!display.empty())
+    display.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(display.front())));
+  return display;
+}
+
 std::string auth_setup_message(runtime::Session const& session, std::string_view prefix)
 {
   auto const provider_id = session.model.provider_id.empty() ? std::string("openai") : session.model.provider_id;
@@ -61,15 +73,13 @@ std::string auth_setup_message(runtime::Session const& session, std::string_view
 std::optional<std::string> first_run_auth_onboarding_message(runtime::Session const& session)
 {
   auto credential = ava::config::provider_credential_for_startup(session.paths, session.model.provider_id);
+  auto const provider_id = session.model.provider_id.empty() ? std::string("openai") : session.model.provider_id;
   if (!credential)
-  {
-    return auth_setup_message(session, "AVA could not inspect provider auth: " + credential.error().format());
-  }
+    return "! " + provider_display_name(provider_id) + " auth unavailable · /connect";
   if (*credential)
     return std::nullopt;
 
-  auto const provider_id = session.model.provider_id.empty() ? std::string("openai") : session.model.provider_id;
-  return auth_setup_message(session, "Provider auth is not configured for `" + provider_id + "`.");
+  return "! " + provider_display_name(provider_id) + " not connected · /connect";
 }
 
 std::string provider_auth_required_message(runtime::Session const& session, std::string_view offline_suffix)

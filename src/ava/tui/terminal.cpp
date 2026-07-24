@@ -1288,6 +1288,12 @@ ava::core::Result<CursesSession> CursesSession::enter()
   return session;
 }
 
+bool detail::force_terminal_cursor_visible() noexcept
+{
+  static_cast<void>(curs_set(0));
+  return curs_set(1) != ERR;
+}
+
 void CursesSession::restore() noexcept
 {
   if (!active_)
@@ -1301,7 +1307,7 @@ void CursesSession::restore() noexcept
     static_cast<void>(tcsetattr(STDIN_FILENO, TCSANOW, &previous_terminal_attrs_));
     restore_terminal_attrs_ = false;
   }
-  static_cast<void>(curs_set(1));
+  static_cast<void>(detail::force_terminal_cursor_visible());
   static_cast<void>(endwin());
   uninstall_curses_signal_flags();
   active_ = false;

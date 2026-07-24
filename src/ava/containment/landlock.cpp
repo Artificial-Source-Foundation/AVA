@@ -111,8 +111,7 @@ ava::core::Error landlock_error(std::string message)
       static_cast<std::uint64_t>(status.st_uid) != rule.owner || static_cast<std::uint64_t>(status.st_gid) != rule.group ||
       static_cast<std::uint64_t>(status.st_rdev) != rule.special_device)
   {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
-                                            "Landlock rule descriptor changed after containment approval"));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Landlock rule descriptor changed after containment approval"));
   }
 
   struct landlock_path_beneath_attr path_attr{};
@@ -168,8 +167,7 @@ ava::core::VoidResult apply_landlock_in_child(DevelopmentContainmentPlan const& 
 
 namespace {
 
-[[nodiscard]] ava::core::Result<struct stat> descriptor_status(std::filesystem::path const& path, ava::core::AnchorSet const& anchors,
-                                                                bool directory)
+[[nodiscard]] ava::core::Result<struct stat> descriptor_status(std::filesystem::path const& path, ava::core::AnchorSet const& anchors, bool directory)
 {
   auto opened = ava::core::open_readable(anchors, path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | (directory ? O_DIRECTORY : 0));
   if (!opened)
@@ -217,28 +215,6 @@ namespace {
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
                                             "Landlock writable root has group/world write permissions outside the verified private-primary-group exception"));
-  }
-  return {};
-}
-
-// Validate the optional real-home rustup state root before granting its
-// read/execute-only Landlock rule. It has the same narrow ownership/mode
-// contract used while sealing: current user, no world write, and group write
-// only through the verified private-primary-group exception.
-[[nodiscard]] ava::core::VoidResult validate_read_only_toolchain_root(std::filesystem::path const& path, ava::core::AnchorSet const& anchors)
-{
-  auto captured = descriptor_status(path, anchors, true);
-  if (!captured)
-    return std::unexpected(std::move(captured.error()));
-  auto const& status = *captured;
-  if (!S_ISDIR(status.st_mode))
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Landlock trusted toolchain root is not a directory"));
-  if (status.st_uid != ::geteuid())
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Landlock trusted toolchain root is not owned by the current user"));
-  if ((status.st_mode & S_IWOTH) != 0 || ((status.st_mode & S_IWGRP) != 0 && !ava::command::detail::is_current_user_private_primary_group_directory(status)))
-  {
-    return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Landlock trusted toolchain root has unsafe group/world write permissions"));
   }
   return {};
 }
@@ -322,11 +298,6 @@ ava::core::VoidResult validate_synthetic_directory_root(std::filesystem::path co
 ava::core::VoidResult validate_writable_directory_root(std::filesystem::path const& path, ava::core::AnchorSet const& anchors)
 {
   return validate_writable_root(path, anchors);
-}
-
-ava::core::VoidResult validate_read_only_toolchain_directory_root(std::filesystem::path const& path, ava::core::AnchorSet const& anchors)
-{
-  return validate_read_only_toolchain_root(path, anchors);
 }
 
 ava::core::VoidResult validate_device_root(std::filesystem::path const& path, ava::core::AnchorSet const& anchors)

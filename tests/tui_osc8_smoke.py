@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 import argparse
+import base64
+import binascii
 import fcntl
 import os
 import pathlib
 import pty
+import re
 import select
 import shutil
 import signal
@@ -15,6 +18,39 @@ import time
 
 
 SKIP = 77
+MAX_CAPTURE_BYTES = 2 * 1024 * 1024
+ENVIRONMENT_ALLOWLIST = (
+    "PATH",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "LC_NUMERIC",
+    "LC_TIME",
+    "LC_COLLATE",
+    "LC_MONETARY",
+    "TERMINFO",
+    "TERMINFO_DIRS",
+    "LD_LIBRARY_PATH",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "ASAN_OPTIONS",
+    "UBSAN_OPTIONS",
+    "LSAN_OPTIONS",
+    "TSAN_OPTIONS",
+    "MSAN_OPTIONS",
+    "HWASAN_OPTIONS",
+    "ASAN_SYMBOLIZER_PATH",
+    "UBSAN_SYMBOLIZER_PATH",
+    "LSAN_SYMBOLIZER_PATH",
+    "TSAN_SYMBOLIZER_PATH",
+    "MSAN_SYMBOLIZER_PATH",
+    "HWASAN_SYMBOLIZER_PATH",
+    "LLVM_SYMBOLIZER_PATH",
+    "TMPDIR",
+    "TZ",
+)
 
 
 def enabled(value: str | None) -> bool:
@@ -23,6 +59,10 @@ def enabled(value: str | None) -> bool:
 
 def set_winsize(fd: int, rows: int, cols: int) -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+
+def allowlisted_environment() -> dict[str, str]:
+    return {key: os.environ[key] for key in ENVIRONMENT_ALLOWLIST if key in os.environ}
 
 
 def strip_control_sequences(text: bytes) -> bytes:
@@ -66,6 +106,8 @@ def read_until(master_fd: int, process: subprocess.Popen[bytes], predicate, labe
                 chunk = b""
             if chunk:
                 captured.extend(chunk)
+                if len(captured) > MAX_CAPTURE_BYTES:
+                    raise RuntimeError(f"terminal output exceeded {MAX_CAPTURE_BYTES} bytes while waiting for {label}")
                 continue
         if process.poll() is not None:
             raise RuntimeError(
@@ -78,27 +120,50 @@ def read_until(master_fd: int, process: subprocess.Popen[bytes], predicate, labe
     )
 
 
-def terminate_process(process: subprocess.Popen[bytes], master_fd: int) -> None:
-    if process.poll() is not None:
-        return
+def process_group_exists(pgid: int) -> bool:
     try:
-        os.write(master_fd, b"\x04")
-        process.wait(timeout=3)
-        return
-    except Exception:
-        pass
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
+        os.killpg(pgid, 0)
+        return True
     except ProcessLookupError:
-        return
-    try:
-        process.wait(timeout=3)
-    except subprocess.TimeoutExpired:
+        return False
+    except PermissionError:
+        return True
+
+
+def wait_for_no_process_group(pgid: int, timeout: float = 1.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not process_group_exists(pgid):
+            return
+        select.select([], [], [], min(0.05, max(0.0, deadline - time.monotonic())))
+    raise RuntimeError(f"process group {pgid} remained after exit")
+
+
+def terminate_process(process: subprocess.Popen[bytes], master_fd: int | None = None) -> None:
+    if process.poll() is None and master_fd is not None:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+            os.write(master_fd, b"\x04")
+            process.wait(timeout=3)
+        except Exception:
             pass
-        process.wait(timeout=3)
+    if process_group_exists(process.pid):
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and process_group_exists(process.pid):
+            process.poll()
+            select.select([], [], [], 0.05)
+        if process_group_exists(process.pid):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def wait_for_file(path: pathlib.Path, process: subprocess.Popen[bytes], label: str, timeout: float = 8.0) -> None:
@@ -108,7 +173,7 @@ def wait_for_file(path: pathlib.Path, process: subprocess.Popen[bytes], label: s
             raise RuntimeError(f"{label} exited before creating {path}")
         if time.monotonic() >= deadline:
             raise RuntimeError(f"timed out waiting for {label} to create {path}")
-        time.sleep(0.05)
+        select.select([], [], [], min(0.05, max(0.0, deadline - time.monotonic())))
 
 
 def main() -> int:
@@ -134,14 +199,18 @@ def main() -> int:
         if root.name != "tui-osc8-smoke":
             raise RuntimeError(f"refusing to clear unexpected smoke root: {root}")
         shutil.rmtree(root)
+    root.mkdir(parents=True, mode=0o700)
     workspace = root / "workspace"
     home = root / "home"
     config = root / "config"
     state = root / "state"
     data = root / "data"
+    cache = root / "cache"
+    runtime = root / "runtime"
     ava_config = config / "ava"
-    for path in (workspace, home, ava_config, state, data):
+    for path in (workspace, home, ava_config, state, data, cache, runtime):
         path.mkdir(parents=True, exist_ok=True)
+    runtime.chmod(0o700)
     (workspace / "AGENTS.md").write_text("osc8 smoke context\n", encoding="utf-8")
     (ava_config / "models.json").write_text(
         '{"default_provider":"moonshot","default_model":"ava-osc8-fake",'
@@ -164,19 +233,23 @@ def main() -> int:
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        start_new_session=True,
+        env=allowlisted_environment(),
     )
     master_fd = -1
     try:
         wait_for_file(port_file, provider, "fake provider")
         port = port_file.read_text(encoding="utf-8").strip()
 
-        env = os.environ.copy()
+        env = allowlisted_environment()
         env.update(
             {
                 "HOME": str(home),
                 "XDG_CONFIG_HOME": str(config),
                 "XDG_STATE_HOME": str(state),
                 "XDG_DATA_HOME": str(data),
+                "XDG_CACHE_HOME": str(cache),
+                "XDG_RUNTIME_DIR": str(runtime),
                 "TERM": "xterm-256color",
                 "TERM_PROGRAM": "vscode",
                 "COLORTERM": "truecolor",
@@ -239,21 +312,52 @@ def main() -> int:
                     "OSC 8 hyperlink mode leaked the visible URL fallback for a descriptive Markdown link\n"
                     f"captured:\n{visible.decode(errors='replace')}"
                 )
+
+            os.write(master_fd, b"/copy last\r")
+            copied = read_until(
+                master_fd,
+                process,
+                lambda data: (
+                    re.search(rb"\x1b\]52;c;[A-Za-z0-9+/]*={0,2}\x1b\\", data) is not None
+                    and b"copied last AVA message to clipboard" in strip_control_sequences(data)
+                ),
+                "OSC 52 clipboard copy",
+            )
+            match = re.search(rb"\x1b\]52;c;([A-Za-z0-9+/]*={0,2})\x1b\\", copied)
+            if match is None:
+                raise RuntimeError(f"captured output did not contain one complete OSC 52 sequence: {copied!r}")
+            try:
+                clipboard_payload = base64.b64decode(match.group(1), validate=True)
+            except (ValueError, binascii.Error) as error:
+                raise RuntimeError("OSC 52 clipboard payload was not valid base64") from error
+            assistant_response = b"[Docs](https://e.test/d) https://e.test/b u@e.test"
+            if assistant_response not in clipboard_payload:
+                raise RuntimeError(
+                    "OSC 52 payload did not contain the actual assistant response; "
+                    f"decoded={clipboard_payload!r}"
+                )
+            copied_visible = strip_control_sequences(copied)
+            if b"copied last AVA message to clipboard" not in copied_visible:
+                raise RuntimeError(
+                    "OSC 52 emission did not retain visible copy-success status; "
+                    f"captured={copied_visible.decode(errors='replace')}"
+                )
             os.write(master_fd, b"\x04")
             process.wait(timeout=5)
+            if process.returncode != 0:
+                raise RuntimeError(f"AVA clean exit returned {process.returncode}")
+            wait_for_no_process_group(process.pid)
+            print(
+                f"osc8+osc52: links=3 osc52_terminator=ST decoded_clipboard_bytes={len(clipboard_payload)} "
+                f"exit={process.returncode}"
+            )
             return 0
         finally:
             terminate_process(process, master_fd)
     finally:
         if master_fd >= 0:
             os.close(master_fd)
-        if provider.poll() is None:
-            provider.terminate()
-            try:
-                provider.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                provider.kill()
-                provider.wait(timeout=3)
+        terminate_process(provider)
 
 
 if __name__ == "__main__":

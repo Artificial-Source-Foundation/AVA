@@ -95,6 +95,11 @@ struct AssistantTurnCommit
   std::size_t item_count = 0;
   std::string provider;
   std::string model;
+  // Additive source-capability provenance for request-time replay decisions.
+  // Legacy commits omit both fields and rely on a preceding session/model
+  // snapshot; empty or contradictory values are never replay authority.
+  std::optional<std::string> api_family = std::nullopt;
+  std::optional<std::string> reasoning_format = std::nullopt;
   std::string finish_reason;
   std::optional<std::string> usage_json;
 

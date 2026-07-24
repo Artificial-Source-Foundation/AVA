@@ -14,9 +14,6 @@ struct SealedCommandContext
   std::vector<std::filesystem::path> ava_authority_roots;
   std::vector<PathMetadata> ava_authority_root_metadata;
   SyntheticEnvironmentRoots synthetic_environment_roots;
-  // Optional sealed ${trusted_home}/.rustup root. No other real-home
-  // toolchain root is discovered for child-environment exposure.
-  std::optional<PathMetadata> rustup_home_metadata;
   std::vector<CommandPathEntry> path_entries;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
@@ -38,16 +35,16 @@ struct SealedCommandContext
 // stable identity and safety properties remain exact.
 [[nodiscard]] ava::core::Result<bool> trusted_home_metadata_is_fresh(PathMetadata const& recorded,
                                                                      std::shared_ptr<ava::core::AnchorSet const> const& anchor_set);
-// User-toolchain freshness is valid only for a final logical path strictly
+// User-tool freshness is valid only for a final logical path strictly
 // beneath this exact sealed trusted home. Only that home's non-symlink ancestor
 // may ignore directory link-count/ctime churn; all descendant and final
 // metadata remains exact. An outside or malformed scope fails closed.
-[[nodiscard]] bool is_sealed_user_toolchain_path(std::filesystem::path const& path, PathMetadata const& trusted_home);
-[[nodiscard]] ava::core::Result<bool> user_toolchain_path_metadata_is_fresh(PathMetadata const& recorded, PathMetadata const& trusted_home,
-                                                                            std::shared_ptr<ava::core::AnchorSet const> const& anchor_set);
+[[nodiscard]] bool is_sealed_user_tool_path(std::filesystem::path const& path, PathMetadata const& trusted_home);
+[[nodiscard]] ava::core::Result<bool> user_tool_path_metadata_is_fresh(PathMetadata const& recorded, PathMetadata const& trusted_home,
+                                                                       std::shared_ptr<ava::core::AnchorSet const> const& anchor_set);
 [[nodiscard]] ava::core::Result<bool> executable_metadata_is_fresh(ExecutableMetadata const& recorded,
                                                                    std::shared_ptr<ava::core::AnchorSet const> const& anchor_set);
-[[nodiscard]] ava::core::Result<bool> user_toolchain_executable_metadata_is_fresh(ExecutableMetadata const& recorded, PathMetadata const& trusted_home,
-                                                                                  std::shared_ptr<ava::core::AnchorSet const> const& anchor_set);
+[[nodiscard]] ava::core::Result<bool> user_tool_executable_metadata_is_fresh(ExecutableMetadata const& recorded, PathMetadata const& trusted_home,
+                                                                             std::shared_ptr<ava::core::AnchorSet const> const& anchor_set);
 
 }  // namespace ava::command::detail

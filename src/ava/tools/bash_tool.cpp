@@ -5,6 +5,8 @@
 #include "ava/core/trusted_home.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/spill_files.h"
+#include "ava/core/AnchorOpen.h"
+#include "ava/core/AnchorSet.h"
 
 #include <algorithm>
 #include <array>
@@ -89,8 +91,7 @@ bool matches_sealed_executable(struct stat const& status, ava::command::Executab
          static_cast<std::int64_t>(status.st_ctim.tv_nsec) == sealed.changed_nanoseconds;
 }
 
-ava::core::Result<UniqueFd> open_approved_executable(ava::command::ExecutableMetadata const& sealed,
-                                                      std::shared_ptr<ava::core::AnchorSet const> const& anchors)
+ava::core::Result<UniqueFd> open_approved_executable(ava::command::ExecutableMetadata const& sealed, std::shared_ptr<ava::core::AnchorSet const> const& anchors)
 {
   if (!anchors)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "approved executable has no shared AnchorSet"));
@@ -424,8 +425,12 @@ class SyntheticEnvironmentRoot final
   SyntheticEnvironmentRoot(SyntheticEnvironmentRoot const&) = delete;
   SyntheticEnvironmentRoot& operator=(SyntheticEnvironmentRoot const&) = delete;
   SyntheticEnvironmentRoot(SyntheticEnvironmentRoot&& other) noexcept
-      : root_(std::move(other.root_)), name_(std::move(other.name_)), parent_fd_(std::move(other.parent_fd_)), root_fd_(std::move(other.root_fd_)),
-        device_(std::exchange(other.device_, 0)), inode_(std::exchange(other.inode_, 0))
+      : root_(std::move(other.root_)),
+        name_(std::move(other.name_)),
+        parent_fd_(std::move(other.parent_fd_)),
+        root_fd_(std::move(other.root_fd_)),
+        device_(std::exchange(other.device_, 0)),
+        inode_(std::exchange(other.inode_, 0))
   {
   }
   SyntheticEnvironmentRoot& operator=(SyntheticEnvironmentRoot&& other) noexcept
@@ -447,14 +452,14 @@ class SyntheticEnvironmentRoot final
   {
     if (!context.anchor_set || context.spill_dir.empty())
     {
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                              "sealed command execution requires a shared AnchorSet and pre-opened spill anchor"));
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "sealed command execution requires a shared AnchorSet and pre-opened spill anchor"));
     }
     auto selected = context.anchor_set->find_anchor(context.spill_dir);
     if (!selected || selected->anchor().root == context.anchor_set->launch_workspace_root())
     {
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
-                                              "sealed command synthetic environment must use a non-workspace writable anchor"));
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "sealed command synthetic environment must use a non-workspace writable anchor"));
     }
     auto opened_parent = ava::core::open_readable(*context.anchor_set, context.spill_dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (!opened_parent)
@@ -485,8 +490,8 @@ class SyntheticEnvironmentRoot final
     if (result.root_fd_.get() < 0 || ::fstat(result.root_fd_.get(), &status) != 0 || !S_ISDIR(status.st_mode) || status.st_uid != ::geteuid() ||
         (status.st_mode & (S_IRWXG | S_IRWXO)) != 0)
     {
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
-                                              "private synthetic command environment root is not an owner-only directory"));
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "private synthetic command environment root is not an owner-only directory"));
     }
     result.device_ = status.st_dev;
     result.inode_ = status.st_ino;
@@ -558,13 +563,13 @@ ava::core::Result<ava::command::CommandBuildOptions> local_command_build_options
   return ava::command::CommandBuildOptions{.workspace = context.workspace_dir,
                                            .anchor_set = context.anchor_set,
                                            .trusted_home = trusted_account.home,
-                                           .discover_host_user_toolchains = !static_cast<bool>(context.command_executor),
+                                           .discover_host_user_tools = !static_cast<bool>(context.command_executor),
                                            .startup_path = std::move(startup_path),
                                            .shell = "/bin/sh",
                                            .ava_authority_roots = context.ava_authority_roots,
-                                           .environment = ava::command::CommandEnvironmentOptions{.profile_id = "ava-local-bash-prompt-v1",
+                                           .environment = ava::command::CommandEnvironmentOptions{.profile_id = "ava-local-bash-prompt-v2",
                                                                                                   .user = trusted_account.user,
-                                                                                                  .logname = trusted_account.user,
+                                                                                                  .logname = trusted_account.home,
                                                                                                   .home = root / "home",
                                                                                                   .xdg_config_home = root / "xdg-config",
                                                                                                   .xdg_cache_home = root / "xdg-cache",
@@ -603,8 +608,8 @@ ava::core::Result<DescriptorExecution> prepare_descriptor_execution(ava::command
   auto const& resolved = *plan.resolved_executable();
   if (!resolved.shebang_fully_resolved)
   {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                            "sealed command shebang chain cannot execute until every interpreter is descriptor-bound"));
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "sealed command shebang chain cannot execute until every interpreter is descriptor-bound"));
   }
 
   DescriptorExecution execution;
@@ -1118,8 +1123,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
       static_cast<void>(write_retry(status_write.get(), &descriptor_error, sizeof(descriptor_error)));
       _exit(127);
     }
-    std::vector<int> keep_descriptors{status_write.get(),
-                                      descriptor_execution->descriptors[descriptor_execution->executable_descriptor].get()};
+    std::vector<int> keep_descriptors{status_write.get(), descriptor_execution->descriptors[descriptor_execution->executable_descriptor].get()};
     keep_descriptors.reserve(keep_descriptors.size() + descriptor_execution->retained_script_descriptors.size());
     for (auto const index : descriptor_execution->retained_script_descriptors)
     {

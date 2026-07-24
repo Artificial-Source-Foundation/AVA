@@ -169,8 +169,9 @@ LSP servers are optional and only affect LSP-backed tools.
   enabled only by exact `builtin_servers` opt-in in the owner-controlled global
   file. Project config cannot enable it. Discovery is passive and excludes
   workspace-local or hardlinked executables, downloads, package managers, and
-  network access. Automatic `gopls` and `rust-analyzer` remain deferred; they
-  may still be configured explicitly behind existing trust and launch policy.
+  network access. This installed-only `clangd` integration is the sole
+  automatic LSP recipe; every other server requires explicit configuration
+  behind existing trust and launch policy.
 - `/context lsp` reports fixed built-in status without launching a process or
   exposing discovered paths, argv, config contents, fingerprints, or raw
   discovery failures.

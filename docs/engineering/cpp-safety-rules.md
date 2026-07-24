@@ -123,5 +123,5 @@ Before merging C++ code, check:
 
 ## Principle
 
-AVA C++ should be modern C++ with Rust-inspired constraints. We will not rely on
-discipline alone; we will encode safety in APIs, tooling, tests, and review.
+AVA C++ should use explicit ownership, bounded interfaces, and fail-closed
+safety constraints. We will encode safety in APIs, tooling, tests, and review.

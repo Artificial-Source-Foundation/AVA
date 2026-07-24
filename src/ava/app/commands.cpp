@@ -1409,6 +1409,10 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   {
     return handled_text("Tool details are a TUI display toggle. Use /details inside the TUI to switch views.");
   }
+  if (request.command == "/sidebar")
+  {
+    return handled_text("The current session overview is an interactive TUI view. Use /sidebar inside the TUI to open it.");
+  }
   if (starts_with_command(request.command, "/tool"))
   {
     return handled_text(

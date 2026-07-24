@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/command_palette.h"
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime_sessions.h"
@@ -420,6 +421,104 @@ void test_coordinator_fallback_and_navigation_lifetime()
   coordinator->shutdown();
 }
 
+void test_session_specific_catalog_notifications_survive_navigation()
+{
+  auto const root = temp_root() / ("session-title-catalog-navigation-" + ava::core::make_id("test"));
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
+  auto state = std::make_shared<GeneratorState>();
+  state->release = false;
+  state->output = "Refined Old Session Catalog Title";
+  auto coordinator = make_coordinator(state);
+  auto old_session = open_title_session(root, coordinator);
+  auto new_session = old_session ? open_title_session(root, coordinator) : ava::core::Result<ava::app::runtime::Session>(std::unexpected(old_session.error()));
+  auto late_session = new_session ? open_title_session(root, coordinator) : ava::core::Result<ava::app::runtime::Session>(std::unexpected(new_session.error()));
+  expect(old_session && new_session && late_session && coordinator,
+         "session-specific title catalog test opens old, new-current, and late-dirty runtime sessions");
+  if (!old_session || !new_session || !late_session || !coordinator)
+    return;
+
+  auto named = ava::app::append_runtime_session_metadata(*new_session, {.name = "New Current Session", .actor = "test"});
+  auto committed = seed_committed_ordinary_turn(*old_session, "Fallback Old Session Catalog Title");
+  auto late_committed = seed_committed_ordinary_turn(*late_session, "Late Session Notification Title");
+  auto new_authority = new_session->append_target->read_authority();
+  auto new_entries = new_authority ? new_authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(new_authority.error()));
+  auto marked = new_entries ? new_session->append_target->append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                                            .parent_id = new_entries->back().id,
+                                                                                            .type = ava::session::EntryType::UserMessage,
+                                                                                            .timestamp = "2099-01-01T00:00:00Z",
+                                                                                            .data_json = R"({"text":"deterministic recent current"})"})
+                            : ava::core::VoidResult(std::unexpected(new_entries.error()));
+  expect(named && committed && late_committed && marked,
+         "session-specific title catalog fixture persists names, old and late committed turns, and deterministic new-current activity");
+  if (!named || !committed || !late_committed || !marked)
+    return;
+
+  std::size_t workspace_walks = 0;
+  std::size_t tree_builds = 0;
+  auto workspace_walker = [&](ava::app::runtime::Session const&) {
+    ++workspace_walks;
+    return std::vector<ava::app::WorkspacePathCandidate>{};
+  };
+  auto tree_builder = [&](ava::app::runtime::Session const& current) {
+    ++tree_builds;
+    return ava::session::build_session_tree(current.workspace_dir, current.paths.sessions_dir, current.store.session_id());
+  };
+  auto cache = ava::app::build_application_catalog_cache(*old_session, {}, workspace_walker, tree_builder);
+  ava::app::ApplicationCatalogCoordinator catalog(std::move(cache));
+
+  ava::app::runtime::RunOptions options;
+  coordinator->schedule(*old_session, "Fallback Old Session Catalog Title", *committed, options);
+  expect(state->wait_started(), "session-specific title refinement blocks after durable fallback notification");
+  auto fallback_changes = coordinator->catalog_changes_since(0);
+  auto fallback_refresh = catalog.refresh_title_changes(*old_session, fallback_changes, {}, tree_builder);
+  catalog.retarget_session(new_session->store.session_id());
+  auto after_fallback = catalog.snapshot();
+  auto old_after_fallback =
+      std::ranges::find_if(after_fallback.session_tree->sessions, [&](auto const& node) { return node.summary.session_id == old_session->store.session_id(); });
+  expect(fallback_changes.cursor == 1 && fallback_changes.dirty_session_ids == std::vector<std::string>{old_session->store.session_id()} && fallback_refresh &&
+             *fallback_refresh && old_after_fallback != after_fallback.session_tree->sessions.end() &&
+             old_after_fallback->summary.title == "Fallback Old Session Catalog Title" && tree_builds == 1 && workspace_walks == 1,
+         "fallback notification refreshes only its exact current authority before navigation");
+
+  state->allow_completion();
+  expect(coordinator->wait_until_idle(3s), "session-specific old-session refinement becomes idle after navigation");
+  auto refinement_changes = coordinator->catalog_changes_since(catalog.title_catalog_cursor());
+  auto topology_refresh = catalog.refresh_session_tree_and_consume_title_changes(*new_session, refinement_changes, {}, tree_builder);
+  auto remaining_changes = coordinator->catalog_changes_since(catalog.title_catalog_cursor());
+  auto duplicate_refresh = topology_refresh ? catalog.refresh_title_changes(*new_session, remaining_changes, {}, tree_builder)
+                                            : ava::core::Result<bool>(std::unexpected(topology_refresh.error()));
+  auto after_refinement = catalog.snapshot();
+  auto selector = catalog.session_view(ava::app::SessionSelectorSort::Recent, {});
+  auto old_node = std::ranges::find_if(after_refinement.session_tree->sessions,
+                                       [&](auto const& node) { return node.summary.session_id == old_session->store.session_id(); });
+  auto new_node = std::ranges::find_if(after_refinement.session_tree->sessions,
+                                       [&](auto const& node) { return node.summary.session_id == new_session->store.session_id(); });
+  expect(refinement_changes.cursor == 2 && refinement_changes.dirty_session_ids == std::vector<std::string>{old_session->store.session_id()} &&
+             topology_refresh && *topology_refresh && remaining_changes.cursor == 2 && remaining_changes.dirty_session_ids.empty() && duplicate_refresh &&
+             !*duplicate_refresh && old_node != after_refinement.session_tree->sessions.end() && new_node != after_refinement.session_tree->sessions.end() &&
+             old_node->summary.title == "Refined Old Session Catalog Title" && new_node->summary.title == "New Current Session" && !selector.items.empty() &&
+             selector.items.front().value == new_session->store.session_id() && tree_builds == 2 && workspace_walks == 1 &&
+             after_refinement.operations.session_tree_builds == 2,
+         "an actual current-session switch/topology rebuild consumes the captured old-session refinement once, preserves titles and Recent ordering, and "
+         "causes no "
+         "second selector rebuild or workspace walk");
+
+  coordinator->schedule(*late_session, "Late Session Notification Title", *late_committed, options);
+  expect(coordinator->wait_until_idle(3s), "late title notification arriving after the topology capture becomes idle");
+  auto late_changes = coordinator->catalog_changes_since(catalog.title_catalog_cursor());
+  auto late_refresh = catalog.refresh_title_changes(*new_session, late_changes, {}, tree_builder);
+  auto late_duplicate = late_refresh ? catalog.refresh_title_changes(*new_session, late_changes, {}, tree_builder) : late_refresh;
+  auto after_late = catalog.snapshot();
+  auto late_node =
+      std::ranges::find_if(after_late.session_tree->sessions, [&](auto const& node) { return node.summary.session_id == late_session->store.session_id(); });
+  expect(late_changes.cursor == 4 && late_changes.dirty_session_ids == std::vector<std::string>{late_session->store.session_id()} && late_refresh &&
+             *late_refresh && late_duplicate && !*late_duplicate && catalog.title_catalog_cursor() == late_changes.cursor && tree_builds == 3 &&
+             workspace_walks == 1 && late_node != after_late.session_tree->sessions.end() && late_node->summary.title == "Refined Old Session Catalog Title",
+         "a notification published after the captured topology cursor remains pending and is consumed exactly once by the later refresh");
+  coordinator->shutdown();
+}
+
 void test_queue_delay_allows_later_turns_after_captured_first_commit()
 {
   auto const root = temp_root() / ("session-title-queue-delay-" + ava::core::make_id("test"));
@@ -571,12 +670,13 @@ void test_runtime_trigger_is_after_completion_and_excludes_synthetic_turns()
   expect(result && result->committed_turn_id && title_absent_at_done, "runtime does not trigger title work from the earlier Done event");
   expect(coordinator->wait_until_idle(3s), "runtime title trigger coordinator becomes idle");
   auto metadata = ava::session::load_session_metadata(session->store, session->lease);
-  expect(metadata && metadata->effective_title() == "Five Word Runtime Trigger Title" && state->calls == 1,
-         "runtime triggers asynchronous title generation only after admission completion succeeds");
+  expect(metadata && metadata->effective_title() == "Five Word Runtime Trigger Title" && state->calls == 1 && coordinator->catalog_generation() == 2,
+         "runtime triggers asynchronous title generation only after admission completion succeeds and publishes fallback/refinement catalog generations");
   options.event_sink = nullptr;
   ava::tests::FakeTransport second_transport({ava::tests::sse_response(ava::tests::final_text_sse("second completed answer"))});
   auto second = ava::app::run_prompt(*session, "A later ordinary prompt", provider, second_transport, options);
-  expect(second && coordinator->wait_until_idle(3s) && state->calls == 1, "later prompts never regenerate an existing automatic title");
+  expect(second && coordinator->wait_until_idle(3s) && state->calls == 1 && coordinator->catalog_generation() == 2,
+         "later prompts never regenerate an existing automatic title or its catalog generation");
 
   auto synthetic_state = std::make_shared<GeneratorState>();
   auto synthetic_coordinator = make_coordinator(synthetic_state);
@@ -711,6 +811,7 @@ void run_session_title_coordinator_tests()
   test_direct_provider_generation_is_isolated();
   test_coordinator_dedupes_and_preserves_manual_rename_races();
   test_coordinator_fallback_and_navigation_lifetime();
+  test_session_specific_catalog_notifications_survive_navigation();
   test_queue_delay_allows_later_turns_after_captured_first_commit();
   test_first_admission_permanently_binds_commit_identity();
   test_fallback_append_failure_latches_without_retry();

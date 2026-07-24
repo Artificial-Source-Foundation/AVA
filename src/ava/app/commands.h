@@ -34,6 +34,7 @@ struct CommandResult
 {
   bool handled = false;
   bool quit = false;
+  bool session_tree_changed = false;
   std::vector<std::string> output;
   std::vector<ava::agent::ToolTimelineEntry> tool_timeline;
   std::optional<std::string> prompt_message = std::nullopt;

@@ -749,6 +749,7 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
   if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)
     return std::unexpected(std::move(replaced.error()));
 
+  result.session_tree_changed = true;
   auto const mode_text = mode == ava::session::SessionBranchMode::Clone ? std::string("cloned") : std::string("forked");
   std::string output = mode_text + " session " + created_session_id + " from " + source_session_id;
   if (!branch_from_entry_id.empty())
@@ -809,6 +810,7 @@ ava::core::Result<CommandResult> run_sessions_rename_command(runtime::Session& s
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
+  result.session_tree_changed = true;
   if (clear_name)
     add_output(result, "session " + target_id + " name cleared");
   else
@@ -866,6 +868,7 @@ ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& s
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
+  result.session_tree_changed = true;
   if (metadata->labels.empty())
     add_output(result, "session " + target->store.session_id() + " labels cleared");
   else
@@ -923,6 +926,7 @@ ava::core::Result<CommandResult> run_sessions_archive_command(runtime::Session& 
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
+  result.session_tree_changed = true;
   add_output(result, "session " + target->store.session_id() + (metadata->archived ? " archived" : " unarchived"));
   return result;
 }
@@ -1102,7 +1106,12 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::Session& sessi
   result.handled = true;
 
   auto const previous_session_id = session.store.session_id();
+  auto previous_session_title = std::string("Untitled session");
+  if (auto metadata = load_runtime_metadata(session); metadata && !metadata->effective_title().empty())
+    previous_session_title = sanitize_inline_text(metadata->effective_title());
+
   auto const trimmed_name = trim_ascii(name);
+  auto const created_session_title = trimmed_name.empty() ? std::string("Untitled session") : sanitize_inline_text(trimmed_name);
   auto opened = create_fresh_session(session);
   if (!opened)
     return std::unexpected(std::move(opened.error()));
@@ -1119,11 +1128,10 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::Session& sessi
   if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)
     return std::unexpected(std::move(replaced.error()));
 
-  std::string output = "started session " + created_session_id;
-  if (!trimmed_name.empty())
-    output += " name=\"" + sanitize_inline_text(trimmed_name) + "\"";
-  output += "\nprevious session " + previous_session_id;
-  output += "\nswitched to " + session.store.session_id();
+  result.session_tree_changed = true;
+  std::string output = "started session \"" + created_session_title + "\" · id " + created_session_id;
+  output += "\nprevious session \"" + previous_session_title + "\" · id " + previous_session_id;
+  output += "\nswitched to \"" + created_session_title + "\"";
   add_output(result, std::move(output));
   return result;
 }
@@ -1170,6 +1178,7 @@ ava::core::Result<CommandResult> run_name_command(runtime::Session& session, std
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
+  result.session_tree_changed = true;
   if (clear_name)
     add_output(result, "session name cleared");
   else
@@ -1208,6 +1217,7 @@ ava::core::Result<CommandResult> run_labels_command(runtime::Session& session, s
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
+  result.session_tree_changed = true;
   if (metadata->labels.empty())
     add_output(result, "session labels cleared");
   else
@@ -1790,6 +1800,7 @@ ava::core::Result<CommandResult> run_import_command(runtime::Session& session, s
   }
   if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)
     return std::unexpected(std::move(replaced.error()));
+  result.session_tree_changed = true;
   add_output(result, "imported session " + session.store.session_id() + " from " + import_path.string() + "\n  entries: " + std::to_string(entries->size()) +
                          "\n  switched to " + session.store.session_id());
   return result;

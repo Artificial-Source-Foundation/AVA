@@ -225,6 +225,14 @@ bool provider_accepts_reasoning_format(ModelInfo const& model, std::string_view 
   if (!profile || profile->api_family != model.api_family || profile->default_reasoning_format != format)
     return false;
 
+  auto const& openai_responses = openai_responses_reasoning_profile();
+  if (profile->provider_id == openai_provider_profile().provider_id && model.provider_id == profile->provider_id &&
+      profile->api_family == openai_responses.api_family && profile->default_reasoning_format == openai_responses.format &&
+      model.reasoning_format == openai_responses.format && format == openai_responses.format)
+  {
+    return true;
+  }
+
   if (!profile->reasoning_level_only)
     return true;
   if (!profile->preserve_reasoning_content && !has_compatibility_quirk(model, "preserve_reasoning_content"))

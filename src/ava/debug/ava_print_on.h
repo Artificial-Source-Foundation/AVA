@@ -85,6 +85,9 @@ using utils::has_print_on::operator<<;
 
 namespace tui {
 using utils::has_print_on::operator<<;
+namespace detail {
+using utils::has_print_on::operator<<;
+} // namespace detail
 namespace terminal {
 using utils::has_print_on::operator<<;
 } // namespace terminal

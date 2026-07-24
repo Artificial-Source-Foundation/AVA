@@ -6,13 +6,13 @@
 
 #include <algorithm>
 #include <array>
-#include <cerrno>
 #include <cctype>
+#include <cerrno>
 #include <string>
-#include <fcntl.h>
-#include <unistd.h>
 #include <utility>
 #include <vector>
+#include <fcntl.h>
+#include <unistd.h>
 
 namespace ava::permissions {
 
@@ -974,8 +974,8 @@ PermissionDecision classify_command(std::string_view command)
     return decision(PermissionAction::Deny, "command matches a destructive pattern", PermissionRisk::Critical);
   }
 
-  if (equals_any(executable, {"bash", "sh", "zsh", "fish", "python", "python3", "node", "perl", "ruby", "php", "lua", "make", "ninja", "npm", "pnpm", "yarn",
-                              "bun", "cargo"}))
+  if (equals_any(executable,
+                 {"bash", "sh", "zsh", "fish", "python", "python3", "node", "perl", "ruby", "php", "lua", "make", "ninja", "npm", "pnpm", "yarn", "bun"}))
   {
     return decision(PermissionAction::Deny, "command can execute arbitrary scripts", PermissionRisk::High);
   }

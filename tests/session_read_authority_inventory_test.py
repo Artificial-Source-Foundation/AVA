@@ -9,8 +9,8 @@ Intentional pathname reads are limited to observational/noncurrent surfaces:
   * the unused generic project_transcript_bounded(SessionStore) compatibility
     adapter, which obtains one bounded vector before logical projection.
 
-Current runtime, provider, compaction, model-validation, permission, and RPC
-code must instead consume SessionReadAuthority. An authority carries the
+Current runtime, provider, compaction, permission, and RPC code must instead
+consume SessionReadAuthority. An authority carries the
 resolved SessionReadLimits policy selected for its runtime session, so ordinary
 load() calls remain bounded after the history grows.
 """
@@ -59,7 +59,6 @@ def main() -> int:
 
     require_text(source, "src/ava/agent/message_builder.h", "build_messages(ava::session::SessionReadAuthority read_authority", failures)
     require_text(source, "src/ava/app/runtime_compaction.h", "compact_runtime_context(Session& session, ava::session::SessionReadAuthority read_authority", failures)
-    require_text(source, "src/ava/app/runtime_model.h", "validate_runtime_model_history(ava::session::SessionReadAuthority read_authority", failures)
     require_text(source, "src/ava/agent/agent_loop.h", "std::optional<ava::session::SessionReadAuthority> session_read_authority", failures)
     require_text(source, "src/ava/app/runtime/Session.h", "create_ephemeral(store, session_read_limits)", failures)
     require_text(source, "src/ava/app/runtime/Session.h", "create_persistent(store, lease, session_read_limits)", failures)

@@ -53,6 +53,35 @@ bool parent_chain_has_cycle(std::vector<SessionTreeNode> const& nodes, std::unor
 
 }  // namespace
 
+void retarget_session_tree(SessionTreeIndex& index, std::string_view current_session_id)
+{
+  index.current_session_id = std::string(current_session_id);
+  std::unordered_map<std::string, std::size_t> index_by_id;
+  index_by_id.reserve(index.sessions.size());
+  for (std::size_t node_index = 0; node_index < index.sessions.size(); ++node_index)
+  {
+    auto& node = index.sessions[node_index];
+    node.current = node.summary.session_id == current_session_id;
+    index_by_id.emplace(node.summary.session_id, node_index);
+  }
+
+  std::unordered_set<std::string> cyclic_chains;
+  if (!current_session_id.empty() && parent_chain_has_cycle(index.sessions, index_by_id, current_session_id))
+    cyclic_chains.insert(std::string(current_session_id));
+  index.current_path = current_path_for(index.sessions, index_by_id, cyclic_chains, current_session_id);
+}
+
+bool refresh_session_tree_node(SessionTreeIndex& index, SessionSummary summary, SessionMetadataView metadata)
+{
+  auto node = std::ranges::find_if(index.sessions, [&](SessionTreeNode const& candidate) { return candidate.summary.session_id == summary.session_id; });
+  if (node == index.sessions.end() || node->metadata.parent_session_id != metadata.parent_session_id)
+    return false;
+
+  node->summary = std::move(summary);
+  node->metadata = std::move(metadata);
+  return true;
+}
+
 ava::core::Result<SessionTreeIndex> build_session_tree(std::filesystem::path const& workspace_dir, std::filesystem::path const& root_dir,
                                                        std::string_view current_session_id)
 {

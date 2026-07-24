@@ -74,48 +74,6 @@ std::string capped_entry_data(std::string_view data)
   return std::string(data.substr(0, kMaxCompactionPromptEntryBytes)) + "\n[entry data truncated from " + std::to_string(data.size()) + " bytes]";
 }
 
-std::string sanitized_reasoning_data_for_compaction(ava::session::SessionEntry const& entry)
-{
-  std::string data = "{";
-  bool first = true;
-  auto append_string = [&](std::string_view key, std::optional<std::string> const& value) {
-    if (!value || value->empty())
-      return;
-    if (!first)
-      data += ',';
-    first = false;
-    data += runtime::json_string_field(key, *value);
-  };
-  auto append_bool = [&](std::string_view key, bool value) {
-    if (!first)
-      data += ',';
-    first = false;
-    data += runtime::json_bool_field(key, value);
-  };
-
-  bool const redacted = runtime::bool_json_field(entry.data_json, "redacted").value_or(false);
-  append_string("provider", ava::core::json::string_field(entry.data_json, "provider"));
-  append_string("model", ava::core::json::string_field(entry.data_json, "model"));
-  append_string("format", ava::core::json::string_field(entry.data_json, "format"));
-  if (!redacted)
-    append_string("text", ava::core::json::string_field(entry.data_json, "text"));
-  append_bool("redacted", redacted);
-  append_bool("signature_present", ava::core::json::string_field(entry.data_json, "signature").has_value());
-  data += '}';
-  return capped_entry_data(data);
-}
-
-std::string compaction_entry_data(ava::session::SessionEntry const& entry)
-{
-  if (entry.type == ava::session::EntryType::ReasoningBlock)
-    return sanitized_reasoning_data_for_compaction(entry);
-  if (entry.type == ava::session::EntryType::UserMessage || entry.type == ava::session::EntryType::AssistantMessage)
-  {
-    return capped_entry_data(ava::session::sanitized_message_data_json(entry.data_json, entry.type == ava::session::EntryType::UserMessage));
-  }
-  return capped_entry_data(entry.data_json);
-}
-
 std::vector<ava::session::SessionEntry> physical_active_compaction_tail(std::vector<ava::session::SessionEntry> const& entries)
 {
   auto const boundary = std::ranges::find_if(entries.rbegin(), entries.rend(), [](auto const& entry) {
@@ -124,7 +82,7 @@ std::vector<ava::session::SessionEntry> physical_active_compaction_tail(std::vec
   });
   if (boundary == entries.rend())
     return entries;
-  auto const start = static_cast<std::size_t>(std::distance(entries.begin(), boundary.base()));
+  auto const start = static_cast<std::size_t>(std::distance(entries.begin(), std::prev(boundary.base())));
   return std::vector<ava::session::SessionEntry>(entries.begin() + static_cast<std::ptrdiff_t>(start), entries.end());
 }
 
@@ -148,9 +106,10 @@ bool message_has_part(ava::provider::ChatMessage const& message, ava::provider::
   // provider-native parts; their fallback payload is still structured and
   // must remain atomic for retention.
   if (type == ava::provider::ContentPartType::ToolUse)
-    return message.content.starts_with("Tool call requested by assistant.");
+    return message.content.starts_with("Tool call requested by assistant.") || message.content.starts_with("Tool call (") ||
+           message.content.find("\n\nTool call requested by assistant.") != std::string::npos || message.content.find("\n\nTool call (") != std::string::npos;
   if (type == ava::provider::ContentPartType::ToolResult)
-    return message.content.starts_with("Tool result data only");
+    return message.content.starts_with("Tool result data only") || message.content.starts_with("Tool result (");
   return false;
 }
 
@@ -177,8 +136,14 @@ void erase_replayed_active_user_messages(std::vector<ava::provider::ChatMessage>
 {
   for (auto replay = replayed_user_messages.rbegin(); replay != replayed_user_messages.rend(); ++replay)
   {
-    auto const match =
-        std::ranges::find_if(messages.rbegin(), messages.rend(), [&](auto const& message) { return starts_user_turn(message) && message.content == *replay; });
+    auto const match = std::ranges::find_if(messages.rbegin(), messages.rend(), [&](auto const& message) {
+      if (!starts_user_turn(message))
+        return false;
+      if (message.content == *replay)
+        return true;
+      auto const image_suffix = *replay + "\n\n[historical image omitted:";
+      return message.content.starts_with(image_suffix);
+    });
     if (match != messages.rend())
       messages.erase(std::next(match).base());
   }
@@ -459,27 +424,33 @@ ava::core::Result<PreparedCompactionContext> prepare_compaction_context(std::vec
                                                                         ava::session::CompactionConfig const& config,
                                                                         std::vector<std::string> const& replayed_user_messages)
 {
-  auto active = ava::session::project_active_compaction_context(entries);
-  if (!active)
-    return std::unexpected(std::move(active.error()));
-  auto estimated = ava::session::estimate_active_context_tokens(*active);
-  if (!estimated)
-    return std::unexpected(std::move(estimated.error()));
-
-  // Summary input/accounting uses the sanitized ordered public projection
-  // above. Retained provider context must instead preserve committed physical
-  // v4 grouping and exact tool-result bindings.
   auto tail_entries = physical_active_compaction_tail(entries);
-  auto messages = ava::agent::build_provider_messages_from_entries(tail_entries);
+  tail_entries.erase(std::remove_if(tail_entries.begin(), tail_entries.end(), ava::session::is_internal_replay_user_message), tail_entries.end());
+  auto messages = ava::agent::build_provider_messages_from_entries(
+      tail_entries, ava::agent::MessageBuildOptions{.replay_mode = ava::agent::HistoryReplayMode::ForcePortable});
   if (!messages)
     return std::unexpected(std::move(messages.error()));
   erase_replayed_active_user_messages(*messages, replayed_user_messages);
+
+  std::vector<ava::session::SessionEntry> portable_entries;
+  portable_entries.reserve(messages->size());
+  for (std::size_t index = 0; index < messages->size(); ++index)
+  {
+    auto const& message = messages->at(index);
+    portable_entries.push_back(
+        ava::session::SessionEntry{.id = "compaction_projection_" + std::to_string(index + 1),
+                                   .parent_id = "",
+                                   .type = message.role == "assistant" ? ava::session::EntryType::AssistantMessage : ava::session::EntryType::UserMessage,
+                                   .timestamp = "",
+                                   .data_json = "{\"text\":\"" + ava::core::json::escape(message.content) + "\"}"});
+  }
+  auto const estimated = ava::session::estimate_tokens(render_message_range(*messages, 0, messages->size()));
   auto ranges = complete_selection_ranges(*messages, config);
   auto [recent_context, omitted] = retain_ranges_with_budget(*messages, ranges, config.keep_recent_tokens);
   auto const retained_tokens = ava::session::estimate_tokens(recent_context);
-  return PreparedCompactionContext{.active_entries = std::move(*active),
+  return PreparedCompactionContext{.active_entries = std::move(portable_entries),
                                    .recent_context = std::move(recent_context),
-                                   .estimated_tokens = *estimated,
+                                   .estimated_tokens = estimated,
                                    .retained_tokens = retained_tokens,
                                    .recent_context_omitted = omitted};
 }
@@ -488,9 +459,12 @@ ava::core::Result<std::string> build_compaction_summary_prompt(std::vector<ava::
                                                                ava::session::CompactionConfig const& config, std::string_view instructions,
                                                                std::size_t estimated_tokens)
 {
-  auto projected = ava::session::project_active_compaction_context(entries);
-  if (!projected)
-    return std::unexpected(std::move(projected.error()));
+  auto tail_entries = physical_active_compaction_tail(entries);
+  tail_entries.erase(std::remove_if(tail_entries.begin(), tail_entries.end(), ava::session::is_internal_replay_user_message), tail_entries.end());
+  auto messages = ava::agent::build_provider_messages_from_entries(
+      tail_entries, ava::agent::MessageBuildOptions{.replay_mode = ava::agent::HistoryReplayMode::ForcePortable});
+  if (!messages)
+    return std::unexpected(std::move(messages.error()));
 
   std::string prompt;
   prompt += "Generate a provider-backed AVA /compact summary for the session below.\n";
@@ -515,20 +489,13 @@ ava::core::Result<std::string> build_compaction_summary_prompt(std::vector<ava::
   prompt += "- keep_recent_messages: " + std::to_string(config.keep_recent_messages) + "\n";
   prompt += "- summary_provider: " + config.provider_id + "\n";
   prompt += "- summary_model: " + config.model_id + "\n\n";
-  prompt += "Session entries in chronological order:\n";
-  std::size_t visible_index = 0;
-  for (std::size_t index = 0; index < projected->size(); ++index)
+  prompt += "Portable conversation messages in chronological order:\n";
+  for (std::size_t index = 0; index < messages->size(); ++index)
   {
-    auto const& entry = projected->at(index);
-    if (ava::session::is_internal_replay_user_message(entry))
-      continue;
-    ++visible_index;
-    prompt += "\n## Entry " + std::to_string(visible_index) + "\n";
-    prompt += "type: " + ava::session::to_string(entry.type) + "\n";
-    if (!entry.timestamp.empty())
-      prompt += "timestamp: " + entry.timestamp + "\n";
-    prompt += "data_json:\n";
-    prompt += compaction_entry_data(entry);
+    prompt += "\n## Message " + std::to_string(index + 1) + "\n";
+    prompt += "role: " + messages->at(index).role + "\n";
+    prompt += "content:\n";
+    prompt += capped_entry_data(messages->at(index).content);
     prompt += "\n";
   }
   return prompt;

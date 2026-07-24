@@ -1,8 +1,8 @@
 #include "sys.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_prompt.h"
-#include "ava/app/runtime/Session.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/session/assistant_output.h"
 #include "ava/session/validation.h"
@@ -10,16 +10,10 @@
 #include "ava/core/json.h"
 #include "ava/core/string_utils.h"
 
-#include <algorithm>
-#include <iterator>
 #include <utility>
 
 namespace ava::app::runtime {
 namespace {
-
-constexpr std::size_t kMaxImageAttachmentsPerRequest = 16;
-constexpr std::size_t kMaxImageBytesPerRequest = 40 * 1024 * 1024;
-constexpr std::size_t kAnthropicMaxImageBytes = 5 * 1024 * 1024;
 
 ava::config::ModelInfo fallback_persisted_model(std::string provider_id, std::string model_id, std::string display_name, std::string family,
                                                 std::string api_family, std::optional<long long> context_window_tokens,
@@ -54,188 +48,7 @@ ava::config::ModelInfo fallback_persisted_model(std::string provider_id, std::st
                                 .reasoning_format = std::move(reasoning_format)};
 }
 
-bool model_accepts_reasoning_format(ava::config::ModelInfo const& model, std::string_view format)
-{
-  return ava::config::provider_accepts_reasoning_format(model, format);
-}
-
-bool model_accepts_images(ava::config::ModelInfo const& model)
-{
-  return std::find(model.input_modalities.begin(), model.input_modalities.end(), "image") != model.input_modalities.end();
-}
-
-bool bool_json_field_is_true(std::string_view object, std::string_view key)
-{
-  auto const start = ava::core::json::field_value_start(object, key);
-  return start && object.substr(*start, 4) == "true";
-}
-
-std::vector<std::string> non_redacted_image_attachments(ava::session::SessionEntry const& entry)
-{
-  std::vector<std::string> attachments;
-  if (entry.type != ava::session::EntryType::UserMessage)
-    return attachments;
-  auto const data_json = ava::session::sanitized_message_data_json(entry.data_json);
-  for (auto const& attachment : ava::core::json::objects_in_array_field(data_json, "attachments"))
-  {
-    if (ava::core::json::string_field(attachment, "type").value_or("") == "image" && !bool_json_field_is_true(attachment, "redacted"))
-    {
-      attachments.push_back(attachment);
-    }
-  }
-  return attachments;
-}
-
-ava::core::Error incompatible_model_switch_error(ava::config::ModelInfo const& model, std::string_view reason, ava::session::SessionEntry const& entry)
-{
-  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model switch cannot safely replay current session history");
-  error.with_context("provider", model.provider_id);
-  error.with_context("model", model.model_id);
-  error.with_context("reason", std::string(reason));
-  error.with_context("entry_id", entry.id);
-  error.with_context("entry_type", ava::session::to_string(entry.type));
-  return error;
-}
-
-ava::core::VoidResult validate_model_history_entries(std::vector<ava::session::SessionEntry> const& entries, ava::config::ModelInfo const& target)
-{
-  auto const assistant_output = ava::session::classify_assistant_output(entries);
-  for (auto const& diagnostic : assistant_output.diagnostics)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, diagnostic.severity == ava::session::AssistantOutputDiagnosticSeverity::Warning
-                                                                         ? "model switch cannot inspect incomplete assistant-output history"
-                                                                         : "model switch cannot inspect malformed assistant-output history");
-    error.with_context("diagnostic_kind", std::string(ava::session::to_string(diagnostic.kind)))
-        .with_context("diagnostic_entry_id", diagnostic.entry_id)
-        .with_context("diagnostic", diagnostic.message);
-    return std::unexpected(std::move(error));
-  }
-
-  auto replay_start = entries.begin();
-  std::size_t replay_start_index = 0;
-  for (auto it = entries.begin(); it != entries.end(); ++it)
-  {
-    if (it->type == ava::session::EntryType::Compaction)
-    {
-      replay_start = std::next(it);
-      replay_start_index = static_cast<std::size_t>(std::distance(entries.begin(), replay_start));
-    }
-  }
-
-  std::size_t image_count = 0;
-  std::size_t total_image_bytes = 0;
-  for (auto it = replay_start; it != entries.end(); ++it)
-  {
-    auto const& entry = *it;
-    if ((entry.type == ava::session::EntryType::ToolCall || entry.type == ava::session::EntryType::ToolResult) && !target.supports_tools.value_or(false))
-    {
-      return std::unexpected(incompatible_model_switch_error(target, "target model does not declare tool support required by existing tool history", entry));
-    }
-
-    for (auto const& attachment : non_redacted_image_attachments(entry))
-    {
-      if (!model_accepts_images(target))
-      {
-        return std::unexpected(
-            incompatible_model_switch_error(target, "target model does not declare image input support required by existing image attachments", entry));
-      }
-      ++image_count;
-      if (image_count > kMaxImageAttachmentsPerRequest)
-      {
-        return std::unexpected(incompatible_model_switch_error(target, "target model cannot safely replay current image attachment count", entry));
-      }
-      auto const byte_size = ava::core::json::integer_field(attachment, "byte_size").value_or(0);
-      if (byte_size <= 0)
-        continue;
-      auto const image_bytes = static_cast<std::size_t>(byte_size);
-      if (target.api_family == "anthropic_messages" && image_bytes > kAnthropicMaxImageBytes)
-      {
-        return std::unexpected(
-            incompatible_model_switch_error(target, "target provider image byte-size limit is lower than existing image attachments", entry));
-      }
-      if (image_bytes > kMaxImageBytesPerRequest - total_image_bytes)
-      {
-        return std::unexpected(incompatible_model_switch_error(target, "target model cannot safely replay current aggregate image bytes", entry));
-      }
-      total_image_bytes += image_bytes;
-    }
-
-    if (entry.type != ava::session::EntryType::ReasoningBlock)
-      continue;
-    auto const source_provider = ava::core::json::string_field(entry.data_json, "provider").value_or("");
-    auto const format = ava::core::json::string_field(entry.data_json, "format").value_or("");
-    if (!source_provider.empty() && source_provider != target.provider_id)
-    {
-      auto error = incompatible_model_switch_error(target, "target model cannot replay provider-native reasoning from another provider", entry);
-      error.with_context("reasoning_provider", source_provider);
-      if (!format.empty())
-        error.with_context("reasoning_format", format);
-      return std::unexpected(std::move(error));
-    }
-    if (model_accepts_reasoning_format(target, format))
-      continue;
-
-    auto error = incompatible_model_switch_error(target,
-                                                 format.empty() ? "target model cannot safely replay provider-native reasoning history without a format"
-                                                                : "target model cannot replay provider-native reasoning format",
-                                                 entry);
-    if (!format.empty())
-      error.with_context("reasoning_format", format);
-    return std::unexpected(std::move(error));
-  }
-
-  for (auto const& turn : assistant_output.turns)
-  {
-    if (turn.commit_index < replay_start_index)
-      continue;
-    for (auto const& output_item : turn.items)
-    {
-      if (output_item.entry_index >= entries.size())
-      {
-        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "model switch encountered an ambiguous committed assistant-output item"));
-      }
-      auto const& source_entry = entries[output_item.entry_index];
-      if (auto const* function = std::get_if<ava::session::AssistantOutputFunctionCall>(&output_item.item.payload))
-      {
-        (void)function;
-        if (!target.supports_tools.value_or(false))
-        {
-          return std::unexpected(incompatible_model_switch_error(
-              target, "target model does not declare tool support required by committed assistant function history", source_entry));
-        }
-        continue;
-      }
-
-      auto const* reasoning = std::get_if<ava::session::AssistantOutputReasoning>(&output_item.item.payload);
-      if (!reasoning)
-        continue;
-      if (turn.commit.provider != target.provider_id)
-      {
-        auto error = incompatible_model_switch_error(target, "target model cannot replay provider-native reasoning from another provider", source_entry);
-        error.with_context("reasoning_provider", turn.commit.provider).with_context("reasoning_format", reasoning->format);
-        return std::unexpected(std::move(error));
-      }
-      if (model_accepts_reasoning_format(target, reasoning->format))
-        continue;
-
-      auto error = incompatible_model_switch_error(target, "target model cannot replay provider-native reasoning format", source_entry);
-      error.with_context("reasoning_format", reasoning->format);
-      return std::unexpected(std::move(error));
-    }
-  }
-
-  return {};
-}
-
 }  // namespace
-
-ava::core::VoidResult validate_runtime_model_history(ava::session::SessionReadAuthority read_authority, ava::config::ModelInfo const& target)
-{
-  auto entries = read_authority.load();
-  if (!entries)
-    return std::unexpected(std::move(entries.error()));
-  return validate_model_history_entries(*entries, target);
-}
 
 std::optional<ava::config::ModelInfo> latest_persisted_model(ava::config::ModelRegistry const& registry, std::vector<ava::session::SessionEntry> const& entries)
 {
@@ -331,13 +144,6 @@ ava::core::Result<bool> switch_runtime_model(runtime::Session& session, ava::con
 {
   if (session.model.provider_id == model.provider_id && session.model.model_id == model.model_id)
     return false;
-
-  auto read_authority = session.read_authority();
-  if (!read_authority)
-    return std::unexpected(std::move(read_authority.error()));
-  auto compatible = runtime::validate_runtime_model_history(std::move(*read_authority), model);
-  if (!compatible)
-    return std::unexpected(std::move(compatible.error()));
 
   auto prompt_state = runtime::load_runtime_prompt_state(session.paths, model, session.mode, session.workspace_dir, session.current_dir,
                                                          project_resources_trusted(session.project_trust), session.prompt_overrides);

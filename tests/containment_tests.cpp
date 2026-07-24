@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -19,6 +20,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <thread>
 #include <vector>
 #include <fcntl.h>
 #include <grp.h>
@@ -43,14 +46,6 @@ bool landlock_available()
 bool python3_available()
 {
   return std::filesystem::exists("/usr/bin/python3");
-}
-
-std::optional<std::string> environment_value(command::CommandEnvironment const& environment, std::string_view key)
-{
-  auto const found = std::ranges::find_if(environment.entries(), [key](command::EnvironmentVariable const& entry) { return entry.key == key; });
-  if (found == environment.entries().end())
-    return std::nullopt;
-  return found->value;
 }
 
 std::optional<gid_t> private_primary_group_for_test()
@@ -152,103 +147,6 @@ struct ContainmentFixture
                                    },
                                    .anchor_set = anchors,
                                    .ava_authority_roots = {ava_authority_root}};
-  }
-};
-
-struct RustupContainmentFixture
-{
-  std::filesystem::path root;
-  std::filesystem::path workspace;
-  std::filesystem::path trusted_home;
-  std::filesystem::path cargo_bin;
-  std::filesystem::path rustup_home;
-  std::filesystem::path cargo_credentials;
-  std::filesystem::path synthetic_root;
-  std::filesystem::path outcome;
-  std::shared_ptr<ava::core::AnchorSet> anchors;
-
-  explicit RustupContainmentFixture(std::string_view name)
-      : root(temp_root() / ("rustup-containment-" + std::string(name))),
-        workspace(root / "workspace"),
-        trusted_home(root / "trusted-home"),
-        cargo_bin(trusted_home / ".cargo" / "bin"),
-        rustup_home(trusted_home / ".rustup"),
-        cargo_credentials(trusted_home / ".cargo" / "credentials"),
-        synthetic_root(root / "synthetic"),
-        outcome(workspace / "rustup-outcome")
-  {
-    std::error_code cleanup;
-    std::filesystem::remove_all(root, cleanup);
-    std::filesystem::create_directories(root.parent_path());
-    ::chmod(root.parent_path().c_str(), S_IRWXU);
-    for (auto const& directory : {workspace, trusted_home, cargo_bin, rustup_home, synthetic_root / "home", synthetic_root / "config", synthetic_root / "cache",
-                                  synthetic_root / "data", synthetic_root / "state", synthetic_root / "tmp"})
-    {
-      std::filesystem::create_directories(directory);
-      ::chmod(directory.c_str(), S_IRWXU);
-    }
-    ::chmod(root.c_str(), S_IRWXU);
-    {
-      std::ofstream settings(rustup_home / "settings-marker", std::ios::binary | std::ios::trunc);
-      settings << "rustup-settings-marker\n";
-    }
-    {
-      std::ofstream credentials(cargo_credentials, std::ios::binary | std::ios::trunc);
-      credentials << "cargo-secret-sentinel\n";
-    }
-    ::chmod((rustup_home / "settings-marker").c_str(), S_IRUSR | S_IWUSR);
-    ::chmod(cargo_credentials.c_str(), S_IRUSR | S_IWUSR);
-    auto opened = ava::core::AnchorSet::open({workspace, synthetic_root});
-    if (!opened)
-      throw std::runtime_error("failed to open rustup containment test AnchorSet");
-    anchors = *opened;
-  }
-
-  bool write_rustup_proxy()
-  {
-    auto const rustup = cargo_bin / "rustup";
-    std::ofstream output(rustup, std::ios::binary | std::ios::trunc);
-    output << "#!/bin/sh\n"
-              "out='"
-           << outcome.string()
-           << "'\n"
-              ": > \"$out\"\n"
-              "if [ -n \"$RUSTUP_HOME\" ] && IFS= read -r marker < \"$RUSTUP_HOME/settings-marker\"; then echo RUSTUP_READ_OK >> \"$out\"; else echo "
-              "RUSTUP_READ_BAD >> \"$out\"; fi\n"
-              "if [ \"${CARGO_HOME+x}\" = x ]; then echo CARGO_HOME_BAD >> \"$out\"; else echo CARGO_HOME_ABSENT >> \"$out\"; fi\n"
-              "if printf blocked > \"$RUSTUP_HOME/write-marker\" 2>/dev/null; then echo RUSTUP_WRITE_BAD >> \"$out\"; else echo RUSTUP_WRITE_BLOCKED >> "
-              "\"$out\"; fi\n"
-              "if IFS= read -r secret < '"
-           << cargo_credentials.string()
-           << "'; then echo CARGO_SECRET_BAD >> \"$out\"; else echo CARGO_SECRET_BLOCKED >> \"$out\"; fi\n"
-              "exit 0\n";
-    output.close();
-    if (::chmod(rustup.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) != 0)
-      return false;
-    std::error_code link_error;
-    std::filesystem::create_symlink("rustup", cargo_bin / "cargo", link_error);
-    return !link_error;
-  }
-
-  command::CommandBuildOptions options() const
-  {
-    return command::CommandBuildOptions{.workspace = workspace,
-                                        .anchor_set = anchors,
-                                        .trusted_home = trusted_home,
-                                        .startup_path = cargo_bin.string(),
-                                        .shell = "/bin/sh",
-                                        .ava_authority_roots = {},
-                                        .environment = command::CommandEnvironmentOptions{.profile_id = "rustup-containment-test",
-                                                                                          .user = "ava-test-user",
-                                                                                          .logname = "ava-test-user",
-                                                                                          .home = synthetic_root / "home",
-                                                                                          .xdg_config_home = synthetic_root / "config",
-                                                                                          .xdg_cache_home = synthetic_root / "cache",
-                                                                                          .xdg_data_home = synthetic_root / "data",
-                                                                                          .xdg_state_home = synthetic_root / "state",
-                                                                                          .tmpdir = synthetic_root / "tmp"},
-                                        .workspace_script_recipes = {},
-                                        .limits = {}};
   }
 };
 
@@ -557,6 +455,142 @@ void test_feature_probe()
   }
 }
 
+void test_replaced_external_path_rule_fails_child_application()
+{
+  if (!landlock_available())
+  {
+    ava::test::request_skip("Landlock ABI insufficient");
+    return;
+  }
+
+  ContainmentFixture fix("replaced-external-path-rule");
+  expect(fix.write_executable("cmake", "#!/bin/sh\nexit 0\n"), "replacement-race fixture creates a known contained command");
+
+  auto const trusted_home = fix.root / "trusted-home";
+  auto const synthetic_root = fix.root / "synthetic-environment";
+  std::vector<std::filesystem::path> synthetic_directories;
+  for (auto const* name : {"home", "config", "cache", "data", "state", "tmp"})
+  {
+    auto const directory = synthetic_root / name;
+    std::filesystem::create_directories(directory);
+    ::chmod(directory.c_str(), S_IRWXU);
+    synthetic_directories.push_back(directory);
+  }
+  std::filesystem::create_directories(trusted_home);
+  ::chmod(trusted_home.c_str(), S_IRWXU);
+  ::chmod(synthetic_root.c_str(), S_IRWXU);
+
+  std::vector<std::filesystem::path> anchor_roots{fix.workspace};
+  anchor_roots.insert(anchor_roots.end(), synthetic_directories.begin(), synthetic_directories.end());
+  auto anchors = ava::core::AnchorSet::open(anchor_roots);
+  expect(anchors.has_value() && !(*anchors)->contains_lexical(fix.bin), "replacement-race PATH directory is sealed as an external path");
+  if (!anchors)
+    return;
+
+  command::CommandBuildOptions options{.workspace = fix.workspace,
+                                       .anchor_set = *anchors,
+                                       .trusted_home = trusted_home,
+                                       .discover_host_user_tools = false,
+                                       .startup_path = fix.bin.string(),
+                                       .shell = "/bin/sh",
+                                       .ava_authority_roots = {fix.ava_authority_root},
+                                       .environment = command::CommandEnvironmentOptions{.profile_id = "containment-test-environment",
+                                                                                         .user = "test-user",
+                                                                                         .logname = "test-user",
+                                                                                         .home = synthetic_directories[0],
+                                                                                         .xdg_config_home = synthetic_directories[1],
+                                                                                         .xdg_cache_home = synthetic_directories[2],
+                                                                                         .xdg_data_home = synthetic_directories[3],
+                                                                                         .xdg_state_home = synthetic_directories[4],
+                                                                                         .tmpdir = synthetic_directories[5]},
+                                       .workspace_script_recipes = {},
+                                       .limits = {}};
+  auto intent = command::CommandIntent::structured({"cmake", "--build", "build"});
+  auto preparation = intent ? command::prepare_command(*intent, options)
+                            : ava::core::Result<command::CommandPreparation>{
+                                  std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "no contained command intent"))};
+  expect(preparation.has_value(), "replacement-race command preparation succeeds");
+  if (!preparation)
+    return;
+
+  auto const path_entry = std::ranges::find_if(preparation->plan().path_entries(),
+                                               [&](command::CommandPathEntry const& entry) { return entry.directory == fix.bin.lexically_normal(); });
+  auto plan = containment::prepare_development_containment(*preparation, false);
+  auto const target_rule = std::ranges::find_if(
+      plan.filesystem_rules, [&](containment::ContainmentFilesystemRule const& rule) { return rule.logical_path == fix.bin.lexically_normal(); });
+  expect(path_entry != preparation->plan().path_entries().end() && plan.availability == containment::ContainmentAvailability::Available &&
+             target_rule != plan.filesystem_rules.end() && target_rule->identity_bound,
+         "containment plan includes an identity-bound rule for the external sealed PATH directory");
+  if (path_entry == preparation->plan().path_entries().end() || plan.availability != containment::ContainmentAvailability::Available ||
+      target_rule == plan.filesystem_rules.end() || !target_rule->identity_bound)
+    return;
+
+  auto const approved_directory = fix.root / "approved-path-original";
+  std::error_code replacement_error;
+  std::filesystem::rename(fix.bin, approved_directory, replacement_error);
+  bool const approved_directory_moved = !replacement_error;
+  if (approved_directory_moved)
+  {
+    std::filesystem::create_directory(fix.bin, replacement_error);
+    if (!replacement_error && ::chmod(fix.bin.c_str(), S_IRWXU) != 0)
+      replacement_error = std::error_code(errno, std::generic_category());
+  }
+  if (replacement_error)
+  {
+    if (approved_directory_moved)
+    {
+      std::error_code cleanup_error;
+      std::filesystem::remove_all(fix.bin, cleanup_error);
+      cleanup_error.clear();
+      std::filesystem::rename(approved_directory, fix.bin, cleanup_error);
+    }
+    expect(false, "replacement-race fixture replaces the approved PATH directory");
+    return;
+  }
+
+  pid_t const child = ::fork();
+  if (child == 0)
+  {
+    auto const applied = containment::apply_containment_in_child(plan);
+    _exit(applied ? 91 : 90);
+  }
+
+  int child_status = 0;
+  bool child_exited = false;
+  if (child > 0)
+  {
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+      pid_t const waited = ::waitpid(child, &child_status, WNOHANG);
+      if (waited == child)
+      {
+        child_exited = true;
+        break;
+      }
+      if (waited < 0 && errno != EINTR)
+        break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (!child_exited)
+    {
+      static_cast<void>(::kill(child, SIGKILL));
+      static_cast<void>(::waitpid(child, &child_status, 0));
+    }
+  }
+
+  std::error_code restore_error;
+  std::filesystem::remove_all(fix.bin, restore_error);
+  bool const replacement_removed = !restore_error;
+  restore_error.clear();
+  std::filesystem::rename(approved_directory, fix.bin, restore_error);
+  bool const restored = !restore_error;
+
+  expect(child > 0 && child_exited && WIFEXITED(child_status) && WEXITSTATUS(child_status) == 90,
+         "child containment application rejects a replaced external PATH rule before accepting or executing the command");
+  expect(replacement_removed && restored, "replacement-race fixture restores the approved PATH directory");
+}
+
 void test_contained_command_writes_workspace()
 {
   if (!landlock_available())
@@ -654,173 +688,6 @@ void test_contained_command_cannot_read_secret()
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(result && result->exit_code == 0 && result->output.find("SECRET_BLOCKED") != std::string::npos,
          "contained command cannot read a test secret file outside the workspace");
-}
-
-void test_contained_rustup_cargo_reads_only_sealed_rustup_home()
-{
-  if (!landlock_available())
-  {
-    ava::test::request_skip("Landlock ABI insufficient");
-    return;
-  }
-
-  RustupContainmentFixture fix("cargo-proxy");
-  bool const proxy_written = fix.write_rustup_proxy();
-  auto const intent = command::CommandIntent::structured({"cargo", "check"});
-  auto preparation = proxy_written ? command::prepare_command(*intent, fix.options())
-                                   : ava::core::Result<command::CommandPreparation>{
-                                         std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create fake rustup proxy"))};
-  auto containment_plan = preparation ? containment::prepare_development_containment(*preparation, false) : containment::DevelopmentContainmentPlan{};
-  auto const permission =
-      preparation ? perms::decide(perms::command_permission_metadata(preparation->plan(), {.available = containment::containment_is_available(containment_plan),
-                                                                                           .profile_id = containment_plan.profile_id,
-                                                                                           .network_allowed = containment_plan.network_allowed}))
-                  : perms::PermissionDecision{.action = perms::PermissionAction::Ask, .reason = {}};
-
-  auto const read_execute_mask = LANDLOCK_ACCESS_FS_EXECUTE | LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR;
-  auto const rustup_rule = preparation ? std::ranges::find_if(containment_plan.filesystem_rules,
-                                                              [&preparation](containment::ContainmentFilesystemRule const& rule) {
-                                                                return rule.logical_path == preparation->plan().rustup_home_metadata()->canonical_path;
-                                                              })
-                                       : containment_plan.filesystem_rules.end();
-  std::size_t expected_read_only_roots = 0;
-  if (preparation && preparation->plan().resolved_executable())
-  {
-    expected_read_only_roots = preparation->plan().path_entries().size() + 1U + preparation->plan().resolved_executable()->shebang_interpreters.size() + 1U;
-  }
-
-  int child_status = -1;
-  if (preparation && containment::containment_is_available(containment_plan) && rustup_rule != containment_plan.filesystem_rules.end())
-  {
-    pid_t const child = ::fork();
-    if (child == 0)
-    {
-      if (auto applied = containment::apply_containment_in_child(containment_plan); !applied)
-        _exit(90);
-      if (::chdir(preparation->plan().cwd().c_str()) != 0)
-        _exit(91);
-      std::vector<std::string> environment_strings;
-      environment_strings.reserve(preparation->environment().entries().size());
-      for (auto const& entry : preparation->environment().entries()) environment_strings.push_back(entry.key + "=" + entry.value);
-      std::vector<char*> environment;
-      environment.reserve(environment_strings.size() + 1U);
-      for (auto& entry : environment_strings) environment.push_back(entry.data());
-      environment.push_back(nullptr);
-      std::array<char*, 3> argv{const_cast<char*>("cargo"), const_cast<char*>("check"), nullptr};
-      auto const executable = preparation->plan().resolved_executable()->executable.canonical_path.string();
-      ::execve(executable.c_str(), argv.data(), environment.data());
-      _exit(92);
-    }
-    if (child > 0)
-      static_cast<void>(::waitpid(child, &child_status, 0));
-  }
-
-  std::ifstream outcome_input(fix.outcome, std::ios::binary);
-  std::string outcome((std::istreambuf_iterator<char>(outcome_input)), std::istreambuf_iterator<char>());
-  expect(proxy_written && preparation && preparation->plan().rustup_home_metadata() && preparation->environment().rustup_home_metadata() &&
-             environment_value(preparation->environment(), "RUSTUP_HOME") == std::optional<std::string>{fix.rustup_home.string()} &&
-             !environment_value(preparation->environment(), "CARGO_HOME") && preparation->plan().classification().level == command::CommandLevel::Standard &&
-             permission.action == perms::PermissionAction::Allow && containment::containment_is_available(containment_plan) &&
-             !containment_plan.network_allowed && containment_plan.network_filter_planned && rustup_rule != containment_plan.filesystem_rules.end() &&
-             rustup_rule->access_mask == read_execute_mask && containment_plan.filesystem_scope.read_only_root_count == expected_read_only_roots &&
-             WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0 && outcome.find("RUSTUP_READ_OK") != std::string::npos &&
-             outcome.find("CARGO_HOME_ABSENT") != std::string::npos && outcome.find("RUSTUP_WRITE_BLOCKED") != std::string::npos &&
-             outcome.find("CARGO_SECRET_BLOCKED") != std::string::npos && !std::filesystem::exists(fix.rustup_home / "write-marker"),
-         "contained symlinked cargo/rustup is Standard with no prompt, receives only read/execute access to sealed RUSTUP_HOME, reads its marker, cannot write "
-         "there or read .cargo credentials, and remains network denied");
-}
-
-void test_final_symlink_trusted_home_containment_stays_strict()
-{
-  RustupContainmentFixture fix("final-symlink-trusted-home");
-  auto const first_target = fix.root / "trusted-home-target-one";
-  auto const second_target = fix.root / "trusted-home-target-two";
-  std::filesystem::rename(fix.trusted_home, first_target);
-  std::filesystem::create_directories(second_target / ".cargo" / "bin");
-  std::filesystem::create_directories(second_target / ".rustup");
-  for (auto const& directory : {second_target, second_target / ".cargo", second_target / ".cargo" / "bin", second_target / ".rustup"})
-    ::chmod(directory.c_str(), S_IRWXU);
-  std::filesystem::create_directory_symlink(first_target.filename(), fix.trusted_home);
-  auto opened = ava::core::AnchorSet::open({fix.workspace, fix.synthetic_root, fix.root});
-  if (opened)
-    fix.anchors = *opened;
-
-  bool const proxy_written = opened && fix.write_rustup_proxy();
-  std::error_code copy_error;
-  if (proxy_written)
-  {
-    std::filesystem::copy_file(first_target / ".cargo" / "bin" / "rustup", second_target / ".cargo" / "bin" / "rustup", copy_error);
-    ::chmod((second_target / ".cargo" / "bin" / "rustup").c_str(), S_IRUSR | S_IWUSR | S_IXUSR);
-    std::filesystem::create_symlink("rustup", second_target / ".cargo" / "bin" / "cargo", copy_error);
-    std::ofstream settings(second_target / ".rustup" / "settings-marker", std::ios::binary | std::ios::trunc);
-    settings << "replacement-rustup-settings-marker\n";
-  }
-  auto const intent = command::CommandIntent::structured({"cargo", "check"});
-  auto preparation = proxy_written && !copy_error ? command::prepare_command(*intent, fix.options())
-                                                  : ava::core::Result<command::CommandPreparation>{std::unexpected(
-                                                        ava::core::Error(ava::core::ErrorCategory::Io, "failed to create final-symlink rustup preparation"))};
-  auto const initial_fresh =
-      preparation ? command::plan_is_fresh(preparation->plan())
-                  : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no final-symlink rustup containment plan"))};
-  auto initial_containment = preparation ? containment::prepare_development_containment(*preparation, false) : containment::DevelopmentContainmentPlan{};
-
-  std::filesystem::remove(fix.trusted_home);
-  std::filesystem::create_directory_symlink(second_target.filename(), fix.trusted_home);
-  auto const retargeted_fresh =
-      preparation ? command::plan_is_fresh(preparation->plan())
-                  : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no retargeted trusted-home plan"))};
-  auto retargeted_containment = preparation ? containment::prepare_development_containment(*preparation, false) : containment::DevelopmentContainmentPlan{};
-
-  expect(proxy_written && preparation && preparation->plan().trusted_home_metadata().requested_path_is_symlink && preparation->plan().rustup_home_metadata() &&
-             preparation->plan().rustup_home_metadata()->requested_path ==
-                 (preparation->plan().trusted_home_metadata().requested_path / ".rustup").lexically_normal() &&
-             environment_value(preparation->environment(), "RUSTUP_HOME") == std::optional<std::string>{fix.rustup_home.string()} && initial_fresh &&
-             *initial_fresh && containment::containment_is_available(initial_containment) && retargeted_fresh && !*retargeted_fresh &&
-             !containment::containment_is_available(retargeted_containment),
-         "containment accepts the shared-AnchorSet logical final-symlink trusted-home spelling while identities are fresh and becomes unavailable after a "
-         "safe symlink retarget replaces its sealed .rustup identity");
-}
-
-void test_containment_rule_replacement_fails_before_restriction()
-{
-  if (!landlock_available())
-  {
-    ava::test::request_skip("Landlock ABI insufficient");
-    return;
-  }
-
-  RustupContainmentFixture fix("rule-identity-race");
-  bool const proxy_written = fix.write_rustup_proxy();
-  auto const intent = command::CommandIntent::structured({"cargo", "check"});
-  auto preparation = proxy_written ? command::prepare_command(*intent, fix.options())
-                                   : ava::core::Result<command::CommandPreparation>{
-                                         std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create fake rustup proxy"))};
-  auto plan = preparation ? containment::prepare_development_containment(*preparation, false) : containment::DevelopmentContainmentPlan{};
-
-  auto const parked = fix.trusted_home / ".rustup.approved";
-  std::error_code rename_error;
-  std::filesystem::rename(fix.rustup_home, parked, rename_error);
-  std::error_code link_error;
-  if (!rename_error)
-    std::filesystem::create_directory_symlink(fix.cargo_bin, fix.rustup_home, link_error);
-
-  int child_status = -1;
-  if (preparation && containment::containment_is_available(plan) && !rename_error && !link_error)
-  {
-    pid_t const child = ::fork();
-    if (child == 0)
-      _exit(containment::apply_containment_in_child(plan) ? 0 : 90);
-    if (child > 0)
-      static_cast<void>(::waitpid(child, &child_status, 0));
-  }
-
-  std::error_code remove_error;
-  std::filesystem::remove(fix.rustup_home, remove_error);
-  std::error_code restore_error;
-  std::filesystem::rename(parked, fix.rustup_home, restore_error);
-  expect(proxy_written && preparation && containment::containment_is_available(plan) && !rename_error && !link_error && WIFEXITED(child_status) &&
-             WEXITSTATUS(child_status) == 90 && !restore_error,
-         "a post-approval external containment-root replacement fails descriptor identity verification before Landlock restriction");
 }
 
 void test_contained_command_cannot_write_ava_authority()
@@ -1029,14 +896,12 @@ void run_containment_tests()
   if (ava::test::skip_requested())
     return;
 
+  test_replaced_external_path_rule_fails_child_application();
   test_contained_command_writes_workspace();
   test_contained_command_writes_private_primary_group_workspace();
   test_contained_command_writes_0755_workspace();
   test_contained_command_reads_system_libs();
   test_contained_command_cannot_read_secret();
-  test_contained_rustup_cargo_reads_only_sealed_rustup_home();
-  test_final_symlink_trusted_home_containment_stays_strict();
-  test_containment_rule_replacement_fails_before_restriction();
   test_contained_command_cannot_write_ava_authority();
   test_contained_command_cannot_open_outbound_network();
   test_contained_command_cannot_open_unix_socket();

@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "ava/command/discovery.h"
 #include "ava/containment/containment.h"
 #include "ava/core/AnchorOpen.h"
 #include "ava/core/AnchorSet.h"
@@ -32,7 +31,6 @@ namespace detail {
 std::uint64_t device_file_mask() noexcept;
 [[nodiscard]] ava::core::VoidResult validate_synthetic_directory_root(std::filesystem::path const& path, ava::core::AnchorSet const& anchors);
 [[nodiscard]] ava::core::VoidResult validate_writable_directory_root(std::filesystem::path const& path, ava::core::AnchorSet const& anchors);
-[[nodiscard]] ava::core::VoidResult validate_read_only_toolchain_directory_root(std::filesystem::path const& path, ava::core::AnchorSet const& anchors);
 [[nodiscard]] ava::core::VoidResult validate_device_root(std::filesystem::path const& path, ava::core::AnchorSet const& anchors);
 [[nodiscard]] bool path_is_within(std::filesystem::path const& child, std::filesystem::path const& parent);
 void add_filesystem_rule(std::vector<ContainmentFilesystemRule>& rules, std::filesystem::path const& path, std::uint64_t mask);
@@ -187,39 +185,10 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
   }
   scope.synthetic_environment_writable = true;
 
-  // 3. Optional sealed rustup state: read/execute only. This root is
-  // identity-bound at planning time and revalidated here before it becomes a
-  // Landlock allow rule; no CARGO_HOME or broader trusted-home rule exists.
-  if (auto const& rustup_home = command_plan.rustup_home_metadata())
-  {
-    auto fresh = rustup_home->requested_path == (command_plan.trusted_home_metadata().requested_path / ".rustup").lexically_normal()
-                     ? (ava::command::detail::is_sealed_user_toolchain_path(rustup_home->requested_path, command_plan.trusted_home_metadata())
-                            ? ava::command::detail::user_toolchain_path_metadata_is_fresh(*rustup_home, command_plan.trusted_home_metadata(), plan.anchor_set)
-                            : ava::command::detail::path_metadata_is_fresh(*rustup_home, plan.anchor_set))
-                     : ava::core::Result<bool>{false};
-    if (!fresh || !*fresh || detail::path_is_within(rustup_home->canonical_path, command_plan.workspace()) ||
-        detail::path_is_within(command_plan.workspace(), rustup_home->canonical_path))
-    {
-      plan.availability = ContainmentAvailability::Unavailable;
-      plan.profile_id = "ava-landlock-seccomp-v1";
-      plan.unavailable_reason = "sealed rustup home changed or overlaps the workspace before containment preparation";
-      return plan;
-    }
-    if (auto valid = detail::validate_read_only_toolchain_directory_root(rustup_home->canonical_path, *plan.anchor_set); !valid)
-    {
-      plan.availability = ContainmentAvailability::Unavailable;
-      plan.profile_id = "ava-landlock-seccomp-v1";
-      plan.unavailable_reason = "sealed rustup home failed containment validation";
-      return plan;
-    }
-    detail::add_filesystem_rule(rules, rustup_home->canonical_path, detail::read_execute_root_mask());
-    ++scope.read_only_root_count;
-  }
-
-  // 4. System roots: read/execute (executables, libraries, headers, config).
+  // 3. System roots: read/execute (executables, libraries, headers, config).
   add_system_roots(rules, *plan.anchor_set, command_plan.ava_authority_roots());
 
-  // 5. Sealed PATH entries: read/execute (toolchain directories).
+  // 4. Sealed PATH entries: read/execute (toolchain directories).
   for (auto const& entry : command_plan.path_entries())
   {
     auto const logical = entry.directory;
@@ -229,7 +198,7 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
     ++scope.read_only_root_count;
   }
 
-  // 6. Resolved executable directory: read/execute (finding the binary).
+  // 5. Resolved executable directory: read/execute (finding the binary).
   if (command_plan.resolved_executable())
   {
     auto const& exec_path = command_plan.resolved_executable()->executable.requested_path;
@@ -244,7 +213,7 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
     }
   }
 
-  // 7. Shebang interpreter directories: read/execute.
+  // 6. Shebang interpreter directories: read/execute.
   if (command_plan.resolved_executable())
   {
     for (auto const& interpreter : command_plan.resolved_executable()->shebang_interpreters)

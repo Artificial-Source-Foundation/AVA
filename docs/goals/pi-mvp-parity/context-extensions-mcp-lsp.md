@@ -50,7 +50,7 @@ AVA has strong context, skills, plugin, MCP, and LSP foundations, including stat
 | Skill UX | Skills are discoverable, loadable, bounded, trust-aware, and documented. The model-visible `skill` tool behavior is tested. |
 | Plugin parity decision | Pi extension capabilities are mapped to AVA plugin equivalents: tools, commands, prompts, skills, events, UI, keybindings, custom providers. Each is implemented, AVA-superior, deferred, or excluded. |
 | MCP parity decision | Tools/resources/prompts are documented and tested. Advanced transports/OAuth/subscriptions/sampling/templates/binary resources are implemented or explicitly deferred. |
-| LSP maturity | Diagnostics, symbols, definition, references, config, server launch permissions, and TUI/headless display are covered. Automatic recipes/unsaved sync are implemented or deferred. |
+| LSP maturity | Diagnostics, symbols, definition, references, config, server launch permissions, and TUI/headless display are covered. Installed-only `clangd` is the sole automatic recipe; every other server requires explicit configuration, and unsaved sync remains deferred. |
 | Trust policy | Project-local executable/config resources cannot become active without explicit outside-workspace trust. |
 | Tests | Plugin/MCP/LSP/context changes have unit tests plus CLI/RPC smoke coverage where user-visible. |
 
@@ -62,7 +62,7 @@ AVA has strong context, skills, plugin, MCP, and LSP foundations, including stat
 | E2. Prompt/template closure | Finish docs/tests for prompt resources, command args, context freshness, and the intentional MVP exclusion of automatic shell-output injection. |
 | E3. Plugin capability closure | Document model exposure decisions for plugin commands/prompts/skills, including static-resource autoload and process-per-call tradeoffs. |
 | E4. MCP prompt/resource closure | Decide and implement or defer MCP prompt exposure as model tools. Keep blob/binary safeguards. |
-| E5. LSP maturity | Product approval covers only globally exact-opt-in installed-only `clangd`; preserve explicit config and keep automatic `gopls`/`rust-analyzer` deferred. |
+| E5. LSP maturity | Product approval covers only globally exact-opt-in installed-only `clangd`; keep it as the sole automatic LSP recipe and require explicit configuration for every other server. |
 | E6. Trust docs | Make project trust implications visible in `docs/CONFIG.md`, `docs/plugin-system.md`, and product baseline. |
 
 ## Non-Goals Unless Approved
@@ -140,7 +140,7 @@ git --no-pager diff --check
 
 - Plugin capabilities: AVA keeps plugin tools/commands/prompts/skills/events implemented through out-of-process manifests/protocol. Enabled static plugin prompts autoload into runtime context, static plugin skills surface in available skills and load through `/skill:<name>` or the model-visible `skill` tool, and these static paths do not launch plugin entrypoints. Plugin UI render slots, plugin keybindings, plugin themes, custom providers, and provider/request interception remain deferred until isolation, input-conflict, trust, and provider-auth contracts exist.
 - MCP prompts: implemented as command-registry slash/RPC commands, not automatic model-visible tools. MCP resources stay opaque no-argument read-style tools requiring `mcp.resource.read`; binary/blob/template/subscription/sampling/HTTP/OAuth surfaces are deferred.
-- LSP: explicit config remains supported, and the sole approved built-in `clangd` recipe requires exact owner-controlled global opt-in, safe non-hardlinked installed identity discovery, and identity-bound launch permission. Automatic `gopls`/`rust-analyzer`, project opt-in, downloads/managers, workspace executables, and unsaved-buffer sync remain excluded or deferred; pull/publish diagnostics, full-text on-disk sync, symbols, definitions, references, logical per-root routing, and output bounds are covered.
+- LSP: explicit config remains supported, and the sole approved built-in `clangd` recipe requires exact owner-controlled global opt-in, safe non-hardlinked installed identity discovery, and identity-bound launch permission. It is the sole automatic LSP recipe; every other server requires explicit configuration, while project opt-in, downloads/managers, workspace executables, and unsaved-buffer sync remain excluded or deferred; pull/publish diagnostics, full-text on-disk sync, symbols, definitions, references, logical per-root routing, and output bounds are covered.
 - Project trust: project-local executable/config resources (`.ava/commands`, skills, plugins, MCP/LSP config, `SYSTEM.md`, `APPEND_SYSTEM.md`) remain inactive until `/trust project`. Context instruction files are visible instructions and load without trust.
 - Remote package/marketplace/custom provider packages remain deferred pending provenance, signing, compatibility, rollback, and trust design. Local/offline plugin directory install/remove is implemented only for global plugin directories and leaves installed plugins disabled.
 

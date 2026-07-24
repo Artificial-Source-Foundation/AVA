@@ -192,6 +192,11 @@ struct AgentLoopOptions
   // Runtime may pre-establish this so retries, compaction, and the agent share
   // one run/turn identity.
   ava::observability::TraceContext trace_context = {};
+  // Explicit source/request compatibility identity. Runtime construction sets
+  // both. A direct-loop request may use a family fallback for serialization,
+  // but only these explicit values are persisted as replay provenance.
+  std::string api_family = {};
+  std::string reasoning_format = {};
 
   // Includes provider credentials and callback/runtime ownership state; never
   // stream this aggregate through generated debug output.

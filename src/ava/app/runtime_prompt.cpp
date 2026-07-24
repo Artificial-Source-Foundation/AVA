@@ -1203,7 +1203,9 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       },
       .model_pricing = session.model.pricing,
       .observation = runtime_options.observation,
-      .trace_context = runtime_options.trace_context});
+      .trace_context = runtime_options.trace_context,
+      .api_family = session.model.api_family,
+      .reasoning_format = session.model.reasoning_format});
 
   auto result = loop.run_turn(*expanded_user_message, runtime_options.image_attachments, session.store, provider, *runtime_transport);
   if (sink_error)

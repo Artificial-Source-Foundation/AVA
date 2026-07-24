@@ -31,7 +31,7 @@ file(MAKE_DIRECTORY "${WORKSPACE}" "${HOME_DIR}" "${CONFIG_DIR}/ava" "${STATE_DI
 file(CHMOD "${CONFIG_DIR}/ava" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 file(WRITE "${CONFIG_DIR}/ava/models.json"
      "{\"default_provider\":\"moonshot\",\"default_model\":\"ava-headless-fake\","
-     "\"models\":[{\"provider\":\"moonshot\",\"id\":\"ava-headless-fake\",\"family\":\"fake\","
+     "\"models\":[{\"provider\":\"moonshot\",\"id\":\"ava-headless-fake\",\"family\":\"fake\",\"api_family\":\"openai_chat_completions\","
      "\"context_window_tokens\":8192,\"max_output_tokens\":1024,\"supports_tools\":true,"
      "\"supports_streaming\":false,\"supports_reasoning\":false,\"reports_usage\":true}]}\n")
 

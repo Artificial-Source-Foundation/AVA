@@ -36,7 +36,7 @@ The backend provides Standard, Sensitive, and Critical command levels. Recognize
 
 Schema-v2 global and external workspace permission rules use opaque typed recipe identities rather than raw wildcard command text. Matching Denies are checked before Standard auto-Allow, including model-initiated foreground/background subagent commands. TUI supports allow once, allow for the current AVA session, and always in the workspace; RPC exposes bounded session grants; global rules remain an explicit user-managed choice. ACP cannot reuse local recipe authority while its executor identity is unverified.
 
-Local children use a positive-list, secret-free environment and filtered system/user/workspace toolchain discovery. A safe exact `<trusted_home>/.rustup` root is identity-sealed and exposed read-only through `RUSTUP_HOME` so common rustup-backed Cargo commands work; real `HOME`, `CARGO_HOME`, Cargo credentials, arbitrary inherited toolchain variables, and network remain unavailable. Linux Landlock plus seccomp network denial provide the verified development profile, including descendant inheritance; unsupported kernels and unverified delegated executors downgrade rather than claiming containment. AVA config/session/auth roots are excluded from command workspaces and synthetic child environment roots.
+Local children use a positive-list, secret-free environment and filtered system, safe `~/.local/bin`, and workspace PATH discovery. Real host `HOME`, arbitrary inherited host state, credentials, and network remain unavailable. Linux Landlock plus seccomp network denial provide the verified development profile, including descendant inheritance; unsupported kernels and unverified delegated executors downgrade rather than claiming containment. AVA config/session/auth roots are excluded from command workspaces and synthetic child environment roots.
 
 The implementation intentionally keeps checked-in `.ava/permission-rules.json` files non-authoritative and ignored; project-owned files cannot grant their own execution authority. Print mode remains fail-closed for unresolved prompts, while external global/workspace rules and RPC replies provide explicit automation authority. A dedicated `--allow-command` convenience flag remains a possible follow-up rather than adding blanket `--allow-tool bash`.
 
@@ -49,8 +49,7 @@ Validation used no paid live-provider calls.
 - The normal configured CTest suite passed all 77 executed checks out of 94 registered checks; the 17 skips were the credential-gated provider check, optional official ACP SDK check, 13 opt-in tmux scenarios, and the Kitty-image/OSC-8 terminal smokes.
 - The sanitizer CTest suite passed the same 77 executed checks with zero failures in 205.99 seconds under the intentional two-job cap.
 - All 13 opt-in tmux TUI scenarios then executed concurrently and passed in 12.74 seconds. This includes raw-shell one-shot prompting, exact persistent denial, redacted durable audit/diagnostics, session-grant behavior, and fixture authority permissions.
-- Focused command, containment, tool/process, AgentLoop, permission-rule, runtime, RPC, ACP, and TUI tests passed. They cover Standard auto-Allow and deny preflight, mutable-project containment, one-shot Critical behavior, bare/absolute and trusted symlink-alias identity parity, private-primary-group workspaces, typed recipe scope separation, secret-free environments, sealed read-only rustup state, and foreground/background subagent routes.
-- A credential-free RPC smoke ran a real rustup-backed `cargo check` with no permission event under verified containment. Cargo reached the expected missing-`Cargo.toml` error, proving the symlink alias and sealed `RUSTUP_HOME` path work without exposing `CARGO_HOME`.
+- Focused command, containment, tool/process, AgentLoop, permission-rule, runtime, RPC, ACP, and TUI tests passed. They cover Standard auto-Allow and deny preflight, mutable-project containment, one-shot Critical behavior, bare/absolute and trusted symlink-alias identity parity, private-primary-group workspaces, typed recipe scope separation, secret-free environments, generic PATH containment, and foreground/background subagent routes.
 - The package test, Python smoke-driver compilation, `clang-format --dry-run --Werror` on changed C++, and `git diff --check` passed.
 - One final integrated security/correctness gate reviewed the complete command path under the documented malicious-model/repository threat model and reported no blocking findings.
 
@@ -98,7 +97,7 @@ Primary reference locations:
 
 ## Original AVA Problems Addressed
 
-1. **Normal tools are hard-denied before approval.** Bare Python, Node, shell, Make, Ninja, package-manager, Bun, and Cargo frontends never reach the resolver.
+1. **Normal tools are hard-denied before approval.** Bare Python, Node, shell, Make, Ninja, and package-manager frontends never reach the resolver.
 2. **Classification is identity-inconsistent.** `python3 --version` is hard-denied while `/usr/bin/python3 --version` reaches an approval prompt because classification compares raw `argv[0]` instead of the resolved executable identity.
 3. **Policy and execution parse independently.** `permission.cpp` and `bash_tool.cpp` can disagree about the command that was approved.
 4. **PATH is not useful for normal development.** Local execution replaces PATH with fixed system directories and excludes common user and project toolchains.
@@ -126,14 +125,11 @@ Most commands in this level run without asking when AVA can recognize and contai
 
 Initial families include:
 
-- bounded inspection and verification (`git status`, `git diff`, `git log`, `rg`, version queries);
-- CMake configure/build and CTest;
-- Ninja and Make build/test targets;
-- Cargo build/check/test;
-- npm, pnpm, Yarn, and Bun test or exact named project scripts;
-- Python test runners and exact workspace scripts;
-- Node exact workspace scripts;
-- additional ecosystems only after each family has a bounded grammar and tests.
+- exact `pwd`, `ls`, `git status`, `git diff`, and `git log -1` inspection;
+- `cmake --build`, CTest, Ninja, and Make recipes;
+- exact named npm, pnpm, Yarn, and Bun project scripts;
+- pytest and explicitly configured workspace scripts;
+- additional recipes only after each family has a bounded grammar and tests.
 
 A project-code command is eligible for automatic execution only when all of these are true:
 
@@ -268,7 +264,6 @@ A recipe is a finite AVA-owned schema derived from a validated command plan, not
 - `CMakeBuild(workspace, build_directory)`
 - `CTest(workspace, test_directory)`
 - `PackageScript(workspace, manager, exact_script_name)`
-- `CargoAction(workspace, build|check|test)`
 - `WorkspaceScript(workspace, interpreter_family, exact_script_path)`
 
 Recipes match structured fields, permitted argument classes, executable origin, workspace identity, working-directory policy, environment-policy version, and effect class. They never fall back to "first executable token plus any arguments." Existing deny rules are evaluated first.
@@ -430,7 +425,7 @@ The final implementation retains these responsibilities across `src/ava/command/
 | Permission-store tests | Ownership, symlinks, corruption, locking, precedence, proposal fingerprint invalidation |
 | Frontend tests | TUI/RPC/headless/ACP choices cannot exceed backend maximum scope |
 | Process tests | Timeout, cancellation, TERM-to-KILL, spill limits, no detached survivors |
-| Real smokes | CMake, CTest, Ninja/Make, Python/pytest, Node/package scripts, Cargo where installed |
+| Real smokes | CMake, CTest, Ninja/Make, Python/pytest, and Node/package scripts |
 
 ## Acceptance Criteria
 

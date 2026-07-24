@@ -2,7 +2,6 @@
 #include "ava/app/acp/client_tools.h"
 #include "ava/app/acp/session.h"
 #include "ava/app/runtime_credentials.h"
-#include "ava/app/runtime_model.h"
 #include "ava/app/runtime_sessions.h"
 #include "ava/app/session_title_coordinator.h"
 #include "ava/app/subagent_delivery_manager.h"
@@ -873,12 +872,6 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::load(std:
   auto session = open_runtime_session_at(std::move(options), options_.launch_root, cwd, session_id);
   if (!session)
     return std::unexpected(std::move(session.error()));
-  auto read_authority = session->read_authority();
-  if (!read_authority)
-    return std::unexpected(std::move(read_authority.error()));
-  auto compatible = ava::app::runtime::validate_runtime_model_history(std::move(*read_authority), session->model);
-  if (!compatible)
-    return std::unexpected(std::move(compatible.error()));
   session->mcp_config = std::move(mcp_config);
   auto inserted = insert_reserved(std::move(*session));
   release_reservation = false;

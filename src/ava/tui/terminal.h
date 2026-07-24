@@ -185,8 +185,8 @@ void erase_last_utf8_codepoint(std::string& text);
 [[nodiscard]] std::string_view terminal_modify_other_keys_disable_sequence();
 [[nodiscard]] std::optional<int> terminal_kitty_keyboard_flags_response(std::string_view sequence);
 [[nodiscard]] bool terminal_device_attributes_response(std::string_view sequence);
-[[nodiscard]] KeyboardProtocolResponseAction terminal_keyboard_protocol_response_action(
-    std::string_view sequence, bool kitty_response_seen, bool modify_other_keys_enabled);
+[[nodiscard]] KeyboardProtocolResponseAction terminal_keyboard_protocol_response_action(std::string_view sequence, bool kitty_response_seen,
+                                                                                        bool modify_other_keys_enabled);
 [[nodiscard]] bool terminal_keyboard_protocol_handle_response(std::string_view sequence);
 [[nodiscard]] InputEvent terminal_escape_sequence_event(std::string_view sequence);
 [[nodiscard]] Key terminal_escape_sequence_key(std::string_view sequence);
@@ -196,5 +196,9 @@ void erase_last_utf8_codepoint(std::string& text);
 [[nodiscard]] bool terminal_signal_received();
 [[nodiscard]] int terminal_signal_number();
 void clear_terminal_signal();
+
+namespace detail {
+[[nodiscard]] bool force_terminal_cursor_visible() noexcept;
+}  // namespace detail
 
 }  // namespace ava::tui

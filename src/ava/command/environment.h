@@ -13,8 +13,8 @@ class EnvironmentFactory final
   // consumers even if they can physically include this detail header.
   [[nodiscard]] static ava::core::Result<CommandEnvironment> make(CommandEnvironmentOptions const& options, std::vector<CommandPathEntry> const& path_entries,
                                                                   std::filesystem::path const& logical_cwd, PathMetadata const& trusted_home,
-                                                                  SyntheticEnvironmentRoots roots, std::optional<PathMetadata> rustup_home_metadata,
-                                                                  CommandLimits const& limits, std::shared_ptr<ava::core::AnchorSet const> const& anchor_set,
+                                                                  SyntheticEnvironmentRoots roots, CommandLimits const& limits,
+                                                                  std::shared_ptr<ava::core::AnchorSet const> const& anchor_set,
                                                                   CommandEnvironment::FactoryPasskey passkey);
 
   AVA_DEBUG_PRINT_MEMBERS_ON

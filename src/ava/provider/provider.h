@@ -349,6 +349,16 @@ void observe_transport_retry(TransportObservation const& observation, std::size_
 [[nodiscard]] ProviderErrorKind classify_provider_error(HttpResponse const& response);
 [[nodiscard]] std::optional<std::string> retry_after_header(HttpResponse const& response);
 [[nodiscard]] bool is_context_overflow_error(ava::core::Error const& error);
+struct ImageInputPolicy
+{
+  std::size_t max_attachments_per_request = 16;
+  std::size_t max_bytes_per_image = 20 * 1024 * 1024;
+  std::size_t max_bytes_per_request = 40 * 1024 * 1024;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+[[nodiscard]] ImageInputPolicy image_input_policy_for_api_family(std::string_view api_family) noexcept;
 [[nodiscard]] bool is_supported_image_mime_type(std::string_view mime_type);
 [[nodiscard]] bool request_has_image_parts(ProviderRequest const& request);
 [[nodiscard]] ava::core::VoidResult validate_image_content_parts(ProviderRequest const& request, bool model_supports_images);

@@ -1,7 +1,12 @@
 #include "sys.h"
+#include "tests/support/libcwd_test_output.h"
 #include "tests/support/test_harness.h"
 #include "ava/core/path.h"
 #include "ava/core/trusted_home.h"
+
+#ifdef DEBUGGLOBAL
+#include "utils/GlobalObjectManager.h"
+#endif
 
 #include <array>
 #include <cstdlib>
@@ -108,6 +113,22 @@ constexpr std::array kTestSuites{
 #endif
 };
 
+std::string_view libcwd_suite_token(int argc, char** argv)
+{
+  if (argc == 1)
+    return "all";
+  if (argc == 2)
+  {
+    std::string_view const requested_suite = argv[1];
+    for (auto const& suite : kTestSuites)
+    {
+      if (suite.name == requested_suite)
+        return suite.name;
+    }
+  }
+  return "invalid";
+}
+
 void run_suite(TestSuite const& suite)
 {
   ava::test::clear_skip();
@@ -139,7 +160,20 @@ int print_failures()
 
 int main(int argc, char** argv)
 {
+#ifdef DEBUGGLOBAL
+  GlobalObjectManager::main_entered();
+#endif
+
+  std::string_view const debug_suite_token = libcwd_suite_token(argc, argv);
+  ava::test::LibcwdTestOutput libcwd_output(debug_suite_token);
   Debug(NAMESPACE_DEBUG::init());
+  libcwd_output.after_libcwd_init();
+  Dout(dc::notice, "AVA libcwd routing marker: suite=" << debug_suite_token);
+  if (!libcwd_output.setup_succeeded())
+  {
+    std::cerr << "failed to configure libcwd test output: " << libcwd_output.setup_error() << '\n';
+    return 2;
+  }
 
   if (argc > 2)
   {

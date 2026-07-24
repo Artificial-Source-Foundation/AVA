@@ -483,8 +483,8 @@ ava::core::Result<AssistantOutputItem> parse_assistant_output_item_data(std::str
 
 ava::core::Result<AssistantTurnCommit> parse_assistant_turn_commit_data(std::string_view data)
 {
-  constexpr std::array<std::string_view, 7> allowed_keys = {
-      "schema_version", "assistant_turn_id", "item_count", "provider", "model", "finish_reason", "usage",
+  constexpr std::array<std::string_view, 9> allowed_keys = {
+      "schema_version", "assistant_turn_id", "item_count", "provider", "model", "api_family", "reasoning_format", "finish_reason", "usage",
   };
   if (!object_has_only_keys(data, allowed_keys))
     return std::unexpected(codec_error("assistant_turn_commit data must be a strict JSON object with no duplicate or unknown keys"));
@@ -502,6 +502,21 @@ ava::core::Result<AssistantTurnCommit> parse_assistant_turn_commit_data(std::str
     return std::unexpected(codec_error("assistant_turn_commit data is missing required bounded turn, count, provider, model, or finish metadata"));
   }
 
+  std::optional<std::string> api_family;
+  if (has_field(data, "api_family"))
+  {
+    api_family = ava::core::json::string_field(data, "api_family");
+    if (!api_family || !valid_identifier(*api_family, kMaxAssistantOutputIdentifierBytes))
+      return std::unexpected(codec_error("assistant_turn_commit api_family must be a bounded string when present"));
+  }
+  std::optional<std::string> reasoning_format;
+  if (has_field(data, "reasoning_format"))
+  {
+    reasoning_format = ava::core::json::string_field(data, "reasoning_format");
+    if (!reasoning_format || !valid_identifier(*reasoning_format, kMaxAssistantOutputIdentifierBytes))
+      return std::unexpected(codec_error("assistant_turn_commit reasoning_format must be a bounded string when present"));
+  }
+
   std::optional<std::string> usage_json;
   if (has_field(data, "usage"))
   {
@@ -514,6 +529,8 @@ ava::core::Result<AssistantTurnCommit> parse_assistant_turn_commit_data(std::str
                              .item_count = *item_count,
                              .provider = *provider,
                              .model = *model,
+                             .api_family = std::move(api_family),
+                             .reasoning_format = std::move(reasoning_format),
                              .finish_reason = *finish_reason,
                              .usage_json = std::move(usage_json)};
 }
@@ -734,8 +751,12 @@ ava::core::Result<std::string> serialize_assistant_turn_commit_data_json(Assista
 {
   std::string data = "{\"schema_version\":" + std::to_string(kCurrentAssistantOutputSchemaVersion) + ",\"assistant_turn_id\":\"" +
                      ava::core::json::escape(commit.assistant_turn_id) + "\",\"item_count\":" + std::to_string(commit.item_count) + ",\"provider\":\"" +
-                     ava::core::json::escape(commit.provider) + "\",\"model\":\"" + ava::core::json::escape(commit.model) + "\",\"finish_reason\":\"" +
-                     ava::core::json::escape(commit.finish_reason) + "\"";
+                     ava::core::json::escape(commit.provider) + "\",\"model\":\"" + ava::core::json::escape(commit.model) + "\"";
+  if (commit.api_family)
+    data += ",\"api_family\":\"" + ava::core::json::escape(*commit.api_family) + "\"";
+  if (commit.reasoning_format)
+    data += ",\"reasoning_format\":\"" + ava::core::json::escape(*commit.reasoning_format) + "\"";
+  data += ",\"finish_reason\":\"" + ava::core::json::escape(commit.finish_reason) + "\"";
   if (commit.usage_json)
     data += ",\"usage\":" + *commit.usage_json;
   data += '}';

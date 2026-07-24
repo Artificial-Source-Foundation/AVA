@@ -1735,7 +1735,8 @@ void test_v4_ordered_turn_persistence_replay_and_openai_serialization()
   };
   turn.finish_reason = ava::provider::ProviderFinishReason::Completed;
   auto append_batch = [append_target = *target](std::vector<ava::session::SessionEntry> entries) { return append_target->append_batch(std::move(entries)); };
-  auto appended = ava::agent::append_assistant_turn(append_batch, turn, "openai", "gpt-5.5", {}, std::nullopt);
+  auto appended = ava::agent::append_assistant_turn(append_batch, turn, "openai", "gpt-5.5", {}, std::nullopt, "openai_responses",
+                                                    "openai_responses");
   expect(appended.has_value() && appended->function_output_entry_ids_by_call_id.size() == 2,
          "one v4 batch persists all ordered output items and returns exact function bindings");
   if (!appended)
@@ -1797,7 +1798,13 @@ void test_v4_ordered_turn_persistence_replay_and_openai_serialization()
   if (!entries)
     return;
 
-  auto messages = ava::agent::build_provider_messages_from_entries(*entries);
+  auto messages = ava::agent::build_provider_messages_from_entries(
+      *entries, ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "openai",
+                                                                                        .model_id = "gpt-5.5",
+                                                                                        .api_family = "openai_responses",
+                                                                                        .reasoning_format = "openai_responses",
+                                                                                        .supports_tools = true,
+                                                                                        .supports_images = true}});
   expect(messages && messages->size() == 2 && (*messages)[0].role == "assistant" && (*messages)[0].content_parts.size() == 6 &&
              (*messages)[0].content_parts[1].provider_item_id == "msg_v4_commentary" &&
              (*messages)[0].content_parts[1].assistant_phase == ava::provider::AssistantPhase::Commentary &&

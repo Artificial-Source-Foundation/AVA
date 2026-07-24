@@ -102,6 +102,10 @@ struct TranscriptItem
   std::string thinking = {};
   Text thinking_model = {};
   std::optional<ToolTimelineItem> tool = std::nullopt;
+  // Runtime event snapshots set this only when they can prove that one stable
+  // stream item retains its complete previous source prefix.
+  std::string stream_id = {};
+  bool append_only_stream = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -176,6 +180,8 @@ struct ComposerFrame
 struct SlashCommandArgumentCompletion
 {
   std::string value = {};
+  // Renderer-only human label. Selection and execution always retain value.
+  std::string display_label = {};
   std::string description = {};
   std::string category = {};
   std::vector<std::string> required_previous_args = {};
@@ -210,6 +216,8 @@ struct SidebarSnapshot
 struct SlashCommandItem
 {
   std::string command;
+  // Renderer-only human label for command argument completions.
+  std::string display_label = {};
   std::string description;
   std::string hint = "";
   std::string category = "";
@@ -423,6 +431,15 @@ struct SelectListView
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct ActiveRunHint
+{
+  std::string submit_or_queue = {};
+  std::string follow_up = {};
+  std::string dequeue = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct ComposerSnapshot
 {
   std::string mode;
@@ -431,14 +448,20 @@ struct ComposerSnapshot
   std::string session_id;
   std::string input;
   std::string status;
+  // One-action presentation feedback from a successful reasoning cycle. It is
+  // neither persistent runtime status nor session/transcript content.
+  std::optional<std::string> reasoning_feedback = std::nullopt;
   bool processing = false;
+  ActiveRunHint active_run_hint = {};
   std::size_t spinner_frame = 0;
   std::optional<std::string> token_status = std::nullopt;
   std::optional<std::string> reasoning_status = std::nullopt;
   std::optional<std::size_t> context_source_count = std::nullopt;
   std::vector<TranscriptItem> transcript;
+  std::size_t transcript_generation = 0;
   std::vector<SlashCommandItem> slash_commands = {};
   std::vector<FileReferenceItem> file_references = {};
+  std::size_t file_references_generation = 0;
   std::vector<ThemeOptionItem> custom_themes = {};
   std::optional<PermissionPromptView> permission_prompt = std::nullopt;
   std::optional<QuestionPromptView> question_prompt = std::nullopt;
@@ -454,6 +477,8 @@ struct ComposerSnapshot
   std::size_t input_selection_start = std::string::npos;
   std::size_t input_selection_end = std::string::npos;
   std::optional<SidebarSnapshot> sidebar = std::nullopt;
+  bool sidebar_drawer_visible = false;
+  std::size_t sidebar_drawer_scroll_offset = 0;
   std::vector<QueuedMessageItem> queued_messages = {};
   std::vector<PendingAttachmentItem> pending_attachments = {};
   std::size_t draft_scroll_offset = 0;
@@ -464,6 +489,16 @@ struct ComposerSnapshot
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct ComposerCanvasLayout
+{
+  std::size_t content_width = 0;
+  std::size_t left = 0;
+  bool rail_visible = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+[[nodiscard]] ComposerCanvasLayout composer_canvas_layout(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input, std::vector<SlashCommandItem> const& commands);
 [[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input, std::size_t cursor, std::vector<SlashCommandItem> const& commands);
 [[nodiscard]] bool slash_palette_visible(std::string_view input, std::vector<SlashCommandItem> const& commands);
@@ -491,7 +526,7 @@ struct SlashCommandSelectionText
                                                                                  std::size_t selected_index);
 [[nodiscard]] std::optional<std::string> slash_command_selection_disabled_reason(std::string_view input, std::size_t cursor,
                                                                                  std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
-[[nodiscard]] std::optional<std::size_t> slash_palette_selection_for_screen_row(ComposerSnapshot const& snapshot, std::size_t row);
+[[nodiscard]] std::optional<std::size_t> slash_palette_selection_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] std::vector<FileReferenceItem> filter_file_references(std::string_view input, std::size_t cursor,
                                                                     std::vector<FileReferenceItem> const& references);
 [[nodiscard]] bool file_reference_palette_visible(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references);
@@ -510,7 +545,10 @@ struct FileReferenceSelectionText
 };
 [[nodiscard]] FileReferenceSelectionText file_reference_selection_text(std::string_view input, std::size_t cursor,
                                                                        std::vector<FileReferenceItem> const& references, std::size_t selected_index);
-[[nodiscard]] std::optional<std::size_t> file_reference_palette_selection_for_screen_row(ComposerSnapshot const& snapshot, std::size_t row);
+[[nodiscard]] std::optional<std::string> file_reference_selection_disabled_reason(std::string_view input, std::size_t cursor,
+                                                                                  std::vector<FileReferenceItem> const& references, std::size_t selected_index);
+[[nodiscard]] std::optional<std::size_t> file_reference_palette_selection_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row,
+                                                                                              std::size_t column);
 [[nodiscard]] std::vector<FileReferenceItem> filter_path_completions(std::string_view input, std::size_t cursor,
                                                                      std::vector<FileReferenceItem> const& references, bool force = false);
 [[nodiscard]] bool path_completion_palette_visible(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
@@ -531,10 +569,26 @@ struct PathCompletionSelectionText
 [[nodiscard]] PathCompletionSelectionText path_completion_selection_text(std::string_view input, std::size_t cursor,
                                                                          std::vector<FileReferenceItem> const& references, std::size_t selected_index,
                                                                          bool force = false);
-[[nodiscard]] std::optional<std::size_t> path_completion_palette_selection_for_screen_row(ComposerSnapshot const& snapshot, std::size_t row);
+[[nodiscard]] std::optional<std::string> path_completion_selection_disabled_reason(std::string_view input, std::size_t cursor,
+                                                                                   std::vector<FileReferenceItem> const& references, std::size_t selected_index,
+                                                                                   bool force = false);
+[[nodiscard]] std::optional<std::size_t> path_completion_palette_selection_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row,
+                                                                                               std::size_t column);
+
+struct ComposerPaletteScreenLayout
+{
+  std::size_t first_item_row = 0;
+  std::size_t item_count = 0;
+  std::size_t first_item_index = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+[[nodiscard]] std::optional<ComposerPaletteScreenLayout> composer_palette_screen_layout(ComposerSnapshot const& snapshot);
 [[nodiscard]] ComposerFrame render_composer_frame(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::vector<std::string> render_composer(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::size_t composer_main_width(ComposerSnapshot const& snapshot);
+[[nodiscard]] std::size_t composer_max_transcript_scroll_offset(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height);
+[[nodiscard]] std::size_t sidebar_drawer_max_scroll_offset(ComposerSnapshot const& snapshot);
 [[nodiscard]] bool draw_screen(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::string sanitize_terminal_text(std::string_view text);
 [[nodiscard]] std::vector<std::string> split_lines(std::string_view text);
@@ -544,11 +598,13 @@ struct PathCompletionSelectionText
                                                                          bool allow_session_available = false, bool allow_remember_available = false,
                                                                          bool deny_remember_available = false);
 [[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt, InputEvent event);
+[[nodiscard]] QuestionPromptInputResult activate_question_option(QuestionPromptView const& prompt, std::size_t option_index);
 [[nodiscard]] std::vector<std::size_t> filter_select_list_items(SelectListView const& view);
 [[nodiscard]] std::size_t clamp_select_list_selection(SelectListView const& view, std::size_t selected_index);
 [[nodiscard]] std::size_t previous_select_list_selection(SelectListView const& view, std::size_t selected_index);
 [[nodiscard]] std::size_t next_select_list_selection(SelectListView const& view, std::size_t selected_index);
 [[nodiscard]] std::optional<std::size_t> select_list_selection_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
+[[nodiscard]] std::optional<std::size_t> question_option_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] std::optional<std::size_t> composer_input_cursor_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] SelectListInputResult handle_select_list_input(SelectListView const& view, InputEvent event);
 [[nodiscard]] SelectListInputResult handle_select_list_input(SelectListView const& view, InputEvent event, TuiKeyBindings const& bindings);

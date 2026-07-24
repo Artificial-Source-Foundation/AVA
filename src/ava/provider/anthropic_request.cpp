@@ -15,8 +15,6 @@
 namespace ava::provider {
 namespace {
 
-constexpr std::size_t kAnthropicMaxImageBytes = 5 * 1024 * 1024;
-
 constexpr std::string_view kDefaultAnthropicBaseUrl = "https://api.anthropic.com";
 constexpr std::string_view kAnthropicVersion = "2023-06-01";
 constexpr int kDefaultMaxTokens = 4096;
@@ -164,21 +162,21 @@ ava::core::VoidResult validate_anthropic_content_parts(std::vector<ChatMessage> 
         case ContentPartType::Text:
           break;
         case ContentPartType::Image:
-          if (role != "user") {
-            return std::unexpected(invalid_content_part_error("Anthropic image content requires user role",
-                                                              message_index, part_index));
+          if (role != "user")
+          {
+            return std::unexpected(invalid_content_part_error("Anthropic image content requires user role", message_index, part_index));
           }
-          if (!is_supported_image_mime_type(part.mime_type)) {
-            return std::unexpected(invalid_content_part_error("Anthropic image MIME type is not supported",
-                                                              message_index, part_index));
+          if (!is_supported_image_mime_type(part.mime_type))
+          {
+            return std::unexpected(invalid_content_part_error("Anthropic image MIME type is not supported", message_index, part_index));
           }
-          if (part.byte_size == 0 || part.byte_size > kAnthropicMaxImageBytes) {
-            return std::unexpected(invalid_content_part_error("Anthropic image byte size is outside supported limits",
-                                                              message_index, part_index));
+          if (part.byte_size == 0 || part.byte_size > image_input_policy_for_api_family("anthropic_messages").max_bytes_per_image)
+          {
+            return std::unexpected(invalid_content_part_error("Anthropic image byte size is outside supported limits", message_index, part_index));
           }
-          if (part.data_base64.empty() || !is_valid_base64(part.data_base64)) {
-            return std::unexpected(invalid_content_part_error(
-                "Anthropic image content requires verified attachment bytes", message_index, part_index));
+          if (part.data_base64.empty() || !is_valid_base64(part.data_base64))
+          {
+            return std::unexpected(invalid_content_part_error("Anthropic image content requires verified attachment bytes", message_index, part_index));
           }
           if (!part.cache_control_ttl.empty()) {
             return std::unexpected(invalid_content_part_error(

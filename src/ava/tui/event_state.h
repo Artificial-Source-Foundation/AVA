@@ -26,6 +26,7 @@ struct PendingToolItem
   std::string request_id;
   std::string correlation_id;
   ToolTimelineItem item;
+  bool append_only_stream = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

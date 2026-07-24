@@ -584,7 +584,7 @@ ava::core::Result<ava::command::CommandBuildOptions> local_command_build_options
                                            .startup_path = std::move(startup_path),
                                            .shell = "/bin/sh",
                                            .ava_authority_roots = context.ava_authority_roots,
-                                           .environment = ava::command::CommandEnvironmentOptions{.profile_id = "ava-local-bash-prompt-v1",
+                                           .environment = ava::command::CommandEnvironmentOptions{.profile_id = "ava-local-bash-prompt-v2",
                                                                                                   .user = account->second,
                                                                                                   .logname = account->second,
                                                                                                   .home = root / "home",

@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -18,6 +19,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <thread>
 #include <vector>
 #include <fcntl.h>
 #include <grp.h>
@@ -420,6 +423,142 @@ void test_feature_probe()
   }
 }
 
+void test_replaced_external_path_rule_fails_child_application()
+{
+  if (!landlock_available())
+  {
+    ava::test::request_skip("Landlock ABI insufficient");
+    return;
+  }
+
+  ContainmentFixture fix("replaced-external-path-rule");
+  expect(fix.write_executable("cmake", "#!/bin/sh\nexit 0\n"), "replacement-race fixture creates a known contained command");
+
+  auto const trusted_home = fix.root / "trusted-home";
+  auto const synthetic_root = fix.root / "synthetic-environment";
+  std::vector<std::filesystem::path> synthetic_directories;
+  for (auto const* name : {"home", "config", "cache", "data", "state", "tmp"})
+  {
+    auto const directory = synthetic_root / name;
+    std::filesystem::create_directories(directory);
+    ::chmod(directory.c_str(), S_IRWXU);
+    synthetic_directories.push_back(directory);
+  }
+  std::filesystem::create_directories(trusted_home);
+  ::chmod(trusted_home.c_str(), S_IRWXU);
+  ::chmod(synthetic_root.c_str(), S_IRWXU);
+
+  std::vector<std::filesystem::path> anchor_roots{fix.workspace};
+  anchor_roots.insert(anchor_roots.end(), synthetic_directories.begin(), synthetic_directories.end());
+  auto anchors = ava::core::AnchorSet::open(anchor_roots);
+  expect(anchors.has_value() && !(*anchors)->contains_lexical(fix.bin), "replacement-race PATH directory is sealed as an external path");
+  if (!anchors)
+    return;
+
+  command::CommandBuildOptions options{.workspace = fix.workspace,
+                                       .anchor_set = *anchors,
+                                       .trusted_home = trusted_home,
+                                       .discover_host_user_tools = false,
+                                       .startup_path = fix.bin.string(),
+                                       .shell = "/bin/sh",
+                                       .ava_authority_roots = {fix.ava_authority_root},
+                                       .environment = command::CommandEnvironmentOptions{.profile_id = "containment-test-environment",
+                                                                                         .user = "test-user",
+                                                                                         .logname = "test-user",
+                                                                                         .home = synthetic_directories[0],
+                                                                                         .xdg_config_home = synthetic_directories[1],
+                                                                                         .xdg_cache_home = synthetic_directories[2],
+                                                                                         .xdg_data_home = synthetic_directories[3],
+                                                                                         .xdg_state_home = synthetic_directories[4],
+                                                                                         .tmpdir = synthetic_directories[5]},
+                                       .workspace_script_recipes = {},
+                                       .limits = {}};
+  auto intent = command::CommandIntent::structured({"cmake", "--build", "build"});
+  auto preparation = intent ? command::prepare_command(*intent, options)
+                            : ava::core::Result<command::CommandPreparation>{
+                                  std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "no contained command intent"))};
+  expect(preparation.has_value(), "replacement-race command preparation succeeds");
+  if (!preparation)
+    return;
+
+  auto const path_entry = std::ranges::find_if(preparation->plan().path_entries(),
+                                               [&](command::CommandPathEntry const& entry) { return entry.directory == fix.bin.lexically_normal(); });
+  auto plan = containment::prepare_development_containment(*preparation, false);
+  auto const target_rule = std::ranges::find_if(
+      plan.filesystem_rules, [&](containment::ContainmentFilesystemRule const& rule) { return rule.logical_path == fix.bin.lexically_normal(); });
+  expect(path_entry != preparation->plan().path_entries().end() && plan.availability == containment::ContainmentAvailability::Available &&
+             target_rule != plan.filesystem_rules.end() && target_rule->identity_bound,
+         "containment plan includes an identity-bound rule for the external sealed PATH directory");
+  if (path_entry == preparation->plan().path_entries().end() || plan.availability != containment::ContainmentAvailability::Available ||
+      target_rule == plan.filesystem_rules.end() || !target_rule->identity_bound)
+    return;
+
+  auto const approved_directory = fix.root / "approved-path-original";
+  std::error_code replacement_error;
+  std::filesystem::rename(fix.bin, approved_directory, replacement_error);
+  bool const approved_directory_moved = !replacement_error;
+  if (approved_directory_moved)
+  {
+    std::filesystem::create_directory(fix.bin, replacement_error);
+    if (!replacement_error && ::chmod(fix.bin.c_str(), S_IRWXU) != 0)
+      replacement_error = std::error_code(errno, std::generic_category());
+  }
+  if (replacement_error)
+  {
+    if (approved_directory_moved)
+    {
+      std::error_code cleanup_error;
+      std::filesystem::remove_all(fix.bin, cleanup_error);
+      cleanup_error.clear();
+      std::filesystem::rename(approved_directory, fix.bin, cleanup_error);
+    }
+    expect(false, "replacement-race fixture replaces the approved PATH directory");
+    return;
+  }
+
+  pid_t const child = ::fork();
+  if (child == 0)
+  {
+    auto const applied = containment::apply_containment_in_child(plan);
+    _exit(applied ? 91 : 90);
+  }
+
+  int child_status = 0;
+  bool child_exited = false;
+  if (child > 0)
+  {
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+      pid_t const waited = ::waitpid(child, &child_status, WNOHANG);
+      if (waited == child)
+      {
+        child_exited = true;
+        break;
+      }
+      if (waited < 0 && errno != EINTR)
+        break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (!child_exited)
+    {
+      static_cast<void>(::kill(child, SIGKILL));
+      static_cast<void>(::waitpid(child, &child_status, 0));
+    }
+  }
+
+  std::error_code restore_error;
+  std::filesystem::remove_all(fix.bin, restore_error);
+  bool const replacement_removed = !restore_error;
+  restore_error.clear();
+  std::filesystem::rename(approved_directory, fix.bin, restore_error);
+  bool const restored = !restore_error;
+
+  expect(child > 0 && child_exited && WIFEXITED(child_status) && WEXITSTATUS(child_status) == 90,
+         "child containment application rejects a replaced external PATH rule before accepting or executing the command");
+  expect(replacement_removed && restored, "replacement-race fixture restores the approved PATH directory");
+}
+
 void test_contained_command_writes_workspace()
 {
   if (!landlock_available())
@@ -725,6 +864,7 @@ void run_containment_tests()
   if (ava::test::skip_requested())
     return;
 
+  test_replaced_external_path_rule_fails_child_application();
   test_contained_command_writes_workspace();
   test_contained_command_writes_private_primary_group_workspace();
   test_contained_command_writes_0755_workspace();

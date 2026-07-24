@@ -50,7 +50,6 @@ Validation used no paid live-provider calls.
 - The sanitizer CTest suite passed the same 77 executed checks with zero failures in 205.99 seconds under the intentional two-job cap.
 - All 13 opt-in tmux TUI scenarios then executed concurrently and passed in 12.74 seconds. This includes raw-shell one-shot prompting, exact persistent denial, redacted durable audit/diagnostics, session-grant behavior, and fixture authority permissions.
 - Focused command, containment, tool/process, AgentLoop, permission-rule, runtime, RPC, ACP, and TUI tests passed. They cover Standard auto-Allow and deny preflight, mutable-project containment, one-shot Critical behavior, bare/absolute and trusted symlink-alias identity parity, private-primary-group workspaces, typed recipe scope separation, secret-free environments, generic PATH containment, and foreground/background subagent routes.
-- Credential-free RPC smokes exercised generic contained build/test command resolution without a permission event and without exposing inherited host state.
 - The package test, Python smoke-driver compilation, `clang-format --dry-run --Werror` on changed C++, and `git diff --check` passed.
 - One final integrated security/correctness gate reviewed the complete command path under the documented malicious-model/repository threat model and reported no blocking findings.
 

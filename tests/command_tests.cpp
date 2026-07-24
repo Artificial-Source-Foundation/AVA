@@ -1104,6 +1104,8 @@ void test_stable_recipe_identity_is_scope_aware_and_secret_free()
       command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "./build"}), fixture.options("recipe-profile-v1"));
   auto const other_build =
       command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build-other"}), fixture.options("recipe-profile-v1"));
+  auto const environment_policy_changed =
+      command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build"}), fixture.options("recipe-profile-v2"));
 
   auto changed_roots = fixture.options("recipe-profile-v1");
   changed_roots.environment.tmpdir = fixture.root / "different-synthetic-tmp";
@@ -1139,6 +1141,7 @@ void test_stable_recipe_identity_is_scope_aware_and_secret_free()
   auto const first_metadata = metadata(first);
   auto const normalized_metadata = metadata(normalized);
   auto const other_build_metadata = metadata(other_build);
+  auto const environment_policy_changed_metadata = metadata(environment_policy_changed);
   auto const synthetic_changed_metadata = metadata(synthetic_changed);
   auto const workspace_two_metadata = metadata(workspace_two_plan);
   auto const changed_executable_metadata = metadata(changed_executable);
@@ -1147,11 +1150,13 @@ void test_stable_recipe_identity_is_scope_aware_and_secret_free()
   auto const secret_npm_metadata = metadata(secret_npm);
   auto const secret_raw_metadata = metadata(secret_raw);
 
-  expect(first && normalized && other_build && synthetic_changed && workspace_two_plan && changed_executable && npm_test && npm_lint && secret_npm &&
-             secret_raw && first_metadata.global_recipe_key.starts_with("sha256:ava-command-recipe-v1:") &&
+  expect(first && normalized && other_build && environment_policy_changed && synthetic_changed && workspace_two_plan && changed_executable && npm_test &&
+             npm_lint && secret_npm && secret_raw && first_metadata.global_recipe_key.starts_with("sha256:ava-command-recipe-v1:") &&
              first_metadata.workspace_recipe_key.starts_with("sha256:ava-command-workspace-recipe-v1:") &&
              first_metadata.global_recipe_key == normalized_metadata.global_recipe_key &&
              first_metadata.workspace_recipe_key == normalized_metadata.workspace_recipe_key &&
+             first_metadata.global_recipe_key != environment_policy_changed_metadata.global_recipe_key &&
+             first_metadata.workspace_recipe_key != environment_policy_changed_metadata.workspace_recipe_key &&
              first_metadata.global_recipe_key == synthetic_changed_metadata.global_recipe_key &&
              first_metadata.workspace_recipe_key == synthetic_changed_metadata.workspace_recipe_key &&
              first_metadata.global_recipe_key == workspace_two_metadata.global_recipe_key &&
@@ -1163,8 +1168,8 @@ void test_stable_recipe_identity_is_scope_aware_and_secret_free()
              first_metadata.recipe_display.find(fixture.workspace.string()) == std::string::npos && secret_npm_metadata.global_recipe_key.empty() &&
              secret_npm_metadata.workspace_recipe_key.empty() && secret_npm_metadata.recipe_display.empty() && secret_raw_metadata.global_recipe_key.empty() &&
              secret_raw_metadata.workspace_recipe_key.empty() && secret_raw_metadata.recipe_display.empty(),
-         "stable recipe identities normalize workspace paths, ignore synthetic roots, bind executable and workspace scope, distinguish typed actions, and "
-         "never mint or display secrets for standard or critical commands");
+         "stable recipe identities normalize workspace paths, ignore synthetic roots, bind environment-policy version, executable, and workspace scope, "
+         "distinguish typed actions, and never mint or display secrets for standard or critical commands");
 }
 
 void test_recipe_argument_domains_and_unavailable_containment()

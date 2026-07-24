@@ -309,7 +309,7 @@ void test_app_rpc_prompt_payload_serialization()
   command_metadata.containment_available = false;
   command_metadata.containment_status = ava::permissions::CommandContainmentStatus::Unavailable;
   command_metadata.backend_maximum_scope = ava::command::InteractiveScope::Once;
-  command_metadata.environment_profile_id = "ava-local-bash-prompt-v1";
+  command_metadata.environment_profile_id = "ava-local-bash-prompt-v2";
   command_metadata.environment_digest = "abc123";
   command_metadata.executor_identity_verified = false;
   auto const command_permission_json =
@@ -334,7 +334,7 @@ void test_app_rpc_prompt_payload_serialization()
              command_permission_json.find("\"containment_available\":false") != std::string::npos &&
              command_permission_json.find("\"containment_status\":\"unavailable\"") != std::string::npos &&
              command_permission_json.find("\"backend_maximum_scope\":\"once\"") != std::string::npos &&
-             command_permission_json.find("\"environment_profile_id\":\"ava-local-bash-prompt-v1\"") != std::string::npos &&
+             command_permission_json.find("\"environment_profile_id\":\"ava-local-bash-prompt-v2\"") != std::string::npos &&
              command_permission_json.find("\"environment_digest\":\"abc123\"") != std::string::npos &&
              command_permission_json.find("\"executor_identity_verified\":false") != std::string::npos,
          "RPC permission request payload includes additive optional command_metadata fields for sealed commands");

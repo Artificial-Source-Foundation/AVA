@@ -6,6 +6,7 @@
 #include "ava/tui/event_state.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/runtime_draft_internal.h"
 #include "ava/tui/runtime_input_internal.h"
 #include "ava/tui/runtime_internal.h"
 #include "ava/tui/runtime_state_internal.h"
@@ -234,23 +235,24 @@ int run_interactive_composer(TuiRuntimeOptions options)
   refresh_reasoning_status();
 
   bool terminal_write_failed = false;
-  std::vector<std::string> input_history;
-  std::optional<std::size_t> history_index;
-  std::string draft_input;
-  ComposerDraftState draft;
-  ComposerJumpMode jump_mode = ComposerJumpMode::None;
-  std::size_t selected_slash_command_index = 0;
-  bool slash_palette_suppressed = false;
-  bool path_completion_force_active = false;
+  RuntimeDraftState draft_state;
+  auto& input_history = draft_state.input_history;
+  auto& history_index = draft_state.history_index;
+  auto& draft_input = draft_state.draft_input;
+  auto& draft = draft_state.draft;
+  auto& jump_mode = draft_state.jump_mode;
+  auto& selected_slash_command_index = draft_state.selected_slash_command_index;
+  auto& slash_palette_suppressed = draft_state.slash_palette_suppressed;
+  auto& path_completion_force_active = draft_state.path_completion_force_active;
+  auto& draft_scroll_offset = draft_state.draft_scroll_offset;
+  auto& draft_selection_anchor = draft_state.draft_selection_anchor;
+  auto& draft_selection_cursor = draft_state.draft_selection_cursor;
+  auto& pending_escape_clear = draft_state.pending_escape_clear;
   std::size_t transcript_scroll_offset = 0;
   std::size_t detached_new_output_count = 0;
   detail::CompletionMatchCache completion_cache;
   detail::TranscriptLayoutCache transcript_layout_cache;
   std::optional<SidebarSnapshot> detached_sidebar_snapshot;
-  std::size_t draft_scroll_offset = 0;
-  std::size_t draft_selection_anchor = std::string::npos;
-  std::size_t draft_selection_cursor = std::string::npos;
-  bool pending_escape_clear = false;
   ActiveSelectList active_select_list = ActiveSelectList::None;
   std::optional<PendingSessionArchiveAction> session_archive_confirmation;
   std::recursive_mutex ui_mutex;
@@ -282,138 +284,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
     static_cast<void>(sink(event));
   };
 
-  auto max_draft_scroll_offset = [&](std::size_t height) {
-    auto const main_width = composer_main_width(snapshot);
-    auto const composer_lines = detail::composer_block_line_count(snapshot, height, main_width);
-    auto const input_lines = detail::input_render_line_spans(draft.text, main_width).size();
-    auto const layout = detail::composer_input_layout(input_lines, composer_lines, 0);
-    return input_lines > layout.visible_input_lines ? input_lines - layout.visible_input_lines : std::size_t{0};
-  };
-
-  auto clear_draft_selection = [&]() {
-    draft_selection_anchor = std::string::npos;
-    draft_selection_cursor = std::string::npos;
-  };
-
-  auto draft_selection_bounds = [&]() -> std::optional<std::pair<std::size_t, std::size_t>> {
-    if (draft_selection_anchor == std::string::npos || draft_selection_cursor == std::string::npos)
-      return std::nullopt;
-    auto start = clamp_composer_draft_cursor(draft.text, draft_selection_anchor);
-    auto end = clamp_composer_draft_cursor(draft.text, draft_selection_cursor);
-    if (end < start)
-      std::swap(start, end);
-    if (start == end)
-      return std::nullopt;
-    return std::pair{start, end};
-  };
-
-  auto replace_draft_selection = [&](std::string_view replacement) {
-    auto const bounds = draft_selection_bounds();
-    if (!bounds)
-      return false;
-    auto const changed = replace_composer_draft_range(draft, bounds->first, bounds->second, replacement);
-    clear_draft_selection();
-    return changed;
-  };
-
-  auto delete_draft_selection = [&]() { return replace_draft_selection(std::string_view{}); };
-
-  auto selected_draft_text = [&]() -> std::optional<std::string> {
-    auto const bounds = draft_selection_bounds();
-    if (!bounds || bounds->first >= bounds->second || bounds->second > draft.text.size())
-      return std::nullopt;
-    return draft.text.substr(bounds->first, bounds->second - bounds->first);
-  };
-
-  auto copy_draft_selection = [&]() {
-    auto const text = selected_draft_text();
-    if (!text || text->empty())
-    {
-      snapshot.status = "no selection to copy";
-      static_cast<void>(beep());
-      return false;
-    }
-    auto const copied = copy_text_to_terminal_clipboard(*text);
-    snapshot.status = copied ? "copied selection to clipboard" : "clipboard copy failed";
-    if (!copied)
-      static_cast<void>(beep());
-    return copied;
-  };
-
-  auto extend_draft_selection = [&](TuiAction movement) {
-    pending_escape_clear = false;
-    history_index.reset();
-    draft_input.clear();
-    selected_slash_command_index = 0;
-    slash_palette_suppressed = false;
-    path_completion_force_active = false;
-    draft_scroll_offset = 0;
-    auto const anchor = draft_selection_anchor == std::string::npos ? clamp_composer_draft_cursor(draft.text, draft.cursor) : draft_selection_anchor;
-    static_cast<void>(apply_composer_draft_action(draft, movement));
-    draft.cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
-    draft_selection_anchor = anchor;
-    draft_selection_cursor = draft.cursor;
-    snapshot.status = draft_selection_bounds() ? "selection active" : "selection boundary";
-  };
-
-  auto extend_draft_selection_to = [&](std::size_t target) {
-    pending_escape_clear = false;
-    history_index.reset();
-    draft_input.clear();
-    selected_slash_command_index = 0;
-    slash_palette_suppressed = false;
-    path_completion_force_active = false;
-    draft_scroll_offset = 0;
-    auto const anchor = draft_selection_anchor == std::string::npos ? clamp_composer_draft_cursor(draft.text, draft.cursor) : draft_selection_anchor;
-    draft.cursor = clamp_composer_draft_cursor(draft.text, target);
-    draft.vertical_column = std::string::npos;
-    draft.yank_start = std::string::npos;
-    draft.yank_end = std::string::npos;
-    draft_selection_anchor = anchor;
-    draft_selection_cursor = draft.cursor;
-    snapshot.status = draft_selection_bounds() ? "selection active" : "selection boundary";
-  };
-
-  auto extend_draft_selection_for_key = [&](Key key) -> bool {
-    switch (key)
-    {
-      case Key::ShiftArrowUp:
-        extend_draft_selection(TuiAction::CursorUp);
-        return true;
-      case Key::ShiftArrowDown:
-        extend_draft_selection(TuiAction::CursorDown);
-        return true;
-      case Key::ShiftArrowLeft:
-        extend_draft_selection(TuiAction::CursorLeft);
-        return true;
-      case Key::ShiftArrowRight:
-        extend_draft_selection(TuiAction::CursorRight);
-        return true;
-      case Key::ShiftCtrlArrowLeft:
-      case Key::ShiftAltArrowLeft:
-        extend_draft_selection(TuiAction::CursorWordLeft);
-        return true;
-      case Key::ShiftCtrlArrowRight:
-      case Key::ShiftAltArrowRight:
-        extend_draft_selection(TuiAction::CursorWordRight);
-        return true;
-      case Key::ShiftHome:
-        extend_draft_selection(TuiAction::CursorLineStart);
-        return true;
-      case Key::ShiftEnd:
-        extend_draft_selection(TuiAction::CursorLineEnd);
-        return true;
-      case Key::ShiftCtrlHome:
-        extend_draft_selection_to(0);
-        return true;
-      case Key::ShiftCtrlEnd:
-        extend_draft_selection_to(draft.text.size());
-        return true;
-      default:
-        return false;
-    }
-  };
-
   auto render = [&]() -> bool {
     if (terminal_signal_received())
       return false;
@@ -424,7 +294,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       draft.cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
       snapshot.input = draft.text;
       snapshot.input_cursor = draft.cursor;
-      if (auto const selection = draft_selection_bounds())
+      if (auto const selection = draft_state.selection_bounds())
       {
         snapshot.input_selection_start = selection->first;
         snapshot.input_selection_end = selection->second;
@@ -447,7 +317,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       snapshot.width = width;
       snapshot.height = height;
       snapshot.sidebar_drawer_scroll_offset = std::min(snapshot.sidebar_drawer_scroll_offset, sidebar_drawer_max_scroll_offset(snapshot));
-      draft_scroll_offset = std::min(draft_scroll_offset, max_draft_scroll_offset(height));
+      draft_scroll_offset = std::min(draft_scroll_offset, draft_state.max_draft_scroll_offset(snapshot, height));
       snapshot.draft_scroll_offset = draft_scroll_offset;
       if (transcript_scroll_offset > 0)
       {
@@ -526,32 +396,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     return wrote && !terminal_signal_received();
   };
-  auto insert_newline = [&]() {
-    pending_escape_clear = false;
-    history_index.reset();
-    draft_input.clear();
-    selected_slash_command_index = 0;
-    path_completion_force_active = false;
-    draft_scroll_offset = 0;
-    if (!replace_draft_selection("\n"))
-      static_cast<void>(insert_composer_draft_text(draft, "\n"));
-  };
-  auto convert_backslash_enter_to_newline = [&]() {
-    if (draft_selection_bounds())
-      return false;
-    if (!replace_composer_backslash_before_cursor_with_newline(draft))
-      return false;
-    pending_escape_clear = false;
-    history_index.reset();
-    draft_input.clear();
-    selected_slash_command_index = 0;
-    slash_palette_suppressed = false;
-    path_completion_force_active = false;
-    draft_scroll_offset = 0;
-    snapshot.status = "newline inserted";
-    return true;
-  };
-
   auto resolve_permission_prompt = [&](ava::permissions::PermissionPrompt const& prompt, std::function<bool()> const& stop_requested = {},
                                        std::function<bool()> const& request_stop = {}) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     auto permission_label = std::string("permission requested");
@@ -1105,7 +949,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     slash_palette_suppressed = false;
     path_completion_force_active = false;
     draft_scroll_offset = 0;
-    clear_draft_selection();
+    draft_state.clear_selection();
     snapshot.status.clear();
     return apply_composer_draft_action(draft, TuiAction::ClearInput);
   };
@@ -1125,7 +969,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     slash_palette_suppressed = false;
     path_completion_force_active = false;
     draft_scroll_offset = 0;
-    clear_draft_selection();
+    draft_state.clear_selection();
     snapshot.status = "opening external editor";
     if (!render())
       return false;
@@ -1161,7 +1005,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     slash_palette_suppressed = false;
     path_completion_force_active = false;
     draft_scroll_offset = 0;
-    clear_draft_selection();
+    draft_state.clear_selection();
 
     {
       SignalBlockGuard block_signals;
@@ -1211,7 +1055,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     slash_palette_suppressed = false;
     path_completion_force_active = false;
     draft_scroll_offset = 0;
-    clear_draft_selection();
+    draft_state.clear_selection();
     if (!options.on_paste_clipboard_image)
     {
       snapshot.status = "clipboard image paste unavailable";
@@ -1638,7 +1482,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         else
         {
-          clear_draft_selection();
+          draft_state.clear_selection();
           static_cast<void>(replace_composer_draft(draft, std::move(selection_text.text), selection_text.cursor));
           selected_slash_command_index = 0;
           path_completion_force_active = false;
@@ -1669,7 +1513,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         return InputLoopAction::ContinueLoop;
       }
       auto selection = selected_completion_text(selected_slash_command_index);
-      clear_draft_selection();
+      draft_state.clear_selection();
       static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
       selected_slash_command_index = 0;
       path_completion_force_active = false;
@@ -1695,7 +1539,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         return InputLoopAction::ContinueLoop;
       }
       auto selection = selected_completion_text(selected_slash_command_index);
-      clear_draft_selection();
+      draft_state.clear_selection();
       static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
       selected_slash_command_index = 0;
       path_completion_force_active = false;
@@ -1712,7 +1556,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       return InputLoopAction::ContinueLoop;
     }
     auto const submitted = immediate_slash_submission ? *immediate_slash_submission : expanded_composer_draft_text(draft);
-    clear_draft_selection();
+    draft_state.clear_selection();
     reset_composer_draft(draft);
     jump_mode = ComposerJumpMode::None;
     draft_scroll_offset = 0;
@@ -2350,7 +2194,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
               return render();
             }
             auto const restored_text = restored->steering ? "/steer " + restored->message : restored->message;
-            clear_draft_selection();
+            draft_state.clear_selection();
             static_cast<void>(replace_composer_draft(draft, restored_text));
             draft_scroll_offset = 0;
             history_index.reset();
@@ -2374,7 +2218,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
             if (draft.text == "/sidebar")
             {
               push_history(input_history, draft.text);
-              clear_draft_selection();
+              draft_state.clear_selection();
               reset_composer_draft(draft);
               jump_mode = ComposerJumpMode::None;
               draft_scroll_offset = 0;
@@ -2407,7 +2251,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
             push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted_command});
             for (auto const& output : dispatch.output)
               push_transcript(snapshot, TranscriptItem{.label = "ava", .text = output, .meta = assistant_meta_for_snapshot(snapshot)});
-            clear_draft_selection();
+            draft_state.clear_selection();
             reset_composer_draft(draft);
             jump_mode = ComposerJumpMode::None;
             draft_scroll_offset = 0;
@@ -2480,7 +2324,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
               return render();
             }
             push_history(input_history, queued_text);
-            clear_draft_selection();
+            draft_state.clear_selection();
             reset_composer_draft(draft);
             jump_mode = ComposerJumpMode::None;
             draft_scroll_offset = 0;
@@ -2512,7 +2356,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
               slash_palette_suppressed = false;
               path_completion_force_active = false;
               draft_scroll_offset = 0;
-              clear_draft_selection();
+              draft_state.clear_selection();
               snapshot.status =
                   jump_composer_draft_to_character(draft, *target, forward) ? (forward ? "jumped forward" : "jumped backward") : "jump character not found";
               return render();
@@ -2523,10 +2367,10 @@ int run_interactive_composer(TuiRuntimeOptions options)
           {
             return request_stop();
           }
-          if (active_is_action(TuiAction::CopySelection) && draft_selection_bounds())
+          if (active_is_action(TuiAction::CopySelection) && draft_state.selection_bounds())
           {
             pending_escape_clear = false;
-            static_cast<void>(copy_draft_selection());
+            static_cast<void>(draft_state.copy_selection(snapshot));
             return render();
           }
           if (active_is_action(TuiAction::Interrupt))
@@ -2556,13 +2400,13 @@ int run_interactive_composer(TuiRuntimeOptions options)
             auto const text = active_input.text.empty() ? std::string(1, active_event.character) : active_input.text;
             if (active_input.bracketed_paste)
             {
-              static_cast<void>(delete_draft_selection());
+              static_cast<void>(draft_state.delete_selection());
               static_cast<void>(insert_composer_paste_text(draft, text));
               snapshot.status = "pasted into draft safely";
             }
             else
             {
-              if (!replace_draft_selection(text))
+              if (!draft_state.replace_selection(text))
                 static_cast<void>(insert_composer_draft_text(draft, text));
             }
           };
@@ -2571,7 +2415,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
             insert_active_text();
             return render();
           }
-          if (extend_draft_selection_for_key(active_event.key))
+          if (draft_state.extend_selection_for_key(active_event.key, snapshot))
           {
             return render();
           }
@@ -2584,7 +2428,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
             slash_palette_suppressed = false;
             path_completion_force_active = false;
             draft_scroll_offset = 0;
-            clear_draft_selection();
+            draft_state.clear_selection();
             draft.cursor = active_event.key == Key::CtrlHome ? 0 : draft.text.size();
             draft.vertical_column = std::string::npos;
             draft.yank_start = std::string::npos;
@@ -2602,7 +2446,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
             }
             else
             {
-              clear_draft_selection();
+              draft_state.clear_selection();
               auto selection = slash_command_selection_text(draft.text, draft.cursor, snapshot.slash_commands, selected_slash_command_index);
               static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
               selected_slash_command_index = 0;
@@ -2624,7 +2468,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
               return render();
             }
             auto selection = selected_completion_text(selected_slash_command_index);
-            clear_draft_selection();
+            draft_state.clear_selection();
             static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
             selected_slash_command_index = 0;
             path_completion_force_active = false;
@@ -2644,7 +2488,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
               return render();
             }
             auto selection = selected_completion_text(selected_slash_command_index);
-            clear_draft_selection();
+            draft_state.clear_selection();
             static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
             selected_slash_command_index = 0;
             path_completion_force_active = false;
@@ -2677,7 +2521,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
                   return render();
                 }
                 auto selection = selected_completion_text(0);
-                clear_draft_selection();
+                draft_state.clear_selection();
                 static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
                 path_completion_force_active = false;
                 draft_scroll_offset = 0;
@@ -2693,7 +2537,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           }
           if (active_is_action(TuiAction::NewLine))
           {
-            insert_newline();
+            draft_state.insert_newline();
             return render();
           }
           if (active_is_action(TuiAction::ExternalEditor))
@@ -2732,7 +2576,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           {
             if (auto handled = reject_disabled_visible_completion())
               return *handled;
-            if (active_event.key == Key::Enter && convert_backslash_enter_to_newline())
+            if (active_event.key == Key::Enter && draft_state.convert_backslash_enter_to_newline(snapshot))
               return render();
             if (auto handled = run_active_command())
               return *handled;
@@ -2754,87 +2598,87 @@ int run_interactive_composer(TuiRuntimeOptions options)
             draft_scroll_offset = 0;
             if (active_is_action(TuiAction::DeleteBackward))
             {
-              if (!delete_draft_selection())
+              if (!draft_state.delete_selection())
                 static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteBackward));
             }
             else if (active_delete_forward)
             {
-              if (!delete_draft_selection())
+              if (!draft_state.delete_selection())
                 static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteForward));
             }
             else if (active_is_action(TuiAction::DeleteWordBackward))
             {
-              if (!delete_draft_selection())
+              if (!draft_state.delete_selection())
                 static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteWordBackward));
             }
             else if (active_is_action(TuiAction::DeleteWordForward))
             {
-              if (!delete_draft_selection())
+              if (!draft_state.delete_selection())
                 static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteWordForward));
             }
             else if (active_is_action(TuiAction::DeleteToLineStart))
             {
-              if (!delete_draft_selection())
+              if (!draft_state.delete_selection())
                 static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteToLineStart));
             }
             else if (active_is_action(TuiAction::DeleteToLineEnd))
             {
-              if (!delete_draft_selection())
+              if (!draft_state.delete_selection())
                 static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteToLineEnd));
             }
             else if (active_is_action(TuiAction::ClearInput))
             {
-              clear_draft_selection();
+              draft_state.clear_selection();
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::ClearInput));
             }
             else if (active_is_action(TuiAction::CursorLeft))
             {
-              clear_draft_selection();
+              draft_state.clear_selection();
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorLeft));
             }
             else if (active_is_action(TuiAction::CursorRight))
             {
-              clear_draft_selection();
+              draft_state.clear_selection();
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorRight));
             }
             else if (active_is_action(TuiAction::CursorLineStart))
             {
-              clear_draft_selection();
+              draft_state.clear_selection();
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorLineStart));
             }
             else if (active_is_action(TuiAction::CursorLineEnd))
             {
-              clear_draft_selection();
+              draft_state.clear_selection();
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorLineEnd));
             }
             else if (active_is_action(TuiAction::CursorWordLeft))
             {
-              clear_draft_selection();
+              draft_state.clear_selection();
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorWordLeft));
             }
             else if (active_is_action(TuiAction::CursorWordRight))
             {
-              clear_draft_selection();
+              draft_state.clear_selection();
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorWordRight));
             }
             else if (active_is_action(TuiAction::Undo))
             {
-              clear_draft_selection();
+              draft_state.clear_selection();
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::Undo));
             }
             else if (active_is_action(TuiAction::Redo))
             {
-              clear_draft_selection();
+              draft_state.clear_selection();
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::Redo));
             }
             else if (active_is_action(TuiAction::Yank))
             {
-              clear_draft_selection();
+              draft_state.clear_selection();
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::Yank));
             }
             else if (active_is_action(TuiAction::YankPop))
             {
-              clear_draft_selection();
+              draft_state.clear_selection();
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::YankPop));
             }
             return render();
@@ -2914,7 +2758,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (active_is_action(TuiAction::HistoryPrev))
           {
             pending_escape_clear = false;
-            clear_draft_selection();
+            draft_state.clear_selection();
             selected_slash_command_index = 0;
             slash_palette_suppressed = false;
             path_completion_force_active = false;
@@ -2937,7 +2781,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (active_is_action(TuiAction::CursorUp) && apply_composer_draft_action(draft, TuiAction::CursorUp))
           {
             pending_escape_clear = false;
-            clear_draft_selection();
+            draft_state.clear_selection();
             history_index.reset();
             draft_input.clear();
             selected_slash_command_index = 0;
@@ -2992,7 +2836,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (active_is_action(TuiAction::HistoryNext))
           {
             pending_escape_clear = false;
-            clear_draft_selection();
+            draft_state.clear_selection();
             selected_slash_command_index = 0;
             slash_palette_suppressed = false;
             path_completion_force_active = false;
@@ -3015,7 +2859,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (active_is_action(TuiAction::CursorDown) && apply_composer_draft_action(draft, TuiAction::CursorDown))
           {
             pending_escape_clear = false;
-            clear_draft_selection();
+            draft_state.clear_selection();
             history_index.reset();
             draft_input.clear();
             selected_slash_command_index = 0;
@@ -3035,7 +2879,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
               else
               {
                 auto selection = slash_command_selection_text(draft.text, draft.cursor, snapshot.slash_commands, *clicked);
-                clear_draft_selection();
+                draft_state.clear_selection();
                 static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
                 selected_slash_command_index = 0;
                 snapshot.status = "command selected - press Enter to queue";
@@ -3054,7 +2898,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
               else
               {
                 auto selection = selected_completion_text(*clicked);
-                clear_draft_selection();
+                draft_state.clear_selection();
                 static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
                 selected_slash_command_index = 0;
                 snapshot.status = "file reference selected";
@@ -3073,7 +2917,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
               else
               {
                 auto selection = selected_completion_text(*clicked);
-                clear_draft_selection();
+                draft_state.clear_selection();
                 static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
                 selected_slash_command_index = 0;
                 path_completion_force_active = false;
@@ -3089,7 +2933,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
             if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
             {
               draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, *cursor);
-              clear_draft_selection();
+              draft_state.clear_selection();
               snapshot.status = "cursor moved";
               return render();
             }
@@ -3478,7 +3322,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         auto status = state.status;
         snapshot.transcript.clear();
         ++snapshot.transcript_generation;
-        clear_draft_selection();
+        draft_state.clear_selection();
         reset_composer_draft(draft);
         jump_mode = ComposerJumpMode::None;
         draft_input.clear();
@@ -3678,7 +3522,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           snapshot.select_list.reset();
           active_select_list = ActiveSelectList::None;
           auto draft_text = "/sessions rename " + selected_value + " ";
-          clear_draft_selection();
+          draft_state.clear_selection();
           static_cast<void>(replace_composer_draft(draft, std::move(draft_text)));
           draft_input.clear();
           history_index.reset();
@@ -3700,7 +3544,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           snapshot.select_list.reset();
           active_select_list = ActiveSelectList::None;
           auto draft_text = "/sessions labels " + selected_value + " ";
-          clear_draft_selection();
+          draft_state.clear_selection();
           static_cast<void>(replace_composer_draft(draft, std::move(draft_text)));
           draft_input.clear();
           history_index.reset();
@@ -3856,7 +3700,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         else if (resolved_list == ActiveSelectList::Hotkeys && !selected_value.empty())
         {
           auto draft_command = std::string("/keybindings set ") + selected_value + " ";
-          clear_draft_selection();
+          draft_state.clear_selection();
           static_cast<void>(replace_composer_draft(draft, std::move(draft_command)));
           selected_slash_command_index = 0;
           path_completion_force_active = false;
@@ -3867,7 +3711,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         else if (resolved_list == ActiveSelectList::Settings && selected_value == kSettingsEditKeybindings)
         {
-          clear_draft_selection();
+          draft_state.clear_selection();
           static_cast<void>(replace_composer_draft(draft, "/keybindings set "));
           selected_slash_command_index = 0;
           path_completion_force_active = false;
@@ -3981,7 +3825,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         static_cast<void>(beep());
         return;
       }
-      clear_draft_selection();
+      draft_state.clear_selection();
       auto selection = slash_command_selection_text(draft.text, draft.cursor, snapshot.slash_commands, selected_slash_command_index);
       static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
       selected_slash_command_index = 0;
@@ -4000,7 +3844,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         return;
       }
       auto selection = selected_completion_text(selected_slash_command_index);
-      clear_draft_selection();
+      draft_state.clear_selection();
       static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
       selected_slash_command_index = 0;
       path_completion_force_active = false;
@@ -4018,7 +3862,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         return;
       }
       auto selection = selected_completion_text(selected_slash_command_index);
-      clear_draft_selection();
+      draft_state.clear_selection();
       static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
       selected_slash_command_index = 0;
       path_completion_force_active = false;
@@ -4052,7 +3896,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           return true;
         }
         auto selection = selected_completion_text(0);
-        clear_draft_selection();
+        draft_state.clear_selection();
         static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
         path_completion_force_active = false;
         draft_scroll_offset = 0;
@@ -4081,7 +3925,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         slash_palette_suppressed = false;
         path_completion_force_active = false;
         draft_scroll_offset = 0;
-        clear_draft_selection();
+        draft_state.clear_selection();
         snapshot.status =
             jump_composer_draft_to_character(draft, *target, forward) ? (forward ? "jumped forward" : "jumped backward") : "jump character not found";
       }
@@ -4113,11 +3957,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
       auto const text = input.text.empty() ? std::string(1, event.character) : input.text;
       if (input.bracketed_paste)
       {
-        static_cast<void>(delete_draft_selection());
+        static_cast<void>(draft_state.delete_selection());
         if (insert_composer_paste_text(draft, text))
           snapshot.status = "pasted into draft safely";
       }
-      else if (!replace_draft_selection(text))
+      else if (!draft_state.replace_selection(text))
       {
         static_cast<void>(insert_composer_draft_text(draft, text));
       }
@@ -4136,7 +3980,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     else if (is_action(TuiAction::NewLine))
     {
-      insert_newline();
+      draft_state.insert_newline();
     }
     else if (is_action(TuiAction::ExternalEditor))
     {
@@ -4184,7 +4028,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
       draft_scroll_offset = 0;
-      if (!delete_draft_selection())
+      if (!draft_state.delete_selection())
         static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteBackward));
     }
     else if (delete_forward_action)
@@ -4195,7 +4039,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
       draft_scroll_offset = 0;
-      if (!delete_draft_selection())
+      if (!draft_state.delete_selection())
         static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteForward));
     }
     else if (is_action(TuiAction::DeleteWordBackward))
@@ -4206,7 +4050,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
       draft_scroll_offset = 0;
-      if (!delete_draft_selection())
+      if (!draft_state.delete_selection())
         static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteWordBackward));
     }
     else if (is_action(TuiAction::DeleteWordForward))
@@ -4217,7 +4061,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
       draft_scroll_offset = 0;
-      if (!delete_draft_selection())
+      if (!draft_state.delete_selection())
         static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteWordForward));
     }
     else if (is_action(TuiAction::DeleteToLineStart))
@@ -4228,7 +4072,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
       draft_scroll_offset = 0;
-      if (!delete_draft_selection())
+      if (!draft_state.delete_selection())
         static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteToLineStart));
     }
     else if (is_action(TuiAction::DeleteToLineEnd))
@@ -4239,14 +4083,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
       draft_scroll_offset = 0;
-      if (!delete_draft_selection())
+      if (!draft_state.delete_selection())
         static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteToLineEnd));
     }
-    else if (is_action(TuiAction::CopySelection) && draft_selection_bounds())
+    else if (is_action(TuiAction::CopySelection) && draft_state.selection_bounds())
     {
       pending_escape_clear = false;
       path_completion_force_active = false;
-      static_cast<void>(copy_draft_selection());
+      static_cast<void>(draft_state.copy_selection(snapshot));
     }
     else if (is_action(TuiAction::ClearInput) && (!draft.text.empty() || !is_action(TuiAction::Interrupt)))
     {
@@ -4257,7 +4101,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       slash_palette_suppressed = false;
       path_completion_force_active = false;
       draft_scroll_offset = 0;
-      clear_draft_selection();
+      draft_state.clear_selection();
       snapshot.status = apply_composer_draft_action(draft, TuiAction::ClearInput) ? "input cleared" : "input already empty";
     }
     else if (is_action(TuiAction::AutocompleteAccept) && slash_palette_active())
@@ -4402,21 +4246,21 @@ int run_interactive_composer(TuiRuntimeOptions options)
       pending_escape_clear = false;
       if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
       {
-        clear_draft_selection();
+        draft_state.clear_selection();
         selected_slash_command_index = *clicked;
         select_slash_command();
       }
       else if (auto const clicked = detail::file_reference_palette_selection_for_screen_position_cached(snapshot, event.mouse_row, event.mouse_column,
                                                                                                         completion_cache, snapshot.file_references_generation))
       {
-        clear_draft_selection();
+        draft_state.clear_selection();
         selected_slash_command_index = *clicked;
         select_file_reference();
       }
       else if (auto const clicked = detail::path_completion_palette_selection_for_screen_position_cached(snapshot, event.mouse_row, event.mouse_column,
                                                                                                          completion_cache, snapshot.file_references_generation))
       {
-        clear_draft_selection();
+        draft_state.clear_selection();
         selected_slash_command_index = *clicked;
         select_path_completion();
       }
@@ -4452,17 +4296,17 @@ int run_interactive_composer(TuiRuntimeOptions options)
         draft.yank_end = std::string::npos;
         history_index.reset();
         draft_input.clear();
-        snapshot.status = draft_selection_bounds() ? "selection active" : "cursor moved";
+        snapshot.status = draft_state.selection_bounds() ? "selection active" : "cursor moved";
       }
     }
-    else if (extend_draft_selection_for_key(event.key))
+    else if (draft_state.extend_selection_for_key(event.key, snapshot))
     {
       // Selection state was updated by the helper.
     }
     else if (event.key == Key::CtrlHome)
     {
       pending_escape_clear = false;
-      clear_draft_selection();
+      draft_state.clear_selection();
       draft.cursor = 0;
       draft.vertical_column = std::string::npos;
       draft.yank_start = std::string::npos;
@@ -4471,7 +4315,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     else if (event.key == Key::CtrlEnd)
     {
       pending_escape_clear = false;
-      clear_draft_selection();
+      draft_state.clear_selection();
       draft.cursor = draft.text.size();
       draft.vertical_column = std::string::npos;
       draft.yank_start = std::string::npos;
@@ -4480,37 +4324,37 @@ int run_interactive_composer(TuiRuntimeOptions options)
     else if (is_action(TuiAction::CursorLeft))
     {
       pending_escape_clear = false;
-      clear_draft_selection();
+      draft_state.clear_selection();
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorLeft));
     }
     else if (is_action(TuiAction::CursorRight))
     {
       pending_escape_clear = false;
-      clear_draft_selection();
+      draft_state.clear_selection();
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorRight));
     }
     else if (is_action(TuiAction::CursorLineStart))
     {
       pending_escape_clear = false;
-      clear_draft_selection();
+      draft_state.clear_selection();
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorLineStart));
     }
     else if (is_action(TuiAction::CursorLineEnd))
     {
       pending_escape_clear = false;
-      clear_draft_selection();
+      draft_state.clear_selection();
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorLineEnd));
     }
     else if (is_action(TuiAction::CursorWordLeft))
     {
       pending_escape_clear = false;
-      clear_draft_selection();
+      draft_state.clear_selection();
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorWordLeft));
     }
     else if (is_action(TuiAction::CursorWordRight))
     {
       pending_escape_clear = false;
-      clear_draft_selection();
+      draft_state.clear_selection();
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorWordRight));
     }
     else if (is_action(TuiAction::PalettePrev) && slash_palette_active())
@@ -4558,7 +4402,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     else if (is_action(TuiAction::HistoryPrev))
     {
       pending_escape_clear = false;
-      clear_draft_selection();
+      draft_state.clear_selection();
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
       path_completion_force_active = false;
@@ -4579,7 +4423,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     else if (is_action(TuiAction::CursorUp) && apply_composer_draft_action(draft, TuiAction::CursorUp))
     {
       pending_escape_clear = false;
-      clear_draft_selection();
+      draft_state.clear_selection();
       history_index.reset();
       draft_input.clear();
       selected_slash_command_index = 0;
@@ -4630,7 +4474,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     else if (is_action(TuiAction::HistoryNext))
     {
       pending_escape_clear = false;
-      clear_draft_selection();
+      draft_state.clear_selection();
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
       path_completion_force_active = false;
@@ -4651,7 +4495,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     else if (is_action(TuiAction::CursorDown) && apply_composer_draft_action(draft, TuiAction::CursorDown))
     {
       pending_escape_clear = false;
-      clear_draft_selection();
+      draft_state.clear_selection();
       history_index.reset();
       draft_input.clear();
       selected_slash_command_index = 0;
@@ -4661,28 +4505,28 @@ int run_interactive_composer(TuiRuntimeOptions options)
     {
       pending_escape_clear = false;
       draft_scroll_offset = 0;
-      clear_draft_selection();
+      draft_state.clear_selection();
       snapshot.status = apply_composer_draft_action(draft, TuiAction::Undo) ? "undo" : "nothing to undo";
     }
     else if (is_action(TuiAction::Redo))
     {
       pending_escape_clear = false;
       draft_scroll_offset = 0;
-      clear_draft_selection();
+      draft_state.clear_selection();
       snapshot.status = apply_composer_draft_action(draft, TuiAction::Redo) ? "redo" : "nothing to redo";
     }
     else if (is_action(TuiAction::Yank))
     {
       pending_escape_clear = false;
       draft_scroll_offset = 0;
-      clear_draft_selection();
+      draft_state.clear_selection();
       snapshot.status = apply_composer_draft_action(draft, TuiAction::Yank) ? "yanked text" : "nothing to yank";
     }
     else if (is_action(TuiAction::YankPop))
     {
       pending_escape_clear = false;
       draft_scroll_offset = 0;
-      clear_draft_selection();
+      draft_state.clear_selection();
       snapshot.status = apply_composer_draft_action(draft, TuiAction::YankPop) ? "yank-pop" : "nothing to yank-pop";
     }
     else if (is_action(TuiAction::DetailsToggle))
@@ -4698,9 +4542,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     else if (is_action(TuiAction::Cancel))
     {
-      if (draft_selection_bounds())
+      if (draft_state.selection_bounds())
       {
-        clear_draft_selection();
+        draft_state.clear_selection();
         pending_escape_clear = false;
         snapshot.status.clear();
       }
@@ -4741,7 +4585,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     else if (is_action(TuiAction::Submit))
     {
-      if (event.key == Key::Enter && convert_backslash_enter_to_newline())
+      if (event.key == Key::Enter && draft_state.convert_backslash_enter_to_newline(snapshot))
       {
         if (!render())
         {

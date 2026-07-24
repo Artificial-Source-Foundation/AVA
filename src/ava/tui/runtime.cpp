@@ -6,6 +6,7 @@
 #include "ava/tui/event_state.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/runtime_input_internal.h"
 #include "ava/tui/runtime_internal.h"
 #include "ava/tui/session_grants.h"
 #include "ava/tui/terminal.h"
@@ -18,13 +19,11 @@
 #include <cctype>
 #include <cerrno>
 #include <chrono>
-#include <climits>
 #include <condition_variable>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <cwchar>
 #include <deque>
 #include <future>
 #include <iostream>
@@ -39,10 +38,14 @@
 #include <unistd.h>
 
 namespace ava::tui {
+using runtime_input::poll_curses_input;
+using runtime_input::printable_jump_target;
+using runtime_input::read_curses_input;
+using runtime_input::read_curses_input_with_timeout;
+using runtime_input::RuntimeInput;
+
 namespace {
 
-constexpr std::size_t kMaxBracketedPasteBytes = 1024 * 1024;
-constexpr std::size_t kMaxEscapeSequenceBytes = 16 * 1024;
 constexpr std::size_t kKeyboardScrollRows = 3;
 constexpr std::size_t kMouseWheelScrollRows = 1;
 constexpr auto kIdleInputPollDelay = std::chrono::milliseconds(250);
@@ -119,14 +122,6 @@ std::pair<std::size_t, std::size_t> terminal_size()
     return {static_cast<std::size_t>(width), static_cast<std::size_t>(height)};
   return {80, 24};
 }
-
-struct CursesInput
-{
-  InputEvent event;
-  std::string text;
-  bool bracketed_paste = false;
-  bool resize = false;
-};
 
 struct PendingPermissionRequest
 {
@@ -208,81 +203,6 @@ struct PendingSessionArchiveAction
   bool archive = true;
 };
 
-bool mouse_state_matches(mmask_t state, mmask_t mask)
-{
-  return (state & mask) != 0;
-}
-
-CursesInput key_input(Key key)
-{
-  return CursesInput{
-      .event = InputEvent{.key = key, .character = '\0', .text = {}, .mouse_column = 0, .mouse_row = 0}, .text = {}, .bracketed_paste = false, .resize = false};
-}
-
-CursesInput event_input(InputEvent event)
-{
-  return CursesInput{.event = std::move(event), .text = {}, .bracketed_paste = false, .resize = false};
-}
-
-CursesInput mouse_key_input(Key key, const MEVENT& mouse)
-{
-  return CursesInput{.event = InputEvent{.key = key,
-                                         .character = '\0',
-                                         .text = {},
-                                         .mouse_column = static_cast<std::size_t>(mouse.x + 1),
-                                         .mouse_row = static_cast<std::size_t>(mouse.y + 1)},
-                     .text = {},
-                     .bracketed_paste = false,
-                     .resize = false};
-}
-
-CursesInput unknown_input()
-{
-  return key_input(Key::Unknown);
-}
-
-std::optional<std::string> printable_jump_target(CursesInput const& input)
-{
-  if (input.bracketed_paste)
-    return std::nullopt;
-  if (input.event.key == Key::Space)
-    return std::string(" ");
-  if (input.event.key != Key::Character)
-    return std::nullopt;
-
-  std::string text = input.text.empty() ? std::string(1, input.event.character) : input.text;
-  if (text.empty())
-    return std::nullopt;
-
-  auto const first = static_cast<unsigned char>(text.front());
-  if (first < 0x20U || first == 0x7FU)
-    return std::nullopt;
-  if ((first & 0x80U) == 0)
-    return text.substr(0, 1);
-
-  auto length = std::size_t{0};
-  if (first >= 0xC2U && first <= 0xDFU)
-    length = 2;
-  else if ((first & 0xF0U) == 0xE0U)
-    length = 3;
-  else if (first >= 0xF0U && first <= 0xF4U)
-    length = 4;
-  if (length == 0 || text.size() < length)
-    return std::nullopt;
-  for (std::size_t index = 1; index < length; ++index)
-  {
-    if ((static_cast<unsigned char>(text[index]) & 0xC0U) != 0x80U)
-      return std::nullopt;
-  }
-  return text.substr(0, length);
-}
-
-bool curses_key_name_equals(int value, std::string_view expected)
-{
-  char const* name = keyname(value);
-  return name != nullptr && std::string_view(name) == expected;
-}
-
 std::string title_case_ascii(std::string_view text)
 {
   std::string output;
@@ -362,16 +282,6 @@ void apply_assistant_turn_meta(std::vector<TranscriptItem>& transcript, std::str
 bool is_compact_command(std::string_view line) noexcept
 {
   return line == "/compact" || (line.starts_with("/compact") && line.size() > 8 && line[8] == ' ');
-}
-
-std::optional<std::string> encode_wide_character(wchar_t character)
-{
-  std::mbstate_t state{};
-  char buffer[MB_LEN_MAX]{};
-  auto const length = std::wcrtomb(buffer, character, &state);
-  if (length == static_cast<std::size_t>(-1))
-    return std::nullopt;
-  return std::string(buffer, length);
 }
 
 std::string base64_encode(std::string_view text)
@@ -880,479 +790,6 @@ void add_custom_theme_settings_action(SelectListView& view, ThemeOptionItem cons
                                           .current = current,
                                           .enabled = true,
                                           .disabled_reason = {}});
-}
-
-CursesInput character_input(std::string text, bool bracketed_paste = false)
-{
-  auto const first_byte = text.empty() ? '\0' : text[0];
-  auto event_text = text;
-  return CursesInput{.event = InputEvent{.key = Key::Character, .character = first_byte, .text = std::move(event_text), .mouse_column = 0, .mouse_row = 0},
-                     .text = std::move(text),
-                     .bracketed_paste = bracketed_paste,
-                     .resize = false};
-}
-
-CursesInput space_input()
-{
-  return CursesInput{.event = InputEvent{.key = Key::Space, .character = ' ', .text = " ", .mouse_column = 0, .mouse_row = 0},
-                     .text = " ",
-                     .bracketed_paste = false,
-                     .resize = false};
-}
-
-std::optional<wchar_t> read_plain_wide_character()
-{
-  wint_t value = 0;
-  auto const result = wget_wch(stdscr, &value);
-  if (result == ERR || result == KEY_CODE_YES)
-    return std::nullopt;
-  return static_cast<wchar_t>(value);
-}
-
-std::pair<bool, std::string> read_ascii_sequence(std::string_view expected)
-{
-  std::string consumed;
-  consumed.reserve(expected.size());
-  for (auto const expected_char : expected)
-  {
-    auto const character = read_plain_wide_character();
-    if (!character)
-      return {false, consumed};
-    auto encoded = encode_wide_character(*character);
-    if (encoded)
-      consumed += *encoded;
-    if (*character != static_cast<unsigned char>(expected_char))
-      return {false, consumed};
-  }
-  return {true, consumed};
-}
-
-CursesInput read_bracketed_paste()
-{
-  std::string pasted;
-  static_cast<void>(wtimeout(stdscr, 1000));
-  while (!terminal_signal_received() && pasted.size() < kMaxBracketedPasteBytes)
-  {
-    auto const character = read_plain_wide_character();
-    if (!character)
-      break;
-    if (*character == L'\x1b')
-    {
-      auto [matched_end, consumed] = read_ascii_sequence("[201~");
-      if (matched_end)
-        break;
-      pasted.push_back('\x1b');
-      if (pasted.size() + consumed.size() > kMaxBracketedPasteBytes)
-      {
-        break;
-      }
-      pasted += consumed;
-      continue;
-    }
-    if (auto encoded = encode_wide_character(*character))
-    {
-      if (pasted.size() + encoded->size() > kMaxBracketedPasteBytes)
-      {
-        break;
-      }
-      pasted += *encoded;
-    }
-  }
-  static_cast<void>(wtimeout(stdscr, -1));
-  return character_input(normalize_composer_paste_text(pasted), true);
-}
-
-std::optional<CursesInput> read_escape_sequence_input()
-{
-  static_cast<void>(wtimeout(stdscr, 50));
-  std::string consumed;
-  consumed.reserve(32);
-  while (consumed.size() < kMaxEscapeSequenceBytes)
-  {
-    wint_t value = 0;
-    auto const result = wget_wch(stdscr, &value);
-    if (result == ERR)
-      break;
-    if (result == KEY_CODE_YES)
-    {
-      if (static_cast<int>(value) == KEY_BACKSPACE)
-      {
-        consumed.push_back('\x7f');
-      }
-      else
-      {
-        break;
-      }
-    }
-    else if (auto encoded = encode_wide_character(static_cast<wchar_t>(value)))
-    {
-      consumed += *encoded;
-    }
-    if (terminal_escape_sequence_complete(consumed))
-      break;
-  }
-  static_cast<void>(wtimeout(stdscr, -1));
-
-  if (consumed.empty())
-    return std::nullopt;
-  if (terminal_keyboard_protocol_handle_response(consumed))
-    return unknown_input();
-  if (consumed == "[200~")
-    return read_bracketed_paste();
-  if (auto event = terminal_escape_sequence_event(consumed); event.key != Key::Unknown)
-    return event_input(std::move(event));
-  if (terminal_escape_sequence_should_discard(consumed) || !terminal_escape_sequence_complete(consumed))
-  {
-    return unknown_input();
-  }
-  return unknown_input();
-}
-
-CursesInput read_curses_input()
-{
-  wint_t value = 0;
-  auto const result = wget_wch(stdscr, &value);
-  if (terminal_signal_received())
-    return key_input(Key::CtrlC);
-  if (result == ERR)
-    return unknown_input();
-
-  if (result == KEY_CODE_YES)
-  {
-    if (curses_key_name_equals(static_cast<int>(value), "kDC2"))
-    {
-      return key_input(Key::ShiftDelete);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kDC3"))
-    {
-      return key_input(Key::AltDelete);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kLFT6"))
-    {
-      return key_input(Key::ShiftCtrlArrowLeft);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kRIT6"))
-    {
-      return key_input(Key::ShiftCtrlArrowRight);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kLFT4"))
-    {
-      return key_input(Key::ShiftAltArrowLeft);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kRIT4"))
-    {
-      return key_input(Key::ShiftAltArrowRight);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kLFT3"))
-    {
-      return key_input(Key::AltArrowLeft);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kRIT3"))
-    {
-      return key_input(Key::AltArrowRight);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kUP3"))
-    {
-      return key_input(Key::AltArrowUp);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kDN3"))
-    {
-      return key_input(Key::AltArrowDown);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kUP2"))
-    {
-      return key_input(Key::ShiftArrowUp);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kDN2"))
-    {
-      return key_input(Key::ShiftArrowDown);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kri"))
-    {
-      return key_input(Key::ShiftArrowUp);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kind"))
-    {
-      return key_input(Key::ShiftArrowDown);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kLFT2"))
-    {
-      return key_input(Key::ShiftArrowLeft);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kRIT2"))
-    {
-      return key_input(Key::ShiftArrowRight);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kLFT5"))
-    {
-      return key_input(Key::CtrlArrowLeft);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kRIT5"))
-    {
-      return key_input(Key::CtrlArrowRight);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kHOM6"))
-    {
-      return key_input(Key::ShiftCtrlHome);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kEND6"))
-    {
-      return key_input(Key::ShiftCtrlEnd);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kHOM5"))
-    {
-      return key_input(Key::CtrlHome);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kEND5"))
-    {
-      return key_input(Key::CtrlEnd);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kHOM2"))
-    {
-      return key_input(Key::ShiftHome);
-    }
-    if (curses_key_name_equals(static_cast<int>(value), "kEND2"))
-    {
-      return key_input(Key::ShiftEnd);
-    }
-    switch (static_cast<int>(value))
-    {
-      case KEY_ENTER:
-        return key_input(Key::Enter);
-      case KEY_BACKSPACE:
-        return key_input(Key::Backspace);
-#ifdef KEY_BTAB
-      case KEY_BTAB:
-        return key_input(Key::ShiftTab);
-#endif
-#if defined(KEY_SDC) && (!defined(KEY_DC) || KEY_SDC != KEY_DC)
-      case KEY_SDC:
-        return key_input(Key::ShiftDelete);
-#endif
-#ifdef KEY_DC
-      case KEY_DC:
-        return key_input(Key::Delete);
-#endif
-#ifdef KEY_IC
-      case KEY_IC:
-        return key_input(Key::Insert);
-#endif
-#ifdef KEY_CLEAR
-      case KEY_CLEAR:
-        return key_input(Key::Clear);
-#endif
-      case KEY_UP:
-        return key_input(Key::ArrowUp);
-      case KEY_DOWN:
-        return key_input(Key::ArrowDown);
-      case KEY_LEFT:
-        return key_input(Key::ArrowLeft);
-      case KEY_RIGHT:
-        return key_input(Key::ArrowRight);
-#ifdef KEY_SLEFT
-      case KEY_SLEFT:
-        return key_input(Key::ShiftArrowLeft);
-#endif
-#ifdef KEY_SRIGHT
-      case KEY_SRIGHT:
-        return key_input(Key::ShiftArrowRight);
-#endif
-#ifdef KEY_SUP
-      case KEY_SUP:
-        return key_input(Key::ShiftArrowUp);
-#endif
-#ifdef KEY_SDOWN
-      case KEY_SDOWN:
-        return key_input(Key::ShiftArrowDown);
-#endif
-#ifdef KEY_SR
-      case KEY_SR:
-        return key_input(Key::ShiftArrowUp);
-#endif
-#ifdef KEY_SF
-      case KEY_SF:
-        return key_input(Key::ShiftArrowDown);
-#endif
-#ifdef KEY_SHOME
-      case KEY_SHOME:
-        return key_input(Key::ShiftHome);
-#endif
-#ifdef KEY_SEND
-      case KEY_SEND:
-        return key_input(Key::ShiftEnd);
-#endif
-      case KEY_PPAGE:
-        return key_input(Key::PageUp);
-      case KEY_NPAGE:
-        return key_input(Key::PageDown);
-#ifdef KEY_HOME
-      case KEY_HOME:
-        return key_input(Key::Home);
-#endif
-#ifdef KEY_END
-      case KEY_END:
-        return key_input(Key::End);
-#endif
-#ifdef KEY_F
-      case KEY_F(1):
-        return key_input(Key::F1);
-      case KEY_F(2):
-        return key_input(Key::F2);
-      case KEY_F(3):
-        return key_input(Key::F3);
-      case KEY_F(4):
-        return key_input(Key::F4);
-      case KEY_F(5):
-        return key_input(Key::F5);
-      case KEY_F(6):
-        return key_input(Key::F6);
-      case KEY_F(7):
-        return key_input(Key::F7);
-      case KEY_F(8):
-        return key_input(Key::F8);
-      case KEY_F(9):
-        return key_input(Key::F9);
-      case KEY_F(10):
-        return key_input(Key::F10);
-      case KEY_F(11):
-        return key_input(Key::F11);
-      case KEY_F(12):
-        return key_input(Key::F12);
-#endif
-#ifdef KEY_RESIZE
-      case KEY_RESIZE:
-        return CursesInput{.event = InputEvent{.key = Key::Unknown, .character = '\0', .text = {}, .mouse_column = 0, .mouse_row = 0},
-                           .text = {},
-                           .bracketed_paste = false,
-                           .resize = true};
-#endif
-#ifdef KEY_MOUSE
-      case KEY_MOUSE: {
-        MEVENT mouse{};
-        if (getmouse(&mouse) != OK)
-          return unknown_input();
-        if (mouse_state_matches(mouse.bstate, BUTTON4_PRESSED))
-        {
-          return mouse_key_input(Key::MouseWheelUp, mouse);
-        }
-        if (mouse_state_matches(mouse.bstate, BUTTON5_PRESSED))
-        {
-          return mouse_key_input(Key::MouseWheelDown, mouse);
-        }
-        if ((mouse.bstate & BUTTON1_CLICKED) != 0)
-        {
-          return mouse_key_input(Key::MouseLeftClick, mouse);
-        }
-        return unknown_input();
-      }
-#endif
-      default:
-        return unknown_input();
-    }
-  }
-
-  auto const character = static_cast<wchar_t>(value);
-  if (character == L'\r')
-    return key_input(Key::Enter);
-  if (character == L'\n')
-    return key_input(Key::ShiftEnter);
-  if (character == L'\t')
-    return key_input(Key::Tab);
-  if (character == L' ')
-    return space_input();
-  if (character == 0x00)
-    return key_input(Key::CtrlSpace);
-  if (character == 0x1B)
-  {
-    if (auto escape_input = read_escape_sequence_input())
-      return *escape_input;
-    return key_input(Key::Escape);
-  }
-  if (character == 0x01)
-    return key_input(Key::CtrlA);
-  if (character == 0x02)
-    return key_input(Key::CtrlB);
-  if (character == 0x03)
-    return key_input(Key::CtrlC);
-  if (character == 0x04)
-    return key_input(Key::CtrlD);
-  if (character == 0x05)
-    return key_input(Key::CtrlE);
-  if (character == 0x06)
-    return key_input(Key::CtrlF);
-  if (character == 0x07)
-    return key_input(Key::CtrlG);
-  if (character == 0x08)
-    return key_input(Key::CtrlH);
-  if (character == 0x0B)
-    return key_input(Key::CtrlK);
-  if (character == 0x0C)
-    return key_input(Key::CtrlL);
-  if (character == 0x1F)
-    return key_input(Key::CtrlMinus);
-  if (character == 0x0E)
-    return key_input(Key::CtrlN);
-  if (character == 0x0F)
-    return key_input(Key::CtrlO);
-  if (character == 0x10)
-    return key_input(Key::CtrlP);
-  if (character == 0x12)
-    return key_input(Key::CtrlR);
-  if (character == 0x13)
-    return key_input(Key::CtrlS);
-  if (character == 0x14)
-    return key_input(Key::CtrlT);
-  if (character == 0x15)
-    return key_input(Key::CtrlU);
-  if (character == 0x16)
-    return key_input(Key::CtrlV);
-  if (character == 0x17)
-    return key_input(Key::CtrlW);
-  if (character == 0x18)
-    return key_input(Key::CtrlX);
-  if (character == 0x19)
-    return key_input(Key::CtrlY);
-  if (character == 0x1A)
-    return key_input(Key::CtrlZ);
-  if (character == 0x1D)
-    return key_input(Key::CtrlRightBracket);
-  if (character == 0x7F)
-    return key_input(Key::Backspace);
-  if (character >= 0x20)
-  {
-    auto encoded = encode_wide_character(character);
-    if (!encoded)
-      return unknown_input();
-    return character_input(std::move(*encoded));
-  }
-  return unknown_input();
-}
-
-bool empty_curses_input(CursesInput const& input)
-{
-  return !input.resize && input.event.key == Key::Unknown && input.text.empty() && !input.bracketed_paste;
-}
-
-std::optional<CursesInput> poll_curses_input()
-{
-  static_cast<void>(wtimeout(stdscr, 0));
-  auto input = read_curses_input();
-  static_cast<void>(wtimeout(stdscr, -1));
-  if (empty_curses_input(input))
-  {
-    return std::nullopt;
-  }
-  return input;
-}
-
-std::optional<CursesInput> read_curses_input_with_timeout(std::chrono::milliseconds timeout)
-{
-  static_cast<void>(wtimeout(stdscr, static_cast<int>(timeout.count())));
-  auto input = read_curses_input();
-  static_cast<void>(wtimeout(stdscr, -1));
-  if (empty_curses_input(input))
-    return std::nullopt;
-  return input;
 }
 
 std::size_t truncate_transcript(std::vector<TranscriptItem>& transcript)
@@ -2366,7 +1803,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       return input;
     };
 
-    auto no_input = [](CursesInput const& input) { return !input.resize && input.event.key == Key::Unknown && input.text.empty() && !input.bracketed_paste; };
+    auto no_input = [](RuntimeInput const& input) { return !input.resize && input.event.key == Key::Unknown && input.text.empty() && !input.bracketed_paste; };
 
     while (true)
     {
@@ -3830,7 +3267,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
                                                                .mark_follow_up_started = mark_follow_up_started,
                                                                .image_attachments = submit_image_attachments});
         });
-        auto handle_active_input = [&](CursesInput const& active_input) -> bool {
+        auto handle_active_input = [&](RuntimeInput const& active_input) -> bool {
           if (active_input.resize)
             return render();
 

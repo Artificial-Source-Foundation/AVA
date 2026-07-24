@@ -18,6 +18,7 @@ add_library(ava_tui
   "event_state.cpp"
   "keybindings.cpp"
   "runtime.cpp"
+  "runtime_input.cpp"
   "session_grants.cpp"
   "terminal.cpp"
   "terminal_image.cpp"

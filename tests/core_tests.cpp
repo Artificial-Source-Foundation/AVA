@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
 #include "ava/core/path.h"
+#include "ava/core/trusted_home.h"
 
 #include <array>
 #include <cstdlib>
@@ -165,6 +166,16 @@ int main(int argc, char** argv)
     if (::getcwd(buffer, sizeof(buffer)) != nullptr)
       ::setenv("PWD", buffer, 1);
   }
+
+  // Resolve and freeze the trusted account once for the whole process before
+  // any suite runs. Several suites (tools, agent_loop, agent_loop_resilience,
+  // run_observer, containment) drive the bash tool directly, and the bash
+  // command planner calls ava::core::cached_trusted_account(), which asserts
+  // that HOME was read exactly once and frozen at startup. This call is
+  // idempotent and process-wide, so it is a cheap no-op for every suite after
+  // the first.
+  if (auto result = ava::core::load_account_once_and_freeze(); !result)
+    std::cerr << "warning: failed to load trusted account: " << result.error().format() << '\n';
 
   if (argc == 2)
   {

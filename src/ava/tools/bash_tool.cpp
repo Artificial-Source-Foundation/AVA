@@ -536,26 +536,9 @@ class SyntheticEnvironmentRoot final
   ino_t inode_ = 0;
 };
 
-// Resolve the trusted local account for a sealed command plan.
-//
-// Prefer the process-wide account cached by open_runtime_session() at startup
-// (ava::core::cached_trusted_account): that value was read once from HOME and
-// frozen, so using it never re-reads the sensitive HOME environment variable.
-// When no runtime session has initialized the cache (for example, in unit tests
-// that call run_bash directly), fall back to resolving it now; the freeze guard
-// in resolve_trusted_account() still ensures HOME is read at most once.
-ava::core::Result<ava::core::TrustedAccount> trusted_account_for_command()
-{
-  if (auto const cached = ava::core::cached_trusted_account())
-    return *cached;
-  return ava::core::resolve_trusted_account();
-}
-
 ava::core::Result<ava::command::CommandBuildOptions> local_command_build_options(ToolContext const& context, SyntheticEnvironmentRoot const& synthetic)
 {
-  auto account = trusted_account_for_command();
-  if (!account)
-    return std::unexpected(std::move(account.error()));
+  ava::core::TrustedAccount const& trusted_account = ava::core::cached_trusted_account();
   // Read exactly one inherited value: startup PATH. Bound the read before
   // copying it into planning options; no child inherits it directly and no
   // execution-time PATH lookup occurs.
@@ -574,14 +557,14 @@ ava::core::Result<ava::command::CommandBuildOptions> local_command_build_options
   auto const& root = synthetic.root();
   return ava::command::CommandBuildOptions{.workspace = context.workspace_dir,
                                            .anchor_set = context.anchor_set,
-                                           .trusted_home = account->home,
+                                           .trusted_home = trusted_account.home,
                                            .discover_host_user_toolchains = !static_cast<bool>(context.command_executor),
                                            .startup_path = std::move(startup_path),
                                            .shell = "/bin/sh",
                                            .ava_authority_roots = context.ava_authority_roots,
                                            .environment = ava::command::CommandEnvironmentOptions{.profile_id = "ava-local-bash-prompt-v1",
-                                                                                                  .user = account->user,
-                                                                                                  .logname = account->user,
+                                                                                                  .user = trusted_account.user,
+                                                                                                  .logname = trusted_account.user,
                                                                                                   .home = root / "home",
                                                                                                   .xdg_config_home = root / "xdg-config",
                                                                                                   .xdg_cache_home = root / "xdg-cache",

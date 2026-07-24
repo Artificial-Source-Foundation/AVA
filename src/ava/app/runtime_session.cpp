@@ -353,13 +353,8 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
   // so the cache check keeps the actual HOME read to the very first call and
   // lets later sessions reuse the frozen result without tripping the freeze
   // assertion.
-  if (!ava::core::cached_trusted_account())
-  {
-    auto resolved = ava::core::resolve_trusted_account();
-    if (!resolved)
-      return std::unexpected(std::move(resolved.error()));
-  }
-  ava::core::freeze_trusted_account();
+  if (auto result = ava::core::load_account_once_and_freeze(); !result)
+    return std::unexpected(std::move(result.error()));
 
   if (options.diagnostics)
   {

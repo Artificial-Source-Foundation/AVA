@@ -6,7 +6,6 @@
 #include <filesystem>
 #include <optional>
 #include <string>
-#include "debug.h"
 
 namespace ava::core {
 
@@ -41,7 +40,7 @@ struct TrustedAccount
 // Always safe to call: it never reads HOME and never trips the freeze
 // assertion, so it is the correct accessor for every post-startup caller
 // (including the bash command planner).
-[[nodiscard]] std::optional<TrustedAccount> cached_trusted_account();
+[[nodiscard]] TrustedAccount const& cached_trusted_account();
 
 // Freeze trusted-home resolution.
 //
@@ -49,5 +48,13 @@ struct TrustedAccount
 // assertion, automatically enforcing that HOME is read at most once. Called once
 // after the runtime session has performed the one-time startup initialization.
 void freeze_trusted_account();
+
+// Return the state of `g_account_frozen`, a fuzzy boolean that goes from WasFalse -> True
+// exactly once (when freeze_trusted_account is called the first time). This returns
+// true iff `g_account_frozen` WasFalse (a few microseconds ago).
+bool was_not_frozen();
+
+// Called for every session from construct_runtime_session.
+ava::core::VoidResult load_account_once_and_freeze();
 
 }  // namespace ava::core

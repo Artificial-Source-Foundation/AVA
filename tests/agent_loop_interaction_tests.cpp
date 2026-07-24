@@ -5,6 +5,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/stream_bridge.h"
+#include "ava/session/assistant_output.h"
 #include "ava/session/session_store.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/core/ids.h"
@@ -17,15 +18,18 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 #include <sys/stat.h>
 
 using agent_loop_test::sse_response;
+using agent_loop_test::tool_call_sse;
 
 namespace {
 
@@ -540,6 +544,134 @@ void test_agent_loop_compaction_status_metadata()
          "agent loop status metadata reports compacted initial provider context");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("Compacted prior conversation summary") != std::string::npos,
          "agent loop sends compacted context in initial provider request");
+}
+
+void test_agent_loop_compaction_callback_runs_without_session_mutex()
+{
+  auto const root = create_empty_root("agent-compaction-unlocked-session-mutex");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "compaction-unlocked-session-mutex"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"compaction callback completed\"}\n\n"
+                    "data: [DONE]\n\n")});
+  std::mutex session_mutex;
+  bool compact_callback_observed = false;
+  bool session_mutex_was_available = false;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .compact_context = [&compact_callback_observed, &session_mutex, &session_mutex_was_available](
+                             ava::session::SessionReadAuthority, std::string_view, std::vector<std::string> const&) -> ava::core::Result<bool> {
+        compact_callback_observed = true;
+        session_mutex_was_available = session_mutex.try_lock();
+        if (session_mutex_was_available)
+          session_mutex.unlock();
+        return false;
+      },
+      .session_mutex = &session_mutex,
+      .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+  });
+
+  auto result = loop.run_turn("continue", store, provider, transport);
+  expect(result && result->final_text == "compaction callback completed" && compact_callback_observed && session_mutex_was_available,
+         "agent loop invokes context compaction without holding the caller session mutex");
+}
+
+void test_agent_loop_two_provider_tool_turn_phase_and_persistence_order()
+{
+  auto const root = create_empty_root("agent-two-provider-tool-turn-order");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  {
+    std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
+    file << "safe tool content";
+  }
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "two-provider-tool-turn-order"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response(tool_call_sse("call_read", "read_file", R"({"path":"note.txt"})") + "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"final answer\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  std::vector<ava::agent::RunPhase> phase_transitions;
+  std::vector<std::string> ordering;
+  std::size_t assistant_commit_count = 0;
+  std::size_t tool_event_count = 0;
+  auto append_entry = append_route_for_test(store);
+  auto append_batch = append_batch_route_for_test(store);
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .on_tool_event =
+          [&ordering, &tool_event_count](ava::agent::ToolTimelineEntry const&) {
+            if (tool_event_count++ == 0)
+              ordering.push_back("first_tool_event");
+          },
+      .append_entry = std::move(append_entry),
+      .append_batch =
+          [&append_batch, &assistant_commit_count, &ordering](std::vector<ava::session::SessionEntry> entries) {
+            if (std::ranges::any_of(entries,
+                                    [](ava::session::SessionEntry const& entry) { return entry.type == ava::session::EntryType::AssistantTurnCommit; }))
+            {
+              ++assistant_commit_count;
+              ordering.push_back(assistant_commit_count == 1 ? "tool_assistant_commit" : "terminal_assistant_commit");
+            }
+            return append_batch(std::move(entries));
+          },
+      .session_read_authority = read_authority_for_test(store),
+      .on_phase = [&ordering, &phase_transitions](ava::agent::RunPhase phase) -> ava::core::VoidResult {
+        if (phase_transitions.empty() || phase_transitions.back() != phase)
+          phase_transitions.push_back(phase);
+        if (phase == ava::agent::RunPhase::Completing)
+          ordering.push_back("completing");
+        return {};
+      },
+  });
+
+  auto result = loop.run_turn("read note", store, provider, transport);
+  auto entries = store.load();
+  auto const projection = entries ? ava::session::classify_assistant_output(*entries) : ava::session::AssistantOutputProjection{};
+  bool first_commit_contains_tool = false;
+  bool terminal_commit_contains_text = false;
+  if (projection.turns.size() == 2)
+  {
+    for (auto const& item : projection.turns[0].items)
+    {
+      if (auto const* function = std::get_if<ava::session::AssistantOutputFunctionCall>(&item.item.payload))
+        first_commit_contains_tool = function->call_id == "call_read";
+    }
+    for (auto const& item : projection.turns[1].items)
+    {
+      if (auto const* text = std::get_if<ava::session::AssistantOutputText>(&item.item.payload))
+        terminal_commit_contains_text = text->text == "final answer";
+    }
+  }
+  auto const tool_assistant_commit = std::ranges::find(ordering, "tool_assistant_commit");
+  auto const first_tool_event = std::ranges::find(ordering, "first_tool_event");
+  auto const completing = std::ranges::find(ordering, "completing");
+  auto const terminal_assistant_commit = std::ranges::find(ordering, "terminal_assistant_commit");
+  expect(result && result->final_text == "final answer" && result->provider_iterations == 2 && result->tool_calls == 1 &&
+             phase_transitions == std::vector<ava::agent::RunPhase>({ava::agent::RunPhase::BuildingContext, ava::agent::RunPhase::AwaitingProvider,
+                                                                     ava::agent::RunPhase::PersistingAssistant, ava::agent::RunPhase::PreparingTools,
+                                                                     ava::agent::RunPhase::ExecutingTools, ava::agent::RunPhase::SettlingTools,
+                                                                     ava::agent::RunPhase::AwaitingProvider, ava::agent::RunPhase::Completing}),
+         "agent loop emits the exact successful two-provider tool-turn phase transitions");
+  expect(entries && assistant_commit_count == 2 && first_commit_contains_tool && terminal_commit_contains_text && tool_assistant_commit != ordering.end() &&
+             first_tool_event != ordering.end() && completing != ordering.end() && terminal_assistant_commit != ordering.end() &&
+             tool_assistant_commit < first_tool_event && completing < terminal_assistant_commit,
+         "agent loop commits the tool assistant before its first event and the terminal assistant after Completing");
 }
 
 void test_agent_loop_replays_steering_after_mid_turn_auto_compaction()

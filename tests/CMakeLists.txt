@@ -15,6 +15,7 @@ add_library(ava_test_support
   "support/fake_transport.cpp"
   "support/libcwd_test_output.cpp"
   "support/test_harness.cpp"
+  "support/tui_test_support.cpp"
 )
 target_link_libraries(ava_test_support PUBLIC ${AVA_BACKEND_LIBRARIES})
 target_include_directories(ava_test_support PUBLIC ${CMAKE_SOURCE_DIR})
@@ -85,6 +86,17 @@ set(AVA_TESTS_SOURCES
   "tools_search_tests.cpp"
   "tools_tests.cpp"
   "tui_composer_tests.cpp"
+  "tui_completion_tests.cpp"
+  "tui_composer_rendering_tests.cpp"
+  "tui_keybinding_tests.cpp"
+  "tui_markdown_tests.cpp"
+  "tui_modal_tests.cpp"
+  "tui_permission_tests.cpp"
+  "tui_runtime_state_tests.cpp"
+  "tui_selector_tests.cpp"
+  "tui_terminal_input_tests.cpp"
+  "tui_tool_card_tests.cpp"
+  "tui_transcript_tests.cpp"
   "run_observer_tests.cpp"
   "runtime_diagnostics_tests.cpp"
   "containment_tests.cpp"

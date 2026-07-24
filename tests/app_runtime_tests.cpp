@@ -18,6 +18,7 @@ void run_app_runtime_tests()
 {
   test_app_runtime_open_session_and_context_prompt();
   test_app_runtime_no_session_mode();
+  test_app_runtime_lifecycle_adapters_preserve_strict_open_policy();
   test_app_runtime_session_startup_options();
   test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork();
   test_app_runtime_reconciles_committed_function_calls_on_resume();
@@ -42,6 +43,7 @@ void run_app_runtime_tests()
   test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata();
   test_app_session_branch_commands();
   test_app_session_new_resume_commands();
+  test_app_sessionless_new_and_resume_commands();
   test_app_session_metadata_commands();
   test_application_catalog_cache_reuses_workspace_and_session_indexes();
   test_application_catalog_coordinator_serializes_refresh_and_snapshot();

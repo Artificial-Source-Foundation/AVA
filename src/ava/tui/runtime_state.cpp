@@ -28,14 +28,6 @@ ComposerSnapshot initial_snapshot(TuiRuntimeOptions& options)
 
 }  // namespace
 
-PendingPermissionRequest::PendingPermissionRequest(ava::permissions::PermissionPrompt prompt_in) : prompt(std::move(prompt_in))
-{
-}
-
-PendingQuestionRequest::PendingQuestionRequest(ava::agent::QuestionPrompt prompt_in) : prompt(std::move(prompt_in))
-{
-}
-
 ava::app::EventEnvelopeSink EventEnvelopeQueue::sink()
 {
   return [this](ava::app::EventEnvelope const& event) -> ava::core::VoidResult {

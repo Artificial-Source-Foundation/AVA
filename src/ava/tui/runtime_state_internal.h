@@ -2,14 +2,11 @@
 
 #include "ava/app/EventEnvelope.h"
 #include "ava/app/events.h"
-#include "ava/agent/question.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/session_grants.h"
 #include "ava/session/attachments.h"
-#include "ava/permissions/permission.h"
 #include "ava/core/result.h"
 
-#include <condition_variable>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -20,30 +17,6 @@ namespace ava::tui {
 
 struct TuiRuntimeOptions;
 struct TuiRuntimeStateSnapshot;
-
-struct PendingPermissionRequest
-{
-  explicit PendingPermissionRequest(ava::permissions::PermissionPrompt prompt_in);
-
-  ava::permissions::PermissionPrompt prompt;
-  std::mutex mutex;
-  std::condition_variable ready;
-  std::optional<ava::core::Result<ava::permissions::PermissionResolutionDecision>> result;
-
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-};
-
-struct PendingQuestionRequest
-{
-  explicit PendingQuestionRequest(ava::agent::QuestionPrompt prompt_in);
-
-  ava::agent::QuestionPrompt prompt;
-  std::mutex mutex;
-  std::condition_variable ready;
-  std::optional<ava::core::Result<ava::agent::QuestionAnswer>> result;
-
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-};
 
 struct EventEnvelopeQueue
 {

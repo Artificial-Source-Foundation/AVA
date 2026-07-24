@@ -2,8 +2,8 @@
 
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/runtime_transcript_internal.h"
 
-#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -13,25 +13,6 @@
 
 namespace ava::tui {
 
-inline constexpr std::size_t kMaxTranscriptItems = 1000;
-
-struct CappedTranscriptSnapshotUpdate
-{
-  std::size_t leading_evictions = 0;
-  std::ptrdiff_t item_index_shift = 0;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-[[nodiscard]] CappedTranscriptSnapshotUpdate apply_capped_transcript_snapshot(std::vector<TranscriptItem>& destination,
-                                                                              std::vector<TranscriptItem> const& submitted_transcript,
-                                                                              std::vector<TranscriptItem> const& turn_transcript,
-                                                                              std::size_t previous_leading_evictions);
-
-// Toggles only the latest original card matching the established tool query.
-// The returned transcript index lets the runtime preserve viewport anchoring.
-[[nodiscard]] std::optional<std::size_t> toggle_latest_matching_tool_details(std::vector<TranscriptItem>& transcript, std::string_view query,
-                                                                             bool global_details_visible);
 [[nodiscard]] std::optional<std::string> parse_tui_tool_command_argument(std::string_view submitted);
 
 enum class TuiActiveNonblockingCommandDispatchKind

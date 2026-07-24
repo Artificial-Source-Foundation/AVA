@@ -37,6 +37,12 @@ struct OpenOptions
 {
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
+  ava::agent::Mode mode = ava::agent::Mode::Build;
+  ava::agent::ToolVisibilityOptions tool_visibility;
+  ava::config::XdgPaths paths = ava::config::xdg_paths();
+  bool sessionless = false;
+  bool offline = false;
+
   // Additional writable directories beyond workspace_dir (e.g., spill_dir,
   // session storage). These are opened as anchor descriptors at startup and
   // made available to tools via ToolContext::anchor_set.
@@ -48,17 +54,12 @@ struct OpenOptions
   std::optional<std::string> fork_session_id;
   std::optional<std::string> initial_session_name;
   bool continue_last_session = false;
-  bool sessionless = false;
-  ava::agent::Mode mode = ava::agent::Mode::Build;
-  ava::agent::ToolVisibilityOptions tool_visibility;
-  ava::config::XdgPaths paths = ava::config::xdg_paths();
   PromptOverrides prompt_overrides;
   std::optional<std::string> initial_reasoning_level = std::nullopt;
   // Strict long-lived adapters may pin the startup default so later config edits cannot drift immutable connection capabilities from new sessions.
   std::optional<ava::config::ModelInfo> default_model_override = std::nullopt;
   // When true, the override is the complete immutable model snapshot for both new and resumed sessions.
   bool pin_model_override = false;
-  bool offline = false;
   // Strict adapters opt out of CLI prefix resolution and may bound persistence reads without changing legacy CLI/RPC behavior.
   bool exact_session_id = false;
   std::optional<ava::session::SessionReadLimits> session_read_limits = std::nullopt;

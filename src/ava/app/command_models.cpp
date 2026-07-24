@@ -300,7 +300,7 @@ std::string format_providers_text(runtime::Session const& session, ava::config::
     output += "    runtime=" + std::string(registered ? "registered" : "not registered") +
               " selectable=" + std::string(profile.runtime_selectable ? "yes" : "no") +
               " models=" + std::to_string(model_count_for_provider(registry, profile.provider_id)) + "\n";
-    output += "    auth=" + provider_credential_status(session.paths, profile) + "\n";
+    output += "    auth=" + provider_credential_status(session.continuity.paths, profile) + "\n";
     output += "    connect=" + sanitize_inline_text(profile.connect_detail.empty() ? std::string("not documented") : profile.connect_detail) +
               " oauth=" + provider_oauth_status(profile) + "\n";
     if (!profile.api_family.empty())
@@ -336,7 +336,7 @@ ava::core::Result<CommandResult> run_models_command(runtime::Session& session, s
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
-  auto registry = ava::config::load_model_registry(session.paths);
+  auto registry = ava::config::load_model_registry(session.continuity.paths);
   if (!registry)
     return std::unexpected(std::move(registry.error()));
   add_output(result, format_models_text(session, *registry, trimmed_query));
@@ -348,7 +348,7 @@ ava::core::Result<CommandResult> run_providers_command(runtime::Session& session
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
-  auto registry = ava::config::load_model_registry(session.paths);
+  auto registry = ava::config::load_model_registry(session.continuity.paths);
   if (!registry)
     return std::unexpected(std::move(registry.error()));
   add_output(result, format_providers_text(session, *registry, trimmed_query));

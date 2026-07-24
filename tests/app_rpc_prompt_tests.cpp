@@ -49,10 +49,10 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC prompt test opens runtime session");
   if (!session)
@@ -99,11 +99,11 @@ void test_app_rpc_offline_allows_local_protocol_and_rejects_prompt_before_provid
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  open_options.offline = true;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
+  open_options.continuity.offline = true;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC offline test opens runtime session");
   if (!session)
@@ -149,10 +149,10 @@ void test_app_rpc_prompt_imports_image_attachments()
   write_app_test_file(image_path, rpc_tiny_png_bytes());
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC image prompt test opens runtime session");
   if (!session)
@@ -206,10 +206,10 @@ void test_app_rpc_prompt_imports_inline_image_uploads()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC inline image upload prompt test opens runtime session");
   if (!session)
@@ -264,10 +264,10 @@ void test_app_rpc_prompt_rejects_inline_image_upload_mime_mismatch()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC inline image MIME mismatch test opens runtime session");
   if (!session)
@@ -300,10 +300,10 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC streaming prompt test opens runtime session");
   if (!session)
@@ -346,10 +346,10 @@ void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC retry-cancel prompt test opens runtime session");
   if (!session)
@@ -398,10 +398,10 @@ void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC idle-cancel prompt test opens runtime session");
   if (!session)
@@ -455,10 +455,10 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
   expect(stored.has_value(), "RPC OAuth refresh test stores expired credential");
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC OAuth refresh test opens runtime session");
   if (!session)

@@ -54,7 +54,7 @@ runtime::Event command_event(runtime::Session const& session, runtime::EventType
   event.type = type;
   event.timestamp = ava::session::now_timestamp();
   event.session_id = session.store.session_id();
-  event.mode = session.mode;
+  event.mode = session.continuity.mode;
   event.provider_id = session.model.provider_id;
   event.model_id = session.model.model_id;
   return event;
@@ -199,41 +199,42 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
 {
   auto const include_project_resources = project_resources_trusted(session.project_trust);
   auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
-      .global_config_file = session.paths.ava_config_dir / "lsp.json",
-      .project_config_file = include_project_resources ? session.workspace_dir / ".ava" / "lsp.json" : std::filesystem::path{},
-      .workspace_root = session.workspace_dir,
-      .anchor_set = session.anchor_set,
-      .mode = session.mode,
+      .global_config_file = session.continuity.paths.ava_config_dir / "lsp.json",
+      .project_config_file = include_project_resources ? session.continuity.workspace_dir / ".ava" / "lsp.json" : std::filesystem::path{},
+      .workspace_root = session.continuity.workspace_dir,
+      .anchor_set = session.continuity.anchor_set,
+      .mode = session.continuity.mode,
       .permission_resolver = permission_resolver,
   });
-  return ava::tools::ToolContext{.workspace_dir = session.workspace_dir,
-                                 .spill_dir = session.store.session_path().parent_path() / "spill",
-                                 .mode = session.mode,
-                                 .permission_resolver = std::move(permission_resolver),
-                                 .command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(permission_rule_store_for_session(session)),
-                                 .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
-                                   auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                           .parent_id = "",
-                                                                           .type = ava::session::EntryType::PermissionDecision,
-                                                                           .timestamp = ava::session::now_timestamp(),
-                                                                           .data_json = ava::tools::permission_audit_data_json(event)};
-                                   return session.append_owned(std::move(entry));
-                                 },
-                                 .anchor_set = session.anchor_set,
-                                 .ava_authority_roots = command_authority_roots_for_session(session),
-                                 .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
-                                 .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
-                                 .plugin_project_plugins_dir = include_project_resources ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{},
-                                 .plugin_enablement_file = session.paths.ava_state_dir / "plugin-enablement.json",
-                                 .include_project_plugins = include_project_resources,
-                                 .mcp_global_config_file = session.paths.ava_config_dir / "mcp.json",
-                                 .mcp_project_config_file = include_project_resources ? session.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{},
-                                 .include_project_mcp_config = include_project_resources,
-                                 .include_project_skills = include_project_resources,
-                                 .session_id = session.store.session_id(),
-                                 .provider_id = session.model.provider_id,
-                                 .model_id = session.model.model_id,
-                                 .current_dir = session.current_dir};
+  return ava::tools::ToolContext{
+      .workspace_dir = session.continuity.workspace_dir,
+      .spill_dir = session.store.session_path().parent_path() / "spill",
+      .mode = session.continuity.mode,
+      .permission_resolver = std::move(permission_resolver),
+      .command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(permission_rule_store_for_session(session)),
+      .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+        auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                .parent_id = "",
+                                                .type = ava::session::EntryType::PermissionDecision,
+                                                .timestamp = ava::session::now_timestamp(),
+                                                .data_json = ava::tools::permission_audit_data_json(event)};
+        return session.append_owned(std::move(entry));
+      },
+      .anchor_set = session.continuity.anchor_set,
+      .ava_authority_roots = command_authority_roots_for_session(session),
+      .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
+      .plugin_global_plugins_dir = session.continuity.paths.ava_config_dir / "plugins",
+      .plugin_project_plugins_dir = include_project_resources ? session.continuity.workspace_dir / ".ava" / "plugins" : std::filesystem::path{},
+      .plugin_enablement_file = session.continuity.paths.ava_state_dir / "plugin-enablement.json",
+      .include_project_plugins = include_project_resources,
+      .mcp_global_config_file = session.continuity.paths.ava_config_dir / "mcp.json",
+      .mcp_project_config_file = include_project_resources ? session.continuity.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{},
+      .include_project_mcp_config = include_project_resources,
+      .include_project_skills = include_project_resources,
+      .session_id = session.store.session_id(),
+      .provider_id = session.model.provider_id,
+      .model_id = session.model.model_id,
+      .current_dir = session.continuity.current_dir};
 }
 
 ava::core::VoidResult record_tool_start(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result, std::string const& call_id,
@@ -276,7 +277,7 @@ ava::core::Result<CommandResult> run_tool_command(runtime::Session& session, Com
     {
       return std::unexpected(std::move(recorded.error()));
     }
-    auto const output = ava::tools::read_file(context, session.current_dir / argument);
+    auto const output = ava::tools::read_file(context, session.continuity.current_dir / argument);
     if (!output)
     {
       auto const text = output.error().format();
@@ -345,7 +346,7 @@ ava::core::Result<CommandResult> run_tool_command(runtime::Session& session, Com
       return result;
     }
     std::string output;
-    for (auto const& path : glob->paths) output += display_path(path, session.current_dir) + '\n';
+    for (auto const& path : glob->paths) output += display_path(path, session.continuity.current_dir) + '\n';
     if (glob->truncated)
     {
       output += "[truncated " + std::to_string(glob->paths.size()) + '/' + std::to_string(glob->total_matches) + " matches]\n";
@@ -379,7 +380,7 @@ ava::core::Result<CommandResult> run_tool_command(runtime::Session& session, Com
     {
       return std::unexpected(std::move(recorded.error()));
     }
-    auto const listed = ava::tools::list_directory(context, session.current_dir / argument);
+    auto const listed = ava::tools::list_directory(context, session.continuity.current_dir / argument);
     if (!listed)
     {
       auto const text = listed.error().format();
@@ -451,7 +452,7 @@ ava::core::Result<CommandResult> run_tool_command(runtime::Session& session, Com
     std::string output;
     for (auto const& match : grep->matches)
     {
-      output += display_path(match.path, session.current_dir) + ':' + std::to_string(match.line_number) + ": " + match.line;
+      output += display_path(match.path, session.continuity.current_dir) + ':' + std::to_string(match.line_number) + ": " + match.line;
       if (match.line_truncated)
         output += " [line truncated]";
       output += '\n';
@@ -492,7 +493,7 @@ ava::core::Result<CommandResult> run_tool_command(runtime::Session& session, Com
     {
       return std::unexpected(std::move(recorded.error()));
     }
-    auto const write = ava::tools::write_file(context, session.current_dir / path_text, text);
+    auto const write = ava::tools::write_file(context, session.continuity.current_dir / path_text, text);
     if (!write)
     {
       auto const error_text = write.error().format();
@@ -528,8 +529,8 @@ ava::core::Result<CommandResult> run_tool_command(runtime::Session& session, Com
     {
       return std::unexpected(std::move(recorded.error()));
     }
-    auto const bash = ava::tools::run_bash(
-        context, command, ava::tools::BashOptions{.invocation_source = ava::tools::BashOptions::InvocationSource::UserRawShell});
+    auto const bash =
+        ava::tools::run_bash(context, command, ava::tools::BashOptions{.invocation_source = ava::tools::BashOptions::InvocationSource::UserRawShell});
     if (!bash)
     {
       auto const text = bash.error().format();

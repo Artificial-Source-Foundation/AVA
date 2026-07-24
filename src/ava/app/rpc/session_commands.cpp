@@ -5,10 +5,9 @@
 #include "serialization_json.h"
 #include "session_commands.h"
 #include "session_operators.h"
-
 #include "ava/app/EventEnvelope.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/agent/job_control.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
@@ -71,13 +70,13 @@ ava::core::Result<std::string> resolve_branch_source_session_id(runtime::Session
   if (!command.session_id)
     return current.store.session_id();
 
-  auto sessions = ava::session::SessionStore::list_sessions(current.workspace_dir, current.paths.sessions_dir);
+  auto sessions = ava::session::SessionStore::list_sessions(current.continuity.workspace_dir, current.continuity.paths.sessions_dir);
   if (!sessions)
     return std::unexpected(std::move(sessions.error()));
   std::vector<std::string> matches;
   for (auto const& session : *sessions)
   {
-    if (session.session_id == *command.session_id || (!open_options.exact_session_id && session.session_id.starts_with(*command.session_id)))
+    if (session.session_id == *command.session_id || (!open_options.request.exact_session_id && session.session_id.starts_with(*command.session_id)))
       matches.push_back(session.session_id);
   }
   if (matches.empty())
@@ -109,7 +108,7 @@ ava::core::VoidResult recover_source_session_for_mutation(runtime::Session& curr
     return {};
   }
 
-  auto source = ava::session::SessionStore::open(current.workspace_dir, source_session_id, current.paths.sessions_dir);
+  auto source = ava::session::SessionStore::open(current.continuity.workspace_dir, source_session_id, current.continuity.paths.sessions_dir);
   if (!source)
     return std::unexpected(std::move(source.error()));
   auto acquired = ava::session::SessionLease::acquire(source->session_path());
@@ -128,22 +127,8 @@ ava::core::VoidResult recover_source_session_for_mutation(runtime::Session& curr
 runtime::OpenOptions owned_replacement_options(runtime::Session const& current, runtime::OpenOptions const& base_options)
 {
   auto options = base_options;
-  options.workspace_dir = current.workspace_dir;
-  options.current_dir = current.current_dir;
-  options.requested_session_id = std::nullopt;
-  options.fork_session_id = std::nullopt;
-  options.initial_session_name = std::nullopt;
-  options.continue_last_session = false;
-  options.sessionless = false;
-  options.mode = current.mode;
-  options.tool_visibility = current.tool_visibility;
-  options.paths = current.paths;
-  options.prompt_overrides = current.prompt_overrides;
-  options.initial_reasoning_level = std::nullopt;
-  options.offline = current.offline;
-  options.subagent_coordinator = current.subagent_coordinator;
-  options.subagent_delivery_manager = current.subagent_delivery_manager;
-  options.session_title_coordinator = current.session_title_coordinator;
+  options.continuity = current.continuity;
+  options.request = {};
   return options;
 }
 
@@ -294,7 +279,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     std::string owner;
     {
       std::lock_guard lock(context.session_mutex);
-      coordinator = context.session.subagent_coordinator;
+      coordinator = context.session.continuity.subagent_coordinator;
       owner = context.session.store.session_id();
     }
     if (!coordinator)
@@ -583,13 +568,13 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
 
     auto const* source_lease = *source_session_id == context.session.store.session_id() ? &context.session.lease : &*temporary_source_lease;
     auto branched = ava::session::create_session_branch(ava::session::SessionBranchOptions{
-        .workspace_dir = context.session.workspace_dir,
-        .root_dir = context.session.paths.sessions_dir,
+        .workspace_dir = context.session.continuity.workspace_dir,
+        .root_dir = context.session.continuity.paths.sessions_dir,
         .source_session_id = *source_session_id,
         .branch_from_entry_id = command.branch_from_entry_id.value_or(""),
         .name = command.session_name,
         .labels = command.labels,
-        .read_limits = context.open_options.session_read_limits,
+        .read_limits = context.open_options.continuity.session_read_limits,
         .source_lease = source_lease,
         .mode = command.type == "clone_session" ? ava::session::SessionBranchMode::Clone : ava::session::SessionBranchMode::Fork,
         .actor = "rpc"});
@@ -650,8 +635,8 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (auto recovered = recover_source_session_for_mutation(context.session, *source_session_id, temporary_source_lease); !recovered)
       return handled(write_error(context.output, command.id, recovered.error()));
     auto const* source_lease = current_source ? &context.session.lease : &*temporary_source_lease;
-    auto options = ava::session::BranchSummaryOptions{.workspace_dir = context.session.workspace_dir,
-                                                      .root_dir = context.session.paths.sessions_dir,
+    auto options = ava::session::BranchSummaryOptions{.workspace_dir = context.session.continuity.workspace_dir,
+                                                      .root_dir = context.session.continuity.paths.sessions_dir,
                                                       .source_session_id = *source_session_id,
                                                       .branch_root_entry_id = *command.branch_root_entry_id,
                                                       .branch_tip_entry_id = *command.branch_tip_entry_id,

@@ -230,9 +230,9 @@ void test_app_rpc_unterminated_final_command_executes()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC unterminated final command test opens runtime session");
   if (!session)
@@ -259,9 +259,9 @@ void test_app_rpc_newline_terminated_oversized_line_recovers()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC oversized-line recovery test opens runtime session");
   if (!session)

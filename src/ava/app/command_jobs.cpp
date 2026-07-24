@@ -1,7 +1,6 @@
 #include "sys.h"
 #include "command_jobs.h"
 #include "runtime/Session.h"
-
 #include "ava/agent/job_control.h"
 
 #include <algorithm>
@@ -82,7 +81,7 @@ std::optional<std::string_view> active_jobs_command_arguments(std::string_view s
 
 ava::core::Result<CommandResult> run_jobs_command(runtime::Session& session, std::string_view arguments)
 {
-  return run_jobs_command(session.subagent_coordinator, session.store.session_id(), arguments, false);
+  return run_jobs_command(session.continuity.subagent_coordinator, session.store.session_id(), arguments, false);
 }
 
 ava::core::Result<CommandResult> run_jobs_command(std::shared_ptr<ava::agent::SubagentCoordinator> const& coordinator, std::string_view parent_session_id,

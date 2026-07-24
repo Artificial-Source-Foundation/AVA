@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/test_harness.h"
 #include "tests/support/tui_test_support.h"
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/command_sessions.h"
@@ -47,10 +48,10 @@ void test_app_session_jsonl_import_export_portable_attachments()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "portable JSONL attachment test opens runtime session");
   if (!session)
@@ -121,10 +122,10 @@ void test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "private JSONL export test opens a runtime session");
   if (!session)
@@ -194,10 +195,10 @@ void test_app_session_branch_commands()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "slash branch command test opens runtime session");
   if (!session)
@@ -266,17 +267,43 @@ void test_app_session_new_resume_commands()
 
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
+  auto const additional_writable_dir = root / "additional-writable";
   std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(additional_writable_dir);
+  auto diagnostics = ava::diagnostics::RuntimeDiagnostics::create(paths, false);
+  expect(diagnostics.has_value(), "slash new/resume continuity test creates diagnostics");
+  if (!diagnostics)
+    return;
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.additional_writable_dirs = {additional_writable_dir};
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
+  open_options.continuity.prompt_overrides.system_prompt = "continuity prompt override";
+  open_options.continuity.offline = true;
+  open_options.continuity.session_read_limits = {.max_file_bytes = 8192, .max_line_bytes = 2048, .max_entries = 32};
+  open_options.continuity.diagnostics = *diagnostics;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "slash new/resume command test opens runtime session");
   if (!session)
     return;
+
+  session->continuity.default_model_override = session->model;
+  session->continuity.pin_model_override = true;
+  auto const expected_anchor_set = session->continuity.anchor_set;
+  auto const expected_diagnostics = session->continuity.diagnostics;
+  auto const expected_pinned_model_id = session->model.model_id;
+  auto continuity_preserved = [&](ava::app::runtime::Session const& value) {
+    auto const& limits = value.session_read_limits;
+    return value.continuity.offline && value.continuity.prompt_overrides.system_prompt == std::optional<std::string>("continuity prompt override") &&
+           value.continuity.diagnostics == expected_diagnostics && value.continuity.anchor_set == expected_anchor_set &&
+           value.continuity.additional_writable_dirs == std::vector<std::filesystem::path>{additional_writable_dir} && limits.max_file_bytes == 8192 &&
+           limits.max_line_bytes == 2048 && limits.max_entries == 32 && value.continuity.session_read_limits &&
+           value.continuity.session_read_limits->max_entries == 32 && value.continuity.pin_model_override && value.continuity.default_model_override &&
+           value.continuity.default_model_override->model_id == expected_pinned_model_id;
+  };
 
   auto const source_session_id = session->store.session_id();
   auto named_source = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/name Old title"});
@@ -296,13 +323,13 @@ void test_app_session_new_resume_commands()
   expect(fresh && fresh->handled && fresh->output.size() == 1 && fresh_session_id != source_session_id && fresh->output[0] == expected_fresh_receipt &&
              fresh->output[0].find("previous session " + source_session_id) == std::string::npos &&
              fresh->output[0].find("switched to " + fresh_session_id) == std::string::npos && fresh_metadata && fresh_metadata->name == "Fresh session" &&
-             fresh_metadata->actor == "tui" && fresh_entries && fresh_entries->size() >= 2,
-         "slash /new emits title-first lifecycle receipts with each actionable full id exactly once, records metadata, and switches runtime session");
+             fresh_metadata->actor == "tui" && fresh_entries && fresh_entries->size() >= 2 && continuity_preserved(*session),
+         "slash /new preserves configured runtime continuity, effective read limits, anchor authority, diagnostics identity, and model pin policy");
 
   auto resumed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/resume " + source_session_id});
   expect(resumed && resumed->handled && !resumed->output.empty() && session->store.session_id() == source_session_id &&
-             resumed->output[0].find("resumed session " + source_session_id) != std::string::npos,
-         "slash /resume switches runtime session by id");
+             resumed->output[0].find("resumed session " + source_session_id) != std::string::npos && continuity_preserved(*session),
+         "slash /resume preserves configured runtime continuity, effective read limits, anchor authority, diagnostics identity, and model pin policy");
 
   auto sessions = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions Fresh"});
   expect(sessions && sessions->handled && !sessions->output.empty() && sessions->output[0].find("Fresh session") != std::string::npos &&
@@ -326,10 +353,10 @@ void test_app_session_metadata_commands()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "slash metadata command test opens runtime session");
   if (!session)

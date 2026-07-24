@@ -93,10 +93,10 @@ void test_app_run_prompt_emits_events()
   }
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "runtime run test opens session");
   if (!session)
@@ -149,10 +149,10 @@ void test_app_run_prompt_expands_file_references()
   }
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "runtime file reference test opens session");
   if (!session)
@@ -203,10 +203,10 @@ void test_app_run_prompt_sends_imported_image_attachment()
   write_app_test_file(image_path, app_tiny_png_bytes());
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "runtime image attachment test opens session");
   if (!session)
@@ -253,10 +253,10 @@ void test_app_clipboard_image_file_override_imports_attachment()
   write_app_test_file(image_path, app_tiny_png_bytes());
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "runtime clipboard image test opens session");
   if (!session)
@@ -282,10 +282,10 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "runtime provider retry test opens session");
   if (!session)
@@ -347,9 +347,9 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "observed runtime compaction test opens session");
   if (!session)
@@ -437,10 +437,10 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
          "runtime tool progress workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "runtime tool progress test opens session");
   if (!session)
@@ -526,10 +526,10 @@ void test_app_first_run_auth_onboarding()
   setenv("XDG_DATA_HOME", data_home_text.c_str(), 1);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "first-run onboarding test opens session");
   if (!session)
@@ -572,10 +572,10 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
   }
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.mode = ava::agent::Mode::Build;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "runtime event sink failure test opens session");
   if (!session)

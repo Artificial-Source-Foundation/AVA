@@ -137,9 +137,9 @@ void test_app_rpc_resolver_output_failure_callback_preserves_lock_order()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = app_test_paths(root);
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = app_test_paths(root);
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC resolver write failure test opens runtime session");
   if (!session)
@@ -307,13 +307,12 @@ void test_app_rpc_resolver_exact_request_identity_gates_publication_and_cleanup(
 
   auto const root = create_empty_root("app-rpc-resolver-exact-identity");
 
-
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = app_test_paths(root);
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = app_test_paths(root);
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC resolver exact-identity test opens runtime session");
   if (!session)
@@ -384,9 +383,9 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
   }
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC permission policy auto-allow test opens runtime session");
   if (!session)
@@ -406,8 +405,9 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read outside\"}\n");
   bool const completed = output_buffer.wait_contains("after policy allow", std::chrono::seconds(2));
@@ -440,9 +440,9 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
     }
 
     ava::app::runtime::OpenOptions open_options;
-    open_options.workspace_dir = workspace;
-    open_options.current_dir = workspace;
-    open_options.paths = paths;
+    open_options.continuity.workspace_dir = workspace;
+    open_options.continuity.current_dir = workspace;
+    open_options.continuity.paths = paths;
     auto session = ava::app::open_runtime_session(open_options);
     expect(session.has_value(), "RPC permission reply test opens runtime session");
     if (!session)
@@ -508,9 +508,9 @@ void test_app_rpc_permission_reply_session_grant_flow()
   }
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC permission session grant test opens runtime session");
   if (!session)
@@ -528,8 +528,9 @@ void test_app_rpc_permission_reply_session_grant_flow()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read outside once\"}\n");
   bool const requested = output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
@@ -568,9 +569,9 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = app_test_paths(root);
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = app_test_paths(root);
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC session grant bounds test opens runtime session");
   if (!session)
@@ -696,9 +697,9 @@ void test_app_rpc_command_one_shot_blocks_reusable_grants()
   auto const paths = app_test_paths(root);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC command one-shot test opens runtime session");
   if (!session)
@@ -786,9 +787,9 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
   auto const outside_path = root / "outside-created.txt";
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC permission diff test opens runtime session");
   if (!session)
@@ -805,8 +806,9 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"write outside\"}\n");
   bool const requested = output_buffer.wait_contains("\"diff_preview\"", std::chrono::seconds(2));
@@ -846,9 +848,9 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   }
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC persistent permission rule test opens runtime session");
   if (!session)
@@ -865,8 +867,9 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
   auto const rpc_timeout = std::chrono::seconds(30);
 
   input_buffer.push(
@@ -926,9 +929,9 @@ void test_app_rpc_question_reply_flow()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC question reply test opens runtime session");
   if (!session)
@@ -944,8 +947,9 @@ void test_app_rpc_question_reply_flow()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"ask question\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));
@@ -974,9 +978,9 @@ void test_app_rpc_question_reply_selected_option_flow()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC selected question reply test opens runtime session");
   if (!session)
@@ -992,8 +996,9 @@ void test_app_rpc_question_reply_selected_option_flow()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"ask question\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));
@@ -1027,9 +1032,9 @@ void test_app_rpc_question_reply_selected_options_flow()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC multi question reply test opens runtime session");
   if (!session)
@@ -1045,8 +1050,9 @@ void test_app_rpc_question_reply_selected_options_flow()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); }); });
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+  });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"ask multi question\"}\n");
   bool const requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));

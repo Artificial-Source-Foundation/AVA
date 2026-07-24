@@ -111,7 +111,7 @@ runtime::Event runtime_error_event(runtime::Session const& session, ava::core::E
   event.type = runtime::EventType::Error;
   event.timestamp = ava::session::now_timestamp();
   event.session_id = session.store.session_id();
-  event.mode = session.mode;
+  event.mode = session.continuity.mode;
   event.provider_id = session.model.provider_id;
   event.model_id = session.model.model_id;
   event.error_category = ava::core::to_string(error.category());
@@ -141,8 +141,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session
 {
   bool emitted_error = false;
   auto runtime_options = print_runtime_options(options.runtime_options);
-  runtime_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(session),
-                                                                                                    std::move(runtime_options.permission_resolver));
+  runtime_options.permission_resolver =
+      ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(session), std::move(runtime_options.permission_resolver));
   EventBus event_bus;
   if (options.output_format == PrintOutputFormat::Json)
   {
@@ -238,10 +238,10 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   ava::provider::Provider const& provider =
       options.provider_override ? options.provider_override->get() : static_cast<ava::provider::Provider const&>(**default_provider);
   runtime::RunOptions runtime_options;
-  runtime_options.offline = session->offline || options.open_options.offline;
+  runtime_options.offline = session->continuity.offline || options.open_options.continuity.offline;
   if (!runtime_options.offline)
   {
-    auto request_credential = ava::config::provider_credential_for_request(session->paths, session->model.provider_id, auth_transport);
+    auto request_credential = ava::config::provider_credential_for_request(session->continuity.paths, session->model.provider_id, auth_transport);
     if (!request_credential)
     {
       err << terminal_output_text(request_credential.error().format(), sanitize_stderr) << '\n';
@@ -250,7 +250,7 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
     if (!*request_credential)
     {
       err << "print mode requires auth for provider `" << terminal_output_text(session->model.provider_id, sanitize_stderr) << "`. Configure a credential in "
-          << terminal_output_text(session->paths.auth_file.string(), sanitize_stderr) << " or the provider API key environment variable\n";
+          << terminal_output_text(session->continuity.paths.auth_file.string(), sanitize_stderr) << " or the provider API key environment variable\n";
       return 1;
     }
     runtime_options.access_token = (*request_credential)->access_token;

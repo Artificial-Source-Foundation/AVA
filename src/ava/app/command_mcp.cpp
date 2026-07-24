@@ -16,9 +16,10 @@ namespace {
 
 ava::mcp::McpConfigLoadOptions mcp_config_options(runtime::Session const& session)
 {
-  auto options = ava::mcp::default_mcp_config_options(session.workspace_dir);
-  options.global_config_file = session.paths.ava_config_dir / "mcp.json";
-  options.project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{};
+  auto options = ava::mcp::default_mcp_config_options(session.continuity.workspace_dir);
+  options.global_config_file = session.continuity.paths.ava_config_dir / "mcp.json";
+  options.project_config_file =
+      project_resources_trusted(session.project_trust) ? session.continuity.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{};
   return options;
 }
 
@@ -51,7 +52,7 @@ std::string mcp_command_text(ava::mcp::McpServerConfig const& server)
 
 std::string mcp_display_path(std::filesystem::path const& path, runtime::Session const& session)
 {
-  return sanitize_inline_text(display_path(path, session.current_dir));
+  return sanitize_inline_text(display_path(path, session.continuity.current_dir));
 }
 
 std::string mcp_config_path_text(std::filesystem::path const& path, runtime::Session const& session)
@@ -243,7 +244,7 @@ ava::core::Result<CommandResult> run_mcp_command(runtime::Session& session, Comm
     }
 
     ava::mcp::McpStdioClientOptions options;
-    options.workspace_dir = session.workspace_dir;
+    options.workspace_dir = session.continuity.workspace_dir;
     auto client = ava::mcp::McpStdioClient::start(*server, options);
     if (!client)
       return fail(client.error());

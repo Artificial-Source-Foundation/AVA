@@ -123,20 +123,19 @@ runtime::RunOptions detached_run_options(runtime::RunOptions const& source)
 runtime::Session detached_session(runtime::Session const& source, ava::session::SessionLease lease, ava::session::SessionReadAuthority authority,
                                   std::shared_ptr<SubagentDeliveryManager> manager)
 {
+  auto continuity = source.continuity;
+  if (manager)
+  {
+    continuity.subagent_delivery_manager = std::move(manager);
+    continuity.subagent_coordinator = continuity.subagent_delivery_manager->coordinator();
+  }
   return runtime::Session{.store = source.store,
                           .lease = std::move(lease),
-                          .mode = source.mode,
+                          .continuity = std::move(continuity),
                           .model = source.model,
                           .base_prompt = source.base_prompt,
-                          .paths = source.paths,
                           .session_read_limits = source.session_read_limits,
-                          .workspace_dir = source.workspace_dir,
-                          .current_dir = source.current_dir,
-                          .additional_writable_dirs = source.additional_writable_dirs,
-                          .anchor_set = source.anchor_set,
                           .project_trust = source.project_trust,
-                          .prompt_overrides = source.prompt_overrides,
-                          .tool_visibility = source.tool_visibility,
                           .context_sources = source.context_sources,
                           .freshness_sources = source.freshness_sources,
                           .system_prompt = source.system_prompt,
@@ -147,12 +146,7 @@ runtime::Session detached_session(runtime::Session const& source, ava::session::
                           .run_controller = source.run_controller,
                           .append_target = source.append_target,
                           .bound_read_authority = std::move(authority),
-                          .subagent_coordinator = source.subagent_coordinator,
-                          .subagent_delivery_manager = std::move(manager),
-                          .session_title_coordinator = source.session_title_coordinator,
-                          .diagnostics = source.diagnostics,
-                          .mcp_config = source.mcp_config,
-                          .offline = source.offline};
+                          .mcp_config = source.mcp_config};
 }
 
 std::string delivery_marker(ava::agent::SubagentJobIdentity const& identity)
@@ -468,7 +462,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
     if (found != parents_.end())
     {
       runtime::session_ts::rat session_r(found->second->session);
-      if (normalized_workspace_identity(session_r->workspace_dir) != expected_workspace)
+      if (normalized_workspace_identity(session_r->continuity.workspace_dir) != expected_workspace)
         return std::unexpected(retained_owner_not_found(session_id));
       capsule = found->second;
     }
@@ -479,7 +473,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
         if (!retained_id.starts_with(session_id))
           continue;
         runtime::session_ts::rat session_r(retained->session);
-        if (normalized_workspace_identity(session_r->workspace_dir) != expected_workspace)
+        if (normalized_workspace_identity(session_r->continuity.workspace_dir) != expected_workspace)
         {
           saw_foreign_owner = true;
           continue;

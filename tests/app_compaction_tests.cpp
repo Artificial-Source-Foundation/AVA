@@ -67,9 +67,9 @@ void test_app_compact_provider_summary_success()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "provider-backed /compact test opens runtime session");
   if (!session)
@@ -151,9 +151,9 @@ void test_app_compact_rejects_replaced_current_session_history()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "replacement-safe /compact test opens runtime session");
   if (!session)
@@ -209,9 +209,9 @@ void test_app_compact_openai_oauth_streaming_summary_success()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "OAuth streaming /compact test opens runtime session");
   if (!session)
@@ -251,9 +251,9 @@ void test_app_compact_provider_failure_leaves_session_untouched()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "provider failure /compact test opens runtime session");
   if (!session)
@@ -288,9 +288,9 @@ void test_compaction_observation_preserves_cancellation_callback_contract()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "compaction callback-contract test opens runtime session");
   if (!session)
@@ -348,9 +348,9 @@ void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "provider cancellation auto compaction test opens runtime session");
   if (!session)
@@ -389,9 +389,9 @@ void test_app_compact_oversized_summary_leaves_session_untouched()
   }
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "oversized /compact test opens runtime session");
   if (!session)
@@ -418,9 +418,9 @@ void test_app_compact_cancellation_before_append_leaves_session_untouched()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "manual compaction cancellation test opens runtime session");
   if (!session)
@@ -494,9 +494,9 @@ void test_app_compaction_model_selection_uses_runtime_catalog()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions options;
-  options.workspace_dir = workspace;
-  options.current_dir = workspace;
-  options.paths = app_test_paths(root);
+  options.continuity.workspace_dir = workspace;
+  options.continuity.current_dir = workspace;
+  options.continuity.paths = app_test_paths(root);
   auto session = ava::app::open_runtime_session(options);
   expect(session.has_value(), "compaction model-selection test opens runtime session");
   if (!session)
@@ -624,9 +624,9 @@ void test_app_manual_compaction_uses_only_active_context()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions options;
-  options.workspace_dir = workspace;
-  options.current_dir = workspace;
-  options.paths = app_test_paths(root);
+  options.continuity.workspace_dir = workspace;
+  options.continuity.current_dir = workspace;
+  options.continuity.paths = app_test_paths(root);
   auto session = ava::app::open_runtime_session(options);
   expect(session.has_value(), "active-context manual /compact test opens runtime session");
   if (!session)
@@ -685,9 +685,9 @@ void test_app_compact_honors_cross_provider_selection()
   setenv("ANTHROPIC_API_KEY", "test-anthropic-key", 1);
 
   ava::app::runtime::OpenOptions options;
-  options.workspace_dir = workspace;
-  options.current_dir = workspace;
-  options.paths = paths;
+  options.continuity.workspace_dir = workspace;
+  options.continuity.current_dir = workspace;
+  options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(options);
   expect(session.has_value(), "cross-provider /compact test opens runtime session");
   if (!session)
@@ -740,9 +740,9 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "auto compaction test opens runtime session");
   if (!session)
@@ -804,9 +804,9 @@ void test_app_auto_compaction_recent_context_respects_token_budget()
   }
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "recent context token budget test opens runtime session");
   if (!session)
@@ -851,9 +851,9 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely()
   }
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "recent context UTF-8 truncation test opens runtime session");
   if (!session)
@@ -900,9 +900,9 @@ void test_app_auto_compaction_explicit_zero_disables()
   }
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "disabled auto compaction test opens runtime session");
   if (!session)
@@ -935,9 +935,9 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "default threshold auto compaction test opens runtime session");
   if (!session)
@@ -976,9 +976,9 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "auto compaction revalidation test opens runtime session");
   if (!session)
@@ -1021,9 +1021,9 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "repeated stale auto compaction test opens runtime session");
   if (!session)
@@ -1061,9 +1061,9 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "context overflow retry test opens runtime session");
   if (!session)
@@ -1130,9 +1130,9 @@ void test_app_context_overflow_compaction_failure_leaves_no_partial_entry()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "context overflow compaction failure test opens runtime session");
   if (!session)
@@ -1164,9 +1164,9 @@ void test_app_non_overflow_provider_error_does_not_compact_or_retry()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "non-overflow provider error test opens runtime session");
   if (!session)
@@ -1281,9 +1281,9 @@ void test_app_context_overflow_retry_is_bounded()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
+  open_options.continuity.workspace_dir = workspace;
+  open_options.continuity.current_dir = workspace;
+  open_options.continuity.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "bounded overflow retry test opens runtime session");
   if (!session)

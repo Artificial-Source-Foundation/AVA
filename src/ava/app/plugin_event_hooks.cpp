@@ -222,12 +222,13 @@ PluginEventObserverOptions plugin_event_observer_options(runtime::Session& sessi
                                                          std::mutex* /*session_mutex*/)
 {
   return PluginEventObserverOptions{
-      .workspace_dir = session.workspace_dir,
-      .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
-      .plugin_project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{},
-      .plugin_enablement_file = session.paths.ava_state_dir / "plugin-enablement.json",
+      .workspace_dir = session.continuity.workspace_dir,
+      .plugin_global_plugins_dir = session.continuity.paths.ava_config_dir / "plugins",
+      .plugin_project_plugins_dir =
+          project_resources_trusted(session.project_trust) ? session.continuity.workspace_dir / ".ava" / "plugins" : std::filesystem::path{},
+      .plugin_enablement_file = session.continuity.paths.ava_state_dir / "plugin-enablement.json",
       .include_project_plugins = project_resources_trusted(session.project_trust),
-      .mode = session.mode,
+      .mode = session.continuity.mode,
       .permission_resolver = std::move(permission_resolver),
       // Permission audits are owner-routed outside active runs and replaced by
       // run_prompt's immutable generation route during one.
@@ -238,7 +239,7 @@ PluginEventObserverOptions plugin_event_observer_options(runtime::Session& sessi
       .session_id = session.store.session_id(),
       .provider_id = session.model.provider_id,
       .model_id = session.model.model_id,
-      .current_dir = session.current_dir};
+      .current_dir = session.continuity.current_dir};
 }
 
 runtime::EventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, runtime::EventSink next)

@@ -350,15 +350,15 @@ std::string state_result_json(runtime::Session const& session, bool cancel_reque
   json += ',';
   json += string_field_json("session_path", session.store.session_path().string());
   json += ',';
-  json += string_field_json("mode", ava::agent::to_string(session.mode));
+  json += string_field_json("mode", ava::agent::to_string(session.continuity.mode));
   json += ',';
   json += string_field_json("provider", session.model.provider_id);
   json += ',';
   json += string_field_json("model", session.model.model_id);
   json += ',';
-  json += string_field_json("workspace_dir", session.workspace_dir.string());
+  json += string_field_json("workspace_dir", session.continuity.workspace_dir.string());
   json += ',';
-  json += string_field_json("current_dir", session.current_dir.string());
+  json += string_field_json("current_dir", session.continuity.current_dir.string());
   json += ',';
   json += bool_field_json("created", session.created);
   json += ',';
@@ -397,7 +397,7 @@ std::string state_result_json(runtime::Session const& session, bool cancel_reque
 
 ava::core::Result<std::string> list_sessions_result_json(runtime::Session const& session)
 {
-  auto sessions = ava::session::SessionStore::list_sessions(session.workspace_dir, session.paths.sessions_dir);
+  auto sessions = ava::session::SessionStore::list_sessions(session.continuity.workspace_dir, session.continuity.paths.sessions_dir);
   if (!sessions)
     return std::unexpected(sessions.error());
   std::string json = "{\"sessions\":[";
@@ -424,7 +424,7 @@ ava::core::Result<std::string> list_sessions_result_json(runtime::Session const&
 
 ava::core::Result<std::string> session_tree_result_json(runtime::Session const& session)
 {
-  auto tree = ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id());
+  auto tree = ava::session::build_session_tree(session.continuity.workspace_dir, session.continuity.paths.sessions_dir, session.store.session_id());
   if (!tree)
     return std::unexpected(std::move(tree.error()));
   std::string json = "{";
@@ -482,7 +482,7 @@ ava::core::Result<std::string> session_tree_result_json(runtime::Session const& 
 
 ava::core::Result<std::string> list_models_result_json(runtime::Session const& session)
 {
-  auto registry = ava::config::load_model_registry(session.paths);
+  auto registry = ava::config::load_model_registry(session.continuity.paths);
   if (!registry)
     return std::unexpected(std::move(registry.error()));
 

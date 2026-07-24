@@ -70,24 +70,25 @@ struct OpenedInstallSourceFile
 
 std::string plugin_display_path(std::filesystem::path const& path, runtime::Session const& session)
 {
-  return sanitize_inline_text(display_path(path, session.current_dir));
+  return sanitize_inline_text(display_path(path, session.continuity.current_dir));
 }
 
 ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::Session const& session)
 {
-  return ava::plugin::PluginDiscoveryOptions{
-      .global_plugins_dir = session.paths.ava_config_dir / "plugins",
-      .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{}};
+  return ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = session.continuity.paths.ava_config_dir / "plugins",
+                                             .project_plugins_dir = project_resources_trusted(session.project_trust)
+                                                                        ? session.continuity.workspace_dir / ".ava" / "plugins"
+                                                                        : std::filesystem::path{}};
 }
 
 std::filesystem::path plugin_enablement_file(runtime::Session const& session)
 {
-  return session.paths.ava_state_dir / "plugin-enablement.json";
+  return session.continuity.paths.ava_state_dir / "plugin-enablement.json";
 }
 
 ava::plugin::PluginDiagnostics plugin_diagnostics(runtime::Session const& session)
 {
-  return ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir);
+  return ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.continuity.workspace_dir);
 }
 
 std::string plugin_scope_text(ava::plugin::PluginScope scope)
@@ -466,7 +467,7 @@ std::filesystem::path plugin_validate_path(runtime::Session const& session, std:
 {
   auto path = std::filesystem::path(std::string(path_text));
   if (path.is_relative())
-    path = session.current_dir / path;
+    path = session.continuity.current_dir / path;
   return path.lexically_normal();
 }
 
@@ -1161,7 +1162,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
       }
 
       ava::plugin::PluginRunnerOptions options;
-      options.workspace_dir = session.workspace_dir;
+      options.workspace_dir = session.continuity.workspace_dir;
       auto process = ava::plugin::PluginProcess::start(status.plugin.manifest, options, request.cancel_requested);
       if (!process)
       {
@@ -1284,7 +1285,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
     }
 
     ava::plugin::PluginRunnerOptions options;
-    options.workspace_dir = session.workspace_dir;
+    options.workspace_dir = session.continuity.workspace_dir;
     auto process = ava::plugin::PluginProcess::start(status->plugin.manifest, options, request.cancel_requested);
     if (!process)
     {
@@ -1365,7 +1366,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
       add_output(result, plugin_not_found_text(diagnostics, args[1]));
       return result;
     }
-    auto stored = ava::plugin::set_plugin_enabled(plugin_enablement_file(session), session.workspace_dir, args[1], enabled, status->plugin.scope);
+    auto stored = ava::plugin::set_plugin_enabled(plugin_enablement_file(session), session.continuity.workspace_dir, args[1], enabled, status->plugin.scope);
     if (!stored)
     {
       add_output(result, stored.error().format());
@@ -1459,7 +1460,7 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::Session& session, C
   }
 
   ava::plugin::PluginRunnerOptions options;
-  options.workspace_dir = session.workspace_dir;
+  options.workspace_dir = session.continuity.workspace_dir;
   auto process = ava::plugin::PluginProcess::start(status->plugin.manifest, options, request.cancel_requested);
   if (!process)
     return fail(process.error());

@@ -34,13 +34,9 @@ void append_command_authority_root(std::vector<std::filesystem::path>& roots, st
 
 runtime::OpenOptions lifecycle_options(runtime::OpenOptions options, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir)
 {
-  options.workspace_dir = workspace_root;
-  options.current_dir = current_dir;
-  options.requested_session_id = std::nullopt;
-  options.fork_session_id = std::nullopt;
-  options.continue_last_session = false;
-  options.sessionless = false;
-  options.initial_reasoning_level = std::nullopt;
+  options.continuity.workspace_dir = workspace_root;
+  options.continuity.current_dir = current_dir;
+  options.request = {};
   return options;
 }
 
@@ -48,20 +44,20 @@ runtime::OpenOptions lifecycle_options(runtime::OpenOptions options, std::filesy
 
 ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session)
 {
-  return ava::permissions::PermissionRuleStore{.global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-                                               .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-                                               .workspace_dir = session.workspace_dir,
-                                               .anchor_set = session.anchor_set};
+  return ava::permissions::PermissionRuleStore{.global_rules_file = session.continuity.paths.ava_config_dir / "permission-rules.json",
+                                               .workspace_rules_file = session.continuity.workspace_dir / ".ava" / "permission-rules.json",
+                                               .workspace_dir = session.continuity.workspace_dir,
+                                               .anchor_set = session.continuity.anchor_set};
 }
 
 std::vector<std::filesystem::path> command_authority_roots_for_session(runtime::Session const& session)
 {
   std::vector<std::filesystem::path> roots;
   roots.reserve(kMaxCommandAuthorityRoots);
-  append_command_authority_root(roots, session.paths.ava_config_dir);
-  append_command_authority_root(roots, session.paths.ava_state_dir);
-  append_command_authority_root(roots, session.paths.sessions_dir);
-  append_command_authority_root(roots, session.paths.auth_file);
+  append_command_authority_root(roots, session.continuity.paths.ava_config_dir);
+  append_command_authority_root(roots, session.continuity.paths.ava_state_dir);
+  append_command_authority_root(roots, session.continuity.paths.sessions_dir);
+  append_command_authority_root(roots, session.continuity.paths.auth_file);
   append_command_authority_root(roots, ava::config::legacy_ava_credentials_path());
   append_command_authority_root(roots, ava::config::legacy_compatible_auth_path());
   // Preserve the exact active store parent as a fallback for custom/test path
@@ -81,35 +77,23 @@ ava::core::Result<runtime::Session> open_runtime_session_at(runtime::OpenOptions
                                                             std::filesystem::path const& current_dir, std::string_view requested_session_id)
 {
   auto options = lifecycle_options(std::move(base_options), workspace_root, current_dir);
-  options.requested_session_id = std::string(requested_session_id);
+  options.request.requested_session_id = std::string(requested_session_id);
   return open_runtime_session(options);
 }
 
 ava::core::Result<runtime::Session> create_runtime_session_like(runtime::Session const& current, runtime::OpenOptions const& base_options)
 {
   auto options = base_options;
-  options.mode = current.mode;
-  options.paths = current.paths;
-  options.anchor_set = current.anchor_set;
-  options.subagent_coordinator = current.subagent_coordinator;
-  options.subagent_delivery_manager = current.subagent_delivery_manager;
-  options.session_title_coordinator = current.session_title_coordinator;
-  options.diagnostics = current.diagnostics;
-  return create_runtime_session_at(std::move(options), current.workspace_dir, current.current_dir);
+  options.continuity = current.continuity;
+  return create_runtime_session_at(std::move(options), current.continuity.workspace_dir, current.continuity.current_dir);
 }
 
 ava::core::Result<runtime::Session> open_runtime_session_like(runtime::Session const& current, runtime::OpenOptions const& base_options,
                                                               std::string_view requested_session_id)
 {
   auto options = base_options;
-  options.mode = current.mode;
-  options.paths = current.paths;
-  options.anchor_set = current.anchor_set;
-  options.subagent_coordinator = current.subagent_coordinator;
-  options.subagent_delivery_manager = current.subagent_delivery_manager;
-  options.session_title_coordinator = current.session_title_coordinator;
-  options.diagnostics = current.diagnostics;
-  return open_runtime_session_at(std::move(options), current.workspace_dir, current.current_dir, requested_session_id);
+  options.continuity = current.continuity;
+  return open_runtime_session_at(std::move(options), current.continuity.workspace_dir, current.continuity.current_dir, requested_session_id);
 }
 
 }  // namespace ava::app

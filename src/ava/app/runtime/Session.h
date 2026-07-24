@@ -3,8 +3,8 @@
 #include "BasePromptMetadata.h"
 #include "ContextSourceMetadata.h"
 #include "FreshnessSourceMetadata.h"
-#include "PromptOverrides.h"
 #include "ReasoningSelection.h"
+#include "RuntimeContinuity.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/project_trust.h"
@@ -24,15 +24,6 @@
 #include <utility>
 #include <vector>
 
-namespace ava::diagnostics {
-class RuntimeDiagnostics;
-}
-
-namespace ava::app {
-class SessionTitleCoordinator;
-class SubagentDeliveryManager;
-}  // namespace ava::app
-
 namespace ava::app::runtime {
 
 // Hold the mutable application state associated with an open runtime session.
@@ -43,24 +34,15 @@ struct Session
   ava::session::SessionStore store;
   // Persistent runtime owners hold a cross-process lease for the complete session lifetime.
   ava::session::SessionLease lease;
-  ava::agent::Mode mode = ava::agent::Mode::Build;
+  // The complete application/session continuity value transferred across
+  // in-process replacement. It owns all configured policy and descriptor-safe
+  // application services needed by later navigation.
+  RuntimeContinuity continuity;
   ava::config::ModelInfo model;
   BasePromptMetadata base_prompt;
-  ava::config::XdgPaths paths;
   // Resolved once at open time and reused by every runtime history reader.
   ava::session::SessionReadLimits session_read_limits = ava::session::legacy_unbounded_session_read_limits();
-  std::filesystem::path workspace_dir;
-  std::filesystem::path current_dir;
-  // Additional writable directories beyond workspace_dir (e.g., user-configured
-  // paths). These are opened as anchor descriptors at startup and made
-  // available to tools via ToolContext::anchor_set.
-  std::vector<std::filesystem::path> additional_writable_dirs = {};
-  // Pre-opened anchor descriptors for all writable directories. Opened once
-  // at session creation and shared across all prompts and subagent loops.
-  std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
   ProjectTrustState project_trust;
-  PromptOverrides prompt_overrides;
-  ava::agent::ToolVisibilityOptions tool_visibility;
   std::vector<ContextSourceMetadata> context_sources;
   std::vector<FreshnessSourceMetadata> freshness_sources;
   std::string system_prompt;
@@ -77,15 +59,8 @@ struct Session
   // without reacquiring the pathname. Ordinary visible sessions leave this
   // empty and derive an authority from their owned lease.
   std::optional<ava::session::SessionReadAuthority> bound_read_authority = std::nullopt;
-  // Shared application process state. Direct coordinator injection remains a
-  // compatibility seam; production sessions use the delivery manager.
-  std::shared_ptr<ava::agent::SubagentCoordinator> subagent_coordinator = nullptr;
-  std::shared_ptr<ava::app::SubagentDeliveryManager> subagent_delivery_manager = nullptr;
-  std::shared_ptr<ava::app::SessionTitleCoordinator> session_title_coordinator = nullptr;
-  std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
   // Null uses normal global/project discovery; non-null is immutable session-local MCP composition.
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;
-  bool offline = false;
 
   // Bind a lifetime-safe history snapshot route to this session's exact lease
   // (or to its shared in-memory state in sessionless mode).

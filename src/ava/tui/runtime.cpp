@@ -36,6 +36,20 @@
 #include <curses.h>
 
 namespace ava::tui {
+using runtime_commands::attach_command_argument;
+using runtime_commands::copy_command_argument;
+using runtime_commands::diff_command_argument;
+using runtime_commands::exact_command;
+using runtime_commands::is_compact_command;
+using runtime_commands::parse_copy_target;
+using runtime_commands::reload_command_argument;
+using runtime_commands::reload_target_from_argument;
+using runtime_commands::ReloadTarget;
+using runtime_commands::session_switching_command;
+using runtime_commands::shell_helper_submission;
+using runtime_commands::should_echo_slash_command;
+using runtime_commands::should_show_slash_command_output_as_status;
+using runtime_commands::tool_command_argument;
 using runtime_input::poll_curses_input;
 using runtime_input::printable_jump_target;
 using runtime_input::read_curses_input;
@@ -214,34 +228,6 @@ struct PendingSessionArchiveAction
   bool archive = true;
 };
 
-bool is_compact_command(std::string_view line) noexcept
-{
-  return line == "/compact" || (line.starts_with("/compact") && line.size() > 8 && line[8] == ' ');
-}
-
-std::string_view first_ascii_token(std::string_view text)
-{
-  auto const end = text.find_first_of(" \t\r\n");
-  return text.substr(0, end == std::string_view::npos ? text.size() : end);
-}
-
-bool should_echo_slash_command(std::string_view submitted)
-{
-  auto const token = first_ascii_token(submitted);
-  return token != "/connect" && token != "/login";
-}
-
-bool shell_helper_submission(std::string_view submitted)
-{
-  return submitted.starts_with('!');
-}
-
-bool should_show_slash_command_output_as_status(std::string_view submitted)
-{
-  auto const token = first_ascii_token(submitted);
-  return token == "/connect" || token == "/login";
-}
-
 std::vector<std::string> split_key_display(std::string_view keys)
 {
   std::vector<std::string> parts;
@@ -302,113 +288,6 @@ std::string compact_path_leaf(std::string path)
   return path.substr(slash + 1);
 }
 
-bool exact_command(std::string_view submitted, std::string_view command)
-{
-  while (!submitted.empty() && std::isspace(static_cast<unsigned char>(submitted.front())) != 0) submitted.remove_prefix(1);
-  while (!submitted.empty() && std::isspace(static_cast<unsigned char>(submitted.back())) != 0) submitted.remove_suffix(1);
-  return submitted == command;
-}
-
-bool starts_with_command_submission(std::string_view submitted, std::string_view command)
-{
-  while (!submitted.empty() && std::isspace(static_cast<unsigned char>(submitted.front())) != 0) submitted.remove_prefix(1);
-  while (!submitted.empty() && std::isspace(static_cast<unsigned char>(submitted.back())) != 0) submitted.remove_suffix(1);
-  return submitted == command ||
-         (submitted.starts_with(command) && submitted.size() > command.size() && std::isspace(static_cast<unsigned char>(submitted[command.size()])) != 0);
-}
-
-bool session_switching_command(std::string_view submitted)
-{
-  return starts_with_command_submission(submitted, "/new") || starts_with_command_submission(submitted, "/resume") ||
-         starts_with_command_submission(submitted, "/fork") || starts_with_command_submission(submitted, "/clone");
-}
-
-std::string trim_view_to_string(std::string_view text)
-{
-  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) text.remove_prefix(1);
-  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) text.remove_suffix(1);
-  return std::string(text);
-}
-
-std::optional<std::string> reload_command_argument(std::string_view submitted)
-{
-  auto const normalized = trim_view_to_string(submitted);
-  submitted = normalized;
-  constexpr std::string_view kReload = "/reload";
-  if (submitted == kReload)
-    return std::string{};
-  if (submitted.starts_with(kReload) && submitted.size() > kReload.size() && std::isspace(static_cast<unsigned char>(submitted[kReload.size()])) != 0)
-  {
-    return trim_view_to_string(submitted.substr(kReload.size() + 1));
-  }
-  return std::nullopt;
-}
-
-std::optional<std::string> copy_command_argument(std::string_view submitted)
-{
-  auto const normalized = trim_view_to_string(submitted);
-  submitted = normalized;
-  constexpr std::string_view kCopy = "/copy";
-  if (submitted == kCopy)
-    return std::string{};
-  if (submitted.starts_with(kCopy) && submitted.size() > kCopy.size() && std::isspace(static_cast<unsigned char>(submitted[kCopy.size()])) != 0)
-  {
-    return trim_view_to_string(submitted.substr(kCopy.size() + 1));
-  }
-  return std::nullopt;
-}
-
-std::optional<std::string> tool_command_argument(std::string_view submitted)
-{
-  auto const normalized = trim_view_to_string(submitted);
-  submitted = normalized;
-  for (auto const command : {std::string_view("/tool"), std::string_view("/tools")})
-  {
-    if (submitted == command)
-      return std::string{};
-    if (submitted.starts_with(command) && submitted.size() > command.size() && std::isspace(static_cast<unsigned char>(submitted[command.size()])) != 0)
-    {
-      return trim_view_to_string(submitted.substr(command.size() + 1));
-    }
-  }
-  return std::nullopt;
-}
-
-std::optional<std::string> diff_command_argument(std::string_view submitted)
-{
-  auto const normalized = trim_view_to_string(submitted);
-  submitted = normalized;
-  constexpr std::string_view kDiff = "/diff";
-  if (submitted == kDiff)
-    return std::string{};
-  if (submitted.starts_with(kDiff) && submitted.size() > kDiff.size() && std::isspace(static_cast<unsigned char>(submitted[kDiff.size()])) != 0)
-  {
-    return trim_view_to_string(submitted.substr(kDiff.size() + 1));
-  }
-  return std::nullopt;
-}
-
-std::optional<std::string> attach_command_argument(std::string_view submitted)
-{
-  auto const normalized = trim_view_to_string(submitted);
-  submitted = normalized;
-  for (auto const command : {std::string_view("/attach"), std::string_view("/image")})
-  {
-    if (submitted == command)
-      return std::string{};
-    if (submitted.starts_with(command) && submitted.size() > command.size() && std::isspace(static_cast<unsigned char>(submitted[command.size()])) != 0)
-    {
-      auto argument = trim_view_to_string(submitted.substr(command.size() + 1));
-      if (argument.size() >= 2 && ((argument.front() == '"' && argument.back() == '"') || (argument.front() == '\'' && argument.back() == '\'')))
-      {
-        argument = argument.substr(1, argument.size() - 2);
-      }
-      return argument;
-    }
-  }
-  return std::nullopt;
-}
-
 std::string attachment_detail(ava::session::ImageAttachmentRef const& attachment, TerminalImageCapabilities const& capabilities)
 {
   return "(" + attachment.mime_type + ", " + std::to_string(attachment.byte_size) + " bytes) preview " + terminal_image_settings_description(capabilities);
@@ -462,38 +341,6 @@ std::optional<PendingAttachmentItem::Preview> attachment_preview(
                                         .base64_data = std::make_shared<std::string const>(base64_encode(loaded->bytes)),
                                         .dimensions = dimensions,
                                         .image_id = kitty_image_id_from_sha(attachment.sha256)};
-}
-
-struct CopyTarget
-{
-  std::string name;
-  std::string query = {};
-};
-
-CopyTarget parse_copy_target(std::string_view argument)
-{
-  auto const normalized = trim_view_to_string(argument);
-  auto view = std::string_view(normalized);
-  auto const name_end = view.find_first_of(" \t\r\n");
-  if (name_end == std::string_view::npos)
-    return CopyTarget{.name = normalized};
-  return CopyTarget{.name = std::string(view.substr(0, name_end)), .query = trim_view_to_string(view.substr(name_end + 1))};
-}
-
-enum class ReloadTarget
-{
-  KeyBindings,
-  DisplaySettings,
-};
-
-std::optional<ReloadTarget> reload_target_from_argument(std::string_view target)
-{
-  auto const normalized = trim_view_to_string(target);
-  if (normalized.empty() || normalized == "keybindings" || normalized == "keybinds" || normalized == "keys")
-    return ReloadTarget::KeyBindings;
-  if (normalized == "theme" || normalized == "themes" || normalized == "display")
-    return ReloadTarget::DisplaySettings;
-  return std::nullopt;
 }
 
 void add_settings_row(SelectListView& view, std::string group, std::string label, std::string description, std::string detail = {}, std::string badge = {})
@@ -626,11 +473,6 @@ void apply_reasoning_cycle_success(ComposerSnapshot& snapshot, std::string feedb
 void clear_reasoning_feedback_for_user_input(ComposerSnapshot& snapshot)
 {
   snapshot.reasoning_feedback.reset();
-}
-
-std::optional<std::string> parse_tui_tool_command_argument(std::string_view submitted)
-{
-  return tool_command_argument(submitted);
 }
 
 ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_prompt_view(QuestionPromptView const& prompt)

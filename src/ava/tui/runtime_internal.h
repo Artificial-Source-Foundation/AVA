@@ -2,6 +2,7 @@
 
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/runtime_commands_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
 
 #include <functional>
@@ -12,8 +13,6 @@
 #include "debug.h"
 
 namespace ava::tui {
-
-[[nodiscard]] std::optional<std::string> parse_tui_tool_command_argument(std::string_view submitted);
 
 enum class TuiActiveNonblockingCommandDispatchKind
 {

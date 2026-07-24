@@ -336,7 +336,6 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
       if (!opened)
         return std::unexpected(std::move(opened.error()));
       anchor_set = std::move(*opened);
-      continuity.anchor_set_is_generated = true;
     }
     auto const config_anchor = anchor_set->find_anchor(continuity.paths.ava_config_dir);
     auto const state_anchor = anchor_set->find_anchor(continuity.paths.ava_state_dir);

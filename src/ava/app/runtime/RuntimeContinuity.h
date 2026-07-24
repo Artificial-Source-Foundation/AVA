@@ -47,10 +47,6 @@ struct RuntimeContinuity
   // sessionless authority also covers that ephemeral store's unique spill
   // root, so creating another ephemeral session must rebind it.
   std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
-  // True when anchor_set was constructed by the runtime. Caller-supplied
-  // descriptor authority is immutable across lifecycle navigation and must
-  // validate every new spill root instead of being reset.
-  bool anchor_set_is_generated = false;
   ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::agent::ToolVisibilityOptions tool_visibility;
   // paths defaults to the process-wide XDG layout so callers that do not
@@ -79,18 +75,9 @@ struct RuntimeContinuity
   // retained, and protocol-managed runtime sessions.
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
 
-  // Drop only generated authority tied to the previous ephemeral store; the
-  // next open reconstructs it around the new store's unique spill root.
-  // Caller-supplied authority remains immutable and is validated by the next
-  // open against that root.
-  void reset_ephemeral_anchor() noexcept
-  {
-    if (anchor_set_is_generated)
-    {
-      anchor_set.reset();
-      anchor_set_is_generated = false;
-    }
-  }
+  // Drop only the descriptor authority tied to the previous ephemeral store;
+  // the next open reconstructs it around the new store's unique spill root.
+  void reset_ephemeral_anchor() noexcept { anchor_set.reset(); }
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

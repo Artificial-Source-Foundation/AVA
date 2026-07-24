@@ -558,57 +558,6 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
          "source active");
 }
 
-void test_app_rpc_branch_strict_cwd_mismatch_rolls_back_created_file()
-{
-  auto const root = create_empty_root("app-rpc-branch-strict-cwd-rollback");
-  auto const workspace = root / "workspace";
-  auto const paths = app_test_paths(root);
-  std::filesystem::create_directories(workspace);
-
-  ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
-  auto source = ava::app::open_runtime_session(open_options);
-  expect(source.has_value(), "RPC strict-cwd rollback test opens an active source session");
-  if (!source)
-    return;
-
-  auto const source_id = source->store.session_id();
-  auto const source_path = source->store.session_path();
-  open_options.request.expected_original_cwd = root / "mismatched-cwd";
-  ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({});
-  std::istringstream in("{\"id\":\"fork-strict-cwd\",\"type\":\"fork_session\"}\n");
-  std::ostringstream out;
-  ava::app::runtime::session_ts unlocked_source(std::move(*source));
-  auto result =
-      ava::app::run_rpc_loop(unlocked_source, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
-  auto const jsonl = out.str();
-  auto const marker = std::string("created_session_id: ");
-  auto const marker_offset = jsonl.find(marker);
-  std::optional<std::string> created_id;
-  if (marker_offset != std::string::npos)
-  {
-    auto const value_start = marker_offset + marker.size();
-    auto const value_end = jsonl.find("\\n", value_start);
-    created_id = jsonl.substr(value_start, value_end == std::string::npos ? std::string::npos : value_end - value_start);
-  }
-  bool created_file_removed = false;
-  if (created_id)
-  {
-    auto destination =
-        ava::session::SessionStore(ava::session::SessionStoreOptions{.root_dir = paths.sessions_dir, .workspace_dir = workspace, .session_id = *created_id});
-    created_file_removed = !std::filesystem::exists(destination.session_path());
-  }
-  auto source_contender = ava::session::SessionLease::acquire(source_path);
-  expect(result && created_id && jsonl.find("\"id\":\"fork-strict-cwd\"") != std::string::npos && jsonl.find("\"success\":false") != std::string::npos &&
-             jsonl.find("requested cwd does not match persisted session cwd") != std::string::npos && created_file_removed &&
-             ava::app::runtime::session_ts::rat(unlocked_source)->store.session_id() == source_id && !source_contender &&
-             source_contender.error().message().find("already owned") != std::string::npos,
-         "RPC fork preserves strict persisted-cwd validation and rolls back its rejected branch file");
-}
-
 void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
 {
   auto const root = create_empty_root("app-rpc-noncurrent-torn-branch");

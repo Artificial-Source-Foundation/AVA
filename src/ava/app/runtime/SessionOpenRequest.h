@@ -38,15 +38,6 @@ struct SessionOpenRequest
     initial_reasoning_level.reset();
   }
 
-  // Clear all selections and initialization choices before directly handing
-  // an already-owned replacement store to the runtime. Strict adapter policy
-  // remains in force for validation of that replacement.
-  void reset_for_owned_replacement() noexcept
-  {
-    reset_for_lifecycle_navigation();
-    initial_session_name.reset();
-  }
-
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 

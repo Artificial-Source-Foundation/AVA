@@ -11,6 +11,7 @@ set(CURSES_NEED_WIDE TRUE)
 find_package(Curses REQUIRED)
 
 add_library(ava_test_support
+  "support/agent_loop_test_support.cpp"
   "support/app_runtime_support.cpp"
   "support/fake_transport.cpp"
   "support/libcwd_test_output.cpp"
@@ -55,8 +56,16 @@ ava_apply_sanitizers(ava_rpc_broken_pipe_subprocess_test)
 
 set(AVA_TESTS_SOURCES
   "acp_tests.cpp"
+  "agent_loop_background_job_tests.cpp"
+  "agent_loop_background_subagent_tests.cpp"
+  "agent_loop_command_safety_tests.cpp"
+  "agent_loop_core_tests.cpp"
+  "agent_loop_history_tests.cpp"
+  "agent_loop_interaction_tests.cpp"
   "agent_loop_resilience_tests.cpp"
+  "agent_loop_subagent_tests.cpp"
   "agent_loop_tests.cpp"
+  "agent_loop_tool_execution_tests.cpp"
   "agent_tool_dispatcher_tests.cpp"
   "app_compaction_tests.cpp"
   "app_command_registry_tests.cpp"

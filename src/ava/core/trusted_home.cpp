@@ -72,9 +72,14 @@ Result<TrustedAccount> read_trusted_account_from_env()
 
 Result<TrustedAccount> resolve_trusted_account()
 {
+  DoutEntering(dc::core|continued_cf, "resolve_trusted_account() -> ");
+
   auto account = read_trusted_account_from_env();
   if (!account)
+  {
+    Dout(dc::finish, account.error());
     return std::unexpected(std::move(account.error()));
+  }
   g_cache = *account;
 
   // The environment variable HOME should *only* be read by `read_trusted_account_from_env`
@@ -88,6 +93,7 @@ Result<TrustedAccount> resolve_trusted_account()
   // the moment of testing *after* calling read_trusted_account_from_env.
   ASSERT(g_account_frozen.is_momentary_false(std::memory_order::relaxed));
 
+  Dout(dc::finish, *account);
   return *account;
 }
 
@@ -104,6 +110,8 @@ TrustedAccount const& cached_trusted_account()
 
 void freeze_trusted_account()
 {
+  DoutEntering(dc::core, "freeze_trusted_account()");
+
   // Transition g_account_frozen from WasFalse -> True.
   g_account_frozen.store(fuzzy::True, std::memory_order::release);
 }

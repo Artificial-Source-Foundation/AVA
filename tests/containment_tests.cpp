@@ -6,6 +6,7 @@
 #include "ava/tools/bash_tool.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/AnchorSet.h"
+#include "ava/core/trusted_home.h"
 
 #include <algorithm>
 #include <array>
@@ -404,18 +405,49 @@ void test_critical_raw_remains_ask_no_containment()
 
 void test_home_as_workspace_rejected()
 {
-  // Reject a workspace that equals or is an ancestor of the trusted real home.
-  // Ordinary projects nested under home are allowed.
-  char const* const home_env = std::getenv("HOME");
-  if (!home_env || home_env[0] == '\0')
+  // Reject a workspace that equals or is an ancestor of the trusted home.
+  // Ordinary projects nested under the trusted home are allowed.
+  //
+  // The boundary rule operates on CommandBuildOptions::trusted_home. Obtain that
+  // path from ava::core::cached_trusted_account() -- the process-wide trusted
+  // home, and the single place HOME is read -- rather than reading $HOME here.
+  // To exercise the rule we need a directory whose ancestor chain is owner-safe
+  // so it passes the sealing ancestor-safety validation; /tmp-based temp space
+  // does not qualify (its ancestors are world-writable). Create a per-process
+  // scratch directory under the trusted home to stand in for it; when the
+  // trusted home is mounted read-only (some CI containers) fall back to a
+  // scratch directory under the build tree, which is writable and owner-safe.
+  // Because the stand-in is always a directory we create, cleanup is uniform and
+  // never touches a real home directory.
+  std::error_code ec;
+  std::filesystem::path trusted_home;
+  auto const boundary_name = "ava-test-home-boundary-" + std::to_string(::getpid());
+
   {
-    ava::test::request_skip("cannot determine trusted home for boundary test");
+    auto candidate = ava::core::cached_trusted_account().home / boundary_name;
+    std::filesystem::create_directories(candidate, ec);
+    if (!ec)
+      trusted_home = std::move(candidate);
+  }
+#ifdef AVA_TESTS_BINARY_DIR
+  // The trusted home may be mounted read-only (some CI containers); fall back to
+  // a scratch directory under the build tree, which is writable and whose
+  // ancestor chain is owner-safe.
+  if (trusted_home.empty())
+  {
+    auto candidate = std::filesystem::path(AVA_TESTS_BINARY_DIR) / boundary_name;
+    std::filesystem::create_directories(candidate, ec);
+    if (!ec)
+      trusted_home = std::move(candidate);
+  }
+#endif
+  if (trusted_home.empty())
+  {
+    ava::test::request_skip("no writable trusted-home stand-in with a safe ancestor chain available");
     return;
   }
-  std::filesystem::path const home(home_env);
-  // Create a project directory under home for the positive case.
-  std::error_code ec;
-  auto project_under_home = std::filesystem::path(home) / "ava-test-project-boundary";
+
+  auto project_under_home = trusted_home / "ava-test-project-boundary";
   std::filesystem::create_directories(project_under_home, ec);
   ::chmod(project_under_home.c_str(), S_IRWXU);
   // Synthetic roots must be disjoint from workspace and trusted_home; use
@@ -430,13 +462,13 @@ void test_home_as_workspace_rejected()
     ::chmod(p.c_str(), S_IRWXU);
   }
   command::CommandLimits limits;
-  auto home_anchors = ava::core::AnchorSet::open({home, synth_base});
+  auto home_anchors = ava::core::AnchorSet::open({trusted_home, synth_base});
   expect(home_anchors.has_value(), "home boundary test opens its shared AnchorSet");
   if (!home_anchors)
     return;
-  command::CommandBuildOptions opts{.workspace = home,
+  command::CommandBuildOptions opts{.workspace = trusted_home,
                                     .anchor_set = *home_anchors,
-                                    .trusted_home = home,
+                                    .trusted_home = trusted_home,
                                     .startup_path = "/usr/bin:/bin",
                                     .shell = "/bin/sh",
                                     .ava_authority_roots = {},
@@ -455,7 +487,7 @@ void test_home_as_workspace_rejected()
   auto plan = command::seal_command_plan(*intent, opts);
   expect(!plan, "sealing rejects workspace that equals the trusted real home");
 
-  // Positive: a project nested under home is allowed.
+  // Positive: a project nested under the trusted home is allowed.
   auto project_anchors = ava::core::AnchorSet::open({project_under_home, synth_base});
   expect(project_anchors.has_value(), "nested project boundary test opens its shared AnchorSet");
   if (!project_anchors)
@@ -466,7 +498,7 @@ void test_home_as_workspace_rejected()
   auto nested_plan = command::seal_command_plan(*nested_intent, opts);
   expect(nested_plan.has_value(), "sealing allows ordinary projects nested under home");
 
-  std::filesystem::remove_all(project_under_home, ec);
+  std::filesystem::remove_all(trusted_home, ec);
   std::filesystem::remove_all(synth_base, ec);
 }
 

@@ -105,6 +105,7 @@ target_compile_definitions(ava_tests PRIVATE AVA_080_GOLDEN_DIR="${CMAKE_SOURCE_
 target_compile_definitions(ava_tests PRIVATE AVA_M1_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/fixtures/eval/m1")
 target_compile_definitions(ava_tests PRIVATE AVA_RPC_V1_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden/rpc-v1")
 target_compile_definitions(ava_tests PRIVATE AVA_ACP_V1_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/acp-v1")
+target_compile_definitions(ava_tests PRIVATE AVA_TESTS_BINARY_DIR="${CMAKE_BINARY_DIR}")
 ava_apply_warnings(ava_tests)
 ava_apply_sanitizers(ava_tests)
 

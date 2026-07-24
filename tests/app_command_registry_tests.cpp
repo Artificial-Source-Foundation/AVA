@@ -7,8 +7,8 @@
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
-#include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
+#include "ava/session/session_store.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -31,9 +31,9 @@ ava::app::runtime::Session open_test_session(std::filesystem::path const& root, 
 {
   auto paths = app_test_paths(root);
   ava::app::runtime::OpenOptions options;
-  options.continuity.workspace_dir = workspace;
-  options.continuity.current_dir = workspace;
-  options.continuity.paths = paths;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
   auto session = ava::app::open_runtime_session(options);
   expect(session.has_value(), "command registry test opens runtime session");
   return std::move(*session);
@@ -173,8 +173,8 @@ void test_mcp_prompts_are_registry_entries_and_permissioned_prompts()
 
   auto session = open_test_session(root, workspace);
   std::vector<ava::permissions::Operation> operations;
-  auto registry =
-      session.load_command_registry(ava::app::CommandRegistryOptions{.include_mcp_prompts = true, .permission_resolver = allow_all_permissions(&operations)});
+  auto registry = session.load_command_registry(
+      ava::app::CommandRegistryOptions{.include_mcp_prompts = true, .permission_resolver = allow_all_permissions(&operations)});
   auto const* entry = find_entry(registry, "/mcp:demo:release-notes");
   expect(entry != nullptr && entry->source == ava::app::UnifiedCommandSource::McpPrompt && entry->mcp_server_id == "demo" &&
              entry->mcp_prompt_name == "release-notes" && !entry->mcp_arguments.empty() && entry->mcp_arguments[0].name == "topic",
@@ -232,8 +232,8 @@ void test_builtin_session_alias_registers_as_current_stats_command()
   auto jobs = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs"});
   auto missing = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs show job_missing"});
   auto invalid_wait = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs wait job_missing nope"});
-  auto active_wait = ava::app::run_jobs_command(session.continuity.subagent_coordinator, session.store.session_id(), "wait job_missing 10", true);
-  auto active_result = ava::app::run_jobs_command(session.continuity.subagent_coordinator, session.store.session_id(), "result job_missing", true);
+  auto active_wait = ava::app::run_jobs_command(session.subagent_coordinator, session.store.session_id(), "wait job_missing 10", true);
+  auto active_result = ava::app::run_jobs_command(session.subagent_coordinator, session.store.session_id(), "result job_missing", true);
   auto active_list_arguments = ava::app::active_jobs_command_arguments(" /jobs ");
   auto active_promote_arguments = ava::app::active_jobs_command_arguments("/jobs promote job_1");
   auto unrelated_active_command = ava::app::active_jobs_command_arguments("/jobs-extra promote job_1");

@@ -186,9 +186,9 @@ void test_app_rpc_terminal_publication_gates_prompt_id_reuse()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC prompt publication gate test opens runtime session");
   if (!session)
@@ -233,9 +233,9 @@ void test_app_rpc_parent_terminal_precedes_queued_follow_up_start()
   std::filesystem::create_directories(workspace);
   write_app_test_file(outside_path, "parent follow-up publication");
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC parent/follow-up publication test opens runtime session");
   if (!session)
@@ -287,9 +287,9 @@ void test_app_rpc_eof_during_blocked_parent_publication_skips_follow_up()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC blocked-publication EOF test opens runtime session");
   if (!session)
@@ -346,9 +346,9 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
     ava::app::runtime::OpenOptions open_options;
-    open_options.continuity.workspace_dir = workspace;
-    open_options.continuity.current_dir = workspace;
-    open_options.continuity.paths = paths;
+    open_options.workspace_dir = workspace;
+    open_options.current_dir = workspace;
+    open_options.paths = paths;
     auto session = ava::app::open_runtime_session(open_options);
     expect(session.has_value(), "RPC direct publication gate test opens runtime session");
     if (session)
@@ -389,9 +389,9 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
     ava::app::runtime::OpenOptions open_options;
-    open_options.continuity.workspace_dir = workspace;
-    open_options.continuity.current_dir = workspace;
-    open_options.continuity.paths = paths;
+    open_options.workspace_dir = workspace;
+    open_options.current_dir = workspace;
+    open_options.paths = paths;
     auto session = ava::app::open_runtime_session(open_options);
     expect(session.has_value(), "RPC compaction publication gate test opens runtime session");
     if (session)
@@ -433,9 +433,9 @@ void test_app_rpc_worker_output_failure_wakes_blocked_input()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC output-failure wake test opens runtime session");
   if (!session)
@@ -475,10 +475,10 @@ void test_app_rpc_mode_forwards_nonstdin_wake()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::app::RpcModeOptions options;
-  options.open_options.continuity.workspace_dir = workspace;
-  options.open_options.continuity.current_dir = workspace;
-  options.open_options.continuity.paths = app_test_paths(root);
-  options.open_options.continuity.offline = true;
+  options.open_options.workspace_dir = workspace;
+  options.open_options.current_dir = workspace;
+  options.open_options.paths = app_test_paths(root);
+  options.open_options.offline = true;
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
   std::ostringstream out;

@@ -630,9 +630,9 @@ void test_app_rpc_utf8_recovery_and_framing()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC invalid UTF-8 recovery test opens runtime session");
   if (!session)
@@ -641,8 +641,8 @@ void test_app_rpc_utf8_recovery_and_framing()
   std::string const replacement = "\xEF\xBF\xBD";
   std::string invalid_component = "bad";
   invalid_component.push_back(static_cast<char>(0xFF));
-  session->continuity.workspace_dir = std::filesystem::path(invalid_component);
-  session->continuity.current_dir = std::filesystem::path(invalid_component);
+  session->workspace_dir = std::filesystem::path(invalid_component);
+  session->current_dir = std::filesystem::path(invalid_component);
   auto const invalid_state = ava::app::rpc::state_result_json(*session, false);
   auto const invalid_path = ava::app::rpc::string_field_json("path", invalid_component);
   ava::app::CommandResult invalid_output_result;

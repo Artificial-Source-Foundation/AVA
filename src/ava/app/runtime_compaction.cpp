@@ -1,9 +1,9 @@
 #include "sys.h"
-#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_compaction.h"
 #include "ava/app/runtime_credentials.h"
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_retry.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/agent/message_builder.h"
 #include "ava/session/logical_projection.h"
 #include "ava/session/validation.h"
@@ -28,7 +28,7 @@ runtime::Event base_compaction_event_locked(runtime::Session const& session, run
     event.type = type;
     event.timestamp = ava::session::now_timestamp();
     event.session_id = session.store.session_id();
-    event.mode = session.continuity.mode;
+    event.mode = session.mode;
     event.provider_id = session.model.provider_id;
     event.model_id = session.model.model_id;
     return event;
@@ -409,7 +409,7 @@ ava::core::Result<ava::session::CompactionConfig> resolve_compaction_config(runt
   }
   auto const provider_id = config.provider_explicit ? config.provider_id : session.model.provider_id;
   auto const model_id = config.model_id;
-  auto model = resolve_runtime_model(session.continuity.paths, provider_id, model_id);
+  auto model = resolve_runtime_model(session.paths, provider_id, model_id);
   if (!model)
   {
     model.error().with_context("compaction_provider", provider_id).with_context("compaction_model", model_id);
@@ -506,7 +506,7 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
                                                            std::size_t estimated_tokens, ava::provider::Provider const& provider,
                                                            ava::provider::Transport& transport, runtime::RunOptions const& options)
 {
-  if (session.continuity.offline || options.offline)
+  if (session.offline || options.offline)
   {
     return std::unexpected(offline_provider_error("compact"));
   }
@@ -514,8 +514,7 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
   if (!effective_config)
     return std::unexpected(std::move(effective_config.error()));
   ava::core::Result<ava::config::ModelInfo> summary_model =
-      effective_config->model_explicit ? resolve_runtime_model(session.continuity.paths, effective_config->provider_id, effective_config->model_id)
-                                       : session.model;
+      effective_config->model_explicit ? resolve_runtime_model(session.paths, effective_config->provider_id, effective_config->model_id) : session.model;
   if (!summary_model)
     return std::unexpected(std::move(summary_model.error()));
 
@@ -529,8 +528,7 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
     summary_options.openai_oauth = false;
     summary_options.openai_account_id.clear();
     ava::provider::CurlCliTransport auth_transport;
-    auto prepared =
-        prepare_runtime_credentials(session.continuity.paths, effective_config->provider_id, std::move(summary_options), auth_transport, "compaction");
+    auto prepared = prepare_runtime_credentials(session.paths, effective_config->provider_id, std::move(summary_options), auth_transport, "compaction");
     if (!prepared)
       return std::unexpected(std::move(prepared.error()));
     summary_options = std::move(*prepared);
@@ -638,7 +636,7 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "compaction requires provider access token"));
   }
 
-  auto loaded_config = ava::session::load_compaction_config(session.continuity.paths);
+  auto loaded_config = ava::session::load_compaction_config(session.paths);
   if (!loaded_config)
     return std::unexpected(std::move(loaded_config.error()));
   auto config = resolve_compaction_config(session, std::move(*loaded_config));

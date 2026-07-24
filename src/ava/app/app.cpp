@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/app/acp_mode.h"
 #include "ava/app/app.h"
 #include "ava/app/connect_openai.h"
@@ -12,8 +11,9 @@
 #include "ava/agent/mode.h"
 #include "ava/tui/composer.h"
 #include "ava/config/xdg_paths.h"
-#include "ava/core/AnchorSet.h"
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/core/version.h"
+#include "ava/core/AnchorSet.h"
 
 #include <cctype>
 #include <cstdlib>
@@ -79,10 +79,10 @@ bool is_cli_option(std::string_view arg)
 {
   return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" || arg == "--session-id" || arg == "--continue" ||
          arg == "--resume" || arg == "-c" || arg == "-r" || arg == "--fork" || arg == "--name" || arg == "-n" || arg == "--session-dir" ||
-         arg == "--no-session" || arg == "--offline" || arg == "--trace" || arg == "--thinking" || arg == "--system-prompt" ||
-         arg == "--append-system-prompt" || arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--acp" || arg == "--json" || arg == "--output" ||
-         arg == "--allow" || arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" ||
-         arg == "--no-builtin-tools" || arg == "-nbt" || arg == "--no-tools" || arg == "-nt";
+         arg == "--no-session" || arg == "--offline" || arg == "--trace" || arg == "--thinking" || arg == "--system-prompt" || arg == "--append-system-prompt" ||
+         arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--acp" || arg == "--json" || arg == "--output" || arg == "--allow" ||
+         arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" || arg == "--no-builtin-tools" || arg == "-nbt" ||
+         arg == "--no-tools" || arg == "-nt";
 }
 
 bool is_cli_file_argument(std::string_view arg)
@@ -769,20 +769,20 @@ int run(int argc, char** argv)
     std::cerr << cwd.error().format() << '\n';
     return 1;
   }
-  open_options.continuity.workspace_dir = std::move(*cwd);
-  open_options.continuity.current_dir = open_options.continuity.workspace_dir;
-  open_options.request.requested_session_id = requested_session_id;
-  open_options.request.fork_session_id = fork_session_id;
-  open_options.request.initial_session_name = initial_session_name;
-  open_options.request.continue_last_session = continue_last_session;
-  open_options.request.sessionless = sessionless;
-  open_options.continuity.mode = mode;
-  open_options.continuity.tool_visibility = std::move(tool_visibility);
-  open_options.continuity.paths = runtime_paths;
-  open_options.continuity.prompt_overrides = std::move(prompt_overrides);
-  open_options.request.initial_reasoning_level = std::move(initial_reasoning_level);
-  open_options.continuity.offline = offline;
-  open_options.continuity.diagnostics = *diagnostics;
+  open_options.workspace_dir = std::move(*cwd);
+  open_options.current_dir = open_options.workspace_dir;
+  open_options.requested_session_id = requested_session_id;
+  open_options.fork_session_id = fork_session_id;
+  open_options.initial_session_name = initial_session_name;
+  open_options.continue_last_session = continue_last_session;
+  open_options.sessionless = sessionless;
+  open_options.mode = mode;
+  open_options.tool_visibility = std::move(tool_visibility);
+  open_options.paths = runtime_paths;
+  open_options.prompt_overrides = std::move(prompt_overrides);
+  open_options.initial_reasoning_level = std::move(initial_reasoning_level);
+  open_options.offline = offline;
+  open_options.diagnostics = *diagnostics;
 
   if (print_mode)
   {

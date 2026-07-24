@@ -145,9 +145,8 @@ ava::core::Result<bool> switch_runtime_model(runtime::Session& session, ava::con
   if (session.model.provider_id == model.provider_id && session.model.model_id == model.model_id)
     return false;
 
-  auto prompt_state =
-      runtime::load_runtime_prompt_state(session.continuity.paths, model, session.continuity.mode, session.continuity.workspace_dir,
-                                         session.continuity.current_dir, project_resources_trusted(session.project_trust), session.continuity.prompt_overrides);
+  auto prompt_state = runtime::load_runtime_prompt_state(session.paths, model, session.mode, session.workspace_dir, session.current_dir,
+                                                         project_resources_trusted(session.project_trust), session.prompt_overrides);
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
 
@@ -157,7 +156,7 @@ ava::core::Result<bool> switch_runtime_model(runtime::Session& session, ava::con
     return std::unexpected(std::move(appended.error()));
 
   session.model = std::move(model);
-  session.continuity.mode = prompt_state->mode;
+  session.mode = prompt_state->mode;
   session.base_prompt = std::move(prompt_state->base_prompt);
   session.context_sources = std::move(prompt_state->context_sources);
   session.freshness_sources = std::move(prompt_state->freshness_sources);

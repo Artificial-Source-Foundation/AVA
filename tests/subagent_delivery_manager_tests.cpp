@@ -289,11 +289,11 @@ DeliveryFixture make_fixture(std::string_view name, std::shared_ptr<DeliveryFact
     return fixture;
   fixture.manager = *manager;
   ava::app::runtime::OpenOptions options;
-  options.continuity.workspace_dir = workspace;
-  options.continuity.current_dir = workspace;
-  options.continuity.paths = fixture.paths;
-  options.continuity.subagent_coordinator = fixture.coordinator;
-  options.continuity.subagent_delivery_manager = fixture.manager;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = fixture.paths;
+  options.subagent_coordinator = fixture.coordinator;
+  options.subagent_delivery_manager = fixture.manager;
   auto session = ava::app::open_runtime_session(options);
   expect(session.has_value(), "delivery fixture opens parent runtime");
   if (session)
@@ -359,7 +359,7 @@ void test_idle_delivery_and_terminal_before_registration()
   expect(entries && marker_count == 1, "synthetic delivery persists one stable deduplication marker");
   expect(permission_callbacks.load() == 0 && question_callbacks.load() == 0 && exact_file_calls->load() == 0 && command_executor_calls->load() == 0,
          "automatic delivery never invokes frontend, ACP-like file, or command executor callbacks");
-  auto released_capsule = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->continuity.workspace_dir, true);
+  auto released_capsule = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir, true);
   expect(released_capsule && !*released_capsule, "acknowledged delivery releases its retained parent capsule, exact lease duplicate, and credential snapshot");
   std::size_t factories_after_ack = 0;
   {
@@ -394,12 +394,12 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   auto const parent_id = fixture.session->store.session_id();
   auto* const parent_controller = fixture.session->run_controller.get();
   ava::app::runtime::OpenOptions continue_options;
-  continue_options.continuity.workspace_dir = fixture.session->continuity.workspace_dir;
-  continue_options.continuity.current_dir = fixture.session->continuity.current_dir;
-  continue_options.continuity.paths = fixture.paths;
-  continue_options.request.continue_last_session = true;
-  continue_options.continuity.subagent_coordinator = fixture.coordinator;
-  continue_options.continuity.subagent_delivery_manager = fixture.manager;
+  continue_options.workspace_dir = fixture.session->workspace_dir;
+  continue_options.current_dir = fixture.session->current_dir;
+  continue_options.paths = fixture.paths;
+  continue_options.continue_last_session = true;
+  continue_options.subagent_coordinator = fixture.coordinator;
+  continue_options.subagent_delivery_manager = fixture.manager;
   auto continued = ava::app::open_runtime_session(continue_options);
   expect(continued && continued->run_controller.get() == parent_controller,
          "continue attaches the retained last parent before attempting pathname lease reacquisition");
@@ -436,9 +436,9 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   expect(admission->wait_reached(), "delivery worker reaches pre-admission after the parent controller becomes idle");
 
   ava::app::runtime::OpenOptions base;
-  base.continuity.paths = fixture.paths;
-  base.continuity.subagent_coordinator = fixture.coordinator;
-  base.continuity.subagent_delivery_manager = fixture.manager;
+  base.paths = fixture.paths;
+  base.subagent_coordinator = fixture.coordinator;
+  base.subagent_delivery_manager = fixture.manager;
   auto replacement = ava::app::create_runtime_session_like(*fixture.session, base);
   expect(replacement.has_value(), "navigation creates another visible session while parent delivery is pending");
   if (!replacement)
@@ -447,9 +447,9 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   expect(ava::app::replace_runtime_session(*fixture.session, std::move(*replacement)).has_value(), "navigation replaces the visible session");
 
   ava::app::runtime::OpenOptions reopen = base;
-  reopen.continuity.workspace_dir = fixture.session->continuity.workspace_dir;
-  reopen.continuity.current_dir = fixture.session->continuity.current_dir;
-  reopen.request.requested_session_id = parent_id.substr(0, 12);
+  reopen.workspace_dir = fixture.session->workspace_dir;
+  reopen.current_dir = fixture.session->current_dir;
+  reopen.requested_session_id = parent_id.substr(0, 12);
   auto retained = ava::app::open_runtime_session(reopen);
   expect(retained && retained->run_controller.get() == parent_controller,
          "reopening a retained parent attaches its exact shared controller without lease reacquisition conflict");
@@ -481,13 +481,13 @@ void test_retained_session_workspace_isolation()
   auto const foreign_workspace = fixture.root / "foreign-workspace";
   std::filesystem::create_directories(foreign_workspace);
   ava::app::runtime::OpenOptions foreign;
-  foreign.continuity.workspace_dir = foreign_workspace;
-  foreign.continuity.current_dir = foreign_workspace;
-  foreign.continuity.paths = fixture.paths;
-  foreign.request.requested_session_id = fixture.session->store.session_id();
-  foreign.request.exact_session_id = true;
-  foreign.continuity.subagent_coordinator = fixture.coordinator;
-  foreign.continuity.subagent_delivery_manager = fixture.manager;
+  foreign.workspace_dir = foreign_workspace;
+  foreign.current_dir = foreign_workspace;
+  foreign.paths = fixture.paths;
+  foreign.requested_session_id = fixture.session->store.session_id();
+  foreign.exact_session_id = true;
+  foreign.subagent_coordinator = fixture.coordinator;
+  foreign.subagent_delivery_manager = fixture.manager;
   auto rejected = ava::app::open_runtime_session(foreign);
   expect(!rejected && rejected.error().category() == ava::core::ErrorCategory::NotFound &&
              rejected.error().format().find(foreign_workspace.string()) == std::string::npos,
@@ -511,12 +511,12 @@ void test_capsule_generation_release_and_active_retention()
   if (!first || !second)
     return;
   fixture.manager->release_parent_if_unused(fixture.session->store.session_id(), *first);
-  auto retained_after_old_release = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->continuity.workspace_dir, true);
+  auto retained_after_old_release = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir, true);
   expect(retained_after_old_release && retained_after_old_release->has_value(), "an old generation release cannot erase a newer refresh");
 
   auto guard = fixture.session->run_controller->admit({.request_id = "capsule-active-retention"});
   fixture.manager->release_parent_if_unused(fixture.session->store.session_id(), *second);
-  auto retained_while_active = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->continuity.workspace_dir, true);
+  auto retained_while_active = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir, true);
   expect(guard && retained_while_active && retained_while_active->has_value(), "active prompt/controller state retains its exact capsule generation");
   if (guard)
   {
@@ -526,7 +526,7 @@ void test_capsule_generation_release_and_active_retention()
     static_cast<void>(guard->complete({.run_id = {}, .reason = ava::app::StopReason::Completed}));
   }
   fixture.manager->release_parent_if_unused(fixture.session->store.session_id(), *second);
-  auto released = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->continuity.workspace_dir, true);
+  auto released = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir, true);
   expect(released && !*released, "the exact current inactive generation releases when no live or pending job needs it");
 
   auto third = fixture.manager->refresh_parent(*fixture.session, first_options);
@@ -542,7 +542,7 @@ void test_capsule_generation_release_and_active_retention()
   }
   if (third)
     fixture.manager->release_parent_if_unused(fixture.session->store.session_id(), *third);
-  auto retained_for_job = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->continuity.workspace_dir, true);
+  auto retained_for_job = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir, true);
   expect(third && fourth && job && job_started && retained_for_job && retained_for_job->has_value(),
          "deterministic old-release versus newer-refresh/job-start keeps the current generation");
   {
@@ -575,12 +575,11 @@ void test_runtime_mutations_refresh_retained_delivery_configuration()
          "successful central model and reasoning mutations refresh parent configuration: " + (switched ? std::string("model-ok") : switched.error().format()) +
              "; " + (reasoned ? std::string("reasoning-ok") : reasoned.error().format()));
 
-  auto retained = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->continuity.workspace_dir, true);
+  auto retained = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir, true);
   expect(retained && *retained && (*retained)->model.model_id == fixture.session->model.model_id && (*retained)->reasoning &&
-             (*retained)->reasoning->level == "low" && (*retained)->continuity.mode == fixture.session->continuity.mode &&
-             (*retained)->system_prompt == fixture.session->system_prompt &&
-             (*retained)->continuity.workspace_dir == fixture.session->continuity.workspace_dir &&
-             (*retained)->continuity.anchor_set == fixture.session->continuity.anchor_set,
+             (*retained)->reasoning->level == "low" && (*retained)->mode == fixture.session->mode &&
+             (*retained)->system_prompt == fixture.session->system_prompt && (*retained)->workspace_dir == fixture.session->workspace_dir &&
+             (*retained)->anchor_set == fixture.session->anchor_set,
          "retained-session attachment returns the latest configuration with the exact logical workspace and shared AnchorSet authority");
 
   auto started = start_completed(fixture, "child_runtime_mutation");
@@ -628,11 +627,11 @@ void test_bounded_delivery_retries()
   }
   auto manager = *manager_result;
   ava::app::runtime::OpenOptions open;
-  open.continuity.workspace_dir = workspace;
-  open.continuity.current_dir = workspace;
-  open.continuity.paths = paths;
-  open.continuity.subagent_coordinator = coordinator;
-  open.continuity.subagent_delivery_manager = manager;
+  open.workspace_dir = workspace;
+  open.current_dir = workspace;
+  open.paths = paths;
+  open.subagent_coordinator = coordinator;
+  open.subagent_delivery_manager = manager;
   auto session = ava::app::open_runtime_session(open);
   if (!session)
   {
@@ -711,11 +710,11 @@ void test_retry_after_synthetic_user_append_uses_same_marker()
     return;
   auto manager = *manager_result;
   ava::app::runtime::OpenOptions open;
-  open.continuity.workspace_dir = workspace;
-  open.continuity.current_dir = workspace;
-  open.continuity.paths = paths;
-  open.continuity.subagent_coordinator = coordinator;
-  open.continuity.subagent_delivery_manager = manager;
+  open.workspace_dir = workspace;
+  open.current_dir = workspace;
+  open.paths = paths;
+  open.subagent_coordinator = coordinator;
+  open.subagent_delivery_manager = manager;
   auto session = ava::app::open_runtime_session(open);
   if (!session)
     return;
@@ -794,13 +793,13 @@ void test_recovered_pending_job_is_discovered_without_child_restart()
     return;
   }
   ava::app::runtime::OpenOptions reopen;
-  reopen.continuity.workspace_dir = fixture.root / "workspace";
-  reopen.continuity.current_dir = reopen.continuity.workspace_dir;
-  reopen.continuity.paths = fixture.paths;
-  reopen.request.requested_session_id = parent_id;
-  reopen.request.exact_session_id = true;
-  reopen.continuity.subagent_coordinator = *recovered_coordinator;
-  reopen.continuity.subagent_delivery_manager = *recovered_manager;
+  reopen.workspace_dir = fixture.root / "workspace";
+  reopen.current_dir = reopen.workspace_dir;
+  reopen.paths = fixture.paths;
+  reopen.requested_session_id = parent_id;
+  reopen.exact_session_id = true;
+  reopen.subagent_coordinator = *recovered_coordinator;
+  reopen.subagent_delivery_manager = *recovered_manager;
   auto parent = ava::app::open_runtime_session(reopen);
   if (!parent)
   {

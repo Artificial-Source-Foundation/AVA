@@ -67,16 +67,16 @@ void test_app_runtime_open_session_and_context_prompt()
   }
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = current;
-  open_options.continuity.mode = ava::agent::Mode::Plan;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = current;
+  open_options.mode = ava::agent::Mode::Plan;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "runtime session opens with selected model, prompt, and context");
   if (!session)
     return;
 
-  expect(session->created && session->continuity.mode == ava::agent::Mode::Plan && session->model.model_id == "gpt-5.5",
+  expect(session->created && session->mode == ava::agent::Mode::Plan && session->model.model_id == "gpt-5.5",
          "runtime session records created state, mode, and model");
   expect(session->context_sources.size() == 3, "runtime session records workspace and global context metadata");
   expect(!session->base_prompt.from_override && !session->base_prompt.source_path && session->base_prompt.byte_count > 0 &&
@@ -94,11 +94,11 @@ void test_app_runtime_open_session_and_context_prompt()
 
   auto const session_id = session->store.session_id();
   ava::app::runtime::OpenOptions reopen_options;
-  reopen_options.continuity.workspace_dir = workspace;
-  reopen_options.continuity.current_dir = current;
-  reopen_options.request.requested_session_id = session_id.substr(0, 12);
-  reopen_options.continuity.mode = ava::agent::Mode::Plan;
-  reopen_options.continuity.paths = paths;
+  reopen_options.workspace_dir = workspace;
+  reopen_options.current_dir = current;
+  reopen_options.requested_session_id = session_id.substr(0, 12);
+  reopen_options.mode = ava::agent::Mode::Plan;
+  reopen_options.paths = paths;
   session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release runtime before reopen"));
   auto reopened = ava::app::open_runtime_session(reopen_options);
   expect(reopened && !reopened->created && reopened->store.session_id() == session_id,
@@ -119,11 +119,11 @@ void test_app_runtime_no_session_mode()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.mode = ava::agent::Mode::Build;
-  open_options.continuity.paths = paths;
-  open_options.request.sessionless = true;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  open_options.sessionless = true;
 
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value() && session->sessionless && session->store.is_ephemeral(), "runtime opens no-session mode with an ephemeral store");
@@ -139,13 +139,13 @@ void test_app_runtime_no_session_mode()
   expect(listed && listed->empty(), "runtime no-session mode does not appear in persisted session listings");
 
   auto requested_conflict = open_options;
-  requested_conflict.request.requested_session_id = session->store.session_id();
+  requested_conflict.requested_session_id = session->store.session_id();
   auto requested_result = ava::app::open_runtime_session(requested_conflict);
   expect(!requested_result && requested_result.error().message().find("no-session") != std::string::npos,
          "runtime rejects no-session with requested session resume");
 
   auto continue_conflict = open_options;
-  continue_conflict.request.continue_last_session = true;
+  continue_conflict.continue_last_session = true;
   auto continue_result = ava::app::open_runtime_session(continue_conflict);
   expect(!continue_result && continue_result.error().message().find("no-session") != std::string::npos, "runtime rejects no-session with continue");
 }
@@ -159,11 +159,11 @@ void test_app_runtime_session_startup_options()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions named_options;
-  named_options.continuity.workspace_dir = workspace;
-  named_options.continuity.current_dir = workspace;
-  named_options.continuity.mode = ava::agent::Mode::Build;
-  named_options.continuity.paths = paths;
-  named_options.request.initial_session_name = "named startup";
+  named_options.workspace_dir = workspace;
+  named_options.current_dir = workspace;
+  named_options.mode = ava::agent::Mode::Build;
+  named_options.paths = paths;
+  named_options.initial_session_name = "named startup";
 
   auto named = ava::app::open_runtime_session(named_options);
   expect(named.has_value() && named->created, "runtime opens a named startup session");
@@ -181,9 +181,9 @@ void test_app_runtime_session_startup_options()
   auto custom_paths = paths;
   custom_paths.sessions_dir = root / "custom-sessions";
   ava::app::runtime::OpenOptions custom_options;
-  custom_options.continuity.workspace_dir = workspace;
-  custom_options.continuity.current_dir = workspace;
-  custom_options.continuity.paths = custom_paths;
+  custom_options.workspace_dir = workspace;
+  custom_options.current_dir = workspace;
+  custom_options.paths = custom_paths;
   auto custom = ava::app::open_runtime_session(custom_options);
   expect(custom.has_value() && custom->store.session_path().string().find(custom_paths.sessions_dir.string()) == 0,
          "runtime opens sessions under a custom session directory");
@@ -195,10 +195,10 @@ void test_app_runtime_session_startup_options()
          "runtime custom session directory has its own session listing");
 
   ava::app::runtime::OpenOptions active_source_fork_options;
-  active_source_fork_options.continuity.workspace_dir = workspace;
-  active_source_fork_options.continuity.current_dir = workspace;
-  active_source_fork_options.continuity.paths = paths;
-  active_source_fork_options.request.fork_session_id = named_session_id;
+  active_source_fork_options.workspace_dir = workspace;
+  active_source_fork_options.current_dir = workspace;
+  active_source_fork_options.paths = paths;
+  active_source_fork_options.fork_session_id = named_session_id;
   auto active_source_fork = ava::app::open_runtime_session(active_source_fork_options);
   expect(!active_source_fork && active_source_fork.error().message().find("already owned") != std::string::npos,
          "runtime --fork reports an actionable lease conflict while another runtime owns the source");
@@ -206,11 +206,11 @@ void test_app_runtime_session_startup_options()
   named = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release source runtime before startup fork"));
 
   ava::app::runtime::OpenOptions fork_options;
-  fork_options.continuity.workspace_dir = workspace;
-  fork_options.continuity.current_dir = workspace;
-  fork_options.continuity.paths = paths;
-  fork_options.request.fork_session_id = named_session_id.substr(0, 12);
-  fork_options.request.initial_session_name = "forked startup";
+  fork_options.workspace_dir = workspace;
+  fork_options.current_dir = workspace;
+  fork_options.paths = paths;
+  fork_options.fork_session_id = named_session_id.substr(0, 12);
+  fork_options.initial_session_name = "forked startup";
   auto forked = ava::app::open_runtime_session(fork_options);
   expect(forked.has_value() && forked->created && forked->store.session_id() != named_session_id, "runtime --fork creates a new session from a source prefix");
   if (forked)
@@ -232,18 +232,18 @@ void test_app_runtime_session_startup_options()
   }
 
   auto fork_requested_conflict = fork_options;
-  fork_requested_conflict.request.requested_session_id = named_session_id;
+  fork_requested_conflict.requested_session_id = named_session_id;
   auto fork_requested_result = ava::app::open_runtime_session(fork_requested_conflict);
   expect(!fork_requested_result && fork_requested_result.error().message().find("fork") != std::string::npos,
          "runtime rejects --fork with requested session resume");
 
   auto fork_continue_conflict = fork_options;
-  fork_continue_conflict.request.continue_last_session = true;
+  fork_continue_conflict.continue_last_session = true;
   auto fork_continue_result = ava::app::open_runtime_session(fork_continue_conflict);
   expect(!fork_continue_result && fork_continue_result.error().message().find("fork") != std::string::npos, "runtime rejects --fork with continue");
 
   auto fork_no_session_conflict = fork_options;
-  fork_no_session_conflict.request.sessionless = true;
+  fork_no_session_conflict.sessionless = true;
   auto fork_no_session_result = ava::app::open_runtime_session(fork_no_session_conflict);
   expect(!fork_no_session_result && fork_no_session_result.error().message().find("no-session") != std::string::npos, "runtime rejects --fork with no-session");
 }
@@ -259,9 +259,9 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
     std::filesystem::create_directories(workspace);
 
     ava::app::runtime::OpenOptions seed_options;
-    seed_options.continuity.workspace_dir = workspace;
-    seed_options.continuity.current_dir = workspace;
-    seed_options.continuity.paths = paths;
+    seed_options.workspace_dir = workspace;
+    seed_options.current_dir = workspace;
+    seed_options.paths = paths;
     auto seeded = ava::app::open_runtime_session(seed_options);
     expect(seeded.has_value(), "runtime torn resume test creates source session for " + mode);
     if (!seeded)
@@ -277,11 +277,11 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
 
     ava::app::runtime::OpenOptions resume_options = seed_options;
     if (mode == "continue")
-      resume_options.request.continue_last_session = true;
+      resume_options.continue_last_session = true;
     else
     {
-      resume_options.request.requested_session_id = mode == "exact" ? session_id : session_id.substr(0, 12);
-      resume_options.request.exact_session_id = mode == "exact";
+      resume_options.requested_session_id = mode == "exact" ? session_id : session_id.substr(0, 12);
+      resume_options.exact_session_id = mode == "exact";
     }
     auto resumed = ava::app::open_runtime_session(resume_options);
     auto loaded = resumed ? resumed->store.load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(resumed.error()));
@@ -295,9 +295,9 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions seed_options;
-  seed_options.continuity.workspace_dir = workspace;
-  seed_options.continuity.current_dir = workspace;
-  seed_options.continuity.paths = paths;
+  seed_options.workspace_dir = workspace;
+  seed_options.current_dir = workspace;
+  seed_options.paths = paths;
   auto source = ava::app::open_runtime_session(seed_options);
   expect(source.has_value(), "startup fork torn recovery test creates source session");
   if (!source)
@@ -312,7 +312,7 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
   source = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release torn source before startup fork"));
 
   auto fork_options = seed_options;
-  fork_options.request.fork_session_id = source_id.substr(0, 12);
+  fork_options.fork_session_id = source_id.substr(0, 12);
   auto forked = ava::app::open_runtime_session(fork_options);
   auto fork_entries = forked ? forked->store.load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(forked.error()));
   expect(forked && forked->created && fork_entries && fork_entries->size() == 2 && app_read_binary_file(source_path) == valid_source_bytes,
@@ -338,9 +338,9 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
   auto const bounded_paths = app_test_paths(bounded_root);
   std::filesystem::create_directories(bounded_workspace);
   ava::app::runtime::OpenOptions bounded_seed_options;
-  bounded_seed_options.continuity.workspace_dir = bounded_workspace;
-  bounded_seed_options.continuity.current_dir = bounded_workspace;
-  bounded_seed_options.continuity.paths = bounded_paths;
+  bounded_seed_options.workspace_dir = bounded_workspace;
+  bounded_seed_options.current_dir = bounded_workspace;
+  bounded_seed_options.paths = bounded_paths;
   auto byte_limited_seed = ava::app::open_runtime_session(bounded_seed_options);
   expect(byte_limited_seed.has_value(), "bounded runtime recovery test creates byte-limited source");
   if (!byte_limited_seed)
@@ -355,9 +355,9 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
   }
   byte_limited_seed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release byte-limited runtime"));
   auto byte_limited_options = bounded_seed_options;
-  byte_limited_options.request.requested_session_id = byte_limited_id;
-  byte_limited_options.request.exact_session_id = true;
-  byte_limited_options.continuity.session_read_limits =
+  byte_limited_options.requested_session_id = byte_limited_id;
+  byte_limited_options.exact_session_id = true;
+  byte_limited_options.session_read_limits =
       ava::session::SessionReadLimits{.max_file_bytes = byte_limited_bytes.size() - 1, .max_line_bytes = byte_limited_bytes.size() - 1, .max_entries = 8};
   auto byte_limited_resume = ava::app::open_runtime_session(byte_limited_options);
   expect(!byte_limited_resume && byte_limited_resume.error().message().find("byte limit") != std::string::npos &&
@@ -384,9 +384,9 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
   }
   entry_limited_seed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release entry-limited runtime"));
   auto entry_limited_options = bounded_seed_options;
-  entry_limited_options.request.requested_session_id = entry_limited_id;
-  entry_limited_options.request.exact_session_id = true;
-  entry_limited_options.continuity.session_read_limits = ava::session::SessionReadLimits{.max_file_bytes = 4096, .max_line_bytes = 2048, .max_entries = 1};
+  entry_limited_options.requested_session_id = entry_limited_id;
+  entry_limited_options.exact_session_id = true;
+  entry_limited_options.session_read_limits = ava::session::SessionReadLimits{.max_file_bytes = 4096, .max_line_bytes = 2048, .max_entries = 1};
   auto entry_limited_resume = ava::app::open_runtime_session(entry_limited_options);
   expect(!entry_limited_resume && entry_limited_resume.error().message().find("entry count") != std::string::npos &&
              app_read_binary_file(entry_limited_path) == entry_limited_bytes && no_recovery_artifacts(entry_limited_path),
@@ -401,9 +401,9 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions options;
-  options.continuity.workspace_dir = workspace;
-  options.continuity.current_dir = workspace;
-  options.continuity.paths = paths;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
   auto seeded = ava::app::open_runtime_session(options);
   expect(seeded.has_value(), "committed-function reconciliation fixture opens a session");
   if (!seeded)
@@ -450,8 +450,8 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
   seeded = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release reconciliation fixture before resume"));
 
   auto resume = options;
-  resume.request.requested_session_id = session_id;
-  resume.request.exact_session_id = true;
+  resume.requested_session_id = session_id;
+  resume.exact_session_id = true;
   auto resumed = ava::app::open_runtime_session(resume);
   auto entries = resumed ? resumed->store.load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(resumed.error()));
   std::size_t first_results = 0;
@@ -519,8 +519,8 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
   expect(zero_committed.has_value(), "zero-result reconciliation fixture writes a committed v4 function without any result");
   zero_result_seed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release zero-result fixture before resume"));
   auto zero_resume = options;
-  zero_resume.request.requested_session_id = zero_result_session_id;
-  zero_resume.request.exact_session_id = true;
+  zero_resume.requested_session_id = zero_result_session_id;
+  zero_resume.exact_session_id = true;
   auto zero_result_reopened = ava::app::open_runtime_session(zero_resume);
   auto zero_entries = zero_result_reopened ? zero_result_reopened->store.load()
                                            : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(zero_result_reopened.error()));
@@ -561,8 +561,8 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
   auto const bytes_before_invalid_resume = app_read_binary_file(invalid_session_path);
   invalid_seed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release invalid reconciliation fixture before resume"));
   auto invalid_resume = options;
-  invalid_resume.request.requested_session_id = invalid_session_id;
-  invalid_resume.request.exact_session_id = true;
+  invalid_resume.requested_session_id = invalid_session_id;
+  invalid_resume.exact_session_id = true;
   auto invalid_reopened = ava::app::open_runtime_session(invalid_resume);
   expect(invalid_committed && invalid_result && !invalid_reopened && app_read_binary_file(invalid_session_path) == bytes_before_invalid_resume,
          "runtime reconciliation rejects an out-of-window exact v4 result before appending any synthetic result");
@@ -586,12 +586,12 @@ void test_app_runtime_cli_prompt_overrides()
          trusted ? "cli prompt override test trusts project resources" : "cli prompt override test trusts project resources: " + trusted.error().format());
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.mode = ava::agent::Mode::Plan;
-  open_options.continuity.paths = paths;
-  open_options.continuity.prompt_overrides.system_prompt = "cli system prompt";
-  open_options.continuity.prompt_overrides.append_system_prompts = {"cli append prompt one", "cli append prompt two"};
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Plan;
+  open_options.paths = paths;
+  open_options.prompt_overrides.system_prompt = "cli system prompt";
+  open_options.prompt_overrides.append_system_prompts = {"cli append prompt one", "cli append prompt two"};
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "runtime session opens with cli prompt overrides");
   if (!session)
@@ -600,8 +600,8 @@ void test_app_runtime_cli_prompt_overrides()
   expect(session->base_prompt.from_override && !session->base_prompt.source_path &&
              session->base_prompt.byte_count == std::string_view("cli system prompt").size() && session->base_prompt.content_fingerprint != 0,
          "cli --system-prompt is recorded as base prompt metadata");
-  expect(session->continuity.prompt_overrides.system_prompt && *session->continuity.prompt_overrides.system_prompt == "cli system prompt" &&
-             session->continuity.prompt_overrides.append_system_prompts.size() == 2,
+  expect(session->prompt_overrides.system_prompt && *session->prompt_overrides.system_prompt == "cli system prompt" &&
+             session->prompt_overrides.append_system_prompts.size() == 2,
          "runtime session retains cli prompt overrides for reloads");
   expect(session->system_prompt.find("cli system prompt") != std::string::npos && session->system_prompt.find("cli append prompt one") != std::string::npos &&
              session->system_prompt.find("cli append prompt two") != std::string::npos &&
@@ -632,7 +632,7 @@ void test_app_runtime_cli_prompt_overrides()
          "context freshness reports repeated cli append prompt overrides as inline sources");
 
   auto switched_mode = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/mode"});
-  expect(switched_mode && switched_mode->handled && session->continuity.mode == ava::agent::Mode::Build &&
+  expect(switched_mode && switched_mode->handled && session->mode == ava::agent::Mode::Build &&
              session->system_prompt.find("cli system prompt") != std::string::npos &&
              session->system_prompt.find("cli append prompt two") != std::string::npos &&
              session->system_prompt.find("Implement changes directly") == std::string::npos,

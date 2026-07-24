@@ -64,7 +64,7 @@ std::string auth_setup_message(runtime::Session const& session, std::string_view
     message.push_back('\n');
   message += "Connect with /connect or /login in this TUI, or run `" + provider_connect_command(provider_id) + "`.\n";
   message += "Environment setup also works with `" + env_key + "`.\n";
-  message += "Auth file: " + session.continuity.paths.auth_file.string();
+  message += "Auth file: " + session.paths.auth_file.string();
   return message;
 }
 
@@ -72,7 +72,7 @@ std::string auth_setup_message(runtime::Session const& session, std::string_view
 
 std::optional<std::string> first_run_auth_onboarding_message(runtime::Session const& session)
 {
-  auto credential = ava::config::provider_credential_for_startup(session.continuity.paths, session.model.provider_id);
+  auto credential = ava::config::provider_credential_for_startup(session.paths, session.model.provider_id);
   auto const provider_id = session.model.provider_id.empty() ? std::string("openai") : session.model.provider_id;
   if (!credential)
     return "! " + provider_display_name(provider_id) + " auth unavailable · /connect";

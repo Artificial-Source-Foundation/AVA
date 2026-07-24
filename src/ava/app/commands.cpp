@@ -14,8 +14,8 @@
 #include "ava/app/display_settings.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/project_trust.h"
-#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_prompt.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/theme.h"
@@ -421,7 +421,7 @@ CommandResult run_keybindings_command(runtime::Session& session, std::string_vie
   if (args.empty())
     return handled_text(command_hotkeys_text(hotkeys));
 
-  auto const keybinds_file = session.continuity.paths.ava_config_dir / "keybinds.json";
+  auto const keybinds_file = session.paths.ava_config_dir / "keybinds.json";
   if (args.front() == "set")
   {
     if (args.size() < 3)
@@ -620,7 +620,7 @@ CommandResult run_keybindings_command(runtime::Session& session, std::string_vie
 
     auto import_path = std::filesystem::path(args[1]);
     if (import_path.is_relative())
-      import_path = session.continuity.current_dir / import_path;
+      import_path = session.current_dir / import_path;
     import_path = import_path.lexically_normal();
 
     std::error_code source_error;
@@ -780,7 +780,7 @@ ava::core::Result<CommandResult> run_theme_command(runtime::Session& session, st
   if (args.size() > 1)
     return handled_text("unsupported theme options: " + std::string(argument) + "\n" + tui_theme_setting_usage());
 
-  auto settings = load_tui_display_settings(session.continuity.paths);
+  auto settings = load_tui_display_settings(session.paths);
   if (!settings)
     return std::unexpected(std::move(settings.error()));
 
@@ -794,31 +794,31 @@ ava::core::Result<CommandResult> run_theme_command(runtime::Session& session, st
 
   if (is_tui_theme_reset_value(args.front()))
   {
-    auto stored = store_tui_theme_setting(session.continuity.paths, std::nullopt);
+    auto stored = store_tui_theme_setting(session.paths, std::nullopt);
     if (!stored)
       return std::unexpected(std::move(stored.error()));
     ava::tui::set_tui_config_theme(std::nullopt);
-    return handled_text("Reset TUI theme to the built-in default.\n  config: " + tui_display_settings_file(session.continuity.paths).string() +
+    return handled_text("Reset TUI theme to the built-in default.\n  config: " + tui_display_settings_file(session.paths).string() +
                         "\n  active: " + active_theme_summary());
   }
 
   if (!normalize_tui_theme_setting(args.front()))
   {
-    auto custom_theme = load_tui_custom_theme(session.continuity.paths, args.front());
+    auto custom_theme = load_tui_custom_theme(session.paths, args.front());
     if (!custom_theme && custom_theme.error().category() == ava::core::ErrorCategory::NotFound)
       return handled_text("unsupported theme: " + args.front() + "\n" + tui_theme_setting_usage());
     if (!custom_theme)
       return std::unexpected(std::move(custom_theme.error()));
   }
 
-  auto stored = store_tui_theme_setting(session.continuity.paths, args.front());
+  auto stored = store_tui_theme_setting(session.paths, args.front());
   if (!stored)
     return std::unexpected(std::move(stored.error()));
-  auto settings_after_store = load_tui_display_settings(session.continuity.paths);
+  auto settings_after_store = load_tui_display_settings(session.paths);
   if (!settings_after_store)
     return std::unexpected(std::move(settings_after_store.error()));
   ava::tui::set_tui_config_theme(settings_after_store->theme, settings_after_store->custom_theme);
-  return handled_text("Stored TUI theme " + *settings_after_store->theme + ".\n  config: " + tui_display_settings_file(session.continuity.paths).string() +
+  return handled_text("Stored TUI theme " + *settings_after_store->theme + ".\n  config: " + tui_display_settings_file(session.paths).string() +
                       "\n  active: " + active_theme_summary());
 }
 
@@ -888,7 +888,7 @@ std::string normalize_reload_target(std::string_view target)
 
 ReloadReportRow reload_display_settings(runtime::Session& session)
 {
-  auto settings = apply_tui_display_settings(session.continuity.paths);
+  auto settings = apply_tui_display_settings(session.paths);
   if (!settings)
     return reload_error_row("display", settings.error());
   ReloadReportRow row{.name = "display", .status = "loaded", .details = {}};
@@ -900,14 +900,14 @@ ReloadReportRow reload_display_settings(runtime::Session& session)
 
 ReloadReportRow reload_model_settings(runtime::Session& session)
 {
-  auto registry = ava::config::load_model_registry(session.continuity.paths);
+  auto registry = ava::config::load_model_registry(session.paths);
   if (!registry)
     return reload_error_row("models", registry.error());
   session.scoped_model_cycle = registry->scoped_model_cycle;
   if (auto refreshed = refresh_runtime_parent_configuration(session); !refreshed)
     return reload_error_row("models", refreshed.error());
   ReloadReportRow row{.name = "models", .status = "loaded", .details = {}};
-  append_reload_detail(row, "config", session.continuity.paths.models_file.string());
+  append_reload_detail(row, "config", session.paths.models_file.string());
   append_reload_detail(row, "models", std::to_string(registry->models.size()));
   append_reload_detail(row, "scoped_cycle", session.scoped_model_cycle ? "configured" : "not configured");
   append_reload_detail(row, "active_model", session.model.provider_id + "/" + session.model.model_id + " (unchanged)");
@@ -916,9 +916,8 @@ ReloadReportRow reload_model_settings(runtime::Session& session)
 
 ReloadReportRow reload_prompt_settings(runtime::Session& session)
 {
-  auto prompt_state =
-      runtime::load_runtime_prompt_state(session.continuity.paths, session.model, session.continuity.mode, session.continuity.workspace_dir,
-                                         session.continuity.current_dir, project_resources_trusted(session.project_trust), session.continuity.prompt_overrides);
+  auto prompt_state = runtime::load_runtime_prompt_state(session.paths, session.model, session.mode, session.workspace_dir, session.current_dir,
+                                                         project_resources_trusted(session.project_trust), session.prompt_overrides);
   if (!prompt_state)
     return reload_error_row("prompts", prompt_state.error());
   if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
@@ -936,10 +935,9 @@ ReloadReportRow reload_prompt_settings(runtime::Session& session)
 
 ReloadReportRow reload_trust_settings(runtime::Session& session)
 {
-  auto next_trust = load_project_trust_state(session.continuity.paths, session.continuity.workspace_dir);
-  auto prompt_state =
-      runtime::load_runtime_prompt_state(session.continuity.paths, session.model, session.continuity.mode, session.continuity.workspace_dir,
-                                         session.continuity.current_dir, project_resources_trusted(next_trust), session.continuity.prompt_overrides);
+  auto next_trust = load_project_trust_state(session.paths, session.workspace_dir);
+  auto prompt_state = runtime::load_runtime_prompt_state(session.paths, session.model, session.mode, session.workspace_dir, session.current_dir,
+                                                         project_resources_trusted(next_trust), session.prompt_overrides);
   if (!prompt_state)
   {
     auto row = reload_error_row("trust", prompt_state.error());
@@ -960,14 +958,14 @@ ReloadReportRow reload_trust_settings(runtime::Session& session)
 
 ReloadReportRow reload_compaction_settings(runtime::Session& session)
 {
-  auto loaded_config = ava::session::load_compaction_config(session.continuity.paths);
+  auto loaded_config = ava::session::load_compaction_config(session.paths);
   if (!loaded_config)
     return reload_error_row("compaction", loaded_config.error());
   auto config = resolve_compaction_config(session, std::move(*loaded_config));
   if (!config)
     return reload_error_row("compaction", config.error());
   ReloadReportRow row{.name = "compaction", .status = "validated", .details = {}};
-  append_reload_detail(row, "config", session.continuity.paths.compaction_file.string());
+  append_reload_detail(row, "config", session.paths.compaction_file.string());
   append_reload_detail(row, "provider", config->provider_id);
   append_reload_detail(row, "model", config->model_id);
   append_reload_detail(row, "auto_threshold_tokens", std::to_string(config->auto_threshold_tokens));
@@ -984,7 +982,7 @@ ReloadReportRow reload_compaction_settings(runtime::Session& session)
 ReloadReportRow keybindings_reload_row(runtime::Session const& session)
 {
   ReloadReportRow row{.name = "keybindings", .status = "tui-runtime", .details = {}};
-  append_reload_detail(row, "config", (session.continuity.paths.ava_config_dir / "keybinds.json").string());
+  append_reload_detail(row, "config", (session.paths.ava_config_dir / "keybinds.json").string());
   append_reload_detail(row, "note", "interactive TUI reloads keybindings live; restart non-TTY sessions after edits");
   return row;
 }
@@ -1014,31 +1012,28 @@ std::vector<ReloadReportRow> reload_report_rows_for_target(runtime::Session& ses
       return keybindings_reload_row(session);
     if (normalized == "auth")
     {
-      return restart_required_reload_row("auth", "active provider credentials are resolved when a run starts",
-                                         {{"config", session.continuity.paths.auth_file}});
+      return restart_required_reload_row("auth", "active provider credentials are resolved when a run starts", {{"config", session.paths.auth_file}});
     }
     if (normalized == "permissions")
     {
-      return restart_required_reload_row("permissions", "active permission policy and session grants are not hot-reloaded",
-                                         {{"global", session.continuity.paths.ava_config_dir / "permission-rules.json"},
-                                          {"project", session.continuity.workspace_dir / ".ava" / "permission-rules.json"}});
+      return restart_required_reload_row(
+          "permissions", "active permission policy and session grants are not hot-reloaded",
+          {{"global", session.paths.ava_config_dir / "permission-rules.json"}, {"project", session.workspace_dir / ".ava" / "permission-rules.json"}});
     }
     if (normalized == "lsp")
     {
-      return restart_required_reload_row(
-          "lsp", "language-server clients are created for tool calls and should restart with config changes",
-          {{"global", session.continuity.paths.ava_config_dir / "lsp.json"}, {"project", session.continuity.workspace_dir / ".ava" / "lsp.json"}});
+      return restart_required_reload_row("lsp", "language-server clients are created for tool calls and should restart with config changes",
+                                         {{"global", session.paths.ava_config_dir / "lsp.json"}, {"project", session.workspace_dir / ".ava" / "lsp.json"}});
     }
     if (normalized == "mcp")
     {
-      return restart_required_reload_row(
-          "mcp", "running MCP server processes are not restarted by /reload",
-          {{"global", session.continuity.paths.ava_config_dir / "mcp.json"}, {"project", session.continuity.workspace_dir / ".ava" / "mcp.json"}});
+      return restart_required_reload_row("mcp", "running MCP server processes are not restarted by /reload",
+                                         {{"global", session.paths.ava_config_dir / "mcp.json"}, {"project", session.workspace_dir / ".ava" / "mcp.json"}});
     }
     return restart_required_reload_row("plugins", "plugin discovery and process state are not hot-reloaded",
-                                       {{"global", session.continuity.paths.ava_config_dir / "plugins"},
-                                        {"project", session.continuity.workspace_dir / ".ava" / "plugins"},
-                                        {"state", session.continuity.paths.ava_state_dir / "plugin-enablement.json"}});
+                                       {{"global", session.paths.ava_config_dir / "plugins"},
+                                        {"project", session.workspace_dir / ".ava" / "plugins"},
+                                        {"state", session.paths.ava_state_dir / "plugin-enablement.json"}});
   };
 
   if (target != "all")
@@ -1088,10 +1083,9 @@ std::string project_trust_summary(ProjectTrustState const& state)
 
 ava::core::Result<CommandResult> reload_project_trust_state(runtime::Session& session, std::string prefix)
 {
-  auto next_trust = load_project_trust_state(session.continuity.paths, session.continuity.workspace_dir);
-  auto prompt_state =
-      runtime::load_runtime_prompt_state(session.continuity.paths, session.model, session.continuity.mode, session.continuity.workspace_dir,
-                                         session.continuity.current_dir, project_resources_trusted(next_trust), session.continuity.prompt_overrides);
+  auto next_trust = load_project_trust_state(session.paths, session.workspace_dir);
+  auto prompt_state = runtime::load_runtime_prompt_state(session.paths, session.model, session.mode, session.workspace_dir, session.current_dir,
+                                                         project_resources_trusted(next_trust), session.prompt_overrides);
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
   session.project_trust = std::move(next_trust);
@@ -1108,21 +1102,21 @@ ava::core::Result<CommandResult> run_trust_command(runtime::Session& session, st
     return handled_text(project_trust_summary(session.project_trust));
   if (action == "project" || action == "trust" || action == "approve")
   {
-    auto saved = set_project_trust_decision(session.continuity.paths, session.continuity.workspace_dir, true);
+    auto saved = set_project_trust_decision(session.paths, session.workspace_dir, true);
     if (!saved)
       return std::unexpected(std::move(saved.error()));
     return reload_project_trust_state(session, "trusted project resources");
   }
   if (action == "deny" || action == "untrust")
   {
-    auto saved = set_project_trust_decision(session.continuity.paths, session.continuity.workspace_dir, false);
+    auto saved = set_project_trust_decision(session.paths, session.workspace_dir, false);
     if (!saved)
       return std::unexpected(std::move(saved.error()));
     return reload_project_trust_state(session, "denied project resources");
   }
   if (action == "clear")
   {
-    auto cleared = clear_project_trust_decision(session.continuity.paths, session.continuity.workspace_dir);
+    auto cleared = clear_project_trust_decision(session.paths, session.workspace_dir);
     if (!cleared)
       return std::unexpected(std::move(cleared.error()));
     return reload_project_trust_state(session, "cleared project trust decision");
@@ -1142,10 +1136,9 @@ std::string dynamic_command_argument(std::string_view line)
 
 ava::plugin::PluginDiscoveryOptions skill_plugin_discovery_options(runtime::Session const& session)
 {
-  return ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = session.continuity.paths.ava_config_dir / "plugins",
-                                             .project_plugins_dir = project_resources_trusted(session.project_trust)
-                                                                        ? session.continuity.workspace_dir / ".ava" / "plugins"
-                                                                        : std::filesystem::path{}};
+  return ava::plugin::PluginDiscoveryOptions{
+      .global_plugins_dir = session.paths.ava_config_dir / "plugins",
+      .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{}};
 }
 
 std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(ava::plugin::PluginDiagnostics const& diagnostics)
@@ -1164,10 +1157,10 @@ std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(
 
 ava::core::Result<std::string> skill_prompt_message(runtime::Session& session, CommandRequest const& request, CommandRegistryEntry const& entry)
 {
-  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(
-      skill_plugin_discovery_options(session), session.continuity.paths.ava_state_dir / "plugin-enablement.json", session.continuity.workspace_dir);
+  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(skill_plugin_discovery_options(session),
+                                                                    session.paths.ava_state_dir / "plugin-enablement.json", session.workspace_dir);
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
-      .workspace_root = session.continuity.workspace_dir,
+      .workspace_root = session.workspace_dir,
       .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
       .include_project_skills = project_resources_trusted(session.project_trust),
   });
@@ -1227,10 +1220,9 @@ ava::core::VoidResult ensure_mcp_prompt_permissions(ava::tools::ToolContext cons
 ava::core::Result<std::string> mcp_prompt_message(runtime::Session& session, CommandRequest const& request, CommandRegistryEntry const& entry,
                                                   std::string_view argument_text)
 {
-  auto config_options = ava::mcp::default_mcp_config_options(session.continuity.workspace_dir);
-  config_options.global_config_file = session.continuity.paths.ava_config_dir / "mcp.json";
-  config_options.project_config_file =
-      project_resources_trusted(session.project_trust) ? session.continuity.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{};
+  auto config_options = ava::mcp::default_mcp_config_options(session.workspace_dir);
+  config_options.global_config_file = session.paths.ava_config_dir / "mcp.json";
+  config_options.project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{};
   auto config = ava::mcp::load_mcp_config(config_options);
   if (!config)
     return std::unexpected(std::move(config.error()));
@@ -1255,8 +1247,7 @@ ava::core::Result<std::string> mcp_prompt_message(runtime::Session& session, Com
     return std::unexpected(std::move(permission.error()));
   }
 
-  auto client =
-      ava::mcp::McpStdioClient::start(*server, ava::mcp::McpStdioClientOptions{.workspace_dir = session.continuity.workspace_dir}, request.cancel_requested);
+  auto client = ava::mcp::McpStdioClient::start(*server, ava::mcp::McpStdioClientOptions{.workspace_dir = session.workspace_dir}, request.cancel_requested);
   if (!client)
     return std::unexpected(std::move(client.error()));
   auto prompt = (*client)->get_prompt(entry.mcp_prompt_name, *arguments, request.cancel_requested);
@@ -1347,12 +1338,12 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   {
     auto const token = command_token(request.command);
     auto registry = session.load_command_registry(CommandRegistryOptions{.include_builtins = false,
-                                                                         .include_prompt_commands = true,
-                                                                         .include_skills = true,
-                                                                         .include_plugin_commands = true,
-                                                                         .include_mcp_prompts = token.starts_with("/mcp:"),
-                                                                         .permission_resolver = request.permission_resolver,
-                                                                         .cancel_requested = request.cancel_requested});
+                                                                          .include_prompt_commands = true,
+                                                                          .include_skills = true,
+                                                                          .include_plugin_commands = true,
+                                                                          .include_mcp_prompts = token.starts_with("/mcp:"),
+                                                                          .permission_resolver = request.permission_resolver,
+                                                                          .cancel_requested = request.cancel_requested});
     if (auto const* registry_entry = find_command_registry_entry(registry, request.command))
     {
       return run_registry_command(session, std::move(request), *registry_entry);
@@ -1360,12 +1351,12 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
     if (!token.starts_with("/skill:") && !token.starts_with("/mcp:") && !token.starts_with("/plugin:"))
     {
       registry = session.load_command_registry(CommandRegistryOptions{.include_builtins = false,
-                                                                      .include_prompt_commands = false,
-                                                                      .include_skills = false,
-                                                                      .include_plugin_commands = false,
-                                                                      .include_mcp_prompts = true,
-                                                                      .permission_resolver = request.permission_resolver,
-                                                                      .cancel_requested = request.cancel_requested});
+                                                                       .include_prompt_commands = false,
+                                                                       .include_skills = false,
+                                                                       .include_plugin_commands = false,
+                                                                       .include_mcp_prompts = true,
+                                                                       .permission_resolver = request.permission_resolver,
+                                                                       .cancel_requested = request.cancel_requested});
       if (auto const* registry_entry = find_command_registry_entry(registry, request.command))
       {
         return run_registry_command(session, std::move(request), *registry_entry);

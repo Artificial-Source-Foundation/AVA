@@ -5,9 +5,9 @@
 #include "ava/app/command_palette.h"
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_sessions.h"
 #include "ava/app/session_title_coordinator.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/config/session_title_config.h"
 #include "ava/session/assistant_output.h"
 #include "ava/provider/openai_provider.h"
@@ -171,11 +171,11 @@ ava::core::Result<ava::app::runtime::Session> open_title_session(std::filesystem
   auto paths = ava::tests::app_test_paths(root);
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions options;
-  options.continuity.workspace_dir = workspace;
-  options.continuity.current_dir = workspace;
-  options.continuity.paths = std::move(paths);
-  options.request.sessionless = sessionless;
-  options.continuity.session_title_coordinator = std::move(coordinator);
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = std::move(paths);
+  options.sessionless = sessionless;
+  options.session_title_coordinator = std::move(coordinator);
   return ava::app::open_runtime_session(options);
 }
 
@@ -209,15 +209,15 @@ void test_title_config_uses_logical_runtime_anchors()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions options;
-  options.continuity.workspace_dir = workspace;
-  options.continuity.current_dir = workspace;
-  options.continuity.paths = paths;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
   auto session = ava::app::open_runtime_session(options);
-  auto config_anchor = session ? session->continuity.anchor_set->find_anchor(paths.ava_config_dir)
+  auto config_anchor = session ? session->anchor_set->find_anchor(paths.ava_config_dir)
                                : ava::core::Result<ava::core::AnchorSet::AnchorRef>(std::unexpected(session.error()));
-  auto state_anchor = session ? session->continuity.anchor_set->find_anchor(paths.ava_state_dir)
+  auto state_anchor = session ? session->anchor_set->find_anchor(paths.ava_state_dir)
                               : ava::core::Result<ava::core::AnchorSet::AnchorRef>(std::unexpected(session.error()));
-  expect(session && session->continuity.session_title_coordinator && config_anchor && config_anchor->relative().empty() &&
+  expect(session && session->session_title_coordinator && config_anchor && config_anchor->relative().empty() &&
              config_anchor->anchor().root == paths.ava_config_dir && state_anchor && state_anchor->relative().empty() &&
              state_anchor->anchor().root == paths.ava_state_dir,
          "session title config and state preserve trusted logical roots through shared descriptor anchors");
@@ -413,7 +413,7 @@ void test_coordinator_fallback_and_navigation_lifetime()
     expect(ava::app::replace_runtime_session(*session, std::move(*replacement)).has_value(), "visible session navigation succeeds during title work");
   state->allow_completion();
   expect(coordinator->wait_until_idle(3s), "navigation title coordinator becomes idle");
-  auto summaries = ava::session::SessionStore::list_sessions(session->continuity.workspace_dir, session->continuity.paths.sessions_dir);
+  auto summaries = ava::session::SessionStore::list_sessions(session->workspace_dir, session->paths.sessions_dir);
   auto found = summaries ? std::ranges::find_if(*summaries, [&](auto const& item) { return item.session_id == source_id; }) : decltype(summaries->begin()){};
   expect(summaries && found != summaries->end() && found->title == "Five Word Navigation Provider Title",
          "provider refinement survives in-process navigation through its retained controller-owned route" +
@@ -462,7 +462,7 @@ void test_session_specific_catalog_notifications_survive_navigation()
   };
   auto tree_builder = [&](ava::app::runtime::Session const& current) {
     ++tree_builds;
-    return ava::session::build_session_tree(current.continuity.workspace_dir, current.continuity.paths.sessions_dir, current.store.session_id());
+    return ava::session::build_session_tree(current.workspace_dir, current.paths.sessions_dir, current.store.session_id());
   };
   auto cache = ava::app::build_application_catalog_cache(*old_session, {}, workspace_walker, tree_builder);
   ava::app::ApplicationCatalogCoordinator catalog(std::move(cache));

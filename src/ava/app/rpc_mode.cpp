@@ -3,6 +3,7 @@
 #include "ava/app/command_registry.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/rpc/input.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/prompt_worker.h"
@@ -14,7 +15,6 @@
 #include "ava/app/rpc/session_commands.h"
 #include "ava/app/rpc/session_operators.h"
 #include "ava/app/rpc_mode.h"
-#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_sessions.h"
 #include "ava/session/attachments.h"
 #include "ava/provider/curl_transport.h"
@@ -256,8 +256,8 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
     ava::core::VoidResult config_valid = {};
     {
       std::lock_guard lock(options.session_mutex);
-      paths = options.session.continuity.paths;
-      session_offline = options.session.continuity.offline;
+      paths = options.session.paths;
+      session_offline = options.session.offline;
       auto loaded_config = ava::session::load_compaction_config(paths);
       if (!loaded_config)
       {
@@ -359,8 +359,8 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
 #ifdef CWDEBUG
   {
     runtime::session_ts::rat session_r(unlocked_session);
-    DoutEntering(dc::rpc, "run_rpc_loop(...) with session_id=" << session_r->store.session_id() << ", provider_id=" << session_r->model.provider_id
-                                                               << ", model_id=" << session_r->model.model_id);
+    DoutEntering(dc::rpc, "run_rpc_loop(...) with session_id=" << session_r->store.session_id()
+        << ", provider_id=" << session_r->model.provider_id << ", model_id=" << session_r->model.model_id);
   }
 #endif
 
@@ -378,7 +378,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
   });
   std::mutex session_mutex;
   std::optional<std::jthread> prompt_worker;
-  runtime_options.offline = runtime_options.offline || session.continuity.offline || open_options.continuity.offline;
+  runtime_options.offline = runtime_options.offline || session.offline || open_options.offline;
   if (!runtime_options.permission_resolver)
   {
     runtime_options.permission_resolver = build_headless_permission_resolver(HeadlessPermissionPolicyOptions{});
@@ -527,14 +527,14 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
         continue;
       }
       std::lock_guard lock(session_mutex);
-      auto registry =
-          session.load_command_registry(CommandRegistryOptions{.include_builtins = true,
-                                                               .include_prompt_commands = true,
-                                                               .include_skills = true,
-                                                               .include_plugin_commands = true,
-                                                               .include_mcp_prompts = true,
-                                                               .permission_resolver = runtime_options.permission_resolver,
-                                                               .cancel_requested = [&] { return run_state.cancel_requested.load(std::memory_order_relaxed); }});
+      auto registry = session.load_command_registry(
+          CommandRegistryOptions{.include_builtins = true,
+                                          .include_prompt_commands = true,
+                                          .include_skills = true,
+                                          .include_plugin_commands = true,
+                                          .include_mcp_prompts = true,
+                                          .permission_resolver = runtime_options.permission_resolver,
+                                          .cancel_requested = [&] { return run_state.cancel_requested.load(std::memory_order_relaxed); }});
       if (auto written = rpc::write_success(output, command->id, rpc::command_registry_result_json(registry)); !written)
       {
         return written;
@@ -573,7 +573,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       ava::config::XdgPaths paths;
       {
         std::lock_guard lock(session_mutex);
-        paths = session.continuity.paths;
+        paths = session.paths;
         auto result = run_command(session, CommandRequest{.command = std::move(slash_command),
                                                           .event_sink = make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(command->id)),
                                                           .permission_resolver = runtime_options.permission_resolver,
@@ -966,8 +966,8 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       std::filesystem::path current_dir;
       {
         std::lock_guard lock(session_mutex);
-        paths = session.continuity.paths;
-        current_dir = session.continuity.current_dir.empty() ? session.continuity.workspace_dir : session.continuity.current_dir;
+        paths = session.paths;
+        current_dir = session.current_dir.empty() ? session.workspace_dir : session.current_dir;
         image_attachments.reserve((command->attachments ? command->attachments->size() : 0U) + (command->images ? command->images->size() : 0U));
         if (command->attachments)
         {
@@ -1118,7 +1118,7 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
   runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
   runtime_options.question_resolver = nullptr;
   runtime_options.enable_transport_retries = true;
-  runtime_options.offline = session->continuity.offline || options.open_options.continuity.offline;
+  runtime_options.offline = session->offline || options.open_options.offline;
 
   auto registry = ava::provider::builtin_provider_registry();
   auto provider = registry.create(session->model.provider_id);

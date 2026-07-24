@@ -2,8 +2,8 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/test_harness.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_sessions.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/job_control.h"
 #include "ava/agent/subagent_coordinator.h"
@@ -1073,11 +1073,11 @@ void test_runtime_navigation_releases_idle_parent_owner()
   if (!coordinator)
     return;
   ava::app::runtime::OpenOptions options;
-  options.continuity.workspace_dir = workspace;
-  options.continuity.current_dir = workspace;
-  options.continuity.paths = paths;
-  options.continuity.offline = true;
-  options.continuity.subagent_coordinator = coordinator;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
+  options.offline = true;
+  options.subagent_coordinator = coordinator;
   auto visible = ava::app::open_runtime_session(options);
   expect(visible.has_value(), "idle-navigation fixture opens parent A");
   if (!visible)
@@ -1113,11 +1113,11 @@ void test_runtime_navigation_preserves_coordinator_and_child_authority()
     return;
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
-  open_options.continuity.offline = true;
-  open_options.continuity.subagent_coordinator = coordinator;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  open_options.offline = true;
+  open_options.subagent_coordinator = coordinator;
   auto visible = ava::app::open_runtime_session(open_options);
   expect(visible.has_value(), "navigation fixture opens parent runtime session");
   if (!visible)
@@ -1169,9 +1169,9 @@ void test_runtime_navigation_preserves_coordinator_and_child_authority()
     return;
   auto const unrelated_parent_id = replacement->store.session_id();
   expect(ava::app::replace_runtime_session(*visible, std::move(*replacement)).has_value(), "visible runtime session is replaced");
-  expect(visible->continuity.subagent_coordinator == coordinator && !other_process_activates(paths.ava_state_dir, original_parent_id),
+  expect(visible->subagent_coordinator == coordinator && !other_process_activates(paths.ava_state_dir, original_parent_id),
          "process B cannot activate a parent after navigation while its child remains live");
-  expect(visible->continuity.subagent_coordinator == coordinator, "runtime replacement preserves the exact application coordinator");
+  expect(visible->subagent_coordinator == coordinator, "runtime replacement preserves the exact application coordinator");
   {
     std::lock_guard lock(child->gate->mutex);
     expect(!child->gate->canceled, "runtime navigation does not cancel the running child");
@@ -1192,8 +1192,8 @@ void test_runtime_navigation_preserves_coordinator_and_child_authority()
   auto attempted = coordinator->record_delivery_attempt(original_parent_id, started->job.identity.job_id, "attempt_navigation", "fingerprint_navigation");
   auto acknowledged = attempted ? coordinator->acknowledge_delivery(original_parent_id, started->job.identity.job_id, "attempt_navigation", "turn_navigation")
                                 : ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot>(std::unexpected(std::move(attempted.error())));
-  if (visible->continuity.subagent_delivery_manager)
-    visible->continuity.subagent_delivery_manager->release_detached_parent(original_parent_id);
+  if (visible->subagent_delivery_manager)
+    visible->subagent_delivery_manager->release_detached_parent(original_parent_id);
   expect(attempted && acknowledged && other_process_activates(paths.ava_state_dir, original_parent_id),
          "acknowledged detached delivery releases parent ownership for process B");
   auto persisted = child->store.load();

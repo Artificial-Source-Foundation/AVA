@@ -44,9 +44,9 @@ void test_application_catalog_cache_reuses_workspace_and_session_indexes()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions options;
-  options.continuity.workspace_dir = workspace;
-  options.continuity.current_dir = workspace;
-  options.continuity.paths = paths;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
   auto session = ava::app::open_runtime_session(options);
   expect(session.has_value(), "application catalog cache test opens a runtime session");
   if (!session)
@@ -132,9 +132,9 @@ void test_application_catalog_coordinator_serializes_refresh_and_snapshot()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions options;
-  options.continuity.workspace_dir = workspace;
-  options.continuity.current_dir = workspace;
-  options.continuity.paths = paths;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
   auto session = ava::app::open_runtime_session(options);
   expect(session.has_value(), "application catalog coordinator test opens a runtime session");
   if (!session)
@@ -237,9 +237,9 @@ void test_application_catalog_current_session_incremental_refresh()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions options;
-  options.continuity.workspace_dir = workspace;
-  options.continuity.current_dir = workspace;
-  options.continuity.paths = paths;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
   auto session = ava::app::open_runtime_session(options);
   auto other = ava::session::SessionStore::create(workspace, paths.sessions_dir);
   expect(session.has_value() && other.has_value(), "incremental catalog refresh creates current and comparison sessions");
@@ -302,7 +302,7 @@ void test_application_catalog_current_session_incremental_refresh()
   std::size_t topology_build_calls = 0;
   auto successful_tree_builder = [&](ava::app::runtime::Session const& current) {
     ++topology_build_calls;
-    return ava::session::build_session_tree(current.continuity.workspace_dir, current.continuity.paths.sessions_dir, current.store.session_id());
+    return ava::session::build_session_tree(current.workspace_dir, current.paths.sessions_dir, current.store.session_id());
   };
   auto const captured_before_topology = ava::app::SessionTitleCatalogChanges{.cursor = 8, .dirty_session_ids = {"old_session_dirty_before_switch"}};
   auto topology_refresh = catalog.refresh_session_tree_and_consume_title_changes(*session, captured_before_topology, {}, successful_tree_builder);

@@ -48,9 +48,9 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC recovery test opens runtime session");
   if (!session)
@@ -83,9 +83,9 @@ void test_app_rpc_state_list_sessions_and_open_session()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto first = ava::app::open_runtime_session(open_options);
   auto second = ava::app::open_runtime_session(open_options);
   expect(first.has_value() && second.has_value(), "RPC state test opens multiple sessions");
@@ -124,12 +124,12 @@ void test_app_rpc_job_controls_are_active_safe_and_redacted()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC job fixture opens runtime session");
-  if (!session || !session->continuity.subagent_coordinator)
+  if (!session || !session->subagent_coordinator)
     return;
 
   struct WorkerState
@@ -174,7 +174,7 @@ void test_app_rpc_job_controls_are_active_safe_and_redacted()
     }
   };
 
-  auto coordinator = session->continuity.subagent_coordinator;
+  auto coordinator = session->subagent_coordinator;
   auto const owner = session->store.session_id();
   auto promoted_state = std::make_shared<WorkerState>();
   auto canceled_state = std::make_shared<WorkerState>();
@@ -249,9 +249,9 @@ void test_app_rpc_current_session_reads_reject_path_replacement()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "replacement-safe current-session RPC test opens runtime session");
   if (!session)
@@ -311,9 +311,9 @@ void test_app_rpc_session_metadata_name_and_labels()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC session metadata test opens runtime session");
   if (!session)
@@ -355,9 +355,9 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto parent = ava::app::open_runtime_session(open_options);
   auto child = ava::app::open_runtime_session(open_options);
   expect(parent.has_value() && child.has_value(), "RPC session_tree test opens parent and child sessions");
@@ -422,9 +422,9 @@ void test_app_rpc_session_fork_and_clone_commands()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC session branch test opens runtime session");
   if (!session)
@@ -492,9 +492,9 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto source = ava::app::open_runtime_session(open_options);
   expect(source.has_value(), "RPC rollback test opens an active source session");
   if (!source)
@@ -567,9 +567,9 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto source = ava::app::open_runtime_session(open_options);
   expect(source.has_value(), "RPC noncurrent torn branch test opens source runtime");
   if (!source)
@@ -613,9 +613,9 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC summarize_branch test opens runtime session");
   if (!session)

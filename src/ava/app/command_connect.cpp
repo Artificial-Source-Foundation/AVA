@@ -310,22 +310,22 @@ ava::core::VoidResult store_connect_credential(runtime::Session const& session, 
                                                     .expires_at = 0,
                                                     .account_id = "",
                                                     .source_path = {}};
-    return ava::config::store_openai_credential(session.continuity.paths, credential);
+    return ava::config::store_openai_credential(session.paths, credential);
   }
 
-  return ava::config::store_provider_credential(session.continuity.paths, ava::config::ProviderCredential{.provider_id = std::string(provider_id),
-                                                                                                          .access_token = std::move(secret),
-                                                                                                          .credential_type = credential_type_value(method),
-                                                                                                          .account_id = "",
-                                                                                                          .source = "connect"});
+  return ava::config::store_provider_credential(session.paths, ava::config::ProviderCredential{.provider_id = std::string(provider_id),
+                                                                                               .access_token = std::move(secret),
+                                                                                               .credential_type = credential_type_value(method),
+                                                                                               .account_id = "",
+                                                                                               .source = "connect"});
 }
 
 ava::core::Result<std::string> store_openai_oauth_result(runtime::Session const& session, ava::config::OpenAICredential const& credential)
 {
-  auto stored = ava::config::store_openai_credential(session.continuity.paths, credential);
+  auto stored = ava::config::store_openai_credential(session.paths, credential);
   if (!stored)
     return std::unexpected(std::move(stored.error()));
-  return "Stored OpenAI OAuth credential at " + session.continuity.paths.auth_file.string();
+  return "Stored OpenAI OAuth credential at " + session.paths.auth_file.string();
 }
 
 ava::core::Result<std::string> run_openai_browser_oauth(runtime::Session const& session, CommandRequest const& request)
@@ -476,7 +476,7 @@ ava::core::Result<CommandResult> run_connect_command(runtime::Session& session, 
     add_output(result, stored.error().format());
     return result;
   }
-  add_output(result, "Stored " + provider_id + " " + connect_method_label(method) + " credential at " + session.continuity.paths.auth_file.string());
+  add_output(result, "Stored " + provider_id + " " + connect_method_label(method) + " credential at " + session.paths.auth_file.string());
   return result;
 }
 

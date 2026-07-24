@@ -312,7 +312,7 @@ std::filesystem::path resolve_export_path(runtime::Session const& session, std::
 {
   auto resolved = std::filesystem::path(std::string(path));
   if (resolved.is_relative())
-    resolved = session.continuity.current_dir / resolved;
+    resolved = session.current_dir / resolved;
   return resolved.lexically_normal();
 }
 
@@ -544,7 +544,7 @@ runtime::Event base_command_event(runtime::Session const& session, runtime::Even
   event.type = type;
   event.timestamp = ava::session::now_timestamp();
   event.session_id = session.store.session_id();
-  event.mode = session.continuity.mode;
+  event.mode = session.mode;
   event.provider_id = session.model.provider_id;
   event.model_id = session.model.model_id;
   return event;
@@ -647,22 +647,49 @@ std::string format_session_tree_line(ava::session::SessionTreeNode const& node, 
 ava::core::Result<runtime::Session> reopen_session(runtime::Session const& current, std::string_view session_id)
 {
   runtime::OpenOptions options;
-  options.continuity = current.continuity;
-  options.request.requested_session_id = std::string(session_id);
+  options.workspace_dir = current.workspace_dir;
+  options.current_dir = current.current_dir;
+  options.requested_session_id = std::string(session_id);
+  options.continue_last_session = false;
+  options.sessionless = current.sessionless;
+  options.mode = current.mode;
+  options.tool_visibility = current.tool_visibility;
+  options.paths = current.paths;
+  options.subagent_coordinator = current.subagent_coordinator;
+  options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
   return open_runtime_session(options);
 }
 
 ava::core::Result<runtime::Session> create_fresh_session(runtime::Session const& current)
 {
   runtime::OpenOptions options;
-  options.continuity = current.continuity;
+  options.workspace_dir = current.workspace_dir;
+  options.current_dir = current.current_dir;
+  options.continue_last_session = false;
+  options.sessionless = current.sessionless;
+  options.mode = current.mode;
+  options.tool_visibility = current.tool_visibility;
+  options.paths = current.paths;
+  options.subagent_coordinator = current.subagent_coordinator;
+  options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
   return open_runtime_session(options);
 }
 
 runtime::OpenOptions owned_replacement_options(runtime::Session const& current)
 {
   runtime::OpenOptions options;
-  options.continuity = current.continuity;
+  options.workspace_dir = current.workspace_dir;
+  options.current_dir = current.current_dir;
+  options.mode = current.mode;
+  options.tool_visibility = current.tool_visibility;
+  options.paths = current.paths;
+  options.prompt_overrides = current.prompt_overrides;
+  options.offline = current.offline;
+  options.subagent_coordinator = current.subagent_coordinator;
+  options.subagent_delivery_manager = current.subagent_delivery_manager;
+  options.session_title_coordinator = current.session_title_coordinator;
   return options;
 }
 
@@ -695,8 +722,8 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
   if (!staged_recovery)
     return std::unexpected(std::move(staged_recovery.error()));
   auto branched = ava::session::create_session_branch(
-      ava::session::SessionBranchOptions{.workspace_dir = session.continuity.workspace_dir,
-                                         .root_dir = session.continuity.paths.sessions_dir,
+      ava::session::SessionBranchOptions{.workspace_dir = session.workspace_dir,
+                                         .root_dir = session.paths.sessions_dir,
                                          .source_session_id = source_session_id,
                                          .branch_from_entry_id = {},
                                          .name = trimmed_name.empty() ? std::nullopt : std::optional<std::string>(trimmed_name),
@@ -966,9 +993,9 @@ std::string format_session_stats_text(runtime::Session const& session, ava::sess
   std::ostringstream output;
   output << "Session stats\n";
   output << "  session: " << shorten_middle(session.store.session_id(), 32) << "   entries: " << stats.entry_count << '\n';
-  output << "  model: " << session.model.provider_id << '/' << session.model.model_id << "   mode: " << ava::agent::to_string(session.continuity.mode) << '\n';
-  output << "  workspace: " << compact_workspace_label(session.continuity.workspace_dir)
-         << "   cwd: " << compact_cwd_label(session.continuity.current_dir, session.continuity.workspace_dir) << '\n';
+  output << "  model: " << session.model.provider_id << '/' << session.model.model_id << "   mode: " << ava::agent::to_string(session.mode) << '\n';
+  output << "  workspace: " << compact_workspace_label(session.workspace_dir) << "   cwd: " << compact_cwd_label(session.current_dir, session.workspace_dir)
+         << '\n';
   if (!stats.first_timestamp.empty() || !stats.last_timestamp.empty())
   {
     output << "  time: " << (stats.first_timestamp.empty() ? "unknown" : stats.first_timestamp) << " -> "
@@ -1028,7 +1055,7 @@ ava::core::Result<CommandResult> run_sessions_command(runtime::Session& session,
     list_query = trimmed_query.substr(std::string_view("--archived").size());
     list_query = trim_ascii(list_query);
   }
-  auto tree = ava::session::build_session_tree(session.continuity.workspace_dir, session.continuity.paths.sessions_dir, session.store.session_id());
+  auto tree = ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id());
   if (!tree)
   {
     add_output(result, tree.error().format());
@@ -1202,7 +1229,7 @@ ava::core::Result<CommandResult> run_mode_command(runtime::Session& session)
 {
   CommandResult result;
   result.handled = true;
-  auto const new_mode = ava::agent::toggle_mode(session.continuity.mode);
+  auto const new_mode = ava::agent::toggle_mode(session.mode);
   auto prompt_state = select_runtime_prompt_state(session, new_mode);
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
@@ -1212,7 +1239,7 @@ ava::core::Result<CommandResult> run_mode_command(runtime::Session& session)
   }
   if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
     return std::unexpected(std::move(refreshed.error()));
-  add_output(result, "mode switched to " + ava::agent::to_string(session.continuity.mode));
+  add_output(result, "mode switched to " + ava::agent::to_string(session.mode));
   return result;
 }
 
@@ -1222,16 +1249,16 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
   auto const include_project_resources = project_resources_trusted(session.project_trust);
-  auto const project_lsp_config = session.continuity.workspace_dir / ".ava" / "lsp.json";
+  auto const project_lsp_config = session.workspace_dir / ".ava" / "lsp.json";
   auto const lsp_inspection = ava::lsp::inspect_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
-      .global_config_file = session.continuity.paths.ava_config_dir / "lsp.json",
+      .global_config_file = session.paths.ava_config_dir / "lsp.json",
       .project_config_file = include_project_resources ? project_lsp_config : std::filesystem::path{},
-      .workspace_root = session.continuity.workspace_dir,
-      .anchor_set = session.continuity.anchor_set,
-      .mode = session.continuity.mode,
+      .workspace_root = session.workspace_dir,
+      .anchor_set = session.anchor_set,
+      .mode = session.mode,
   });
   std::string output = "Context freshness:\n";
-  output += "  mode=" + ava::agent::to_string(session.continuity.mode) + "\n";
+  output += "  mode=" + ava::agent::to_string(session.mode) + "\n";
   output += "  model=" + session.model.provider_id + "/" + session.model.model_id + "\n";
   output += "  project_trust=" + std::string(to_string(session.project_trust.decision)) +
             " project_resources=" + (include_project_resources ? std::string("enabled") : std::string("skipped")) + "\n";
@@ -1378,7 +1405,7 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
   {
     return fail_compaction(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "/compact requires provider-backed summary generation"));
   }
-  auto loaded_config = ava::session::load_compaction_config(session.continuity.paths);
+  auto loaded_config = ava::session::load_compaction_config(session.paths);
   if (!loaded_config)
   {
     return fail_compaction(std::move(loaded_config.error()));
@@ -1723,7 +1750,7 @@ ava::core::Result<CommandResult> run_import_command(runtime::Session& session, s
 
   auto import_path = std::filesystem::path(*path_arg);
   if (import_path.is_relative())
-    import_path = session.continuity.current_dir / import_path;
+    import_path = session.current_dir / import_path;
   import_path = import_path.lexically_normal();
 
   auto entries = load_import_session_entries(import_path);
@@ -1739,7 +1766,7 @@ ava::core::Result<CommandResult> run_import_command(runtime::Session& session, s
     return result;
   }
 
-  auto imported_store = ava::session::SessionStore::create(session.continuity.workspace_dir, session.continuity.paths.sessions_dir);
+  auto imported_store = ava::session::SessionStore::create(session.workspace_dir, session.paths.sessions_dir);
   if (!imported_store)
   {
     add_output(result, imported_store.error().format());
@@ -1860,7 +1887,7 @@ ava::core::Result<CommandResult> run_export_command(runtime::Session& session, C
   };
 
   auto const call_id = ava::core::make_id("cmd");
-  auto const path_text = display_path(target_path, session.continuity.current_dir);
+  auto const path_text = display_path(target_path, session.current_dir);
   if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "export", path_text); !recorded)
     return std::unexpected(std::move(recorded.error()));
 

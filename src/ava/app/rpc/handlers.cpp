@@ -15,9 +15,8 @@
 
 namespace ava::app::rpc {
 
-ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id,
-                                                                     runtime::RunOptions options, ava::provider::Transport& auth_transport,
-                                                                     std::string_view purpose)
+ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id, runtime::RunOptions options,
+                                                                   ava::provider::Transport& auth_transport, std::string_view purpose)
 {
   return prepare_runtime_credentials(paths, provider_id, std::move(options), auth_transport, std::string("RPC ") + std::string(purpose));
 }
@@ -28,7 +27,7 @@ ava::core::Result<runtime::Session> create_new_session(runtime::Session const& c
 }
 
 ava::core::Result<runtime::Session> open_requested_session(runtime::Session const& current, runtime::OpenOptions const& base_options,
-                                                           std::string_view requested_session_id)
+                                                         std::string_view requested_session_id)
 {
   return open_runtime_session_like(current, base_options, requested_session_id);
 }
@@ -39,7 +38,7 @@ ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::Sessi
     return std::unexpected(invalid_rpc("set_model requires model"));
   if (command.provider && !command.provider->empty())
   {
-    return resolve_runtime_model(session.continuity.paths, *command.provider, *command.model);
+    return resolve_runtime_model(session.paths, *command.provider, *command.model);
   }
 
   return select_runtime_model(session, std::nullopt, *command.model);

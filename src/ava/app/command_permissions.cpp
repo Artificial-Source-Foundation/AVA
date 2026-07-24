@@ -109,7 +109,7 @@ std::string rule_target_text(ava::permissions::PersistentPermissionRule const& r
 {
   std::string text;
   if (!rule.target_path.empty())
-    text += " path=" + sanitize_inline_text(display_permission_path(rule.target_path, session.continuity.workspace_dir));
+    text += " path=" + sanitize_inline_text(display_permission_path(rule.target_path, session.workspace_dir));
   if (!rule.command.empty())
     text += " command=\"" + sanitize_inline_text(rule.command) + "\"";
   if (!rule.command_recipe_key.empty())
@@ -143,7 +143,7 @@ bool rule_matches_query(ava::permissions::PersistentPermissionRule const& rule, 
          contains_ascii_case_insensitive(ava::permissions::to_string(rule.action), query) ||
          contains_ascii_case_insensitive(ava::permissions::to_string(rule.operation), query) ||
          contains_ascii_case_insensitive(ava::permissions::to_string(rule.mode), query) || contains_ascii_case_insensitive(rule.tool_name, query) ||
-         contains_ascii_case_insensitive(display_permission_path(rule.target_path, session.continuity.workspace_dir), query) ||
+         contains_ascii_case_insensitive(display_permission_path(rule.target_path, session.workspace_dir), query) ||
          contains_ascii_case_insensitive(rule.command, query) || contains_ascii_case_insensitive(rule.command_recipe_key, query) ||
          contains_ascii_case_insensitive(rule.recipe_display, query) || contains_ascii_case_insensitive(rule.reason, query) ||
          contains_ascii_case_insensitive(rule.actor, query) || contains_ascii_case_insensitive(rule.created_at, query);
@@ -158,7 +158,7 @@ PermissionAuditRow permission_audit_row(ava::session::SessionEntry const& entry,
 {
   auto target_path = audit_field(entry.data_json, "target_path");
   if (!target_path.empty())
-    target_path = display_permission_path(target_path, session.continuity.workspace_dir);
+    target_path = display_permission_path(target_path, session.workspace_dir);
 
   auto const command_metadata = ava::core::json::object_field(entry.data_json, "command_metadata").value_or("");
   auto scopes = ava::core::json::strings_in_array_field(command_metadata, "effective_allowed_scopes");
@@ -772,7 +772,7 @@ std::string format_permission_rule_explain(ava::permissions::PermissionRuleStore
   if (!rule.workspace_dir.empty())
     output << "  workspace: " << sanitize_inline_text(rule.workspace_dir.generic_string()) << "\n";
   if (!rule.target_path.empty())
-    output << "  path: " << sanitize_inline_text(display_permission_path(rule.target_path, session.continuity.workspace_dir)) << "\n";
+    output << "  path: " << sanitize_inline_text(display_permission_path(rule.target_path, session.workspace_dir)) << "\n";
   if (!rule.command.empty())
     output << "  command: " << sanitize_inline_text(rule.command) << "\n";
   if (!rule.command_recipe_key.empty())

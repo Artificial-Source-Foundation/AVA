@@ -38,9 +38,9 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
          "RPC direct command fixture workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC direct command test opens runtime session");
   if (!session)
@@ -103,9 +103,9 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
          "RPC direct command denial fixture workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC direct command denial test opens runtime session");
   if (!session)
@@ -169,9 +169,9 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
          "RPC direct command cancellation fixture workspace is owner-only for sealed command planning");
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC direct command cancellation test opens runtime session");
   if (!session)
@@ -227,9 +227,9 @@ void test_app_rpc_compact_provider_failure_is_error_response()
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC compact failure test opens runtime session");
   if (!session)
@@ -272,9 +272,9 @@ void test_app_rpc_compact_cancellation_is_error_response_without_provider_reques
   std::filesystem::create_directories(workspace);
 
   ava::app::runtime::OpenOptions open_options;
-  open_options.continuity.workspace_dir = workspace;
-  open_options.continuity.current_dir = workspace;
-  open_options.continuity.paths = paths;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC compact cancellation test opens runtime session");
   if (!session)

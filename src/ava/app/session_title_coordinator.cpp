@@ -632,8 +632,7 @@ void SessionTitleCoordinator::start()
 void SessionTitleCoordinator::schedule(runtime::Session const& session, std::string_view original_user_text, std::string_view committed_turn_id,
                                        runtime::RunOptions const& run_options) noexcept
 {
-  if (!options_.config.enabled || session.sessionless || !session.created || !session.run_controller || !session.continuity.anchor_set ||
-      committed_turn_id.empty())
+  if (!options_.config.enabled || session.sessionless || !session.created || !session.run_controller || !session.anchor_set || committed_turn_id.empty())
     return;
   try
   {
@@ -661,16 +660,16 @@ void SessionTitleCoordinator::schedule(runtime::Session const& session, std::str
               .read_authority = std::move(*read_authority),
               .append_controller = session.run_controller,
               .append_route = std::move(append_route),
-              .request = SessionTitleGenerationRequest{.paths = session.continuity.paths,
+              .request = SessionTitleGenerationRequest{.paths = session.paths,
                                                        .active_model = session.model,
                                                        .config = options_.config,
-                                                       .anchor_set = session.continuity.anchor_set,
+                                                       .anchor_set = session.anchor_set,
                                                        .source_text = source_text,
                                                        .access_token = run_options.access_token,
                                                        .credential_type = run_options.credential_type,
                                                        .account_id = run_options.openai_account_id,
                                                        .openai_oauth = run_options.openai_oauth,
-                                                       .offline = session.continuity.offline || run_options.offline}};
+                                                       .offline = session.offline || run_options.offline}};
     std::lock_guard lock(mutex_);
     if (!accepting_ || queue_.size() >= options_.max_queued)
     {

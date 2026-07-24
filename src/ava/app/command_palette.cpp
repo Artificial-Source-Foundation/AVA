@@ -94,8 +94,8 @@ bool path_is_under(std::filesystem::path const& path, std::filesystem::path cons
 
 bool is_reference_code_path(runtime::Session const& session, std::filesystem::path const& path)
 {
-  return path_is_under(path, session.continuity.workspace_dir / "docs" / "reference-code") ||
-         path.lexically_normal() == (session.continuity.workspace_dir / "docs" / "reference-code").lexically_normal();
+  return path_is_under(path, session.workspace_dir / "docs" / "reference-code") ||
+         path.lexically_normal() == (session.workspace_dir / "docs" / "reference-code").lexically_normal();
 }
 
 bool should_skip_path_completion_entry(runtime::Session const& session, std::filesystem::directory_entry const& entry)
@@ -142,12 +142,11 @@ std::vector<WorkspacePathCandidate> walk_workspace_path_candidates(runtime::Sess
 {
   std::vector<WorkspacePathCandidate> candidates;
   std::error_code error;
-  if (!std::filesystem::is_directory(session.continuity.current_dir, error) || error)
+  if (!std::filesystem::is_directory(session.current_dir, error) || error)
     return candidates;
 
   std::size_t visited = 0;
-  for (std::filesystem::recursive_directory_iterator it(session.continuity.current_dir, error), end; it != end && visited < kMaxPathCompletionVisited;
-       it.increment(error))
+  for (std::filesystem::recursive_directory_iterator it(session.current_dir, error), end; it != end && visited < kMaxPathCompletionVisited; it.increment(error))
   {
     if (error)
     {
@@ -174,7 +173,7 @@ std::vector<WorkspacePathCandidate> walk_workspace_path_candidates(runtime::Sess
     if (static_cast<std::size_t>(it.depth()) >= kMaxPathCompletionDepth)
       it.disable_recursion_pending();
 
-    auto value = completion_relative_path(session.continuity.current_dir, entry.path(), directory, true);
+    auto value = completion_relative_path(session.current_dir, entry.path(), directory, true);
     if (!value)
       continue;
     candidates.push_back(
@@ -553,24 +552,22 @@ void append_session_tree_items(tui::SelectListView& view, std::vector<ava::sessi
 
 ava::mcp::McpConfigLoadOptions mcp_config_options(runtime::Session const& session)
 {
-  auto options = ava::mcp::default_mcp_config_options(session.continuity.workspace_dir);
-  options.global_config_file = session.continuity.paths.ava_config_dir / "mcp.json";
-  options.project_config_file =
-      project_resources_trusted(session.project_trust) ? session.continuity.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{};
+  auto options = ava::mcp::default_mcp_config_options(session.workspace_dir);
+  options.global_config_file = session.paths.ava_config_dir / "mcp.json";
+  options.project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{};
   return options;
 }
 
 ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::Session const& session)
 {
-  return ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = session.continuity.paths.ava_config_dir / "plugins",
-                                             .project_plugins_dir = project_resources_trusted(session.project_trust)
-                                                                        ? session.continuity.workspace_dir / ".ava" / "plugins"
-                                                                        : std::filesystem::path{}};
+  return ava::plugin::PluginDiscoveryOptions{
+      .global_plugins_dir = session.paths.ava_config_dir / "plugins",
+      .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{}};
 }
 
 std::filesystem::path plugin_enablement_file(runtime::Session const& session)
 {
-  return session.continuity.paths.ava_state_dir / "plugin-enablement.json";
+  return session.paths.ava_state_dir / "plugin-enablement.json";
 }
 
 void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys,
@@ -600,7 +597,7 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
   {
     auto& item = items[*index];
     auto const providers = ava::provider::builtin_provider_registry();
-    if (auto registry = ava::config::load_model_registry(session.continuity.paths))
+    if (auto registry = ava::config::load_model_registry(session.paths))
     {
       for (auto const& model : effective_models(*registry))
       {
@@ -637,7 +634,7 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     add_completion(item, 0, "light", "Persist the built-in light palette", "General", {}, false);
     add_completion(item, 0, "plain", "Persist no-ANSI output", "General", {}, false);
     add_completion(item, 0, "reset", "Use the built-in default unless an environment override is set", "General", {}, false);
-    for (auto const& theme : available_tui_custom_themes(session.continuity.paths))
+    for (auto const& theme : available_tui_custom_themes(session.paths))
     {
       add_completion(item, 0, theme.name, "Persist custom theme from " + theme.path.string(), "Themes", {}, false);
     }
@@ -708,9 +705,9 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
   {
     auto& item = items[*index];
     for (auto const& action : {"show", "wait", "result", "cancel", "promote"}) add_completion(item, 0, action, "Subagent job control", "Sessions");
-    if (session.continuity.subagent_coordinator)
+    if (session.subagent_coordinator)
     {
-      for (auto const& job : session.continuity.subagent_coordinator->list(session.store.session_id()))
+      for (auto const& job : session.subagent_coordinator->list(session.store.session_id()))
       {
         auto const description = std::string(ava::agent::to_string(job.job.execution)) + " · " + std::string(ava::agent::to_string(job.job.mode));
         for (auto const& action : {"show", "wait", "result", "cancel", "promote"})
@@ -747,10 +744,10 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
       add_completion(item, 1, value, "Persistent rule field", "Safety", {"add"}, false);
     }
     auto const store = ava::permissions::PermissionRuleStore{
-        .global_rules_file = session.continuity.paths.ava_config_dir / "permission-rules.json",
-        .workspace_rules_file = session.continuity.workspace_dir / ".ava" / "permission-rules.json",
-        .workspace_dir = session.continuity.workspace_dir,
-        .anchor_set = session.continuity.anchor_set,
+        .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
+        .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
+        .workspace_dir = session.workspace_dir,
+        .anchor_set = session.anchor_set,
     };
     if (auto rules = ava::permissions::load_persistent_permission_rules(store))
     {
@@ -802,8 +799,7 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     add_completion(item, 0, "clear", "Remove this workspace trust decision", "Trust");
   }
 
-  auto const diagnostics =
-      ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.continuity.workspace_dir);
+  auto const diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir);
   if (auto index = find_item_index(items, "/plugins"))
   {
     auto& item = items[*index];
@@ -927,9 +923,8 @@ void refresh_application_workspace_catalog(ApplicationCatalogCache& cache, runti
 void refresh_application_session_tree(ApplicationCatalogCache& cache, runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys,
                                       SessionTreeIndexBuilder session_tree_builder)
 {
-  auto tree = session_tree_builder
-                  ? session_tree_builder(session)
-                  : ava::session::build_session_tree(session.continuity.workspace_dir, session.continuity.paths.sessions_dir, session.store.session_id());
+  auto tree = session_tree_builder ? session_tree_builder(session)
+                                   : ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id());
   ++cache.operations.session_tree_builds;
   if (tree)
   {
@@ -960,9 +955,8 @@ ApplicationCatalogCache build_application_catalog_cache(runtime::Session const& 
   cache.file_references = file_reference_items_from_candidates(candidates);
   cache.workspace_path_candidates = prepare_workspace_path_candidates(std::move(candidates), false);
 
-  auto tree = session_tree_builder
-                  ? session_tree_builder(session)
-                  : ava::session::build_session_tree(session.continuity.workspace_dir, session.continuity.paths.sessions_dir, session.store.session_id());
+  auto tree = session_tree_builder ? session_tree_builder(session)
+                                   : ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id());
   ++cache.operations.session_tree_builds;
   if (tree)
   {
@@ -1028,9 +1022,8 @@ ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_session_tree_duri
                                                                                              std::vector<CommandHotkey> const& hotkeys,
                                                                                              SessionTreeIndexBuilder session_tree_builder)
 {
-  auto tree = session_tree_builder
-                  ? session_tree_builder(session)
-                  : ava::session::build_session_tree(session.continuity.workspace_dir, session.continuity.paths.sessions_dir, session.store.session_id());
+  auto tree = session_tree_builder ? session_tree_builder(session)
+                                   : ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id());
   ++cache_.operations.session_tree_builds;
   if (!tree)
   {
@@ -1109,9 +1102,8 @@ ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_title_changes(run
       std::ranges::any_of(changes.dirty_session_ids, [&](std::string const& session_id) { return session_id != current_session_id; });
   if (needs_full_rebuild)
   {
-    auto tree = session_tree_builder
-                    ? session_tree_builder(session)
-                    : ava::session::build_session_tree(session.continuity.workspace_dir, session.continuity.paths.sessions_dir, current_session_id);
+    auto tree = session_tree_builder ? session_tree_builder(session)
+                                     : ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, current_session_id);
     if (!tree)
       return std::unexpected(std::move(tree.error()));
     cache_.session_tree = std::move(*tree);
@@ -1221,7 +1213,7 @@ tui::SelectListView model_selector_view(ava::config::ModelRegistry const& regist
 
 tui::SelectListView model_selector_view(runtime::Session const& session, std::string footer_hint)
 {
-  auto registry = ava::config::load_model_registry(session.continuity.paths);
+  auto registry = ava::config::load_model_registry(session.paths);
   if (registry)
     return model_selector_view(*registry, session.model, std::move(footer_hint));
 
@@ -1282,7 +1274,7 @@ tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const&
 
 tui::SelectListView scoped_model_selector_view(runtime::Session const& session, std::string footer_hint)
 {
-  auto registry = ava::config::load_model_registry(session.continuity.paths);
+  auto registry = ava::config::load_model_registry(session.paths);
   if (registry)
     return scoped_model_selector_view(*registry, session.model, session.scoped_model_cycle, std::move(footer_hint));
 
@@ -1437,7 +1429,7 @@ tui::SelectListView session_selector_view(ApplicationCatalogCache const& cache, 
 tui::SelectListView session_selector_view(runtime::Session const& session, SessionSelectorSort sort, std::string footer_hint, bool named_only, bool show_paths,
                                           bool show_archived, bool show_label_time)
 {
-  auto tree = ava::session::build_session_tree(session.continuity.workspace_dir, session.continuity.paths.sessions_dir, session.store.session_id());
+  auto tree = ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id());
   if (tree)
     return session_selector_view(*tree, sort, std::move(footer_hint), named_only, show_paths, show_archived, show_label_time);
 

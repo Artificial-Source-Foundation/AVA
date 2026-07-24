@@ -19,6 +19,7 @@
 #include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
 #include "ava/session/validation.h"
+#include "ava/core/AnchorSet.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -371,6 +372,46 @@ void test_app_sessionless_new_and_resume_commands()
   auto resumed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/resume " + original_session_id});
   expect(!resumed && resumed.error().message().find("no-session") != std::string::npos && session->sessionless && session->store.is_ephemeral(),
          "slash /resume from a sessionless runtime retains the no-session conflict instead of opening persistent state");
+}
+
+void test_app_sessionless_new_preserves_supplied_anchor()
+{
+  auto const root = create_empty_root("app-sessionless-new-supplied-anchor");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::error_code temp_error;
+  auto const temp_root = std::filesystem::temp_directory_path(temp_error);
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(paths.ava_config_dir);
+  std::filesystem::create_directories(paths.ava_state_dir);
+  expect(!temp_error, "sessionless supplied-anchor test resolves the temporary fixture root");
+  if (temp_error)
+    return;
+
+  // The isolated fixture's temporary root covers both generated ephemeral
+  // spill roots; config and state remain exact anchors.
+  auto supplied_anchor_set = ava::core::AnchorSet::open({workspace, temp_root, paths.ava_config_dir, paths.ava_state_dir});
+  expect(supplied_anchor_set.has_value(), "sessionless supplied-anchor test opens fixture authority before runtime creation");
+  if (!supplied_anchor_set)
+    return;
+
+  ava::app::runtime::OpenOptions options;
+  options.continuity.workspace_dir = workspace;
+  options.continuity.current_dir = workspace;
+  options.continuity.paths = paths;
+  options.continuity.anchor_set = *supplied_anchor_set;
+  options.request.sessionless = true;
+  auto session = ava::app::open_runtime_session(options);
+  expect(session && session->sessionless && session->continuity.anchor_set == *supplied_anchor_set && !session->continuity.anchor_set_is_generated,
+         "sessionless supplied-anchor test retains caller authority with supplied provenance");
+  if (!session)
+    return;
+
+  auto const original_session_id = session->store.session_id();
+  auto fresh = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/new Supplied anchor session"});
+  expect(fresh && fresh->handled && session->sessionless && session->store.is_ephemeral() && session->store.session_id() != original_session_id &&
+             session->continuity.anchor_set == *supplied_anchor_set && !session->continuity.anchor_set_is_generated,
+         "sessionless /new preserves supplied authority that covers the next ephemeral spill root");
 }
 
 void test_app_session_metadata_commands()

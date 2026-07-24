@@ -23,6 +23,7 @@ void test_app_rpc_session_metadata_name_and_labels();
 void test_app_rpc_session_tree_command_and_switch_navigation();
 void test_app_rpc_session_fork_and_clone_commands();
 void test_app_rpc_branch_construction_failure_rolls_back_created_file();
+void test_app_rpc_branch_strict_cwd_mismatch_rolls_back_created_file();
 void test_app_rpc_noncurrent_branch_source_recovers_torn_tail();
 void test_app_rpc_summarize_branch_appends_to_source_session();
 void test_app_rpc_model_commands();

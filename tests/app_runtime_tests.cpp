@@ -44,6 +44,7 @@ void run_app_runtime_tests()
   test_app_session_branch_commands();
   test_app_session_new_resume_commands();
   test_app_sessionless_new_and_resume_commands();
+  test_app_sessionless_new_preserves_supplied_anchor();
   test_app_session_metadata_commands();
   test_application_catalog_cache_reuses_workspace_and_session_indexes();
   test_application_catalog_coordinator_serializes_refresh_and_snapshot();

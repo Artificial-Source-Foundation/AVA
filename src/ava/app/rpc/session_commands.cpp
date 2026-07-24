@@ -128,7 +128,7 @@ runtime::OpenOptions owned_replacement_options(runtime::Session const& current, 
 {
   auto options = base_options;
   options.continuity = current.continuity;
-  options.request = {};
+  options.request.reset_for_owned_replacement();
   return options;
 }
 

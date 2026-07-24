@@ -24,6 +24,7 @@ void run_app_rpc_tests()
   ava::tests::app_rpc_test::test_app_rpc_session_tree_command_and_switch_navigation();
   ava::tests::app_rpc_test::test_app_rpc_session_fork_and_clone_commands();
   ava::tests::app_rpc_test::test_app_rpc_branch_construction_failure_rolls_back_created_file();
+  ava::tests::app_rpc_test::test_app_rpc_branch_strict_cwd_mismatch_rolls_back_created_file();
   ava::tests::app_rpc_test::test_app_rpc_noncurrent_branch_source_recovers_torn_tail();
   ava::tests::app_rpc_test::test_app_rpc_summarize_branch_appends_to_source_session();
   ava::tests::app_rpc_test::test_app_rpc_model_commands();

@@ -41,6 +41,7 @@ void test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata()
 void test_app_session_branch_commands();
 void test_app_session_new_resume_commands();
 void test_app_sessionless_new_and_resume_commands();
+void test_app_sessionless_new_preserves_supplied_anchor();
 void test_app_session_metadata_commands();
 void test_request_projection_validates_committed_v4_history();
 void test_runtime_model_switch_accepts_committed_openai_responses_reasoning();

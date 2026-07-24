@@ -1495,7 +1495,7 @@ void test_lsp_builtin_config_is_global_exact_and_default_off()
   rejects_global("{\"version\":1,\"builtin_servers\":[\"unknown\"]}", "unknown ids");
   rejects_global("{\"version\":1,\"builtin_servers\":[\"clangd\\u0001\"]}", "control bytes");
   rejects_global("{\"version\":1,\"builtin_servers\":[\"gopls\"]}", "deferred gopls ids");
-  rejects_global("{\"version\":1,\"builtin_servers\":[\"rust-analyzer\"]}", "deferred rust-analyzer ids");
+  rejects_global("{\"version\":1,\"builtin_servers\":[\"other-server\"]}", "unsupported server ids");
   rejects_global("{\"version\":1,\"builtin_servers\":[\"clangd\",\"unknown\"]}", "bounds");
 }
 

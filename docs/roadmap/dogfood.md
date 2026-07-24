@@ -55,7 +55,7 @@ Current workflow controls:
 
 - Background jobs have public status, wait, result, and cancel controls through `/jobs` and RPC.
 - Sealed command plans use a fixed trusted command path rather than inheriting arbitrary user `PATH`; approved development commands follow the contained-command policy.
-- The built-in `clangd` recipe is default-off and requires exact global opt-in; it uses only an already-installed, identity-checked executable. Automatic `gopls` and `rust-analyzer` remain deferred.
+- The built-in `clangd` recipe is default-off and requires exact global opt-in; it uses only an already-installed, identity-checked executable. It is the sole automatic LSP recipe; every other server requires explicit configuration.
 
 ## Linux release closure boundary
 

@@ -73,9 +73,8 @@ CommandClassification standard_classification(CommandFamily family, CommandRecip
       .level = CommandLevel::Standard,
       .family = family,
       .recipe = RecipeDescriptor{.recipe = recipe, .canonical_argv = std::move(canonical_argv), .path_arguments = std::move(path_arguments)},
-      .capabilities =
-          CommandCapabilities{.executes_mutable_project_code = executes_mutable_project_code,
-                              .requires_containment = executes_mutable_project_code || requires_path_containment},
+      .capabilities = CommandCapabilities{.executes_mutable_project_code = executes_mutable_project_code,
+                                          .requires_containment = executes_mutable_project_code || requires_path_containment},
       .max_interactive_scope = InteractiveScope::Workspace,
       .ask_candidate = true};
 }
@@ -175,7 +174,7 @@ std::optional<CommandClassification> classify_sensitive(std::string_view executa
     }
   }
   if ((executable_name == "npm" || executable_name == "pnpm" || executable_name == "yarn" || executable_name == "bun" || executable_name == "pip" ||
-       executable_name == "pip3" || executable_name == "cargo") &&
+       executable_name == "pip3") &&
       (second == "install" || second == "update" || second == "upgrade" || second == "add" || second == "remove" || second == "uninstall"))
   {
     return sensitive_classification(CommandFamily::InstallOrUpdate, CommandCapabilities{.network_enabled = true, .mutates_workspace = true});
@@ -264,16 +263,6 @@ std::optional<CommandClassification> classify_standard(std::string_view executab
     if (path)
       return standard_classification(CommandFamily::Make, CommandRecipe::Make, canonical({{2, *path}}), {*path}, true);
   }
-  if (executable_name == "cargo" && argv.size() == 2)
-  {
-    auto const verb = lowercase(argv[1]);
-    if (verb == "build")
-      return standard_classification(CommandFamily::Cargo, CommandRecipe::CargoBuild, canonical(), {}, true);
-    if (verb == "check")
-      return standard_classification(CommandFamily::Cargo, CommandRecipe::CargoCheck, canonical(), {}, true);
-    if (verb == "test")
-      return standard_classification(CommandFamily::Cargo, CommandRecipe::CargoTest, canonical(), {}, true);
-  }
   if ((executable_name == "npm" || executable_name == "pnpm" || executable_name == "yarn" || executable_name == "bun") && argv.size() == 3 &&
       lowercase(argv[1]) == "run" && is_simple_script_name(argv[2]))
   {
@@ -320,8 +309,8 @@ CommandClassification classify_command(std::vector<std::string> const& argv, Res
                                        std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
 {
   // Classify by the invoked basename when the sealed executable is a symlink.
-  // Multi-call toolchains commonly expose trusted aliases this way (for
-  // example cargo -> rustup and npm -> npm-cli.js). The canonical target and
+  // Multi-call tools commonly expose trusted aliases this way (for
+  // example npm -> npm-cli.js). The canonical target and
   // origin still bind permission identity and execution, so bare and absolute
   // spellings of the same alias cannot select different authority.
   auto const& classification_path =

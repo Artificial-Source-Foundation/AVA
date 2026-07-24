@@ -4303,7 +4303,7 @@ void test_tui_composer_rendering_and_input()
                                                            .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "bash",
                                                                                                                .operation = "bash",
                                                                                                                .target = "/workspace",
-                                                                                                               .command = "cargo test",
+                                                                                                               .command = "cmake --build build",
                                                                                                                .reason = "sealed workspace recipe",
                                                                                                                .risk = "medium",
                                                                                                                .allow_session_available = true,

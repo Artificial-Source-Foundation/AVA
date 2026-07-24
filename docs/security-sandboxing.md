@@ -133,8 +133,8 @@ Policy details:
 - Exact `git status`, `git diff`, and `git log -1` recipes are Standard but
   require containment because repository Git configuration, hooks, filters,
   pagers, or helpers may execute mutable project code.
-- Recognized `cmake --build`, `ctest`, `ninja`, `make`, Cargo
-  build/check/test, package-manager script, pytest, and configured workspace
+- Recognized `cmake --build`, `ctest`, `ninja`, `make`, package-manager
+  script, pytest, and configured workspace
   script recipes are Standard only under verified development containment.
 - Network, installation, publishing, and workspace-mutation families are
   Sensitive and require explicit approval. Destructive/privileged commands,
@@ -210,9 +210,10 @@ or hardlinked executable files, unsafe ownership/modes/directory chains, and
 script wrappers; it never downloads, updates, invokes package/toolchain
 managers, or accesses the network. Launch revalidates the sealed descriptor
 identity and executes it with `fexecve`. Its permission identity includes clear
-exact argv plus a bounded replacement-sensitive fingerprint. Automatic `gopls`
-and `rust-analyzer` recipes remain deferred; explicitly configured servers keep
-the existing trust and launch-permission boundary.
+exact argv plus a bounded replacement-sensitive fingerprint. The installed-only
+`clangd` integration is the sole automatic LSP recipe; every other server
+requires explicit configuration and keeps the existing trust
+and launch-permission boundary.
 
 Workspace documents, project config, and logical server roots are acquired
 through the runtime's shared `AnchorSet`/`AnchorOpen` authority without

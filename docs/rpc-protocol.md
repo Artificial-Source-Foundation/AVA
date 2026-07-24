@@ -119,7 +119,7 @@ When `operation` is `bash` and the request originates from a sealed command plan
 |-------|------|-------------|
 | `level` | string | Command risk level: `standard`, `sensitive`, or `critical`. |
 | `family` | string | Command family (e.g. `inspection`, `cmake_build`, `interpreter_inline`, `raw_shell`). |
-| `fingerprint` | string | Instantaneous integrity binding for the sealed plan (`sha256:ava-command-plan-v4:...`); never a durable grant identity. |
+| `fingerprint` | string | Instantaneous integrity binding for the sealed plan (`sha256:ava-command-plan-v5:...`); never a durable grant identity. |
 | `execution_domain` | string | `direct_argv` or `raw_shell`. |
 | `resolved_executable` | string | Preserved logical spelling of the resolved executable; physical identity remains descriptor-bound internally. |
 | `origin` | string | Executable provenance: `system`, `user`, or `workspace`. |

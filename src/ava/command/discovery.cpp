@@ -630,7 +630,7 @@ ava::core::Result<std::vector<CommandPathEntry>> discover_path(CommandBuildOptio
       if (entry.empty())
         return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "startup PATH contains an empty entry"));
       auto safe = safe_path_directory(std::filesystem::path(entry), PathProvenance::StartupPath, anchors);
-      // A startup PATH commonly contains optional toolchain locations. Keep
+      // A startup PATH commonly contains optional tool locations. Keep
       // only directories that pass the sealed-path checks. Missing, symlinked,
       // or writable absolute entries add no executable authority and are
       // omitted; empty or relative entries are ambiguous and fail closed.
@@ -651,10 +651,9 @@ ava::core::Result<std::vector<CommandPathEntry>> discover_path(CommandBuildOptio
   };
   // Host discovery uses only this trusted root; these paths never flow into the
   // child HOME/XDG/TMP environment.
-  if (options.discover_host_user_toolchains)
+  if (options.discover_host_user_tools)
   {
     add_optional_candidate(trusted_home / ".local" / "bin", PathProvenance::UserLocal);
-    add_optional_candidate(trusted_home / ".cargo" / "bin", PathProvenance::UserCargo);
   }
   add_optional_candidate(workspace / ".venv" / "bin", PathProvenance::WorkspaceVenv);
   add_optional_candidate(workspace / "node_modules" / ".bin", PathProvenance::WorkspaceNodeModules);
@@ -670,56 +669,6 @@ ava::core::Result<std::vector<CommandPathEntry>> discover_path(CommandBuildOptio
     total_bytes += bytes;
   }
   return entries;
-}
-
-ava::core::Result<std::optional<PathMetadata>> discover_optional_rustup_home(PathMetadata const& trusted_home, std::filesystem::path const& workspace,
-                                                                             std::vector<std::filesystem::path> const& ava_authority_paths,
-                                                                             SyntheticEnvironmentRoots const& synthetic_environment_roots,
-                                                                             CommandLimits const& limits, ava::core::AnchorSet const& anchors)
-{
-  // Never consult inherited RUSTUP_HOME. The only eligible toolchain state is
-  // this exact child of the already-sealed trusted home.
-  auto const candidate = trusted_home.canonical_path / ".rustup";
-  auto metadata = inspect_path_metadata(candidate, ExpectedNode::Directory, true, "trusted rustup home", &anchors);
-  if (!metadata)
-  {
-    if (metadata.error().category() == ava::core::ErrorCategory::NotFound)
-      return std::optional<PathMetadata>{};
-    return std::unexpected(std::move(metadata.error()));
-  }
-  if (metadata->canonical_path.empty() || !metadata->canonical_path.is_absolute() || has_forbidden_path_byte(metadata->canonical_path) ||
-      metadata->canonical_path.string().size() > limits.max_path_bytes || !is_within(metadata->canonical_path, trusted_home.canonical_path))
-  {
-    return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied,
-                                         "trusted rustup home is not a bounded canonical directory beneath the trusted home", "path",
-                                         metadata->canonical_path.string()));
-  }
-  // Rustup state belongs to the invoking account. It may use the narrowly
-  // verified private-primary-group write exception, but no other group/world
-  // write authority is accepted.
-  if (auto valid = validate_safe_directory(*metadata, true, true, "trusted rustup home"); !valid)
-    return std::unexpected(std::move(valid.error()));
-
-  auto const overlaps = [&metadata](std::filesystem::path const& protected_root) {
-    return is_within(metadata->canonical_path, protected_root) || is_within(protected_root, metadata->canonical_path);
-  };
-  if (overlaps(workspace) || std::ranges::any_of(ava_authority_paths, overlaps))
-  {
-    return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied,
-                                         "trusted rustup home must be disjoint from the workspace and AVA authority roots", "path",
-                                         metadata->canonical_path.string()));
-  }
-  for (auto const* root : {&synthetic_environment_roots.home, &synthetic_environment_roots.xdg_config_home, &synthetic_environment_roots.xdg_cache_home,
-                           &synthetic_environment_roots.xdg_data_home, &synthetic_environment_roots.xdg_state_home, &synthetic_environment_roots.tmpdir})
-  {
-    if (overlaps(root->canonical_path))
-    {
-      return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied,
-                                           "trusted rustup home must be disjoint from synthetic child environment roots", "path",
-                                           metadata->canonical_path.string()));
-    }
-  }
-  return std::optional<PathMetadata>{std::move(*metadata)};
 }
 
 ExecutableOrigin executable_origin(ExecutableMetadata const& executable, std::filesystem::path const& workspace, std::filesystem::path const& trusted_home)
@@ -1068,16 +1017,6 @@ ava::core::Result<SealedCommandContext> discover_command_context(CommandIntent c
                                                         .xdg_state_home = std::move(*xdg_state_home),
                                                         .tmpdir = std::move(*tmpdir)};
 
-  std::optional<PathMetadata> rustup_home;
-  if (options.discover_host_user_toolchains)
-  {
-    auto discovered_rustup_home = discover_optional_rustup_home(*trusted_home, workspace_metadata->canonical_path, ava_authority_paths,
-                                                                synthetic_environment_roots, options.limits, *options.anchor_set);
-    if (!discovered_rustup_home)
-      return std::unexpected(std::move(discovered_rustup_home.error()));
-    rustup_home = std::move(*discovered_rustup_home);
-  }
-
   auto entries = discover_path(options, workspace_metadata->canonical_path, trusted_home->canonical_path, *options.anchor_set);
   if (!entries)
     return std::unexpected(std::move(entries.error()));
@@ -1100,7 +1039,6 @@ ava::core::Result<SealedCommandContext> discover_command_context(CommandIntent c
                               .ava_authority_roots = std::move(ava_authority_paths),
                               .ava_authority_root_metadata = std::move(ava_authority_roots),
                               .synthetic_environment_roots = std::move(synthetic_environment_roots),
-                              .rustup_home_metadata = std::move(rustup_home),
                               .path_entries = std::move(*entries)};
 }
 
@@ -1225,8 +1163,8 @@ bool trusted_home_matches_ancestor(PathMetadata const& trusted_home, PathAncesto
          trusted_home.group == ancestor.group;
 }
 
-bool user_toolchain_ancestors_are_fresh(std::vector<PathAncestorMetadata> const& recorded, std::vector<PathAncestorMetadata> const& current,
-                                        PathMetadata const& trusted_home)
+bool user_tool_ancestors_are_fresh(std::vector<PathAncestorMetadata> const& recorded, std::vector<PathAncestorMetadata> const& current,
+                                   PathMetadata const& trusted_home)
 {
   if (recorded.size() != current.size())
     return false;
@@ -1283,7 +1221,7 @@ bool trusted_home_directory_identity_is_fresh(PathMetadata const& recorded, Path
   return S_ISDIR(static_cast<mode_t>(current.mode));
 }
 
-bool is_sealed_user_toolchain_path(std::filesystem::path const& path, PathMetadata const& trusted_home)
+bool is_sealed_user_tool_path(std::filesystem::path const& path, PathMetadata const& trusted_home)
 {
   if (path.empty() || !path.is_absolute() || path != path.lexically_normal() || trusted_home.requested_path.empty() ||
       !trusted_home.requested_path.is_absolute() || trusted_home.requested_path != trusted_home.requested_path.lexically_normal() ||
@@ -1303,7 +1241,7 @@ ava::core::Result<bool> path_metadata_is_fresh_with_ancestors(PathMetadata const
   auto current = inspect_path_metadata(recorded.requested_path, ExpectedNode::Any, false, "sealed path", anchor_set.get());
   if (!current)
     return std::unexpected(std::move(current.error()));
-  bool const ancestors_fresh = trusted_home ? user_toolchain_ancestors_are_fresh(recorded.ancestor_metadata, current->ancestor_metadata, *trusted_home)
+  bool const ancestors_fresh = trusted_home ? user_tool_ancestors_are_fresh(recorded.ancestor_metadata, current->ancestor_metadata, *trusted_home)
                                             : ancestors_are_fresh(recorded.ancestor_metadata, current->ancestor_metadata);
   if (!ancestors_fresh)
     return false;
@@ -1343,10 +1281,10 @@ ava::core::Result<bool> trusted_home_metadata_is_fresh(PathMetadata const& recor
   return trusted_home_directory_identity_is_fresh(recorded, *current);
 }
 
-ava::core::Result<bool> user_toolchain_path_metadata_is_fresh(PathMetadata const& recorded, PathMetadata const& trusted_home,
-                                                              std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
+ava::core::Result<bool> user_tool_path_metadata_is_fresh(PathMetadata const& recorded, PathMetadata const& trusted_home,
+                                                         std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
 {
-  if (!is_sealed_user_toolchain_path(recorded.requested_path, trusted_home))
+  if (!is_sealed_user_tool_path(recorded.requested_path, trusted_home))
     return false;
   auto home_fresh = trusted_home_metadata_is_fresh(trusted_home, anchor_set);
   if (!home_fresh || !*home_fresh)
@@ -1362,7 +1300,7 @@ ava::core::Result<bool> executable_metadata_is_fresh_with_ancestors(ExecutableMe
   auto current = executable_metadata(recorded.requested_path, *anchor_set);
   if (!current)
     return std::unexpected(std::move(current.error()));
-  bool const ancestors_fresh = trusted_home ? user_toolchain_ancestors_are_fresh(recorded.ancestor_metadata, current->ancestor_metadata, *trusted_home)
+  bool const ancestors_fresh = trusted_home ? user_tool_ancestors_are_fresh(recorded.ancestor_metadata, current->ancestor_metadata, *trusted_home)
                                             : ancestors_are_fresh(recorded.ancestor_metadata, current->ancestor_metadata);
   if (!ancestors_fresh)
     return false;
@@ -1377,10 +1315,10 @@ ava::core::Result<bool> executable_metadata_is_fresh(ExecutableMetadata const& r
   return executable_metadata_is_fresh_with_ancestors(recorded, nullptr, anchor_set);
 }
 
-ava::core::Result<bool> user_toolchain_executable_metadata_is_fresh(ExecutableMetadata const& recorded, PathMetadata const& trusted_home,
-                                                                    std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
+ava::core::Result<bool> user_tool_executable_metadata_is_fresh(ExecutableMetadata const& recorded, PathMetadata const& trusted_home,
+                                                               std::shared_ptr<ava::core::AnchorSet const> const& anchor_set)
 {
-  if (!is_sealed_user_toolchain_path(recorded.requested_path, trusted_home))
+  if (!is_sealed_user_tool_path(recorded.requested_path, trusted_home))
     return false;
   auto home_fresh = trusted_home_metadata_is_fresh(trusted_home, anchor_set);
   if (!home_fresh || !*home_fresh)

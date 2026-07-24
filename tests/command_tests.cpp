@@ -351,34 +351,26 @@ void test_group_changes_invalidate_sealed_plans()
          "workspace group metadata changes invalidate freshness and fingerprint identity");
 }
 
-void test_known_toolchain_symlink_aliases_keep_invoked_family()
+void test_known_symlink_alias_keeps_invoked_family()
 {
-  CommandFixture fixture("toolchain-symlink-aliases");
-  fixture.executable("rustup");
+  CommandFixture fixture("symlink-alias");
   fixture.executable("npm-cli.js");
-  std::filesystem::create_symlink("rustup", fixture.bin / "cargo");
   std::filesystem::create_symlink("npm-cli.js", fixture.bin / "npm");
 
-  auto const bare_cargo = command::seal_command_plan(*command::CommandIntent::structured({"cargo", "check"}), fixture.options());
-  auto const absolute_cargo = command::seal_command_plan(*command::CommandIntent::structured({(fixture.bin / "cargo").string(), "check"}), fixture.options());
-  auto const npm = command::seal_command_plan(*command::CommandIntent::structured({"npm", "run", "test"}), fixture.options());
-
-  auto const is_recipe = [](ava::core::Result<command::CommandPlan> const& plan, command::CommandRecipe expected) {
-    return plan && plan->classification().level == command::CommandLevel::Standard && plan->classification().recipe &&
-           plan->classification().recipe->recipe == expected;
-  };
+  auto const bare = command::seal_command_plan(*command::CommandIntent::structured({"npm", "run", "test"}), fixture.options());
+  auto const absolute = command::seal_command_plan(*command::CommandIntent::structured({(fixture.bin / "npm").string(), "run", "test"}), fixture.options());
   ava::permissions::CommandContainmentInfo const contained{.available = true, .profile_id = "ava-development-v1", .network_allowed = false};
-  auto const cargo_metadata =
-      bare_cargo ? ava::permissions::command_permission_metadata(*bare_cargo, contained) : ava::permissions::CommandPermissionMetadata{};
-  auto const cargo_permission = ava::permissions::decide(cargo_metadata);
-  expect(is_recipe(bare_cargo, command::CommandRecipe::CargoCheck) && is_recipe(absolute_cargo, command::CommandRecipe::CargoCheck) &&
-             is_recipe(npm, command::CommandRecipe::PackageManagerRunScript) && bare_cargo->resolved_executable() &&
-             bare_cargo->resolved_executable()->executable.canonical_path.filename() == "rustup" && npm->resolved_executable() &&
-             npm->resolved_executable()->executable.canonical_path.filename() == "npm-cli.js" &&
-             bare_cargo->classification().recipe->canonical_argv == absolute_cargo->classification().recipe->canonical_argv &&
-             cargo_metadata.resolved_executable == fixture.bin / "cargo" && cargo_permission.action == ava::permissions::PermissionAction::Allow,
-         "known symlinked cargo/npm toolchain aliases classify by the invoked family while descriptor identity and recipe argv bind their physical target, "
-         "public metadata preserves the logical alias, and contained cargo check requires no prompt");
+  auto const metadata = bare ? ava::permissions::command_permission_metadata(*bare, contained) : ava::permissions::CommandPermissionMetadata{};
+  auto const permission = ava::permissions::decide(metadata);
+
+  expect(bare && absolute && bare->classification().level == command::CommandLevel::Standard && bare->classification().recipe &&
+             bare->classification().recipe->recipe == command::CommandRecipe::PackageManagerRunScript && absolute->classification().recipe &&
+             absolute->classification().recipe->recipe == command::CommandRecipe::PackageManagerRunScript && bare->resolved_executable() &&
+             bare->resolved_executable()->executable.canonical_path.filename() == "npm-cli.js" &&
+             bare->classification().recipe->canonical_argv == absolute->classification().recipe->canonical_argv &&
+             metadata.resolved_executable == fixture.bin / "npm" && permission.action == ava::permissions::PermissionAction::Allow,
+         "a known symlinked executable alias classifies by the invoked family while descriptor identity and recipe argv bind its physical target, public "
+         "metadata preserves the logical alias, and verified containment permits the recipe");
 }
 
 void test_workspace_spoofs_are_not_inspection_recipes()
@@ -628,53 +620,54 @@ void test_environment_is_synthetic_and_digest_bound()
   auto path = prepared ? environment_value(prepared->environment(), "PATH") : std::nullopt;
   expect(prepared && prepared->plan().resolved_executable() && prepared->plan().resolved_executable()->origin == command::ExecutableOrigin::User && home &&
              *home == fixture.synthetic_home.string() && *home != fixture.trusted_home.string() && pwd && *pwd == fixture.workspace.string() && path &&
-             path->find(user_bin.string()) != std::string::npos && prepared->plan().environment_digest().starts_with("sha256:ava-command-environment-v2:") &&
+             path->find(user_bin.string()) != std::string::npos && prepared->plan().environment_digest().starts_with("sha256:ava-command-environment-v3:") &&
+             prepared->plan().fingerprint().starts_with("sha256:ava-command-plan-v5:") &&
              prepared->plan().display_json().find(fixture.synthetic_home.string()) == std::string::npos && changed_environment &&
              changed_environment->environment_digest() != prepared->plan().environment_digest() &&
              changed_environment->fingerprint() != prepared->plan().fingerprint() && !overlapping_root,
-         "trusted host toolchain discovery is separate from synthetic child roots, PWD retains the logical cwd spelling, and a versioned SHA-256 "
+         "trusted host user-tool discovery is separate from synthetic child roots, PWD retains the logical cwd spelling, and a versioned SHA-256 "
          "environment digest binds exact environment content to plans");
 }
 
-void test_delegated_context_omits_automatic_host_user_toolchains()
+void test_delegated_context_omits_automatic_host_user_tools()
 {
-  CommandFixture fixture("delegated-host-user-toolchains");
+  CommandFixture fixture("delegated-host-user-tools");
   fixture.executable("pwd");
   auto const user_bin = fixture.trusted_home / ".local" / "bin";
-  auto const cargo_bin = fixture.trusted_home / ".cargo" / "bin";
-  auto const rustup_home = fixture.trusted_home / ".rustup";
+  auto const other_user_bin = fixture.trusted_home / ".tools" / "bin";
   auto const workspace_venv = fixture.workspace / ".venv" / "bin";
   auto const workspace_node_modules = fixture.workspace / "node_modules" / ".bin";
-  for (auto const& directory : {user_bin, cargo_bin, rustup_home, workspace_venv, workspace_node_modules})
+  for (auto const& directory : {user_bin, other_user_bin, workspace_venv, workspace_node_modules})
   {
     std::filesystem::create_directories(directory);
     ::chmod(directory.c_str(), S_IRWXU);
   }
   ::chmod(user_bin.parent_path().c_str(), S_IRWXU);
-  ::chmod(cargo_bin.parent_path().c_str(), S_IRWXU);
+  ::chmod(other_user_bin.parent_path().c_str(), S_IRWXU);
 
   auto const intent = command::CommandIntent::structured({"pwd"});
-  auto local = command::prepare_command(*intent, fixture.options("local-host-user-toolchains"));
-  auto delegated_options = fixture.options("delegated-host-user-toolchains");
-  delegated_options.discover_host_user_toolchains = false;
+  auto local = command::prepare_command(*intent, fixture.options("local-host-user-tools"));
+  auto delegated_options = fixture.options("delegated-host-user-tools");
+  delegated_options.discover_host_user_tools = false;
   auto delegated = command::prepare_command(*intent, delegated_options);
   auto const has_path = [](command::CommandPlan const& plan, std::filesystem::path const& directory, command::PathProvenance provenance) {
     return std::ranges::any_of(plan.path_entries(), [&directory, provenance](command::CommandPathEntry const& entry) {
       return entry.directory == directory && entry.provenance == provenance;
     });
   };
+  auto const has_directory = [](command::CommandPlan const& plan, std::filesystem::path const& directory) {
+    return std::ranges::any_of(plan.path_entries(), [&directory](command::CommandPathEntry const& entry) { return entry.directory == directory; });
+  };
 
-  expect(local && delegated && local->plan().rustup_home_metadata() && environment_value(local->environment(), "RUSTUP_HOME") == rustup_home.string() &&
-             has_path(local->plan(), user_bin, command::PathProvenance::UserLocal) && has_path(local->plan(), cargo_bin, command::PathProvenance::UserCargo) &&
+  expect(local && delegated && has_path(local->plan(), user_bin, command::PathProvenance::UserLocal) && !has_directory(local->plan(), other_user_bin) &&
              has_path(local->plan(), workspace_venv, command::PathProvenance::WorkspaceVenv) &&
-             has_path(local->plan(), workspace_node_modules, command::PathProvenance::WorkspaceNodeModules) && !delegated->plan().rustup_home_metadata() &&
-             !environment_value(delegated->environment(), "RUSTUP_HOME") && !has_path(delegated->plan(), user_bin, command::PathProvenance::UserLocal) &&
-             !has_path(delegated->plan(), cargo_bin, command::PathProvenance::UserCargo) &&
+             has_path(local->plan(), workspace_node_modules, command::PathProvenance::WorkspaceNodeModules) &&
+             !has_path(delegated->plan(), user_bin, command::PathProvenance::UserLocal) &&
              has_path(delegated->plan(), fixture.bin, command::PathProvenance::StartupPath) &&
              has_path(delegated->plan(), workspace_venv, command::PathProvenance::WorkspaceVenv) &&
              has_path(delegated->plan(), workspace_node_modules, command::PathProvenance::WorkspaceNodeModules),
-         "delegated command contexts omit automatic trusted-home user toolchains and rustup while local contexts retain them and both preserve startup and "
-         "workspace PATH entries");
+         "automatic host discovery includes only the safe trusted-home .local/bin path, delegated contexts omit it, and startup and workspace PATH entries "
+         "remain available in both contexts");
 }
 
 void test_logical_workspace_and_cwd_spelling_is_preserved()
@@ -697,15 +690,12 @@ void test_logical_workspace_and_cwd_spelling_is_preserved()
          "sealed command workspace, cwd, and PWD preserve the launch-time logical symlink spelling without filesystem canonicalization");
 }
 
-void test_only_direct_trusted_home_entry_churn_stays_fresh_for_user_toolchains()
+void test_only_direct_trusted_home_entry_churn_stays_fresh_for_user_tools()
 {
   CommandFixture fixture("trusted-home-entry-churn");
   auto const user_bin = fixture.trusted_home / ".local" / "bin";
   fixture.executable_in(user_bin, "user-tool");
   ::chmod(user_bin.parent_path().c_str(), S_IRWXU);
-  auto const rustup_home = fixture.trusted_home / ".rustup";
-  std::filesystem::create_directories(rustup_home);
-  ::chmod(rustup_home.c_str(), S_IRWXU);
   auto options = fixture.options("trusted-home-churn-profile");
   options.startup_path = user_bin.string() + ":" + fixture.bin.string();
 
@@ -727,7 +717,7 @@ void test_only_direct_trusted_home_entry_churn_stays_fresh_for_user_toolchains()
   auto direct_removed = plan ? command::plan_is_fresh(*plan)
                              : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no trusted-home plan"))};
 
-  auto const local_entry = user_bin.parent_path() / "unrelated-toolchain-entry";
+  auto const local_entry = user_bin.parent_path() / "unrelated-user-tool-entry";
   {
     std::ofstream output(local_entry);
   }
@@ -740,7 +730,7 @@ void test_only_direct_trusted_home_entry_churn_stays_fresh_for_user_toolchains()
   bool private_group_descendant_churn_staled = true;
   if (auto const private_group = private_primary_group_for_test())
   {
-    CommandFixture private_fixture("private-group-toolchain-ancestor-churn");
+    CommandFixture private_fixture("private-group-user-tool-ancestor-churn");
     auto const private_bin = private_fixture.trusted_home / ".local" / "bin";
     private_fixture.executable_in(private_bin, "private-tool");
     auto const private_local = private_bin.parent_path();
@@ -759,16 +749,16 @@ void test_only_direct_trusted_home_entry_churn_stays_fresh_for_user_toolchains()
     private_group_descendant_churn_staled = configured && private_plan && private_stale && !*private_stale;
   }
 
-  expect(plan && plan->resolved_executable() && plan->resolved_executable()->origin == command::ExecutableOrigin::User && plan->rustup_home_metadata() &&
+  expect(plan && plan->resolved_executable() && plan->resolved_executable()->origin == command::ExecutableOrigin::User &&
              startup_user_path != plan->path_entries().end() && direct_created && *direct_created && direct_removed && *direct_removed && descendant_created &&
              !*descendant_created && descendant_removed && !*descendant_removed && private_group_descendant_churn_staled && plan->fingerprint() == fingerprint,
-         "only direct trusted-home entry churn preserves a sealed user executable, startup PATH duplicate, and RUSTUP_HOME; .local and available "
+         "only direct trusted-home entry churn preserves a sealed user executable and startup PATH duplicate; .local and available "
          "private-primary-group descendant churn stale the plan");
 }
 
-void test_user_toolchain_scope_keeps_final_and_symlink_identity_strict()
+void test_user_tool_scope_keeps_final_and_symlink_identity_strict()
 {
-  CommandFixture executable_fixture("user-toolchain-final-executable");
+  CommandFixture executable_fixture("user-tool-final-executable");
   auto const executable_bin = executable_fixture.trusted_home / ".local" / "bin";
   executable_fixture.executable_in(executable_bin, "user-tool");
   auto executable_options = executable_fixture.options();
@@ -782,7 +772,7 @@ void test_user_toolchain_scope_keeps_final_and_symlink_identity_strict()
       executable_plan ? command::plan_is_fresh(*executable_plan)
                       : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no final user executable plan"))};
 
-  CommandFixture path_fixture("user-toolchain-final-path");
+  CommandFixture path_fixture("user-tool-final-path");
   path_fixture.executable("pwd");
   auto const path_bin = path_fixture.trusted_home / ".local" / "bin";
   std::filesystem::create_directories(path_bin);
@@ -794,13 +784,13 @@ void test_user_toolchain_scope_keeps_final_and_symlink_identity_strict()
                                 : std::vector<command::CommandPathEntry>::const_iterator{};
   auto outside_scope_misuse =
       path_plan && outside_path != path_plan->path_entries().end()
-          ? command::detail::user_toolchain_path_metadata_is_fresh(outside_path->metadata, path_plan->trusted_home_metadata(), path_plan->anchor_set())
+          ? command::detail::user_tool_path_metadata_is_fresh(outside_path->metadata, path_plan->trusted_home_metadata(), path_plan->anchor_set())
           : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no outside PATH metadata"))};
   ::chmod(path_bin.c_str(), S_IRWXU | S_IRGRP | S_IXGRP);
   auto path_changed = path_plan ? command::plan_is_fresh(*path_plan)
                                 : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no final user PATH plan"))};
 
-  CommandFixture symlink_fixture("user-toolchain-symlink-ancestor");
+  CommandFixture symlink_fixture("user-tool-symlink-ancestor");
   auto const target_one = symlink_fixture.trusted_home / "target-one";
   auto const target_two = symlink_fixture.trusted_home / "target-two";
   symlink_fixture.executable_in(target_one, "linked-tool");
@@ -814,65 +804,11 @@ void test_user_toolchain_scope_keeps_final_and_symlink_identity_strict()
   std::filesystem::create_directory_symlink(target_two.filename(), linked_bin);
   auto symlink_changed = symlink_plan
                              ? command::plan_is_fresh(*symlink_plan)
-                             : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no user-toolchain symlink plan"))};
+                             : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no user-tool symlink plan"))};
 
   expect(executable_changed && !*executable_changed && outside_scope_misuse && !*outside_scope_misuse && path_changed && !*path_changed && symlink_changed &&
              !*symlink_changed,
-         "user-toolchain freshness keeps final executable and PATH metadata plus every symlink ancestor exact and fails closed when used for an outside path");
-}
-
-void test_final_symlink_trusted_home_uses_strict_rustup_freshness()
-{
-  CommandFixture fixture("final-symlink-trusted-home");
-  auto const trusted_home_target = fixture.root / "trusted-home-target";
-  std::filesystem::rename(fixture.trusted_home, trusted_home_target);
-  std::filesystem::create_directory_symlink(trusted_home_target.filename(), fixture.trusted_home);
-
-  auto const user_bin = fixture.trusted_home / ".local" / "bin";
-  fixture.executable_in(user_bin, "user-tool");
-  auto const rustup_home = fixture.trusted_home / ".rustup";
-  std::filesystem::create_directories(rustup_home);
-  ::chmod(rustup_home.c_str(), S_IRWXU);
-
-  auto options = fixture.options("final-symlink-trusted-home-profile");
-  options.anchor_set = fixture.open_anchors({}, {fixture.root});
-  options.startup_path = user_bin.string() + ":" + fixture.bin.string();
-  auto const intent = command::CommandIntent::structured({"user-tool"});
-  auto sealed = command::seal_command_plan(*intent, options);
-  auto prepared = command::prepare_command(*intent, options);
-  auto const initial_fresh =
-      prepared ? command::plan_is_fresh(prepared->plan())
-               : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no final-symlink trusted-home preparation"))};
-  auto const logical_user_path = prepared ? std::ranges::find_if(prepared->plan().path_entries(),
-                                                                 [&user_bin](command::CommandPathEntry const& entry) {
-                                                                   return entry.directory == user_bin && entry.metadata.requested_path == user_bin;
-                                                                 })
-                                          : std::vector<command::CommandPathEntry>::const_iterator{};
-  bool const strict_scope =
-      prepared && prepared->plan().trusted_home_metadata().requested_path_is_symlink && prepared->plan().rustup_home_metadata() &&
-      prepared->plan().rustup_home_metadata()->requested_path == (prepared->plan().trusted_home_metadata().requested_path / ".rustup").lexically_normal() &&
-      !command::detail::is_sealed_user_toolchain_path(prepared->plan().rustup_home_metadata()->requested_path, prepared->plan().trusted_home_metadata());
-
-  ::chmod(rustup_home.c_str(), S_IRWXU | S_IRGRP | S_IXGRP);
-  auto const final_metadata_stale =
-      prepared ? command::plan_is_fresh(prepared->plan())
-               : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no final-symlink trusted-home plan"))};
-  ::chmod(rustup_home.c_str(), S_IRWXU);
-  auto replacement_plan = command::prepare_command(*intent, options);
-  auto const parked_rustup = trusted_home_target / ".rustup.approved";
-  std::filesystem::rename(rustup_home, parked_rustup);
-  std::filesystem::create_directories(rustup_home);
-  ::chmod(rustup_home.c_str(), S_IRWXU);
-  auto const replacement_stale =
-      replacement_plan
-          ? command::plan_is_fresh(replacement_plan->plan())
-          : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no final-symlink rustup replacement plan"))};
-
-  expect(sealed && prepared && strict_scope && logical_user_path != prepared->plan().path_entries().end() &&
-             environment_value(prepared->environment(), "RUSTUP_HOME") == std::optional<std::string>{rustup_home.string()} && initial_fresh && *initial_fresh &&
-             final_metadata_stale && !*final_metadata_stale && replacement_plan && replacement_stale && !*replacement_stale,
-         "an owner-safe final-symlink trusted-home spelling remains sealable and preparable with logical RUSTUP_HOME and PATH, falls back to strict freshness, "
-         "starts fresh, and becomes stale after .rustup final metadata changes or replacement");
+         "user-tool freshness keeps final executable and PATH metadata plus every symlink ancestor exact and fails closed when used for an outside path");
 }
 
 void test_trusted_home_stable_identity_changes_stale()
@@ -922,78 +858,6 @@ void test_trusted_home_stable_identity_changes_stale()
 
   expect(mode_changed && !*mode_changed && replaced && !*replaced && available_owner_or_group_change_staled,
          "trusted-home mode, replacement, and available owner/group identity changes stale sealed plans");
-}
-
-void test_rustup_home_is_optional_sealed_and_bound()
-{
-  CommandFixture fixture("rustup-home");
-  fixture.executable("pwd");
-  ScopedEnvVar const inherited_rustup("RUSTUP_HOME", (fixture.root / "inherited-rustup").string());
-  auto const intent = command::CommandIntent::structured({"pwd"});
-  auto const absent = command::prepare_command(*intent, fixture.options("rustup-profile"));
-
-  auto const rustup_home = fixture.trusted_home / ".rustup";
-  std::filesystem::create_directories(rustup_home);
-  ::chmod(rustup_home.c_str(), S_IRWXU);
-  auto const sealed = command::prepare_command(*intent, fixture.options("rustup-profile"));
-  auto const rustup = sealed ? environment_value(sealed->environment(), "RUSTUP_HOME") : std::nullopt;
-  auto const cargo = sealed ? environment_value(sealed->environment(), "CARGO_HOME") : std::nullopt;
-  auto const before_fresh = sealed ? command::plan_is_fresh(sealed->plan())
-                                   : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no rustup plan"))};
-
-  ::chmod(rustup_home.c_str(), S_IRWXU | S_IRGRP | S_IXGRP);
-  auto const stale = sealed ? command::plan_is_fresh(sealed->plan())
-                            : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no rustup plan"))};
-  auto const resealed = command::prepare_command(*intent, fixture.options("rustup-profile"));
-  std::filesystem::remove(rustup_home);
-  std::filesystem::create_directories(rustup_home);
-  ::chmod(rustup_home.c_str(), S_IRWXU | S_IRGRP | S_IXGRP);
-  auto const replacement_stale = resealed
-                                     ? command::plan_is_fresh(resealed->plan())
-                                     : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no resealed rustup plan"))};
-
-  CommandFixture unsafe_fixture("rustup-unsafe");
-  unsafe_fixture.executable("pwd");
-  std::filesystem::create_directories(unsafe_fixture.trusted_home / ".rustup");
-  ::chmod((unsafe_fixture.trusted_home / ".rustup").c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
-  auto const unsafe = command::seal_command_plan(*intent, unsafe_fixture.options());
-
-  CommandFixture symlink_fixture("rustup-symlink");
-  symlink_fixture.executable("pwd");
-  auto const symlink_target = symlink_fixture.root / "rustup-target";
-  std::filesystem::create_directories(symlink_target);
-  ::chmod(symlink_target.c_str(), S_IRWXU);
-  std::filesystem::create_directory_symlink(symlink_target, symlink_fixture.trusted_home / ".rustup");
-  auto const symlinked = command::seal_command_plan(*intent, symlink_fixture.options());
-
-  auto overlapping_options = fixture.options();
-  overlapping_options.workspace = rustup_home;
-  auto const workspace_overlap = command::seal_command_plan(*intent, overlapping_options);
-  auto authority_overlap_options = fixture.options();
-  authority_overlap_options.ava_authority_roots = {rustup_home};
-  auto const authority_overlap = command::seal_command_plan(*intent, authority_overlap_options);
-
-  bool private_primary_group_accepted = true;
-  if (auto const private_group = private_primary_group_for_test())
-  {
-    CommandFixture private_group_fixture("rustup-private-primary-group");
-    private_group_fixture.executable("pwd");
-    auto const private_rustup = private_group_fixture.trusted_home / ".rustup";
-    std::filesystem::create_directories(private_rustup);
-    private_primary_group_accepted =
-        set_group_and_mode(private_rustup, *private_group, S_IRWXU | S_IRWXG) && command::prepare_command(*intent, private_group_fixture.options()).has_value();
-  }
-
-  expect(absent && !environment_value(absent->environment(), "RUSTUP_HOME") && sealed && sealed->plan().rustup_home_metadata() &&
-             sealed->environment().rustup_home_metadata() == sealed->plan().rustup_home_metadata() && rustup && *rustup == rustup_home.string() && !cargo &&
-             sealed->plan().display_json().find(rustup_home.string()) == std::string::npos &&
-             sealed->plan().redacted_summary().find(rustup_home.string()) == std::string::npos && before_fresh && *before_fresh && stale && !*stale &&
-             resealed && sealed->environment().digest() != resealed->environment().digest() && sealed->plan().fingerprint() != resealed->plan().fingerprint() &&
-             *sealed != *resealed && replacement_stale && !*replacement_stale && !unsafe && !symlinked && !workspace_overlap && !authority_overlap &&
-             private_primary_group_accepted,
-         "only a safe sealed trusted-home .rustup root adds RUSTUP_HOME (never inherited RUSTUP_HOME or CARGO_HOME), keeps its value out of diagnostics, binds "
-         "environment/plan metadata and freshness, accepts the verified private-primary-group exception, and fails closed for unsafe, symlinked, or "
-         "overlapping roots");
 }
 
 void test_synthetic_environment_roots_are_sealed_and_fresh()
@@ -1188,12 +1052,12 @@ void test_ancestor_freshness_detects_mode_and_replacement()
   auto const symlink_target = symlink_fixture.root / "symlink-target";
   auto const symlink_bin = symlink_target / "bin";
   symlink_fixture.executable_in(symlink_bin, "linked-tool");
-  std::filesystem::create_directory_symlink(symlink_target.filename(), symlink_fixture.root / "toolchain-link");
+  std::filesystem::create_directory_symlink(symlink_target.filename(), symlink_fixture.root / "tool-link");
   auto symlink_options = symlink_fixture.options();
-  symlink_options.startup_path = (symlink_fixture.root / "toolchain-link" / "bin").string();
+  symlink_options.startup_path = (symlink_fixture.root / "tool-link" / "bin").string();
   auto symlink_plan = command::seal_command_plan(*command::CommandIntent::structured({"linked-tool"}), symlink_options);
-  std::filesystem::remove(symlink_fixture.root / "toolchain-link");
-  std::filesystem::create_directory_symlink(symlink_target, symlink_fixture.root / "toolchain-link");
+  std::filesystem::remove(symlink_fixture.root / "tool-link");
+  std::filesystem::create_directory_symlink(symlink_target, symlink_fixture.root / "tool-link");
   auto symlink_changed = symlink_plan
                              ? command::plan_is_fresh(*symlink_plan)
                              : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no ancestor symlink plan"))};
@@ -1230,7 +1094,7 @@ void test_ancestor_freshness_detects_mode_and_replacement()
 void test_stable_recipe_identity_is_scope_aware_and_secret_free()
 {
   CommandFixture fixture("stable-recipe-identity");
-  for (auto const name : {"cmake", "cargo", "npm", "python"}) fixture.executable(name);
+  for (auto const name : {"cmake", "npm", "python"}) fixture.executable(name);
   std::filesystem::create_directories(fixture.workspace / "build-other");
   ::chmod((fixture.workspace / "build-other").c_str(), S_IRWXU);
 
@@ -1263,8 +1127,6 @@ void test_stable_recipe_identity_is_scope_aware_and_secret_free()
   changed_executable_options.startup_path = other_bin.string();
   auto const changed_executable = command::seal_command_plan(*command::CommandIntent::structured({"cmake", "--build", "build"}), changed_executable_options);
 
-  auto const cargo_build = command::seal_command_plan(*command::CommandIntent::structured({"cargo", "build"}), fixture.options("recipe-profile-v1"));
-  auto const cargo_test = command::seal_command_plan(*command::CommandIntent::structured({"cargo", "test"}), fixture.options("recipe-profile-v1"));
   auto const npm_test = command::seal_command_plan(*command::CommandIntent::structured({"npm", "run", "test"}), fixture.options("recipe-profile-v1"));
   auto const npm_lint = command::seal_command_plan(*command::CommandIntent::structured({"npm", "run", "lint"}), fixture.options("recipe-profile-v1"));
   auto const secret_npm = command::seal_command_plan(*command::CommandIntent::structured({"npm", "run", "test", "--", "--token", "never-display"}),
@@ -1280,15 +1142,13 @@ void test_stable_recipe_identity_is_scope_aware_and_secret_free()
   auto const synthetic_changed_metadata = metadata(synthetic_changed);
   auto const workspace_two_metadata = metadata(workspace_two_plan);
   auto const changed_executable_metadata = metadata(changed_executable);
-  auto const cargo_build_metadata = metadata(cargo_build);
-  auto const cargo_test_metadata = metadata(cargo_test);
   auto const npm_test_metadata = metadata(npm_test);
   auto const npm_lint_metadata = metadata(npm_lint);
   auto const secret_npm_metadata = metadata(secret_npm);
   auto const secret_raw_metadata = metadata(secret_raw);
 
-  expect(first && normalized && other_build && synthetic_changed && workspace_two_plan && changed_executable && cargo_build && cargo_test && npm_test &&
-             npm_lint && secret_npm && secret_raw && first_metadata.global_recipe_key.starts_with("sha256:ava-command-recipe-v1:") &&
+  expect(first && normalized && other_build && synthetic_changed && workspace_two_plan && changed_executable && npm_test && npm_lint && secret_npm &&
+             secret_raw && first_metadata.global_recipe_key.starts_with("sha256:ava-command-recipe-v1:") &&
              first_metadata.workspace_recipe_key.starts_with("sha256:ava-command-workspace-recipe-v1:") &&
              first_metadata.global_recipe_key == normalized_metadata.global_recipe_key &&
              first_metadata.workspace_recipe_key == normalized_metadata.workspace_recipe_key &&
@@ -1298,7 +1158,6 @@ void test_stable_recipe_identity_is_scope_aware_and_secret_free()
              first_metadata.workspace_recipe_key != workspace_two_metadata.workspace_recipe_key &&
              first_metadata.global_recipe_key != changed_executable_metadata.global_recipe_key &&
              first_metadata.global_recipe_key != other_build_metadata.global_recipe_key &&
-             cargo_build_metadata.global_recipe_key != cargo_test_metadata.global_recipe_key &&
              npm_test_metadata.global_recipe_key != npm_lint_metadata.global_recipe_key &&
              ava::permissions::command_permission_allows_reusable_grant(first_metadata) &&
              first_metadata.recipe_display.find(fixture.workspace.string()) == std::string::npos && secret_npm_metadata.global_recipe_key.empty() &&
@@ -1482,20 +1341,18 @@ void run_command_tests()
   test_world_writable_directories_are_rejected();
   test_shared_supplementary_group_directories_are_rejected();
   test_group_changes_invalidate_sealed_plans();
-  test_known_toolchain_symlink_aliases_keep_invoked_family();
+  test_known_symlink_alias_keeps_invoked_family();
   test_workspace_spoofs_are_not_inspection_recipes();
   test_recipe_paths_are_logical_sealed_and_fresh();
   test_sealed_freshness_and_symlink_provenance();
   test_workspace_cwd_path_and_interpreter_freshness();
   test_raw_shell_binds_configured_shell_and_accepts_env_shebang();
   test_environment_is_synthetic_and_digest_bound();
-  test_delegated_context_omits_automatic_host_user_toolchains();
+  test_delegated_context_omits_automatic_host_user_tools();
   test_logical_workspace_and_cwd_spelling_is_preserved();
-  test_only_direct_trusted_home_entry_churn_stays_fresh_for_user_toolchains();
-  test_user_toolchain_scope_keeps_final_and_symlink_identity_strict();
-  test_final_symlink_trusted_home_uses_strict_rustup_freshness();
+  test_only_direct_trusted_home_entry_churn_stays_fresh_for_user_tools();
+  test_user_tool_scope_keeps_final_and_symlink_identity_strict();
   test_trusted_home_stable_identity_changes_stale();
-  test_rustup_home_is_optional_sealed_and_bound();
   test_synthetic_environment_roots_are_sealed_and_fresh();
   test_capabilities_scopes_and_standard_recipes();
   test_workspace_origin_capabilities_apply_to_every_family();

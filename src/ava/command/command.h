@@ -47,7 +47,6 @@ enum class PathProvenance
 {
   StartupPath,
   UserLocal,
-  UserCargo,
   WorkspaceVenv,
   WorkspaceNodeModules,
 };
@@ -73,7 +72,6 @@ enum class CommandFamily
   Ctest,
   Ninja,
   Make,
-  Cargo,
   PackageManagerScript,
   Pytest,
   WorkspaceScript,
@@ -100,9 +98,6 @@ enum class CommandRecipe
   Ctest,
   Ninja,
   Make,
-  CargoBuild,
-  CargoCheck,
-  CargoTest,
   PackageManagerRunScript,
   Pytest,
   WorkspaceScript,
@@ -173,12 +168,12 @@ struct CommandBuildOptions
   // tools. The launch workspace is the first anchor; synthetic command roots
   // must be descendants of one of the other pre-opened writable anchors.
   std::shared_ptr<ava::core::AnchorSet const> anchor_set;
-  // The real, trusted host home used only to discover user-local toolchains.
+  // The real, trusted host home used only to discover user-local tools.
   // It must be distinct from the synthetic child HOME.
   std::filesystem::path trusted_home;
-  // Controls automatic trusted-home .local/bin, .cargo/bin, and .rustup
-  // discovery only; explicitly supplied and workspace-local PATH entries stay enabled.
-  bool discover_host_user_toolchains = true;
+  // Controls automatic trusted-home .local/bin discovery only; explicitly
+  // supplied and workspace-local PATH entries stay enabled.
+  bool discover_host_user_tools = true;
   std::optional<std::string> startup_path;
   // Raw shell plans resolve and bind this exact logical executable; it is never
   // found by basename lookup. The local executor reopens it through the shared
@@ -407,10 +402,6 @@ class CommandEnvironment final
   [[nodiscard]] std::string const& digest() const noexcept;
   [[nodiscard]] std::vector<EnvironmentVariable> const& entries() const noexcept;
   [[nodiscard]] SyntheticEnvironmentRoots const& synthetic_roots() const noexcept;
-  // The only trusted real-home toolchain root exposed to a child today. Its
-  // complete metadata is sealed with this environment; absent roots are not
-  // represented and never become an environment variable.
-  [[nodiscard]] std::optional<PathMetadata> const& rustup_home_metadata() const noexcept;
 
   friend bool operator==(CommandEnvironment const&, CommandEnvironment const&) = default;
 
@@ -442,7 +433,6 @@ class CommandEnvironment final
   std::string digest_;
   std::vector<EnvironmentVariable> entries_;
   SyntheticEnvironmentRoots roots_;
-  std::optional<PathMetadata> rustup_home_metadata_;
 };
 
 class CommandIntent final
@@ -479,7 +469,7 @@ class CommandPlan final
   [[nodiscard]] std::filesystem::path const& cwd() const noexcept;
   [[nodiscard]] PathMetadata const& cwd_metadata() const noexcept;
   [[nodiscard]] std::shared_ptr<ava::core::AnchorSet const> const& anchor_set() const noexcept;
-  // Sealed host discovery boundary used only to scope user-toolchain freshness.
+  // Sealed host discovery boundary used only to scope user-tool freshness.
   [[nodiscard]] PathMetadata const& trusted_home_metadata() const noexcept;
   [[nodiscard]] std::vector<std::string> const& argv() const noexcept;
   [[nodiscard]] std::string const& raw_shell_text() const noexcept;
@@ -487,9 +477,6 @@ class CommandPlan final
   [[nodiscard]] std::vector<std::filesystem::path> const& ava_authority_roots() const noexcept;
   [[nodiscard]] std::optional<ResolvedExecutable> const& resolved_executable() const noexcept;
   [[nodiscard]] CommandClassification const& classification() const noexcept;
-  // Optional sealed ${trusted_home}/.rustup authority. This is intentionally
-  // not a general trusted-home escape hatch and never represents CARGO_HOME.
-  [[nodiscard]] std::optional<PathMetadata> const& rustup_home_metadata() const noexcept;
   [[nodiscard]] std::string const& environment_profile_id() const noexcept;
   [[nodiscard]] std::string const& environment_digest() const noexcept;
   // An instantaneous integrity binding for this sealed plan, never a durable
@@ -526,7 +513,6 @@ class CommandPlan final
   std::vector<std::filesystem::path> ava_authority_roots_;
   std::vector<PathMetadata> ava_authority_root_metadata_;
   SyntheticEnvironmentRoots synthetic_environment_roots_;
-  std::optional<PathMetadata> rustup_home_metadata_;
   std::vector<std::string> argv_;
   std::string raw_shell_text_;
   std::vector<CommandPathEntry> path_entries_;

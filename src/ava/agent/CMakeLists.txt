@@ -1,6 +1,9 @@
 add_library(ava_agent
   "agent_loop.cpp"
   "agent_loop_session.cpp"
+  "agent_turn_context.cpp"
+  "agent_turn_executor.cpp"
+  "agent_turn_subagents.cpp"
   "assistant_turn.cpp"
   "history_projection.cpp"
   "background_job_registry.cpp"

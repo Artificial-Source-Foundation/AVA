@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/tui_test_support.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/runtime_internal.h"
@@ -1008,11 +1009,7 @@ void run_tui_composer_rendering_tests_part_4()
           .context_source_count = std::nullopt,
           .session_path = "/raw/session/path/must/stay/hidden.jsonl",
           .session_entry_count = 999}});
-  auto const curated_idle_text = [&]() {
-    std::string text;
-    for (auto const& line : curated_idle_sidebar) text += strip_sgr(line) + "\n";
-    return text;
-  }();
+  auto const curated_idle_text = tui_test_support::join_visible_lines(curated_idle_sidebar);
   auto const curated_idle_title_line =
       std::ranges::find_if(curated_idle_sidebar, [](std::string const& line) { return strip_sgr(line).find("Session") != std::string::npos; });
   auto const curated_idle_title_visible = curated_idle_title_line == curated_idle_sidebar.end() ? std::string{} : strip_sgr(*curated_idle_title_line);
@@ -1071,11 +1068,7 @@ void run_tui_composer_rendering_tests_part_4()
           .context_source_count = 7,
           .session_path = "/raw/populated/session/path.jsonl",
           .session_entry_count = 42}});
-  auto const curated_populated_text = [&]() {
-    std::string text;
-    for (auto const& line : curated_populated_sidebar) text += strip_sgr(line) + "\n";
-    return text;
-  }();
+  auto const curated_populated_text = tui_test_support::join_visible_lines(curated_populated_sidebar);
   auto const curated_populated_rail_lines = [&]() {
     std::vector<std::string> lines;
     for (auto const& line : curated_populated_sidebar)

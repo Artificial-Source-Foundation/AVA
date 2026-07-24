@@ -15,12 +15,17 @@ add_library(ava_test_support
   "support/fake_transport.cpp"
   "support/libcwd_test_output.cpp"
   "support/test_harness.cpp"
-  "support/tui_test_support.cpp"
 )
 target_link_libraries(ava_test_support PUBLIC ${AVA_BACKEND_LIBRARIES})
 target_include_directories(ava_test_support PUBLIC ${CMAKE_SOURCE_DIR})
 ava_apply_warnings(ava_test_support)
 ava_apply_sanitizers(ava_test_support)
+
+add_library(ava_tui_test_support "support/tui_test_support.cpp")
+target_link_libraries(ava_tui_test_support PRIVATE ava_test_support)
+target_include_directories(ava_tui_test_support PUBLIC ${CMAKE_SOURCE_DIR})
+ava_apply_warnings(ava_tui_test_support)
+ava_apply_sanitizers(ava_tui_test_support)
 
 add_executable(ava_fake_lsp_server "support/fake_lsp_server.cpp")
 target_link_libraries(ava_fake_lsp_server PRIVATE ${AVA_BACKEND_LIBRARIES})
@@ -108,7 +113,7 @@ if(OptionEnableLibcwd)
 endif()
 
 add_executable(ava_tests ${AVA_TESTS_SOURCES})
-target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support ${AICXX_OBJECTS_LIST})
+target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support ava_tui_test_support ${AICXX_OBJECTS_LIST})
 target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS})
 add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_provider_server)
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")

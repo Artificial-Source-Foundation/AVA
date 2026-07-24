@@ -106,8 +106,7 @@ void run_tui_tool_card_tests_part_1()
   auto const pending_permission_rows = ava::tui::detail::render_tool_card(pending_permission_item, 120, false);
   auto const pending_permission_text = pending_permission_rows.empty() ? std::string{} : strip_sgr(pending_permission_rows.front());
   auto const pending_permission_expanded = ava::tui::detail::render_tool_card(pending_permission_item, 120, true);
-  auto pending_permission_expanded_text = std::string{};
-  for (auto const& row : pending_permission_expanded) pending_permission_expanded_text += strip_sgr(row) + '\n';
+  auto const pending_permission_expanded_text = tui_test_support::join_visible_lines(pending_permission_expanded);
   auto const pending_permission_copy = ava::tui::detail::tool_card_copy_text(pending_permission_item);
   expect(pending_permission_rows.size() == 1 && pending_permission_text.find("permission required") != std::string::npos &&
              pending_permission_text.find("permission checked") == std::string::npos && pending_permission_text.find("permreq_push") == std::string::npos &&
@@ -170,8 +169,7 @@ void run_tui_tool_card_tests_part_1()
   running_permission_item.lifecycle = ava::tui::ToolLifecycleState::ExecutionStarted;
   running_permission_item.result_json = "{\"output\":\"SECRET OUTPUT PREVIEW\"}";
   auto const running_permission_card = ava::tui::detail::render_tool_card(running_permission_item, 88, false);
-  std::string running_permission_text;
-  for (auto const& line : running_permission_card) running_permission_text += strip_sgr(line) + '\n';
+  auto const running_permission_text = tui_test_support::join_visible_lines(running_permission_card);
   expect(running_permission_card.size() == 1 && running_permission_text.find("~ bash · permission deny") != std::string::npos &&
              running_permission_text.find("risk critical") != std::string::npos &&
              running_permission_text.find("reason command permission denied") != std::string::npos &&
@@ -184,8 +182,7 @@ void run_tui_tool_card_tests_part_1()
       "permission_denied: command requires permission\n  action: ask\n  request_id: permreq_push\n  inspect: /permissions audit show permreq_push";
   structured_permission_item.argument_summary = structured_permission_item.result_summary;
   auto const structured_permission_card = ava::tui::detail::render_tool_card(structured_permission_item, 88, false);
-  std::string structured_permission_text;
-  for (auto const& line : structured_permission_card) structured_permission_text += strip_sgr(line) + '\n';
+  auto const structured_permission_text = tui_test_support::join_visible_lines(structured_permission_card);
   expect(structured_permission_text.find("permission deny") != std::string::npos && structured_permission_text.find("risk critical") != std::string::npos &&
              structured_permission_text.find("permission_denied:") == std::string::npos &&
              structured_permission_text.find("permreq_push") == std::string::npos && structured_permission_text.find("/permissions audit") == std::string::npos,
@@ -313,8 +310,7 @@ void run_tui_tool_card_tests_part_1()
                                                                   .result_summary = "wrote /workspace/pkg/a.cpp and a.cpp",
                                                                   .lifecycle = ava::tui::ToolLifecycleState::Complete,
                                                                   .changed_paths = {"/workspace/pkg/a.cpp", "a.cpp"}};
-  auto same_basename_multi_path_text = std::string{};
-  for (auto const& line : ava::tui::detail::render_tool_card(same_basename_multi_path_item, 120, true)) same_basename_multi_path_text += strip_sgr(line) + '\n';
+  auto const same_basename_multi_path_text = tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(same_basename_multi_path_item, 120, true));
   expect(same_basename_multi_path_text.find("/workspace/pkg/a.cpp") != std::string::npos &&
              same_basename_multi_path_text.find("wrote /workspace/pkg/a.cpp and a.cpp") != std::string::npos,
          "tui multi-file cards retain distinct absolute and same-basename relative paths without cross-path aliasing");
@@ -322,15 +318,14 @@ void run_tui_tool_card_tests_part_1()
   auto action_query_item = changed_path_priority;
   action_query_item.call_id = "call\nunsafe";
   auto const action_query_card = ava::tui::detail::render_tool_card(action_query_item, 120, true);
-  auto action_query_text = std::string{};
-  for (auto const& row : action_query_card) action_query_text += strip_sgr(row) + '\n';
+  auto const action_query_text = tui_test_support::join_visible_lines(action_query_card);
+
   expect(action_query_text.find("toggle: /tool src/main.cpp") != std::string::npos &&
              action_query_text.find("copy: /copy tool src/main.cpp") != std::string::npos && action_query_text.find("inspect: /tool") == std::string::npos &&
              ava::tui::detail::tool_card_matches_copy_query(action_query_item, "src/main.cpp"),
          "tool action rows reject sanitized call ids, fall back to a round-trippable changed path, and label /tool as toggle");
   action_query_item.call_id = "call-safe";
-  auto safe_call_action_text = std::string{};
-  for (auto const& row : ava::tui::detail::render_tool_card(action_query_item, 120, true)) safe_call_action_text += strip_sgr(row) + '\n';
+  auto const safe_call_action_text = tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(action_query_item, 120, true));
   expect(safe_call_action_text.find("toggle: /tool call-safe") != std::string::npos &&
              ava::tui::detail::tool_card_matches_copy_query(action_query_item, "call-safe"),
          "tool action rows use an unchanged single-line call id that round-trips through query matching");
@@ -350,9 +345,8 @@ void run_tui_tool_card_tests_part_1()
                                                        .call_id = "call-" + std::string(48, 'x'),
                                                        .lifecycle = ava::tui::ToolLifecycleState::Complete,
                                                        .diff = "--- a/src/main.cpp\n+++ b/src/main.cpp"};
-  auto narrow_action_text = std::string{};
   auto const narrow_action_card = ava::tui::detail::render_tool_card(narrow_action_item, 36, true);
-  for (auto const& row : narrow_action_card) narrow_action_text += strip_sgr(row) + '\n';
+  auto const narrow_action_text = tui_test_support::join_visible_lines(narrow_action_card);
   auto const parsed_narrow_action = parse_rendered_tool_action(narrow_action_text);
   expect(narrow_action_text.find("toggle: /tool write") != std::string::npos && narrow_action_text.find("copy: /copy tool write") != std::string::npos &&
              narrow_action_text.find("copy diff: /copy diff write") != std::string::npos &&
@@ -369,19 +363,18 @@ void run_tui_tool_card_tests_part_1()
   auto no_fit_action_item = narrow_action_item;
   no_fit_action_item.name = "impossibly-long-tool-name";
   no_fit_action_item.diff.clear();
-  auto no_fit_action_text = std::string{};
-  for (auto const& row : ava::tui::detail::render_tool_card(no_fit_action_item, 32, true)) no_fit_action_text += strip_sgr(row) + '\n';
+  auto const no_fit_action_text = tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(no_fit_action_item, 32, true));
   expect(no_fit_action_text.find("toggle: /tool") == std::string::npos && no_fit_action_text.find("copy: /copy tool") == std::string::npos,
          "tool action rows are omitted when no safe matching query fits every emitted command row");
   auto whitespace_id_item = action_query_item;
   whitespace_id_item.call_id = "   ";
-  auto whitespace_id_action_text = std::string{};
-  for (auto const& row : ava::tui::detail::render_tool_card(whitespace_id_item, 120, true)) whitespace_id_action_text += strip_sgr(row) + '\n';
+  auto const whitespace_id_action_text = tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(whitespace_id_item, 120, true));
+
   auto edge_whitespace_item = action_query_item;
   edge_whitespace_item.call_id = " call-edge ";
   edge_whitespace_item.changed_paths = {" changed-edge.cpp "};
-  auto edge_whitespace_action_text = std::string{};
-  for (auto const& row : ava::tui::detail::render_tool_card(edge_whitespace_item, 120, true)) edge_whitespace_action_text += strip_sgr(row) + '\n';
+  auto const edge_whitespace_action_text = tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(edge_whitespace_item, 120, true));
+
   auto const parsed_whitespace_fallback = parse_rendered_tool_action(whitespace_id_action_text);
   auto const parsed_edge_fallback = parse_rendered_tool_action(edge_whitespace_action_text);
   expect(parsed_whitespace_fallback == "src/main.cpp" && parsed_edge_fallback == "write_file" &&
@@ -393,8 +386,7 @@ void run_tui_tool_card_tests_part_1()
   action_query_item.call_id = "\x1b[31munsafe";
   action_query_item.changed_paths = {"/absolute/not-safe"};
   action_query_item.name = "write\nunsafe";
-  auto unsafe_action_text = std::string{};
-  for (auto const& row : ava::tui::detail::render_tool_card(action_query_item, 120, true)) unsafe_action_text += strip_sgr(row) + '\n';
+  auto const unsafe_action_text = tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(action_query_item, 120, true));
   expect(unsafe_action_text.find("toggle: /tool") == std::string::npos && unsafe_action_text.find("copy: /copy tool") == std::string::npos,
          "tool action rows are omitted when no supplied id, relative path, or tool name is an exact safe query");
 
@@ -1095,9 +1087,7 @@ void test_tui_large_tool_output_preview_is_bounded()
                                                                                      .result_json = std::move(result_json),
                                                                                      .lifecycle = ava::tui::ToolLifecycleState::Complete},
                                                           96, true);
-    std::string text;
-    for (auto const& line : lines) text += strip_sgr(line) + '\n';
-    return text;
+    return tui_test_support::join_visible_lines(lines);
   };
   auto const empty_preview = output_preview_text("{\"output\":\"\"}");
   auto const unterminated_preview = output_preview_text("{\"output\":\"one\"}");
@@ -1122,8 +1112,8 @@ void test_tui_large_tool_output_preview_is_bounded()
                                                                                                .total_lines = 20000,
                                                                                                .omitted_lines = 19800},
                                                                     96, true);
-  std::string seq_preview_text;
-  for (auto const& line : seq_preview_lines) seq_preview_text += strip_sgr(line) + '\n';
+  auto const seq_preview_text = tui_test_support::join_visible_lines(seq_preview_lines);
+
   expect(seq_preview_text.find("output: 8 shown/20000 lines · 19992 hidden") != std::string::npos && seq_preview_text.find("20001") == std::string::npos &&
              seq_preview_text.find("19993 hidden") == std::string::npos,
          "tui truncated seq-like output keeps authoritative 20000-line totals and hidden-line math after a final LF");
@@ -1154,18 +1144,8 @@ void test_tui_large_tool_output_preview_is_bounded()
   auto const expanded = ava::tui::detail::render_tool_card(item, 96, true);
   auto const elapsed = std::chrono::steady_clock::now() - start;
 
-  std::string compact_text;
-  for (auto const& line : compact)
-  {
-    compact_text += strip_sgr(line);
-    compact_text += '\n';
-  }
-  std::string expanded_text;
-  for (auto const& line : expanded)
-  {
-    expanded_text += strip_sgr(line);
-    expanded_text += '\n';
-  }
+  auto const compact_text = tui_test_support::join_visible_lines(compact);
+  auto const expanded_text = tui_test_support::join_visible_lines(expanded);
 
   expect(compact.size() == 1 && compact_text.find("output:") == std::string::npos && compact_text.find("large output line") == std::string::npos,
          "tui collapsed tool cards never render large output preview bodies");

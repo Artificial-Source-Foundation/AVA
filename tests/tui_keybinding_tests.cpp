@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/tui_test_support.h"
 #include "ava/tui/keybindings.h"
 
 #include <algorithm>
@@ -523,13 +524,7 @@ void run_tui_keybinding_tests()
              ava::tui::key_matches_action(*session_action_keybinds, ava::tui::TuiAction::SessionRename, ava::tui::Key::CtrlK) &&
              ava::tui::key_matches_action(*session_action_keybinds, ava::tui::TuiAction::SessionArchive, ava::tui::Key::AltD),
          "tui keybind parser accepts Pi session action ids");
-  auto const tree_action_keybinds = ava::tui::parse_key_bindings_json(
-      "{\"app.tree.foldOrUp\":\"Ctrl+O\","
-      "\"app.tree.unfoldOrDown\":\"Ctrl+Y\","
-      "\"app.tree.editLabel\":\"Shift+L\","
-      "\"app.tree.toggleLabelTimestamp\":\"Shift+T\","
-      "\"app.tree.filter.labeledOnly\":\"Ctrl+Space\","
-      "\"app.tree.filter.all\":\"Ctrl+/\"}");
+  auto const tree_action_keybinds = ava::tui::parse_key_bindings_json(tui_test_support::tree_action_key_bindings_json());
   expect(tree_action_keybinds && ava::tui::key_matches_action(*tree_action_keybinds, ava::tui::TuiAction::TreeFoldOrUp, ava::tui::Key::CtrlO) &&
              ava::tui::key_matches_action(*tree_action_keybinds, ava::tui::TuiAction::TreeUnfoldOrDown, ava::tui::Key::CtrlY) &&
              ava::tui::key_matches_action(*tree_action_keybinds, ava::tui::TuiAction::TreeEditLabel, ava::tui::Key::ShiftL) &&

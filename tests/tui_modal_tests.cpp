@@ -1099,13 +1099,7 @@ void run_tui_modal_tests_part_3()
   selector_input = ava::tui::handle_select_list_input(session_bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::AltD}, session_selector_bindings);
   expect(selector_input.action == ava::tui::SelectListInputAction::Archive && selector_input.query == session_bound_selector.query,
          "select-list routes custom app.session.delete binding before raw composer word deletion");
-  auto const tree_selector_keybinds = ava::tui::parse_key_bindings_json(
-      "{\"app.tree.foldOrUp\":\"Ctrl+O\","
-      "\"app.tree.unfoldOrDown\":\"Ctrl+Y\","
-      "\"app.tree.editLabel\":\"Shift+L\","
-      "\"app.tree.toggleLabelTimestamp\":\"Shift+T\","
-      "\"app.tree.filter.labeledOnly\":\"Ctrl+Space\","
-      "\"app.tree.filter.all\":\"Ctrl+/\"}");
+  auto const tree_selector_keybinds = ava::tui::parse_key_bindings_json(tui_test_support::tree_action_key_bindings_json());
   expect(static_cast<bool>(tree_selector_keybinds), "tree selector custom keybind fixture parses");
   auto const tree_selector_bindings = tree_selector_keybinds ? *tree_selector_keybinds : ava::tui::default_key_bindings();
   selector_input = ava::tui::handle_select_list_input(session_bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlO}, tree_selector_bindings);

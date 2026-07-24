@@ -295,12 +295,7 @@ void run_tui_transcript_tests_part_1()
                                                                                    .transcript = mixed_items,
                                                                                    .width = 60,
                                                                                    .height = 12});
-  std::string mixed_visible;
-  for (auto const& line : mixed_scrolled)
-  {
-    mixed_visible += strip_sgr(line);
-    mixed_visible += '\n';
-  }
+  auto const mixed_visible = tui_test_support::join_visible_lines(mixed_scrolled);
   expect(mixed_visible.find("lines hidden") == std::string::npos && mixed_visible.find("+ grep") != std::string::npos &&
              mixed_visible.find("2 matches") != std::string::npos && mixed_visible.find("done") != std::string::npos &&
              mixed_visible.find("AVA") == std::string::npos && mixed_visible.find("old 0") == std::string::npos,
@@ -1107,13 +1102,7 @@ void test_tui_very_long_transcript_performance_budget()
                                                                  .input_cursor = std::string::npos,
                                                                  .tool_details_visible = true,
                                                                  .thinking_visible = true});
-    std::string visible;
-    for (auto const& line : frame)
-    {
-      visible += strip_sgr(line);
-      visible += '\n';
-    }
-    visible_frames.push_back(std::move(visible));
+    visible_frames.push_back(tui_test_support::join_visible_lines(frame));
   }
   auto const elapsed = std::chrono::steady_clock::now() - start;
   expect(frame.size() == 30, "tui very long transcript frame keeps the requested height");

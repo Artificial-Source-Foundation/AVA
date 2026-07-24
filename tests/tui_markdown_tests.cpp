@@ -356,12 +356,7 @@ void run_tui_markdown_tests()
                                                            .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "1. alpha\n1. beta\n1. gamma"}},
                                                            .width = 48,
                                                            .height = 14});
-  auto ordered_list_text = std::string{};
-  for (auto const& line : ordered_list_transcript)
-  {
-    ordered_list_text += strip_sgr(line);
-    ordered_list_text.push_back('\n');
-  }
+  auto const ordered_list_text = tui_test_support::join_visible_lines(ordered_list_transcript);
   expect(ordered_list_text.find("1. alpha") != std::string::npos && ordered_list_text.find("2. beta") != std::string::npos &&
              ordered_list_text.find("3. gamma") != std::string::npos && ordered_list_text.find("1. beta") == std::string::npos &&
              std::ranges::all_of(ordered_list_transcript, [](std::string const& line) { return visible_columns(line) <= 48; }),
@@ -379,12 +374,7 @@ void run_tui_markdown_tests()
                                                       "block\n```\n\n1. Third item"}},
       .width = 72,
       .height = 24});
-  auto ordered_code_list_text = std::string{};
-  for (auto const& line : ordered_code_list_transcript)
-  {
-    ordered_code_list_text += strip_sgr(line);
-    ordered_code_list_text.push_back('\n');
-  }
+  auto const ordered_code_list_text = tui_test_support::join_visible_lines(ordered_code_list_transcript);
   expect(ordered_code_list_text.find("1. First item") != std::string::npos && ordered_code_list_text.find("2. Second item") != std::string::npos &&
              ordered_code_list_text.find("3. Third item") != std::string::npos && ordered_code_list_text.find("1. Second item") == std::string::npos &&
              ordered_code_list_text.find("``` typescript") != std::string::npos && ordered_code_list_text.find("// another code block") != std::string::npos &&
@@ -479,12 +469,7 @@ void run_tui_markdown_tests()
                                                       "HTML</div>\n```"}},
       .width = 88,
       .height = 18});
-  auto html_literal_text = std::string{};
-  for (auto const& line : html_literal_transcript)
-  {
-    html_literal_text += strip_sgr(line);
-    html_literal_text.push_back('\n');
-  }
+  auto const html_literal_text = tui_test_support::join_visible_lines(html_literal_transcript);
   expect(
       html_literal_text.find("<thinking>hidden content</thinking>") != std::string::npos && html_literal_text.find("<div>Some HTML</div>") != std::string::npos,
       "tui assistant renderer keeps HTML-like tags visible in prose and fenced code");
@@ -728,12 +713,7 @@ void run_tui_markdown_tests()
                                  .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |"}},
                                  .width = 22,
                                  .height = 14});
-  auto narrow_three_column_text = std::string{};
-  for (auto const& line : narrow_three_column_table)
-  {
-    narrow_three_column_text += strip_sgr(line);
-    narrow_three_column_text.push_back('\n');
-  }
+  auto const narrow_three_column_text = tui_test_support::join_visible_lines(narrow_three_column_table);
   expect(!narrow_three_column_table.empty() && narrow_three_column_text.find("A") != std::string::npos &&
              narrow_three_column_text.find("B") != std::string::npos && narrow_three_column_text.find("C") != std::string::npos &&
              narrow_three_column_text.find("1") != std::string::npos && narrow_three_column_text.find("2") != std::string::npos &&
@@ -1086,12 +1066,7 @@ void test_tui_text_model_conversions()
                      ava::tui::TranscriptItem{.label = "error", .text = "raw-error-hidden", .text_model = ava::tui::text_from_plain("model error visible")}},
       .width = 80,
       .height = 22});
-  std::string visible_model_text;
-  for (auto const& line : rendered_from_model)
-  {
-    visible_model_text += strip_sgr(line);
-    visible_model_text += '\n';
-  }
+  auto const visible_model_text = tui_test_support::join_visible_lines(rendered_from_model);
   expect(visible_model_text.find("model user visible") != std::string::npos && visible_model_text.find("model assistant visible") != std::string::npos &&
              visible_model_text.find("model thinking visible") != std::string::npos && visible_model_text.find("model error visible") != std::string::npos &&
              visible_model_text.find("raw-user-hidden") == std::string::npos && visible_model_text.find("raw-thinking-hidden") == std::string::npos &&

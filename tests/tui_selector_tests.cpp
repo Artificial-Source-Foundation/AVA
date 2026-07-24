@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/tui_test_support.h"
 #include "ava/app/command_palette.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
@@ -75,8 +76,7 @@ void run_tui_selector_tests()
       auto const visible = strip_sgr(line);
       return visible.find("›") != std::string::npos && visible.find("Diagnostic Local") != std::string::npos;
     });
-    std::string resting;
-    for (auto const& line : frame) resting += strip_sgr(line) + '\n';
+    auto const resting = tui_test_support::join_visible_lines(frame);
     expect(selected_line != frame.end() && resting.find("openai/gpt-5.5") == std::string::npos && resting.find("reasoning") == std::string::npos &&
                resting.find("tools") == std::string::npos && resting.find("diagnostics") == std::string::npos &&
                std::ranges::none_of(frame, [](std::string const& line) { return line.find("\x1b[7m") != std::string::npos; }),
@@ -191,8 +191,7 @@ void run_tui_selector_tests()
       auto const visible = strip_sgr(line);
       return visible.find("›") != std::string::npos && visible.find("Review branch") != std::string::npos;
     });
-    std::string resting;
-    for (auto const& line : frame) resting += strip_sgr(line) + '\n';
+    auto const resting = tui_test_support::join_visible_lines(frame);
     expect(selected_line != frame.end() && resting.find("session_child") == std::string::npos && resting.find("child.jsonl") == std::string::npos &&
                resting.find("current current") == std::string::npos && resting.find("Ctrl+D archive") != std::string::npos &&
                std::ranges::none_of(frame, [](std::string const& line) { return line.find("\x1b[7m") != std::string::npos; }),

@@ -31,6 +31,16 @@ std::vector<ava::tui::SlashCommandItem> const& standard_slash_commands()
   return commands;
 }
 
+std::string_view tree_action_key_bindings_json() noexcept
+{
+  return "{\"app.tree.foldOrUp\":\"Ctrl+O\","
+         "\"app.tree.unfoldOrDown\":\"Ctrl+Y\","
+         "\"app.tree.editLabel\":\"Shift+L\","
+         "\"app.tree.toggleLabelTimestamp\":\"Shift+T\","
+         "\"app.tree.filter.labeledOnly\":\"Ctrl+Space\","
+         "\"app.tree.filter.all\":\"Ctrl+/\"}";
+}
+
 std::vector<std::string> plain_lines(std::vector<std::string> lines)
 {
   for (auto& line : lines) line = strip_sgr(line);

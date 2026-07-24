@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/tui_test_support.h"
 #include "ava/app/EventEnvelope.h"
 #include "ava/app/events.h"
 #include "ava/tui/composer.h"
@@ -256,11 +257,7 @@ void test_tui_event_state_reduces_runtime_events()
     auto const* item = provider_permission_state.transcript.empty() || !provider_permission_state.transcript.back().tool
                            ? nullptr
                            : &*provider_permission_state.transcript.back().tool;
-    auto rendered = std::string{};
-    if (item)
-    {
-      for (auto const& line : ava::tui::detail::render_tool_card(*item, 100, true)) rendered += strip_sgr(line) + '\n';
-    }
+    auto const rendered = item ? tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(*item, 100, true)) : std::string{};
     auto const copied = item ? ava::tui::detail::tool_card_copy_text(*item) : std::string{};
     expect(item && item->permissions.size() == 1 && item->permissions[0].decision == expected_decision &&
                rendered.find("permission: " + expected_label) != std::string::npos && copied.find("permission: " + expected_label) != std::string::npos,
@@ -642,11 +639,8 @@ void test_tui_event_state_reduces_runtime_events()
   auto const* canonical_session_item = canonical_session_permission_state.transcript.empty() || !canonical_session_permission_state.transcript.back().tool
                                            ? nullptr
                                            : &*canonical_session_permission_state.transcript.back().tool;
-  auto canonical_session_render = std::string{};
-  if (canonical_session_item)
-  {
-    for (auto const& line : ava::tui::detail::render_tool_card(*canonical_session_item, 100, true)) canonical_session_render += strip_sgr(line) + '\n';
-  }
+  auto const canonical_session_render =
+      canonical_session_item ? tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(*canonical_session_item, 100, true)) : std::string{};
   auto const canonical_session_copy = canonical_session_item ? ava::tui::detail::tool_card_copy_text(*canonical_session_item) : std::string{};
   expect(canonical_session_item && canonical_session_item->permissions.size() == 1 && canonical_session_item->permissions[0].decision == "allow_session" &&
              canonical_session_render.find("permission: allow session") != std::string::npos &&
@@ -1014,32 +1008,26 @@ void test_tui_event_state_reduces_runtime_events()
     ava::tui::apply_runtime_event(live_state, event);
     ava::tui::apply_event_envelope(replayed_state, ava::app::to_event_envelope(event, parity_context));
   }
-  auto visible_lines = [](std::vector<std::string> const& rendered) {
-    std::vector<std::string> visible;
-    visible.reserve(rendered.size());
-    for (auto const& line : rendered) visible.push_back(strip_sgr(line));
-    return visible;
-  };
   auto const live_render =
-      visible_lines(ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
-                                                                         .provider = "openai",
-                                                                         .model = "gpt-5.5",
-                                                                         .session_id = "session_test",
-                                                                         .input = "",
-                                                                         .status = "ready",
-                                                                         .transcript = ava::tui::event_state_transcript_snapshot(live_state),
-                                                                         .width = 72,
-                                                                         .height = 20}));
-  auto const replayed_render =
-      visible_lines(ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
-                                                                         .provider = "openai",
-                                                                         .model = "gpt-5.5",
-                                                                         .session_id = "session_test",
-                                                                         .input = "",
-                                                                         .status = "ready",
-                                                                         .transcript = ava::tui::event_state_transcript_snapshot(replayed_state),
-                                                                         .width = 72,
-                                                                         .height = 20}));
+      tui_test_support::plain_lines(ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                         .provider = "openai",
+                                                                                         .model = "gpt-5.5",
+                                                                                         .session_id = "session_test",
+                                                                                         .input = "",
+                                                                                         .status = "ready",
+                                                                                         .transcript = ava::tui::event_state_transcript_snapshot(live_state),
+                                                                                         .width = 72,
+                                                                                         .height = 20}));
+  auto const replayed_render = tui_test_support::plain_lines(
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "",
+                                                           .status = "ready",
+                                                           .transcript = ava::tui::event_state_transcript_snapshot(replayed_state),
+                                                           .width = 72,
+                                                           .height = 20}));
   expect(live_render == replayed_render && replayed_state.active_run_id == "run_1" && replayed_state.active_turn_id == "turn_1" &&
              replayed_state.active_message_id == "message_1" && replayed_state.active_request_id == "request_1" &&
              replayed_state.active_correlation_id == "correlation_1",

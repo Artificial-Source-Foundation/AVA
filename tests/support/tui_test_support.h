@@ -29,6 +29,7 @@ struct ScopedTerminalCapabilityProfile
 };
 
 std::vector<ava::tui::SlashCommandItem> const& standard_slash_commands();
+std::string_view tree_action_key_bindings_json() noexcept;
 std::vector<std::string> plain_lines(std::vector<std::string> lines);
 std::string join_plain_lines(std::vector<std::string> const& lines);
 std::string join_visible_lines(std::vector<std::string> const& lines);

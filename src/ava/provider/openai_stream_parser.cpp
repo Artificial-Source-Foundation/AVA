@@ -10,6 +10,23 @@
 #include <vector>
 
 namespace ava::provider {
+namespace {
+
+void append_parser_limit_error(std::vector<StreamEvent>& events, bool& error_seen, bool& parser_limit_exceeded)
+{
+  if (parser_limit_exceeded)
+    return;
+  parser_limit_exceeded = true;
+  error_seen = true;
+  events.push_back(StreamEvent{.type = StreamEventType::Error,
+                               .text = "",
+                               .tool_call_id = "",
+                               .tool_name = "",
+                               .error_message = "OpenAI response parser limit exceeded",
+                               .usage = std::nullopt});
+}
+
+}  // namespace
 
 using namespace openai_stream_parser_internal;
 
@@ -91,39 +108,41 @@ ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::append(std::stri
   return events;
 }
 
+void OpenAIStreamParser::reset_state() noexcept
+{
+  pending_line_.clear();
+  data_.clear();
+  scan_offset_ = 0;
+  saw_content_ = false;
+  saw_refusal_ = false;
+  reasoning_open_ = false;
+  reasoning_text_seen_ = false;
+  active_reasoning_item_id_.clear();
+  active_reasoning_output_index_ = std::nullopt;
+  active_reasoning_text_.clear();
+  completed_reasoning_item_ids_.clear();
+  completed_reasoning_texts_.clear();
+  function_calls_.clear();
+  function_call_item_ids_by_logical_id_.clear();
+  legacy_function_calls_.clear();
+  message_items_.clear();
+  documented_output_item_types_.clear();
+  documented_output_item_added_ids_.clear();
+  documented_output_item_ids_by_index_.clear();
+  done_seen_ = false;
+  error_seen_ = false;
+  parser_limit_exceeded_ = false;
+  events_emitted_ = 0;
+  data_records_seen_ = 0;
+  data_record_limit_exceeded_ = false;
+}
+
 ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::finish()
 {
   std::vector<StreamEvent> events;
-  auto reset = [this] {
-    pending_line_.clear();
-    data_.clear();
-    scan_offset_ = 0;
-    saw_content_ = false;
-    saw_refusal_ = false;
-    reasoning_open_ = false;
-    reasoning_text_seen_ = false;
-    active_reasoning_item_id_.clear();
-    active_reasoning_output_index_ = std::nullopt;
-    active_reasoning_text_.clear();
-    completed_reasoning_item_ids_.clear();
-    completed_reasoning_texts_.clear();
-    function_calls_.clear();
-    function_call_item_ids_by_logical_id_.clear();
-    legacy_function_calls_.clear();
-    message_items_.clear();
-    documented_output_item_types_.clear();
-    documented_output_item_added_ids_.clear();
-    documented_output_item_ids_by_index_.clear();
-    done_seen_ = false;
-    error_seen_ = false;
-    parser_limit_exceeded_ = false;
-    events_emitted_ = 0;
-    data_records_seen_ = 0;
-    data_record_limit_exceeded_ = false;
-  };
   if (parser_limit_exceeded_)
   {
-    reset();
+    reset_state();
     return events;
   }
 
@@ -164,18 +183,17 @@ ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::finish()
   {
     if (!done_seen_ && !error_seen_)
     {
-      if (!reject_unended_documented_function_calls(events, error_seen_, function_calls_))
-        static_cast<void>(reject_unended_documented_message_items(events, error_seen_, message_items_));
+      if (!reject_unended_documented_function_calls(events))
+        static_cast<void>(reject_unended_documented_message_items(events));
     }
-    append_finish_reasoning_if_open(events, reasoning_open_, reasoning_text_seen_, active_reasoning_item_id_, active_reasoning_output_index_,
-                                    active_reasoning_text_, completed_reasoning_item_ids_, completed_reasoning_texts_);
+    append_finish_reasoning_if_open(events);
     if (saw_content_ && !done_seen_ && !error_seen_)
       append_stream_error(events, error_seen_, "OpenAI SSE stream ended before done marker");
     if (events.size() >= kMaxProviderParserEvents - events_emitted_)
       terminal_parser_limit();
   }
   events_emitted_ += events.size();
-  reset();
+  reset_state();
   return events;
 }
 

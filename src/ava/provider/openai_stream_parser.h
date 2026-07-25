@@ -9,6 +9,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include "debug.h"
 
@@ -56,8 +57,62 @@ class OpenAIStreamParser final : public StreamParser
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
+  enum class EventHandling
+  {
+    Unhandled,
+    Handled,
+  };
+
+  enum class OutputItemLifecycle
+  {
+    Added,
+    Done,
+  };
+
+  enum class MessageEventSource
+  {
+    Legacy,
+    Documented,
+  };
+
+  enum class EventRoutingPhase
+  {
+    BeforeIgnoredLifecycle,
+    AfterIgnoredLifecycle,
+  };
+
   void append_event_for_data(std::vector<StreamEvent>& events, std::string_view data);
   void append_events_for_sse_line(std::vector<StreamEvent>& events, std::string line);
+  [[nodiscard]] EventHandling handle_documented_output_item_lifecycle(std::vector<StreamEvent>& events, std::string_view data, std::string_view type);
+  [[nodiscard]] EventHandling handle_message_event(std::vector<StreamEvent>& events, std::string_view data, std::string_view type,
+                                                   EventRoutingPhase routing_phase);
+  [[nodiscard]] EventHandling handle_reasoning_event(std::vector<StreamEvent>& events, std::string_view data, std::string_view type);
+  [[nodiscard]] EventHandling handle_function_call_event(std::vector<StreamEvent>& events, std::string_view data, std::string_view type,
+                                                         EventRoutingPhase routing_phase);
+  [[nodiscard]] EventHandling handle_terminal_event(std::vector<StreamEvent>& events, std::string_view data, std::string_view type);
+
+  void handle_documented_message_output_item(std::vector<StreamEvent>& events, std::string_view item, std::string const& item_id,
+                                             std::optional<std::size_t> output_index, AssistantPhase phase, OutputItemLifecycle lifecycle);
+  void handle_documented_reasoning_output_item(std::vector<StreamEvent>& events, std::string const& item, std::string const& item_id,
+                                               std::optional<std::size_t> output_index, OutputItemLifecycle lifecycle);
+  void handle_documented_function_call_output_item(std::vector<StreamEvent>& events, std::string_view data, std::string_view item,
+                                                   std::optional<std::size_t> output_index, OutputItemLifecycle lifecycle);
+
+  [[nodiscard]] std::pair<MessageEventSource, MessageItemState*> documented_message_item_for_event(std::vector<StreamEvent>& events, std::string_view data);
+  [[nodiscard]] bool reject_unended_documented_message_items(std::vector<StreamEvent>& events);
+
+  void append_start_reasoning_if_needed(std::vector<StreamEvent>& events);
+  void append_reasoning_delta(std::vector<StreamEvent>& events, std::string_view text);
+  [[nodiscard]] bool reconcile_complete_reasoning_text(std::vector<StreamEvent>& events, std::string_view complete_text);
+  void append_finish_reasoning_if_open(std::vector<StreamEvent>& events, std::string native_item_json = {});
+  [[nodiscard]] bool bind_documented_reasoning_event(std::vector<StreamEvent>& events, std::string_view data);
+
+  [[nodiscard]] FunctionCallState* bind_documented_function_call_item(std::vector<StreamEvent>& events, std::string_view item,
+                                                                      std::optional<std::size_t> provider_output_index);
+  [[nodiscard]] FunctionCallState* documented_function_call_state_for_event(std::vector<StreamEvent>& events, std::string_view data);
+  [[nodiscard]] bool reject_unended_documented_function_calls(std::vector<StreamEvent>& events);
+
+  void reset_state() noexcept;
 
   std::string pending_line_;
   std::string data_;

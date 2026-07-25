@@ -19,7 +19,7 @@ namespace ava::app {
 struct SessionTitleCatalogChanges;
 
 namespace runtime {
-struct Session;
+class Session;
 } // namespace runtime
 
 enum class SessionSelectorSort

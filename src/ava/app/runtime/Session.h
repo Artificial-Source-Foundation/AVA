@@ -35,10 +35,9 @@ class SubagentDeliveryManager;
 
 namespace ava::app::runtime {
 
-// Hold the mutable application state associated with an open runtime session.
-//
-// The store may be persistent or ephemeral according to sessionless. Shared background jobs remain valid when the aggregate is moved or replaced.
-struct Session
+// Old aggregate for Session.
+// This class holds members that are still initialized by a designated initializer list.
+struct Session_aggregate_base
 {
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
@@ -46,7 +45,6 @@ struct Session
   ava::agent::ToolVisibilityOptions tool_visibility;
   ava::config::XdgPaths paths;
   bool sessionless = false;
-  bool offline = false;
 
   ava::session::SessionStore store;
   // Persistent runtime owners hold a cross-process lease for the complete session lifetime.
@@ -88,6 +86,28 @@ struct Session
   // Null uses normal global/project discovery; non-null is immutable session-local MCP composition.
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;
 
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+// Hold the mutable application state associated with an open runtime session.
+//
+// The store may be persistent or ephemeral according to sessionless. Shared background jobs remain valid when the aggregate is moved or replaced.
+class Session : public Session_aggregate_base
+{
+  // One member at a time we will make them private :(
+ private:
+  bool is_offline_ = false;
+
+ public:
+  // Move constructors.
+  Session(Session&& session) = default;
+  Session(Session_aggregate_base&& base, bool is_offline = false) : Session_aggregate_base(std::move(base)), is_offline_(is_offline) { }
+
+  Session& operator=(Session&& session) = default;
+
+  // Accessors.
+  bool is_offline() const { return is_offline_; }
+
   // Bind a lifetime-safe history snapshot route to this session's exact lease
   // (or to its shared in-memory state in sessionless mode).
   [[nodiscard]] ava::core::Result<ava::session::SessionReadAuthority> read_authority() const
@@ -119,7 +139,7 @@ struct Session
     return run_controller ? run_controller->owner_append_batch_route() : ava::agent::SessionAppendBatchSink{};
   }
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_ON_BASE(Session_aggregate_base)
 };
 
 }  // namespace ava::app::runtime

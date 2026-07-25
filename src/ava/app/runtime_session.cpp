@@ -377,13 +377,12 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
     title_coordinator = std::move(*created_coordinator);
   }
 
-  runtime::Session session{.workspace_dir = workspace_dir,
+  runtime::Session session({.workspace_dir = workspace_dir,
                            .current_dir = current_dir,
                            .mode = options.mode,
                            .tool_visibility = options.tool_visibility,
                            .paths = options.paths,
                            .sessionless = sessionless,
-                           .offline = options.offline,
                            .store = std::move(store),
                            .lease = std::move(lease),
                            .model = std::move(model),
@@ -404,7 +403,8 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
                            .subagent_coordinator = delivery_manager->coordinator(),
                            .subagent_delivery_manager = std::move(delivery_manager),
                            .session_title_coordinator = std::move(title_coordinator),
-                           .diagnostics = options.diagnostics};
+                           .diagnostics = options.diagnostics},
+                           options.offline);
 
   if (options.initial_reasoning_level)
   {

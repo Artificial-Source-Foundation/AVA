@@ -24,7 +24,7 @@
 namespace ava::app {
 
 namespace runtime {
-struct Session;
+class Session;
 } // namespace runtime
 
 using CompactionSummaryGenerator =

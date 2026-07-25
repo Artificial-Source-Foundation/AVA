@@ -257,7 +257,7 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
     {
       std::lock_guard lock(options.session_mutex);
       paths = options.session.paths;
-      session_offline = options.session.offline;
+      session_offline = options.session.is_offline();
       auto loaded_config = ava::session::load_compaction_config(paths);
       if (!loaded_config)
       {
@@ -378,7 +378,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
   });
   std::mutex session_mutex;
   std::optional<std::jthread> prompt_worker;
-  runtime_options.offline = runtime_options.offline || session.offline || open_options.offline;
+  runtime_options.offline = runtime_options.offline || session.is_offline() || open_options.offline;
   if (!runtime_options.permission_resolver)
   {
     runtime_options.permission_resolver = build_headless_permission_resolver(HeadlessPermissionPolicyOptions{});
@@ -1118,7 +1118,7 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
   runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
   runtime_options.question_resolver = nullptr;
   runtime_options.enable_transport_retries = true;
-  runtime_options.offline = session->offline || options.open_options.offline;
+  runtime_options.offline = session->is_offline() || options.open_options.offline;
 
   auto registry = ava::provider::builtin_provider_registry();
   auto provider = registry.create(session->model.provider_id);

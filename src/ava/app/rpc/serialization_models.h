@@ -7,7 +7,7 @@ struct ModelInfo;
 }
 
 namespace ava::app::runtime {
-struct Session;
+class Session;
 }
 
 namespace ava::app::rpc {

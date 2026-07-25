@@ -123,13 +123,12 @@ runtime::RunOptions detached_run_options(runtime::RunOptions const& source)
 runtime::Session detached_session(runtime::Session const& source, ava::session::SessionLease lease, ava::session::SessionReadAuthority authority,
                                   std::shared_ptr<SubagentDeliveryManager> manager)
 {
-  return runtime::Session{.workspace_dir = source.workspace_dir,
+  return runtime::Session({.workspace_dir = source.workspace_dir,
                           .current_dir = source.current_dir,
                           .mode = source.mode,
                           .tool_visibility = source.tool_visibility,
                           .paths = source.paths,
                           .sessionless = source.sessionless,
-                          .offline = source.offline,
                           .store = source.store,
                           .lease = std::move(lease),
                           .model = source.model,
@@ -152,7 +151,8 @@ runtime::Session detached_session(runtime::Session const& source, ava::session::
                           .subagent_delivery_manager = std::move(manager),
                           .session_title_coordinator = source.session_title_coordinator,
                           .diagnostics = source.diagnostics,
-                          .mcp_config = source.mcp_config};
+                          .mcp_config = source.mcp_config},
+                          source.is_offline());
 }
 
 std::string delivery_marker(ava::agent::SubagentJobIdentity const& identity)

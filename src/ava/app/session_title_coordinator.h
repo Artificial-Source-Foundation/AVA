@@ -29,7 +29,7 @@ namespace ava::app {
 class SessionRunController;
 namespace runtime {
 struct RunOptions;
-struct Session;
+class Session;
 }  // namespace runtime
 
 inline constexpr std::size_t kMaxSessionTitleSourceBytes = 4096;

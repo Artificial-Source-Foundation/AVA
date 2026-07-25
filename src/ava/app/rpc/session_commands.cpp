@@ -140,7 +140,7 @@ runtime::OpenOptions owned_replacement_options(runtime::Session const& current, 
   options.paths = current.paths;
   options.prompt_overrides = current.prompt_overrides;
   options.initial_reasoning_level = std::nullopt;
-  options.offline = current.offline;
+  options.offline = current.is_offline();
   options.subagent_coordinator = current.subagent_coordinator;
   options.subagent_delivery_manager = current.subagent_delivery_manager;
   options.session_title_coordinator = current.session_title_coordinator;

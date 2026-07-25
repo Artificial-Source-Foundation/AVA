@@ -829,7 +829,7 @@ ava::core::VoidResult apply_runtime_prompt_state(runtime::Session& session, runt
 ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message, ava::provider::Provider const& provider,
                                                           ava::provider::Transport& transport, runtime::RunOptions const& options)
 {
-  if (session.offline || options.offline)
+  if (session.is_offline() || options.offline)
     return std::unexpected(offline_provider_error("prompt"));
   if (!session.run_controller)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));
@@ -904,7 +904,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       return fail_run(std::move(retained.error()));
     refresh.generation = *retained;
   }
-  if (session.offline || options.offline)
+  if (session.is_offline() || options.offline)
     return fail_run(offline_provider_error("prompt"));
   if (!session.run_controller)
     return fail_run(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));

@@ -106,7 +106,7 @@ struct CommandRegistryOptions
 };
 
 namespace runtime {
-struct Session;
+class Session;
 } // namespace runtime
 
 [[nodiscard]] std::string to_string(UnifiedCommandSource source);

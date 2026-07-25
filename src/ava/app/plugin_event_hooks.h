@@ -15,7 +15,7 @@
 namespace ava::app {
 
 namespace runtime {
-struct Session;
+class Session;
 } // namespace runtime
 
 using PluginEventHookFailureSink = std::function<void(std::string_view plugin_id, std::string_view event_name, ava::core::Error const& error)>;

@@ -830,7 +830,7 @@ template <typename Callback>
 LineResult with_provider_runtime(ShellState& state, std::string_view offline_suffix, Callback callback, std::string_view provider_override = {})
 {
   LineResult line_result;
-  if (state.session.offline)
+  if (state.session.is_offline())
   {
     add_output(line_result, ava::app::offline_provider_error("prompt").format() + std::string(offline_suffix));
     return line_result;
@@ -1102,7 +1102,7 @@ int run_tui(ShellState state)
     options.tool_visibility = state.session.tool_visibility;
     options.paths = state.session.paths;
     options.sessionless = state.session.sessionless;
-    options.offline = state.session.offline;
+    options.offline = state.session.is_offline();
     return options;
   };
   auto capture_title_catalog_changes = [&state, &application_catalog]() {

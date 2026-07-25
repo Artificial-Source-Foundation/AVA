@@ -669,7 +669,7 @@ void SessionTitleCoordinator::schedule(runtime::Session const& session, std::str
                                                        .credential_type = run_options.credential_type,
                                                        .account_id = run_options.openai_account_id,
                                                        .openai_oauth = run_options.openai_oauth,
-                                                       .offline = session.offline || run_options.offline}};
+                                                       .offline = session.is_offline() || run_options.offline}};
     std::lock_guard lock(mutex_);
     if (!accepting_ || queue_.size() >= options_.max_queued)
     {

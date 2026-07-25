@@ -4,7 +4,7 @@
 
 namespace ava::app::runtime {
 
-struct Session;
+class Session;
 using session_ts = threadsafe::Unlocked<Session, threadsafe::policy::Primitive<std::mutex>>;
 
 } // namespace ava::app::runtime

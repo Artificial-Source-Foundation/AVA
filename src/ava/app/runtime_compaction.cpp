@@ -506,7 +506,7 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
                                                            std::size_t estimated_tokens, ava::provider::Provider const& provider,
                                                            ava::provider::Transport& transport, runtime::RunOptions const& options)
 {
-  if (session.offline || options.offline)
+  if (session.is_offline() || options.offline)
   {
     return std::unexpected(offline_provider_error("compact"));
   }

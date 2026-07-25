@@ -103,8 +103,7 @@ def main(argv):
         # offending types are visible directly in the ctest failure output.
         sys.stdout.write(
             "Found struct(s)/class(es) in src/ava/ headers that are missing an "
-            "AVA_DEBUG_PRINT_MEMBERS_ON / AVA_DEBUG_PRINT_MEMBERS_OPT_OUT "
-            "marker:\n\n")
+            "AVA_DEBUG_PRINT_MEMBERS_[ON|ON_BASE|OPT_OUT] marker:\n\n")
         sys.stdout.write(scan_out)
         return 1
 

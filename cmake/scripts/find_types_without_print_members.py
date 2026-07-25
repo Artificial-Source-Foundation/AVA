@@ -3,8 +3,9 @@
 #
 # Reads the JSON tags file ($BUILDDIR/generated/ctags/tags.json) and lists every
 # struct and class defined in a header under src/ava/ that does not yet declare
-# the AVA_DEBUG_PRINT_MEMBERS_ON or AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS opt-in
-# marker, nor the AVA_DEBUG_PRINT_MEMBERS_OPT_OUT marker.
+# the AVA_DEBUG_PRINT_MEMBERS_ON, AVA_DEBUG_PRINT_MEMBERS_ON_BASE or
+# AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS opt-in marker, nor the AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+# marker.
 #
 # How opt-in/out is detected: the ctags invocation that produced tags.json passed
 # `-D AVA_DEBUG_PRINT_MEMBERS_ON=void print_members_opt_in() { }`, so every
@@ -145,7 +146,7 @@ def report(title, by_file, out):
 def main(argv):
     parser = argparse.ArgumentParser(
         description="List ava header structs and classes missing "
-                    "AVA_DEBUG_PRINT_MEMBERS_ON.")
+                    "AVA_DEBUG_PRINT_MEMBERS_[ON|ON_BASE|OPT_OUT].")
     parser.add_argument("tags_json", help="Path to the ctags tags.json file.")
     args = parser.parse_args()
 
@@ -153,12 +154,12 @@ def main(argv):
 
     struct_files = collect_missing(classes, opted, {"struct"})
     struct_total = report("Structs in src/ava/ headers WITHOUT "
-                          "AVA_DEBUG_PRINT_MEMBERS_ON or AVA_DEBUG_PRINT_MEMBERS_OPT_OUT:", struct_files, sys.stdout)
+                          "AVA_DEBUG_PRINT_MEMBERS_[ON|OPT_OUT]:", struct_files, sys.stdout)
 
     print()
     class_files = collect_missing(classes, opted, {"class"})
-    class_total = report("Classes in src/ava/ headers WITHOUT "
-                         "AVA_DEBUG_PRINT_MEMBERS_ON, AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS "
+    class_total = report("Classes in src/ava/ headers WITHOUT AVA_DEBUG_PRINT_MEMBERS_ON, "
+                         "AVA_DEBUG_PRINT_MEMBERS_ON_BASE, AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS "
                          "or AVA_DEBUG_PRINT_MEMBERS_OPT_OUT:", class_files, sys.stdout)
 
     sys.stderr.write("\nSummary: %d struct(s), %d class(es) missing an opt-in or "

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # generate_print_members.py -- emit print_members definitions, split by namespace.
 #
-# Reads the JSON tags file from goal 03 ($BUILDDIR/generated/ctags/tags.json) in
-# a single pass and writes one print_members.cpp per namespace bucket under
+# Reads the JSON tags file ($BUILDDIR/generated/ctags/tags.json) in a
+# single pass and writes one print_members.cpp per namespace bucket under
 # <output_dir>/<bucket>/print_members.cpp.
 #
-# Which types are generated is read straight from tags.json: the ctags call in
-# goal 03 passes `-D AVA_DEBUG_PRINT_MEMBERS_ON=void print_members_opt_in() { }`, so
-# every class/struct that opted in (has that macro in its body) shows a
-# `print_members_opt_in` member whose scope is that type's fully-qualified name. A
-# generated definition only compiles for a type that declared print_members_opt_in, so
+# Which types are generated is read straight from tags.json: the ctags call
+# passes `-D AVA_DEBUG_PRINT_MEMBERS_ON=void print_members_opt_in() { }`, so
+# every class/struct that opted in (has that macro (and others like it) in its body)
+# shows a `print_members_opt_in` member whose scope is that type's fully-qualified name.
+# A generated definition only compiles for a type that declared print_members_opt_in, so
 # only those types are emitted.
 #
 # Bucketing (collapse rule): a type in ava::<submodule>[::...] goes to bucket

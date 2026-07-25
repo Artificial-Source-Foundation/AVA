@@ -21,7 +21,7 @@ class Application
   [[nodiscard]] static Application const& instance();
   [[nodiscard]] virtual std::string_view application_name() const noexcept = 0;
 
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   bool initialized_ = false;

@@ -119,6 +119,7 @@ class SessionTraceScope
 [[nodiscard]] std::string project_key(std::filesystem::path const& workspace_dir);
 [[nodiscard]] std::mutex& append_mutex_for_path(std::filesystem::path const& path);
 [[nodiscard]] ava::core::Error path_io_error(std::string message, std::filesystem::path const& path, int error_number = 0);
+[[nodiscard]] std::filesystem::path anchored_child_diagnostic_path(int parent_fd, std::string_view name, std::filesystem::path const& fallback_parent);
 [[nodiscard]] ava::core::Error append_authority_error(std::string message, std::filesystem::path const& path);
 [[nodiscard]] ava::core::Result<std::pair<int, off_t>> open_regular_snapshot(std::filesystem::path const& path, std::size_t max_file_bytes);
 [[nodiscard]] ava::core::VoidResult validate_read_limits(SessionReadLimits const& limits);

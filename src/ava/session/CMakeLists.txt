@@ -10,6 +10,7 @@ add_library(ava_session
   "session_metadata.cpp"
   "session_store.cpp"
   "session_store_append.cpp"
+  "session_store_authority.cpp"
   "session_store_catalog.cpp"
   "session_store_read.cpp"
   "session_tree.cpp"

@@ -62,8 +62,9 @@ def main() -> int:
     require_text(source, "src/ava/agent/agent_loop.h", "std::optional<ava::session::SessionReadAuthority> session_read_authority", failures)
     require_text(source, "src/ava/app/runtime/Session.h", "create_ephemeral(store, session_read_limits)", failures)
     require_text(source, "src/ava/app/runtime/Session.h", "create_persistent(store, lease, session_read_limits)", failures)
-    require_text(source, "src/ava/session/session_store.cpp", "state_->store.load_bounded(*state_->lease, state_->limits)", failures)
-    require_text(source, "src/ava/session/session_store.cpp", "state_->store.load_bounded(state_->limits)", failures)
+    require_text(source, "src/ava/session/session_store_authority.cpp", "struct SessionReadAuthority::State", failures)
+    require_text(source, "src/ava/session/session_store_authority.cpp", "state_->store.load_bounded(*state_->lease, state_->limits)", failures)
+    require_text(source, "src/ava/session/session_store_authority.cpp", "state_->store.load_bounded(state_->limits)", failures)
 
     # Keep the small observational pathname inventory visible and intentional.
     require_text(source, "src/ava/session/session_tree.cpp", "load_session_metadata(*store)", failures)

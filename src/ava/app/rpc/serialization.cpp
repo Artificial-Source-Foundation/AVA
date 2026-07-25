@@ -41,9 +41,9 @@ ava::core::Result<std::vector<ava::session::SessionEntry>> load_runtime_entries(
 std::string context_sources_json(runtime::Session const& session)
 {
   std::string json = "[";
-  for (std::size_t index = 0; index < session.context_sources.size(); ++index)
+  for (std::size_t index = 0; index < session.context_sources().size(); ++index)
   {
-    auto const& source = session.context_sources[index];
+    auto const& source = session.context_sources()[index];
     if (index > 0)
       json += ',';
     json += '{';
@@ -388,7 +388,7 @@ std::string state_result_json(runtime::Session const& session, bool cancel_reque
     }
   }
   json += ',';
-  json += number_field_json("context_source_count", session.context_sources.size());
+  json += number_field_json("context_source_count", session.context_sources().size());
   json += ",\"context_sources\":";
   json += context_sources_json(session);
   json += '}';

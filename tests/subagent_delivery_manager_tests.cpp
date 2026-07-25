@@ -578,7 +578,7 @@ void test_runtime_mutations_refresh_retained_delivery_configuration()
   auto retained = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir(), true);
   expect(retained && *retained && (*retained)->model.model_id == fixture.session->model.model_id && (*retained)->reasoning &&
              (*retained)->reasoning->level == "low" && (*retained)->mode() == fixture.session->mode() &&
-             (*retained)->system_prompt == fixture.session->system_prompt && (*retained)->workspace_dir() == fixture.session->workspace_dir() &&
+             (*retained)->system_prompt() == fixture.session->system_prompt() && (*retained)->workspace_dir() == fixture.session->workspace_dir() &&
              (*retained)->anchor_set == fixture.session->anchor_set,
          "retained-session attachment returns the latest configuration with the exact logical workspace and shared AnchorSet authority");
 

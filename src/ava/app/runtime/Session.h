@@ -45,7 +45,6 @@ struct InvocationInputs
 {
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
-  ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::agent::ToolVisibilityOptions tool_visibility = {};
   ava::config::XdgPaths paths;
   bool sessionless;
@@ -56,6 +55,28 @@ struct InvocationInputs
   // Resolved once at open time and reused by every runtime history reader.
   ava::session::SessionReadLimits session_read_limits = ava::session::legacy_unbounded_session_read_limits();
   PromptOverrides prompt_overrides = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+// Resolved prompt state.
+//
+// The agent mode and assembled prompt material currently in effect for the
+// session: base-prompt metadata, contributing context and freshness sources,
+// and the resulting system prompt text. This whole bundle is recomputed
+// whenever the mode or model changes (see apply_runtime_prompt_state and
+// switch_runtime_model) and is otherwise the session's live resolved state.
+//
+// It is field-compatible with the transient PromptState returned by
+// load_runtime_prompt_state, which apply_runtime_prompt_state moves into this
+// member as a single object rather than copying fields one at a time.
+struct ResolvedPromptState
+{
+  ava::agent::Mode mode = ava::agent::Mode::Build;
+  BasePromptMetadata base_prompt;
+  std::vector<ContextSourceMetadata> context_sources;
+  std::vector<FreshnessSourceMetadata> freshness_sources;
+  std::string system_prompt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -73,6 +94,14 @@ struct Session_aggregate_base
   // Accessor.
   InvocationInputs& invocation_inputs() { return invocation_inputs_; }
 
+  ResolvedPromptState resolved_prompt_state_;   // Do NOT use this variable name outside of this file!
+
+  // Accessors. The non-const overload is used to replace the whole bundle on
+  // mode/model changes; the const overload lets callers copy it out of a const
+  // Session without naming the member directly.
+  ResolvedPromptState& resolve_prompt_state() { return resolved_prompt_state_; }
+  ResolvedPromptState const& resolve_prompt_state() const { return resolved_prompt_state_; }
+
   // ===========================================================================
   // Persistent session identity.
   // The durable content handle plus attributes projected back out of it on
@@ -86,12 +115,10 @@ struct Session_aggregate_base
   // ===========================================================================
   // Re-derived state.
   // Recomputed from config and workspace on every open, including resume.
-  // None of these round-trip through the store as fields.
+  // None of these round-trip through the store as fields. The resolved prompt
+  // material (mode, base/system prompt, context and freshness sources) lives
+  // in `resolved_prompt_state_` above and is replaced as a whole object.
   // ===========================================================================
-  BasePromptMetadata base_prompt;
-  std::string system_prompt;
-  std::vector<ContextSourceMetadata> context_sources;
-  std::vector<FreshnessSourceMetadata> freshness_sources;
   ProjectTrustState project_trust;
   std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
   bool created = false;                        // True when this is a freshly created session rather than a resumed one.
@@ -146,10 +173,16 @@ class Session : public Session_aggregate_base
   // Invocation inputs.
   std::filesystem::path const& workspace_dir() const { return invocation_inputs_.workspace_dir; }
   std::filesystem::path const& current_dir() const noexcept { return invocation_inputs_.current_dir; }
-  ava::agent::Mode mode() const { return invocation_inputs_.mode; }
   ava::agent::ToolVisibilityOptions const& tool_visibility() const { return invocation_inputs_.tool_visibility; }
   ava::config::XdgPaths const& paths() const { return invocation_inputs_.paths; }
   bool sessionless() const { return invocation_inputs_.sessionless; }
+
+  // Resolved prompt state.
+  ava::agent::Mode mode() const { return resolved_prompt_state_.mode; }
+  BasePromptMetadata const& base_prompt() const { return resolved_prompt_state_.base_prompt; }
+  std::vector<ContextSourceMetadata> const& context_sources() const { return resolved_prompt_state_.context_sources; }
+  std::vector<FreshnessSourceMetadata> const& freshness_sources() const { return resolved_prompt_state_.freshness_sources; }
+  std::string const& system_prompt() const { return resolved_prompt_state_.system_prompt; }
   bool is_offline() const { return invocation_inputs_.is_offline_; }
   std::vector<std::filesystem::path> const& additional_writable_dirs() const { return invocation_inputs_.additional_writable_dirs; }
   // Resolved once at open time and reused by every runtime history reader.

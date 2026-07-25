@@ -360,14 +360,14 @@ void test_app_runtime_open_session_and_context_prompt()
 
   expect(session->created && session->mode() == ava::agent::Mode::Plan && session->model.model_id == "gpt-5.5",
          "runtime session records created state, mode, and model");
-  expect(session->context_sources.size() == 3, "runtime session records workspace and global context metadata");
-  expect(!session->base_prompt.from_override && !session->base_prompt.source_path && session->base_prompt.byte_count > 0 &&
-             session->base_prompt.content_fingerprint != 0,
+  expect(session->context_sources().size() == 3, "runtime session records workspace and global context metadata");
+  expect(!session->base_prompt().from_override && !session->base_prompt().source_path && session->base_prompt().byte_count > 0 &&
+             session->base_prompt().content_fingerprint != 0,
          "runtime session records selected base prompt metadata without storing prompt text twice");
-  expect(session->system_prompt.find("Plan before changing files") != std::string::npos &&
-             session->system_prompt.find("workspace runtime instructions") != std::string::npos &&
-             session->system_prompt.find("nested runtime instructions") != std::string::npos &&
-             session->system_prompt.find("global runtime instructions") != std::string::npos,
+  expect(session->system_prompt().find("Plan before changing files") != std::string::npos &&
+             session->system_prompt().find("workspace runtime instructions") != std::string::npos &&
+             session->system_prompt().find("nested runtime instructions") != std::string::npos &&
+             session->system_prompt().find("global runtime instructions") != std::string::npos,
          "runtime session system prompt combines selected prompt and formatted context");
   auto entries = session->store.load();
   expect(entries && entries->size() == 1 && (*entries)[0].type == ava::session::EntryType::SessionStart &&
@@ -881,26 +881,26 @@ void test_app_runtime_cli_prompt_overrides()
   if (!session)
     return;
 
-  expect(session->base_prompt.from_override && !session->base_prompt.source_path &&
-             session->base_prompt.byte_count == std::string_view("cli system prompt").size() && session->base_prompt.content_fingerprint != 0,
+  expect(session->base_prompt().from_override && !session->base_prompt().source_path &&
+             session->base_prompt().byte_count == std::string_view("cli system prompt").size() && session->base_prompt().content_fingerprint != 0,
          "cli --system-prompt is recorded as base prompt metadata");
   expect(session->prompt_overrides().system_prompt && *session->prompt_overrides().system_prompt == "cli system prompt" &&
              session->prompt_overrides().append_system_prompts.size() == 2,
          "runtime session retains cli prompt overrides for reloads");
-  expect(session->system_prompt.find("cli system prompt") != std::string::npos && session->system_prompt.find("cli append prompt one") != std::string::npos &&
-             session->system_prompt.find("cli append prompt two") != std::string::npos &&
-             session->system_prompt.find("workspace context should remain") != std::string::npos &&
-             session->system_prompt.find("provider prompt override should be replaced") == std::string::npos &&
-             session->system_prompt.find("global system prompt should be replaced") == std::string::npos &&
-             session->system_prompt.find("project system prompt should be replaced") == std::string::npos &&
-             session->system_prompt.find("global append prompt should be replaced") == std::string::npos &&
-             session->system_prompt.find("project append prompt should be replaced") == std::string::npos,
+  expect(session->system_prompt().find("cli system prompt") != std::string::npos && session->system_prompt().find("cli append prompt one") != std::string::npos &&
+             session->system_prompt().find("cli append prompt two") != std::string::npos &&
+             session->system_prompt().find("workspace context should remain") != std::string::npos &&
+             session->system_prompt().find("provider prompt override should be replaced") == std::string::npos &&
+             session->system_prompt().find("global system prompt should be replaced") == std::string::npos &&
+             session->system_prompt().find("project system prompt should be replaced") == std::string::npos &&
+             session->system_prompt().find("global append prompt should be replaced") == std::string::npos &&
+             session->system_prompt().find("project append prompt should be replaced") == std::string::npos,
          "cli prompt overrides replace selected system/append prompt resources while preserving context");
 
   auto const system_source_count =
-      std::ranges::count_if(session->freshness_sources, [](auto const& source) { return source.kind == ava::app::runtime::FreshnessSourceKind::SystemPrompt; });
+      std::ranges::count_if(session->freshness_sources(), [](auto const& source) { return source.kind == ava::app::runtime::FreshnessSourceKind::SystemPrompt; });
   auto const append_source_count = std::ranges::count_if(
-      session->freshness_sources, [](auto const& source) { return source.kind == ava::app::runtime::FreshnessSourceKind::AppendSystemPrompt; });
+      session->freshness_sources(), [](auto const& source) { return source.kind == ava::app::runtime::FreshnessSourceKind::AppendSystemPrompt; });
   expect(system_source_count == 1 && append_source_count == 2, "cli prompt overrides are tracked as system prompt freshness sources");
 
   auto context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context --system-prompt"});
@@ -917,9 +917,9 @@ void test_app_runtime_cli_prompt_overrides()
 
   auto switched_mode = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/mode"});
   expect(switched_mode && switched_mode->handled && session->mode() == ava::agent::Mode::Build &&
-             session->system_prompt.find("cli system prompt") != std::string::npos &&
-             session->system_prompt.find("cli append prompt two") != std::string::npos &&
-             session->system_prompt.find("Implement changes directly") == std::string::npos,
+             session->system_prompt().find("cli system prompt") != std::string::npos &&
+             session->system_prompt().find("cli append prompt two") != std::string::npos &&
+             session->system_prompt().find("Implement changes directly") == std::string::npos,
          "mode reloads preserve cli system prompt overrides");
 }
 
@@ -1008,22 +1008,22 @@ void test_app_runtime_enabled_plugin_resources_autoload()
     return;
 
   auto has_context_source = [&](std::string_view needle, ava::context::ContextSourceType source_type) {
-    return std::ranges::any_of(session->context_sources,
+    return std::ranges::any_of(session->context_sources(),
                                [&](auto const& source) { return source.source_type == source_type && source.path.string().find(needle) != std::string::npos; });
   };
   auto has_freshness_source = [&](ava::app::runtime::FreshnessSourceKind kind, std::string_view source_id, std::string_view name) {
-    return std::ranges::any_of(session->freshness_sources,
+    return std::ranges::any_of(session->freshness_sources(),
                                [&](auto const& source) { return source.kind == kind && source.source_id == source_id && source.name == name; });
   };
 
-  expect(session->system_prompt.find("Enabled plugin prompt autoload marker") != std::string::npos &&
-             session->system_prompt.find("<name>plugin-triage</name>") != std::string::npos &&
-             session->system_prompt.find("Enabled plugin triage skill") != std::string::npos &&
-             session->system_prompt.find("<scope>plugin</scope>") != std::string::npos,
+  expect(session->system_prompt().find("Enabled plugin prompt autoload marker") != std::string::npos &&
+             session->system_prompt().find("<name>plugin-triage</name>") != std::string::npos &&
+             session->system_prompt().find("Enabled plugin triage skill") != std::string::npos &&
+             session->system_prompt().find("<scope>plugin</scope>") != std::string::npos,
          "enabled plugin prompt and skill resources appear in the runtime system prompt");
-  expect(session->system_prompt.find("Disabled plugin prompt must not load") == std::string::npos &&
-             session->system_prompt.find("disabled-triage") == std::string::npos &&
-             session->system_prompt.find("Disabled plugin triage skill") == std::string::npos,
+  expect(session->system_prompt().find("Disabled plugin prompt must not load") == std::string::npos &&
+             session->system_prompt().find("disabled-triage") == std::string::npos &&
+             session->system_prompt().find("Disabled plugin triage skill") == std::string::npos,
          "disabled plugin prompt and skill resources are not added to runtime context");
   expect(has_context_source("com.example.autoload/prompts/review.md", ava::context::ContextSourceType::Plugin) &&
              !has_context_source("com.example.disabled/prompts/review.md", ava::context::ContextSourceType::Plugin),
@@ -1139,16 +1139,16 @@ void test_app_runtime_project_plugin_resources_follow_trust_gate()
     return;
 
   auto has_freshness_source = [&](ava::app::runtime::FreshnessSourceKind kind, std::string_view source_id, std::string_view name) {
-    return std::ranges::any_of(session->freshness_sources,
+    return std::ranges::any_of(session->freshness_sources(),
                                [&](auto const& source) { return source.kind == kind && source.source_id == source_id && source.name == name; });
   };
 
   expect(session->project_trust.decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session->project_trust),
          "project plugin resource trust-gate test starts with project resources excluded");
-  expect(session->system_prompt.find("Global enabled plugin prompt loads") != std::string::npos &&
-             session->system_prompt.find("<name>global-triage</name>") != std::string::npos &&
-             session->system_prompt.find("Project enabled plugin prompt must stay gated") == std::string::npos &&
-             session->system_prompt.find("project-triage") == std::string::npos,
+  expect(session->system_prompt().find("Global enabled plugin prompt loads") != std::string::npos &&
+             session->system_prompt().find("<name>global-triage</name>") != std::string::npos &&
+             session->system_prompt().find("Project enabled plugin prompt must stay gated") == std::string::npos &&
+             session->system_prompt().find("project-triage") == std::string::npos,
          "global enabled plugin resources load normally while project plugin resources remain gated");
   expect(has_freshness_source(ava::app::runtime::FreshnessSourceKind::PluginPrompt, "com.example.globalautoload", "global-review") &&
              has_freshness_source(ava::app::runtime::FreshnessSourceKind::PluginSkill, "com.example.globalautoload", "global-triage") &&
@@ -1217,8 +1217,8 @@ void test_app_runtime_enabled_plugin_resource_failures_are_context_visible()
              broken_skill->output[0].find("plugin_skill  project  com.example.failedresources/broken-skill") != std::string::npos &&
              broken_skill->output[0].find("status=unavailable") != std::string::npos,
          "failed enabled plugin skill resources remain visible in /context without re-reading the rejected final symlink");
-  expect(session->system_prompt.find("Outside prompt target must not load") == std::string::npos &&
-             session->system_prompt.find("Outside skill target must not load") == std::string::npos && !std::filesystem::exists(marker),
+  expect(session->system_prompt().find("Outside prompt target must not load") == std::string::npos &&
+             session->system_prompt().find("Outside skill target must not load") == std::string::npos && !std::filesystem::exists(marker),
          "failed plugin static resources never consume outside content through intermediate or final symlinks and do not execute plugin entrypoints");
 }
 
@@ -2002,7 +2002,7 @@ void test_app_command_dispatcher()
   expect(session.has_value(), "command dispatcher test opens runtime session");
   if (!session)
     return;
-  auto const plan_system_prompt = session->system_prompt;
+  auto const plan_system_prompt = session->system_prompt();
   {
     std::ofstream file(workspace / "AGENTS.md", std::ios::binary | std::ios::trunc);
     file << "dispatcher context changed after session open\n";
@@ -2646,7 +2646,7 @@ void test_app_command_dispatcher()
   expect(reload_prompts && reload_prompts->handled && !reload_prompts->output.empty() &&
              reload_prompts->output[0].find("Reload report:") != std::string::npos && reload_prompts->output[0].find("prompts: loaded") != std::string::npos &&
              reload_prompts->output[0].find("context_sources: 1") != std::string::npos &&
-             session->system_prompt.find("dispatcher context changed after session open") != std::string::npos,
+             session->system_prompt().find("dispatcher context changed after session open") != std::string::npos,
          "command dispatcher /reload prompts re-reads prompt and context resources without restarting");
   write_app_test_file(paths.models_file, "{\n  \"scoped_model_cycle\": [\"openai/gpt-5.5\"]\n}\n");
   auto reload_models = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/reload models"});
@@ -2886,8 +2886,8 @@ void test_app_command_dispatcher()
   auto mode = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/mode"});
   expect(mode && mode->handled && session->mode() == ava::agent::Mode::Build && !mode->output.empty() && mode->output[0].find("build") != std::string::npos,
          "command dispatcher /mode toggles runtime mode");
-  expect(session->system_prompt != plan_system_prompt && session->system_prompt.find("Implement changes directly") != std::string::npos &&
-             session->system_prompt.find("dispatcher context changed after session open") != std::string::npos,
+  expect(session->system_prompt() != plan_system_prompt && session->system_prompt().find("Implement changes directly") != std::string::npos &&
+             session->system_prompt().find("dispatcher context changed after session open") != std::string::npos,
          "command dispatcher /mode rebuilds the mode-specific system prompt with context");
 
   bool saw_secret_prompt = false;

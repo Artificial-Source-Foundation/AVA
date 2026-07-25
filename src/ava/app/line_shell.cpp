@@ -1130,7 +1130,7 @@ int run_tui(ShellState state)
         .session_path = state.session.store.session_path().string(),
         .workspace = state.session.current_dir().empty() ? state.session.workspace_dir().string() : state.session.current_dir().string(),
         .git_branch = git_branch_for_sidebar(state.session.workspace_dir()),
-        .context_source_count = state.session.context_sources.size(),
+        .context_source_count = state.session.context_sources().size(),
         .status = std::move(status),
         .slash_commands = std::move(delivery.slash_commands),
         .slash_catalog_generation = delivery.slash_catalog_generation,
@@ -1209,7 +1209,7 @@ int run_tui(ShellState state)
       .workspace = state.session.current_dir().empty() ? state.session.workspace_dir().string() : state.session.current_dir().string(),
       .git_branch = git_branch_for_sidebar(state.session.workspace_dir()),
       .app_version = std::string(version::kDisplayVersion),
-      .context_source_count = state.session.context_sources.size(),
+      .context_source_count = state.session.context_sources().size(),
       .initial_status = keybind_status,
       .initial_transcript = std::move(initial_transcript),
       .slash_commands = initial_catalog_snapshot.slash_commands,
@@ -1350,7 +1350,7 @@ int run_tui(ShellState state)
             return ava::tui::TuiSubmitResult{.quit = line_result.quit,
                                              .output = line_result.output,
                                              .tool_timeline = tui_tool_timeline(line_result.tool_timeline),
-                                             .context_source_count = state.session.context_sources.size(),
+                                             .context_source_count = state.session.context_sources().size(),
                                              .state_snapshot = state_snapshot({})};
           },
       .on_attach_image = [&state](std::string const& path) -> ava::core::Result<ava::session::ImageAttachmentRef> {

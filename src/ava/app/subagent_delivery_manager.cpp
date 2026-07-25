@@ -124,13 +124,10 @@ runtime::Session detached_session(runtime::Session const& source, ava::session::
                                   std::shared_ptr<SubagentDeliveryManager> manager)
 {
   return runtime::Session({.invocation_inputs_ = source.invocation_inputs_,
+                           .resolved_prompt_state_ = source.resolve_prompt_state(),
                            .store = source.store,
                            .model = source.model,
                            .reasoning = source.reasoning,
-                           .base_prompt = source.base_prompt,
-                           .system_prompt = source.system_prompt,
-                           .context_sources = source.context_sources,
-                           .freshness_sources = source.freshness_sources,
                            .project_trust = source.project_trust,
                            .scoped_model_cycle = source.scoped_model_cycle,
                            .created = source.created,

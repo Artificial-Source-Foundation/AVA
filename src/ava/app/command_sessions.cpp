@@ -399,7 +399,7 @@ bool prompt_matches_query(runtime::Session const& session, std::string_view quer
   if (contains_ascii_case_insensitive("prompt", query) || contains_ascii_case_insensitive("base_prompt", query) ||
       contains_ascii_case_insensitive("builtin", query) || contains_ascii_case_insensitive("override", query))
     return true;
-  return session.base_prompt.source_path && contains_ascii_case_insensitive(session.base_prompt.source_path->generic_string(), query);
+  return session.base_prompt().source_path && contains_ascii_case_insensitive(session.base_prompt().source_path->generic_string(), query);
 }
 
 std::string_view freshness_source_kind_text(runtime::FreshnessSourceKind kind)
@@ -1265,30 +1265,30 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
   if (prompt_matches_query(session, trimmed_query))
   {
     output += "  base_prompt=";
-    if (session.base_prompt.from_override)
+    if (session.base_prompt().from_override)
     {
       output += "override";
-      if (session.base_prompt.source_path)
-        output += " path=" + session.base_prompt.source_path->string() + " " +
-                  context_file_status(*session.base_prompt.source_path, session.base_prompt.byte_count, session.base_prompt.content_fingerprint);
+      if (session.base_prompt().source_path)
+        output += " path=" + session.base_prompt().source_path->string() + " " +
+                  context_file_status(*session.base_prompt().source_path, session.base_prompt().byte_count, session.base_prompt().content_fingerprint);
     }
     else
     {
       output += "builtin";
     }
-    output += " bytes=" + std::to_string(session.base_prompt.byte_count) + "\n";
+    output += " bytes=" + std::to_string(session.base_prompt().byte_count) + "\n";
   }
-  output += "  context_sources=" + std::to_string(session.context_sources.size()) + "\n";
-  auto const system_prompt_sources = freshness_source_count(session.freshness_sources, runtime::FreshnessSourceKind::SystemPrompt) +
-                                     freshness_source_count(session.freshness_sources, runtime::FreshnessSourceKind::AppendSystemPrompt);
+  output += "  context_sources=" + std::to_string(session.context_sources().size()) + "\n";
+  auto const system_prompt_sources = freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::SystemPrompt) +
+                                     freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::AppendSystemPrompt);
   output += "  system_prompt_sources=" + std::to_string(system_prompt_sources) + "\n";
-  auto const prompt_command_sources = freshness_source_count(session.freshness_sources, runtime::FreshnessSourceKind::PromptCommand);
+  auto const prompt_command_sources = freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::PromptCommand);
   output += "  prompt_commands=" + std::to_string(prompt_command_sources) + "\n";
-  auto const skill_sources = freshness_source_count(session.freshness_sources, runtime::FreshnessSourceKind::Skill);
+  auto const skill_sources = freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::Skill);
   output += "  skills=" + std::to_string(skill_sources) + "\n";
-  auto const plugin_sources = freshness_source_count(session.freshness_sources, runtime::FreshnessSourceKind::PluginManifest) +
-                              freshness_source_count(session.freshness_sources, runtime::FreshnessSourceKind::PluginPrompt) +
-                              freshness_source_count(session.freshness_sources, runtime::FreshnessSourceKind::PluginSkill);
+  auto const plugin_sources = freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::PluginManifest) +
+                              freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::PluginPrompt) +
+                              freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::PluginSkill);
   output += "  plugin_sources=" + std::to_string(plugin_sources) + "\n";
   output += "  lsp_status=" + lsp_provider_status_text(lsp_inspection) + " lsp_configs=" + std::to_string(configured_lsp_config_count(lsp_inspection.configs)) +
             " lsp_servers=" + std::to_string(lsp_inspection.server_count) + " lsp_errors=" + std::to_string(lsp_inspection.error_count) +
@@ -1296,7 +1296,7 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
             " lsp_builtins_available=" + std::to_string(available_builtin_lsp_count(lsp_inspection)) + "\n";
 
   bool matched_source = false;
-  for (auto const& source : session.context_sources)
+  for (auto const& source : session.context_sources())
   {
     if (!context_source_matches_query(source, trimmed_query))
       continue;
@@ -1305,7 +1305,7 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
               context_file_status(source.path, source.byte_count, source.content_fingerprint) + '\n';
   }
   bool matched_freshness_source = false;
-  for (auto const& source : session.freshness_sources)
+  for (auto const& source : session.freshness_sources())
   {
     if (!freshness_source_matches_query(source, trimmed_query))
       continue;

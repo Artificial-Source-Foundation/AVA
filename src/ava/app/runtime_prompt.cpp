@@ -818,11 +818,11 @@ ava::core::VoidResult refresh_runtime_parent_configuration(runtime::Session cons
 
 ava::core::VoidResult apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state)
 {
-  session.invocation_inputs().mode = prompt_state.mode;
-  session.base_prompt = std::move(prompt_state.base_prompt);
-  session.context_sources = std::move(prompt_state.context_sources);
-  session.freshness_sources = std::move(prompt_state.freshness_sources);
-  session.system_prompt = std::move(prompt_state.system_prompt);
+  session.resolve_prompt_state() = runtime::ResolvedPromptState{.mode = prompt_state.mode,
+                                                                .base_prompt = std::move(prompt_state.base_prompt),
+                                                                .context_sources = std::move(prompt_state.context_sources),
+                                                                .freshness_sources = std::move(prompt_state.freshness_sources),
+                                                                .system_prompt = std::move(prompt_state.system_prompt)};
   return refresh_runtime_parent_configuration(session);
 }
 
@@ -1036,7 +1036,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .mode = session.mode(),
       .provider_id = session.model.provider_id,
       .model_id = session.model.model_id,
-      .system_prompt = session.system_prompt,
+      .system_prompt = session.system_prompt(),
       .access_token = options.access_token,
       .credential_type = options.openai_oauth && options.credential_type == "bearer" ? "oauth" : options.credential_type,
       .openai_oauth = options.openai_oauth,

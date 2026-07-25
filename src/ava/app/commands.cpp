@@ -924,11 +924,11 @@ ReloadReportRow reload_prompt_settings(runtime::Session& session)
     return reload_error_row("prompts", refreshed.error());
   ReloadReportRow row{.name = "prompts", .status = "loaded", .details = {}};
   append_reload_detail(row, "project_resources", project_resources_trusted(session.project_trust) ? "enabled" : "skipped");
-  append_reload_detail(row, "context_sources", std::to_string(session.context_sources.size()));
-  append_reload_detail(row, "freshness_sources", std::to_string(session.freshness_sources.size()));
+  append_reload_detail(row, "context_sources", std::to_string(session.context_sources().size()));
+  append_reload_detail(row, "freshness_sources", std::to_string(session.freshness_sources().size()));
   append_reload_detail(row, "base_prompt",
-                       session.base_prompt.from_override ? std::string("override")
-                       : session.base_prompt.source_path ? session.base_prompt.source_path->string()
+                       session.base_prompt().from_override ? std::string("override")
+                       : session.base_prompt().source_path ? session.base_prompt().source_path->string()
                                                          : std::string("built-in"));
   return row;
 }

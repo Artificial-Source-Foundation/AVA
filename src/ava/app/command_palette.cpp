@@ -764,7 +764,7 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
   if (auto index = find_item_index(items, "/context"))
   {
     auto& item = items[*index];
-    for (auto const& source : session.context_sources)
+    for (auto const& source : session.context_sources())
     {
       add_completion(item, 0, source.path.generic_string(), std::to_string(source.byte_count) + " bytes", "Context", {}, false);
     }

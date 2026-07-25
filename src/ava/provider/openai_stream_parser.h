@@ -56,6 +56,9 @@ class OpenAIStreamParser final : public StreamParser
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
+  void append_event_for_data(std::vector<StreamEvent>& events, std::string_view data);
+  void append_events_for_sse_line(std::vector<StreamEvent>& events, std::string line);
+
   std::string pending_line_;
   std::string data_;
   std::size_t scan_offset_ = 0;

@@ -21,6 +21,8 @@
 
 namespace ava::agent::detail {
 
+class ProviderEventAccumulator;
+
 inline constexpr std::string_view kRedactedRunCommand = "<redacted one-shot command>";
 
 enum class ProviderTurnDisposition
@@ -134,6 +136,8 @@ class AgentTurnExecutor final
   [[nodiscard]] ava::core::VoidResult replay_active_turn_user_messages();
   [[nodiscard]] ava::core::Result<bool> prepare_context_overflow_retry(ava::core::Error const& error);
   [[nodiscard]] ava::core::Result<ProviderTurn> request_provider_turn();
+  [[nodiscard]] ava::core::VoidResult receive_provider_events(ava::provider::HttpRequest const& built_request,
+                                                              ava::provider::ProviderRequest const& provider_request, ProviderEventAccumulator& accumulator);
   [[nodiscard]] ava::core::VoidResult initialize_tools();
   [[nodiscard]] ava::core::VoidResult persist_assistant_turn(ProviderTurn const& provider_turn, PendingCommittedToolResults& pending_results);
   [[nodiscard]] ava::core::Result<ToolDispatchResult> dispatch_and_commit_tool(ProviderToolCall const& call, PendingCommittedToolResults& pending_results);

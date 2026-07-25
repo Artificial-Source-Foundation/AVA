@@ -51,7 +51,7 @@ ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime:
   return ava::permissions::PermissionRuleStore{.global_rules_file = session.paths().ava_config_dir / "permission-rules.json",
                                                .workspace_rules_file = session.workspace_dir() / ".ava" / "permission-rules.json",
                                                .workspace_dir = session.workspace_dir(),
-                                               .anchor_set = session.anchor_set};
+                                               .anchor_set = session.anchor_set()};
 }
 
 std::vector<std::filesystem::path> command_authority_roots_for_session(runtime::Session const& session)
@@ -90,11 +90,11 @@ ava::core::Result<runtime::Session> create_runtime_session_like(runtime::Session
   auto options = base_options;
   options.mode = current.mode();
   options.paths = current.paths();
-  options.anchor_set = current.anchor_set;
-  options.subagent_coordinator = current.subagent_coordinator;
-  options.subagent_delivery_manager = current.subagent_delivery_manager;
-  options.session_title_coordinator = current.session_title_coordinator;
-  options.diagnostics = current.diagnostics;
+  options.anchor_set = current.anchor_set();
+  options.subagent_coordinator = current.subagent_coordinator();
+  options.subagent_delivery_manager = current.subagent_delivery_manager();
+  options.session_title_coordinator = current.session_title_coordinator();
+  options.diagnostics = current.diagnostics();
   return create_runtime_session_at(std::move(options), current.workspace_dir(), current.current_dir());
 }
 
@@ -104,11 +104,11 @@ ava::core::Result<runtime::Session> open_runtime_session_like(runtime::Session c
   auto options = base_options;
   options.mode = current.mode();
   options.paths = current.paths();
-  options.anchor_set = current.anchor_set;
-  options.subagent_coordinator = current.subagent_coordinator;
-  options.subagent_delivery_manager = current.subagent_delivery_manager;
-  options.session_title_coordinator = current.session_title_coordinator;
-  options.diagnostics = current.diagnostics;
+  options.anchor_set = current.anchor_set();
+  options.subagent_coordinator = current.subagent_coordinator();
+  options.subagent_delivery_manager = current.subagent_delivery_manager();
+  options.session_title_coordinator = current.session_title_coordinator();
+  options.diagnostics = current.diagnostics();
   return open_runtime_session_at(std::move(options), current.workspace_dir(), current.current_dir(), requested_session_id);
 }
 

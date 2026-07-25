@@ -122,20 +122,20 @@ ava::core::Result<bool> set_runtime_reasoning(runtime::Session& session, std::op
   {
     selection->level = core::trim(selection->level);
     selection->display = core::trim(selection->display);
-    auto resolved = runtime::resolve_runtime_reasoning_selection(session.model, std::move(*selection));
+    auto resolved = runtime::resolve_runtime_reasoning_selection(session.model(), std::move(*selection));
     if (!resolved)
     {
       return std::unexpected(std::move(resolved.error()));
     }
     selection = std::move(*resolved);
   }
-  if (runtime::same_reasoning_selection(session.reasoning, selection))
+  if (runtime::same_reasoning_selection(session.reasoning(), selection))
     return false;
 
-  auto appended = session.append_owned(runtime::make_reasoning_change_entry(session.model, selection));
+  auto appended = session.append_owned(runtime::make_reasoning_change_entry(session.model(), selection));
   if (!appended)
     return std::unexpected(std::move(appended.error()));
-  session.reasoning = std::move(selection);
+  session.model_selection().reasoning = std::move(selection);
   if (auto refreshed = refresh_runtime_parent_configuration(session); !refreshed)
     return std::unexpected(std::move(refreshed.error()));
   return true;

@@ -352,9 +352,9 @@ std::string state_result_json(runtime::Session const& session, bool cancel_reque
   json += ',';
   json += string_field_json("mode", ava::agent::to_string(session.mode()));
   json += ',';
-  json += string_field_json("provider", session.model.provider_id);
+  json += string_field_json("provider", session.model().provider_id);
   json += ',';
-  json += string_field_json("model", session.model.model_id);
+  json += string_field_json("model", session.model().model_id);
   json += ',';
   json += string_field_json("workspace_dir", session.workspace_dir().string());
   json += ',';
@@ -366,25 +366,25 @@ std::string state_result_json(runtime::Session const& session, bool cancel_reque
   json += ',';
   json += bool_field_json("cancel_requested", cancel_requested);
   json += ',';
-  json += bool_field_json("reasoning_enabled", session.reasoning.has_value());
-  if (session.reasoning)
+  json += bool_field_json("reasoning_enabled", session.reasoning().has_value());
+  if (session.reasoning())
   {
     json += ',';
-    json += string_field_json("reasoning_level", session.reasoning->level);
-    if (session.reasoning->provider_level && *session.reasoning->provider_level != session.reasoning->level)
+    json += string_field_json("reasoning_level", session.reasoning()->level);
+    if (session.reasoning()->provider_level && *session.reasoning()->provider_level != session.reasoning()->level)
     {
       json += ',';
-      json += string_field_json("reasoning_provider_level", *session.reasoning->provider_level);
+      json += string_field_json("reasoning_provider_level", *session.reasoning()->provider_level);
     }
-    if (session.reasoning->budget_tokens)
+    if (session.reasoning()->budget_tokens)
     {
       json += ',';
-      json += integer_field_json("reasoning_budget_tokens", *session.reasoning->budget_tokens);
+      json += integer_field_json("reasoning_budget_tokens", *session.reasoning()->budget_tokens);
     }
-    if (!session.reasoning->display.empty())
+    if (!session.reasoning()->display.empty())
     {
       json += ',';
-      json += string_field_json("reasoning_display", session.reasoning->display);
+      json += string_field_json("reasoning_display", session.reasoning()->display);
     }
   }
   json += ',';
@@ -490,16 +490,16 @@ ava::core::Result<std::string> list_models_result_json(runtime::Session const& s
   bool current_in_catalog = false;
   for (auto const& model : models)
   {
-    current_in_catalog = current_in_catalog || (model.provider_id == session.model.provider_id && model.model_id == session.model.model_id);
+    current_in_catalog = current_in_catalog || (model.provider_id == session.model().provider_id && model.model_id == session.model().model_id);
   }
   std::string json = "{";
   json += string_field_json("default_provider", registry->default_provider_id);
   json += ',';
   json += string_field_json("default_model", registry->default_model_id);
   json += ',';
-  json += string_field_json("current_provider", session.model.provider_id);
+  json += string_field_json("current_provider", session.model().provider_id);
   json += ',';
-  json += string_field_json("current_model", session.model.model_id);
+  json += string_field_json("current_model", session.model().model_id);
   json += ",\"models\":[";
   for (std::size_t index = 0; index < models.size(); ++index)
   {
@@ -511,7 +511,7 @@ ava::core::Result<std::string> list_models_result_json(runtime::Session const& s
   {
     if (!models.empty())
       json += ',';
-    json += model_info_json(session.model, session, false);
+    json += model_info_json(session.model(), session, false);
   }
   json += "]}";
   return json;

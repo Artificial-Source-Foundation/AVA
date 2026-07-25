@@ -172,9 +172,9 @@ std::vector<ava::agent::QuestionOption> provider_options(runtime::Session const&
     groups.push_back(std::move(group));
     options.push_back(ava::agent::QuestionOption{.value = std::move(value), .label = std::move(label)});
   };
-  if (!session.model.provider_id.empty())
+  if (!session.model().provider_id.empty())
   {
-    add(session.model.provider_id, connect_provider_display_name(session.model.provider_id) + " ✓", connect_provider_group_id(session.model.provider_id));
+    add(session.model().provider_id, connect_provider_display_name(session.model().provider_id) + " ✓", connect_provider_group_id(session.model().provider_id));
   }
   for (auto const& profile : ava::config::builtin_provider_profiles())
   {

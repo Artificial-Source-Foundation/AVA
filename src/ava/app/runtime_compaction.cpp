@@ -29,8 +29,8 @@ runtime::Event base_compaction_event_locked(runtime::Session const& session, run
     event.timestamp = ava::session::now_timestamp();
     event.session_id = session.store.session_id();
     event.mode = session.mode();
-    event.provider_id = session.model.provider_id;
-    event.model_id = session.model.model_id;
+    event.provider_id = session.model().provider_id;
+    event.model_id = session.model().model_id;
     return event;
   };
   if (!options.session_mutex)
@@ -403,11 +403,11 @@ ava::core::Result<ava::session::CompactionConfig> resolve_compaction_config(runt
 {
   if (!config.model_explicit)
   {
-    config.provider_id = session.model.provider_id;
-    config.model_id = session.model.model_id;
+    config.provider_id = session.model().provider_id;
+    config.model_id = session.model().model_id;
     return config;
   }
-  auto const provider_id = config.provider_explicit ? config.provider_id : session.model.provider_id;
+  auto const provider_id = config.provider_explicit ? config.provider_id : session.model().provider_id;
   auto const model_id = config.model_id;
   auto model = resolve_runtime_model(session.paths(), provider_id, model_id);
   if (!model)
@@ -514,14 +514,14 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
   if (!effective_config)
     return std::unexpected(std::move(effective_config.error()));
   ava::core::Result<ava::config::ModelInfo> summary_model =
-      effective_config->model_explicit ? resolve_runtime_model(session.paths(), effective_config->provider_id, effective_config->model_id) : session.model;
+      effective_config->model_explicit ? resolve_runtime_model(session.paths(), effective_config->provider_id, effective_config->model_id) : session.model();
   if (!summary_model)
     return std::unexpected(std::move(summary_model.error()));
 
   auto summary_options = options;
   std::unique_ptr<ava::provider::Provider> owned_provider;
   ava::provider::Provider const* summary_provider = &provider;
-  if (effective_config->provider_id != session.model.provider_id)
+  if (effective_config->provider_id != session.model().provider_id)
   {
     summary_options.access_token.clear();
     summary_options.credential_type = "bearer";
@@ -672,12 +672,12 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
     auto prepared = prepare_compaction_context(*entries, *config, replayed_user_messages);
     if (!prepared)
       return std::unexpected(std::move(prepared.error()));
-    auto const threshold = ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens);
+    auto const threshold = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens);
     std::size_t estimated_tokens = prepared->estimated_tokens;
     std::size_t threshold_tokens = threshold;
     if (trigger == "auto")
     {
-      auto decision = ava::session::should_auto_compact(*entries, *config, session.model.context_window_tokens);
+      auto decision = ava::session::should_auto_compact(*entries, *config, session.model().context_window_tokens);
       if (!decision)
         return std::unexpected(std::move(decision.error()));
       if (!decision->should_compact)

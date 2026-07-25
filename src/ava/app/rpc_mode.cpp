@@ -273,7 +273,7 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
         else
         {
           provider_id = config->provider_id;
-          if (provider_id == options.session.model.provider_id)
+          if (provider_id == options.session.model().provider_id)
           {
             selected_provider = rpc::provider_for_session_model(options.session, options.injected_provider_id, options.injected_provider);
           }
@@ -360,7 +360,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
   {
     runtime::session_ts::rat session_r(unlocked_session);
     DoutEntering(dc::rpc, "run_rpc_loop(...) with session_id=" << session_r->store.session_id()
-        << ", provider_id=" << session_r->model.provider_id << ", model_id=" << session_r->model.model_id);
+        << ", provider_id=" << session_r->model().provider_id << ", model_id=" << session_r->model().model_id);
   }
 #endif
 
@@ -385,7 +385,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
   }
   runtime_options.permission_resolver =
       ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(session), std::move(runtime_options.permission_resolver));
-  std::string const injected_provider_id = session.model.provider_id;
+  std::string const injected_provider_id = session.model().provider_id;
 
   auto reap_finished_prompt = [&] {
     if (prompt_worker && rpc::async_worker_reap_ready(run_state))
@@ -796,8 +796,8 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
     {
       auto cancellation = rpc::begin_cancellation(run_state);
       static_cast<void>(rpc::cancel_pending_resolvers(output, pending_state));
-      if (session.run_controller)
-        static_cast<void>(session.run_controller->request_stop(StopReason::UserCanceled));
+      if (session.run_controller())
+        static_cast<void>(session.run_controller()->request_stop(StopReason::UserCanceled));
       if (cancellation.deferred_to_terminal_publication)
       {
         rpc::wait_for_terminal_publication(run_state);
@@ -1121,7 +1121,7 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
   runtime_options.offline = session->is_offline() || options.open_options.offline;
 
   auto registry = ava::provider::builtin_provider_registry();
-  auto provider = registry.create(session->model.provider_id);
+  auto provider = registry.create(session->model().provider_id);
   if (!provider)
   {
     err << provider.error().format() << '\n';

@@ -390,7 +390,7 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   auto canceled = canceled_session ? ava::app::run_prompt(*canceled_session, "cancel", provider, canceled_transport, canceled_options)
                                    : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(canceled_session.error()));
   expect(!canceled && canceled_session &&
-             ava::diagnostics::read_last_failure_record(canceled_paths, *canceled_session->anchor_set).state ==
+             ava::diagnostics::read_last_failure_record(canceled_paths, *canceled_session->anchor_set()).state ==
                  ava::diagnostics::StoredRecordState::Absent,
          "runtime cancellation does not create a last-failure artifact");
 
@@ -404,7 +404,7 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   provider_options.access_token = "token";
   auto provider_result = provider_session ? ava::app::run_prompt(*provider_session, "fail", provider, provider_transport, provider_options)
                                           : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(provider_session.error()));
-  auto provider_failure = provider_session ? ava::diagnostics::read_last_failure_record(provider_paths, *provider_session->anchor_set)
+  auto provider_failure = provider_session ? ava::diagnostics::read_last_failure_record(provider_paths, *provider_session->anchor_set())
                                            : ava::diagnostics::StoredRecord<ava::diagnostics::LastFailureRecord>{};
   auto const provider_body = read_all(provider_paths.ava_state_dir / "diagnostics" / "last-failure-v1.json");
   expect(!provider_result && provider_failure.record && provider_failure.record->failure.component == ava::diagnostics::ComponentClass::Provider &&
@@ -426,7 +426,7 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   ava::tests::FakeTransport tool_transport({});
   auto tool_result = tool_session ? ava::app::run_prompt(*tool_session, "tool failure", provider, tool_transport, tool_options)
                                   : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(tool_session.error()));
-  auto tool_failure = tool_session ? ava::diagnostics::read_last_failure_record(tool_paths, *tool_session->anchor_set)
+  auto tool_failure = tool_session ? ava::diagnostics::read_last_failure_record(tool_paths, *tool_session->anchor_set())
                                    : ava::diagnostics::StoredRecord<ava::diagnostics::LastFailureRecord>{};
   expect(!tool_result && tool_failure.record && tool_failure.record->failure.component == ava::diagnostics::ComponentClass::Tool,
          "central runtime tool failure persists the typed tool terminal class");
@@ -445,7 +445,7 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   ava::tests::FakeTransport session_transport({});
   auto session_result = failed_session ? ava::app::run_prompt(*failed_session, "session failure", provider, session_transport, session_options)
                                        : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(failed_session.error()));
-  auto session_failure = failed_session ? ava::diagnostics::read_last_failure_record(session_paths, *failed_session->anchor_set)
+  auto session_failure = failed_session ? ava::diagnostics::read_last_failure_record(session_paths, *failed_session->anchor_set())
                                         : ava::diagnostics::StoredRecord<ava::diagnostics::LastFailureRecord>{};
   expect(!session_result && session_failure.record && session_failure.record->failure.component == ava::diagnostics::ComponentClass::Session,
          "central runtime persistence failure persists the typed session terminal class");

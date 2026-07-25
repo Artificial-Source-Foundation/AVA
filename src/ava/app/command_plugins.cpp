@@ -77,7 +77,7 @@ ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::Session co
 {
   return ava::plugin::PluginDiscoveryOptions{
       .global_plugins_dir = session.paths().ava_config_dir / "plugins",
-      .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir() / ".ava" / "plugins" : std::filesystem::path{}};
+      .project_plugins_dir = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "plugins" : std::filesystem::path{}};
 }
 
 std::filesystem::path plugin_enablement_file(runtime::Session const& session)

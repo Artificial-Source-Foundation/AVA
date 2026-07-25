@@ -632,7 +632,7 @@ void SessionTitleCoordinator::start()
 void SessionTitleCoordinator::schedule(runtime::Session const& session, std::string_view original_user_text, std::string_view committed_turn_id,
                                        runtime::RunOptions const& run_options) noexcept
 {
-  if (!options_.config.enabled || session.sessionless() || !session.created || !session.run_controller || !session.anchor_set || committed_turn_id.empty())
+  if (!options_.config.enabled || session.sessionless() || !session.created || !session.run_controller() || !session.anchor_set() || committed_turn_id.empty())
     return;
   try
   {
@@ -658,12 +658,12 @@ void SessionTitleCoordinator::schedule(runtime::Session const& session, std::str
               .committed_turn_id = std::string(committed_turn_id),
               .fallback_title = fallback_title,
               .read_authority = std::move(*read_authority),
-              .append_controller = session.run_controller,
+              .append_controller = session.run_controller(),
               .append_route = std::move(append_route),
               .request = SessionTitleGenerationRequest{.paths = session.paths(),
-                                                       .active_model = session.model,
+                                                       .active_model = session.model(),
                                                        .config = options_.config,
-                                                       .anchor_set = session.anchor_set,
+                                                       .anchor_set = session.anchor_set(),
                                                        .source_text = source_text,
                                                        .access_token = run_options.access_token,
                                                        .credential_type = run_options.credential_type,

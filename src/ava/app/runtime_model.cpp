@@ -142,26 +142,26 @@ ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::Xdg
 
 ava::core::Result<bool> switch_runtime_model(runtime::Session& session, ava::config::ModelInfo model)
 {
-  if (session.model.provider_id == model.provider_id && session.model.model_id == model.model_id)
+  if (session.model().provider_id == model.provider_id && session.model().model_id == model.model_id)
     return false;
 
   auto prompt_state = runtime::load_runtime_prompt_state(session.paths(), model, session.mode(), session.workspace_dir(), session.current_dir(),
-                                                         project_resources_trusted(session.project_trust), session.prompt_overrides());
+                                                         project_resources_trusted(session.project_trust()), session.prompt_overrides());
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
 
-  auto const previous = session.model;
+  auto const previous = session.model();
   auto appended = session.append_owned(runtime::make_model_change_entry(previous, model));
   if (!appended)
     return std::unexpected(std::move(appended.error()));
 
-  session.model = std::move(model);
+  session.model_selection().model = std::move(model);
   session.resolve_prompt_state() = runtime::ResolvedPromptState{.mode = prompt_state->mode,
                                                                 .base_prompt = std::move(prompt_state->base_prompt),
                                                                 .context_sources = std::move(prompt_state->context_sources),
                                                                 .freshness_sources = std::move(prompt_state->freshness_sources),
                                                                 .system_prompt = std::move(prompt_state->system_prompt)};
-  session.reasoning = std::nullopt;
+  session.model_selection().reasoning = std::nullopt;
   if (auto refreshed = refresh_runtime_parent_configuration(session); !refreshed)
     return std::unexpected(std::move(refreshed.error()));
   return true;

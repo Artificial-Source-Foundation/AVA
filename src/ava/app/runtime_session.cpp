@@ -90,18 +90,18 @@ ava::core::VoidResult apply_initial_reasoning_level(runtime::Session& session, s
   if (level.empty())
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning level is required");
-    add_cli_reasoning_context(error, session.model);
+    add_cli_reasoning_context(error, session.model());
     return std::unexpected(std::move(error));
   }
 
   std::optional<runtime::ReasoningSelection> selection = std::nullopt;
   if (level != "off")
   {
-    auto selected = reasoning_selection_for_level(session.model, std::move(level));
+    auto selected = reasoning_selection_for_level(session.model(), std::move(level));
     if (!selected)
     {
       auto error = std::move(selected.error());
-      add_cli_reasoning_context(error, session.model);
+      add_cli_reasoning_context(error, session.model());
       return std::unexpected(std::move(error));
     }
     selection = std::move(*selected);
@@ -111,7 +111,7 @@ ava::core::VoidResult apply_initial_reasoning_level(runtime::Session& session, s
   if (!changed)
   {
     auto error = std::move(changed.error());
-    add_cli_reasoning_context(error, session.model);
+    add_cli_reasoning_context(error, session.model());
     return std::unexpected(std::move(error));
   }
   return {};
@@ -377,36 +377,37 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
     title_coordinator = std::move(*created_coordinator);
   }
 
-  runtime::InvocationInputs const invocation_inputs{.workspace_dir = workspace_dir,
-                                                     .current_dir = current_dir,
-                                                     .tool_visibility = options.tool_visibility,
-                                                     .paths = options.paths,
-                                                     .sessionless = sessionless,
-                                                     .is_offline_ = options.offline,
-                                                     .additional_writable_dirs = options.additional_writable_dirs,
-                                                     .session_read_limits = session_read_limits,
-                                                     .prompt_overrides = options.prompt_overrides};
-  runtime::ResolvedPromptState const resolved_prompt_state{.mode = options.mode,
-                                                           .base_prompt = std::move(prompt_state->base_prompt),
-                                                           .context_sources = std::move(prompt_state->context_sources),
-                                                           .freshness_sources = std::move(prompt_state->freshness_sources),
-                                                           .system_prompt = std::move(prompt_state->system_prompt)};
+  runtime::InvocationInputs invocation_inputs{.workspace_dir = workspace_dir,
+                                              .current_dir = current_dir,
+                                              .tool_visibility = options.tool_visibility,
+                                              .paths = options.paths,
+                                              .sessionless = sessionless,
+                                              .is_offline_ = options.offline,
+                                              .additional_writable_dirs = options.additional_writable_dirs,
+                                              .session_read_limits = session_read_limits,
+                                              .prompt_overrides = options.prompt_overrides};
+  runtime::ResolvedPromptState resolved_prompt_state{.mode = options.mode,
+                                                     .base_prompt = std::move(prompt_state->base_prompt),
+                                                     .context_sources = std::move(prompt_state->context_sources),
+                                                     .freshness_sources = std::move(prompt_state->freshness_sources),
+                                                     .system_prompt = std::move(prompt_state->system_prompt)};
+  runtime::ModelSelection model_selection{.model = std::move(model), .reasoning = std::move(reasoning), .scoped_model_cycle = registry.scoped_model_cycle};
+  runtime::TrustState trust_state{.project_trust = std::move(project_trust)};
+  runtime::SessionResources resources{.lease = std::move(lease),
+                                      .anchor_set = std::move(anchor_set),
+                                      .run_controller = std::make_shared<SessionRunController>(*append_target),
+                                      .append_target = std::move(*append_target),
+                                      .subagent_coordinator = delivery_manager->coordinator(),
+                                      .subagent_delivery_manager = std::move(delivery_manager),
+                                      .session_title_coordinator = std::move(title_coordinator),
+                                      .diagnostics = options.diagnostics};
   runtime::Session session({.invocation_inputs_ = std::move(invocation_inputs),
                             .resolved_prompt_state_ = std::move(resolved_prompt_state),
+                            .model_selection_ = std::move(model_selection),
+                            .trust_state_ = std::move(trust_state),
+                            .resources_ = std::move(resources),
                             .store = std::move(store),
-                            .model = std::move(model),
-                            .reasoning = std::move(reasoning),
-                            .project_trust = std::move(project_trust),
-                            .scoped_model_cycle = registry.scoped_model_cycle,
-                            .created = created,
-                            .lease = std::move(lease),
-                            .anchor_set = std::move(anchor_set),
-                            .run_controller = std::make_shared<SessionRunController>(*append_target),
-                            .append_target = std::move(*append_target),
-                            .subagent_coordinator = delivery_manager->coordinator(),
-                            .subagent_delivery_manager = std::move(delivery_manager),
-                            .session_title_coordinator = std::move(title_coordinator),
-                            .diagnostics = options.diagnostics});
+                            .created = created});
 
   if (options.initial_reasoning_level)
   {
@@ -414,7 +415,7 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
     {
       auto error = std::move(applied.error());
       store = std::move(session.store);
-      lease = std::move(session.lease);
+      lease = std::move(session.resources().lease);
       return std::unexpected(std::move(error));
     }
   }
@@ -423,15 +424,15 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
   // so a later initialization failure cannot leak an attached owner lease.
   if (!sessionless)
   {
-    auto activated = session.subagent_coordinator->activate_parent(session.store.session_id());
+    auto activated = session.subagent_coordinator()->activate_parent(session.store.session_id());
     if (!activated)
     {
       auto error = std::move(activated.error());
       store = std::move(session.store);
-      lease = std::move(session.lease);
+      lease = std::move(session.resources().lease);
       return std::unexpected(std::move(error));
     }
-    session.subagent_delivery_manager->attach_parent(session.store.session_id());
+    session.subagent_delivery_manager()->attach_parent(session.store.session_id());
   }
   return session;
 }
@@ -608,22 +609,22 @@ ava::core::VoidResult replace_runtime_session(runtime::Session& destination, run
 {
   // Background ownership is application-scoped. Retire only the visible
   // session controller and preserve the exact coordinator across navigation.
-  auto coordinator = destination.subagent_coordinator;
-  auto delivery_manager = destination.subagent_delivery_manager;
-  auto title_coordinator = destination.session_title_coordinator;
+  auto coordinator = destination.resources().subagent_coordinator;
+  auto delivery_manager = destination.resources().subagent_delivery_manager;
+  auto title_coordinator = destination.resources().session_title_coordinator;
   auto const detached_parent_id = destination.sessionless() ? std::string{} : destination.store.session_id();
   bool const leaves_detached_parent = !detached_parent_id.empty() && (replacement.sessionless() || replacement.store.session_id() != detached_parent_id);
-  destination.run_controller.reset();
+  destination.resources().run_controller.reset();
   destination = std::move(replacement);
   if (delivery_manager)
   {
-    destination.subagent_delivery_manager = delivery_manager;
-    destination.subagent_coordinator = destination.subagent_delivery_manager->coordinator();
+    destination.resources().subagent_delivery_manager = delivery_manager;
+    destination.resources().subagent_coordinator = destination.resources().subagent_delivery_manager->coordinator();
   }
   else if (coordinator)
-    destination.subagent_coordinator = coordinator;
+    destination.resources().subagent_coordinator = coordinator;
   if (title_coordinator)
-    destination.session_title_coordinator = std::move(title_coordinator);
+    destination.resources().session_title_coordinator = std::move(title_coordinator);
 
   // This is an explicit visible-session detach boundary. The delivery manager
   // keeps a capsule and journal owner when work remains; otherwise its exact

@@ -81,54 +81,45 @@ struct ResolvedPromptState
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-// Old aggregate for Session.
-// This class holds members that are still initialized by a designated initializer list.
+// Model selection.
 //
-// Members are grouped into cohorts by where their values come from and how long
-// they live. The grouping is documentation-only today, but it marks the seams
-// along which this aggregate is expected to be decomposed into smaller types.
-struct Session_aggregate_base
+// The active model and its derived/user-selected companions: the resolved
+// ModelInfo, the latest reasoning selection, and the optional scoped model
+// rotation. `model` and `reasoning` are re-derived on resume (model from the
+// persisted entries, reasoning from the last assistant turn); all three are
+// runtime-mutable: model/reasoning change on /models, scoped_model_cycle on
+// /models scope commands.
+struct ModelSelection
 {
-  InvocationInputs invocation_inputs_;          // Do NOT use this variable name outside of this file!
-
-  // Accessor.
-  InvocationInputs& invocation_inputs() { return invocation_inputs_; }
-
-  ResolvedPromptState resolved_prompt_state_;   // Do NOT use this variable name outside of this file!
-
-  // Accessors. The non-const overload is used to replace the whole bundle on
-  // mode/model changes; the const overload lets callers copy it out of a const
-  // Session without naming the member directly.
-  ResolvedPromptState& resolve_prompt_state() { return resolved_prompt_state_; }
-  ResolvedPromptState const& resolve_prompt_state() const { return resolved_prompt_state_; }
-
-  // ===========================================================================
-  // Persistent session identity.
-  // The durable content handle plus attributes projected back out of it on
-  // resume. `store` is the session's on-disk identity; `model` and `reasoning`
-  // are re-derived from the persisted entries rather than stored as fields.
-  // ===========================================================================
-  ava::session::SessionStore store;
   ava::config::ModelInfo model;
   std::optional<ReasoningSelection> reasoning = std::nullopt;
-
-  // ===========================================================================
-  // Re-derived state.
-  // Recomputed from config and workspace on every open, including resume.
-  // None of these round-trip through the store as fields. The resolved prompt
-  // material (mode, base/system prompt, context and freshness sources) lives
-  // in `resolved_prompt_state_` above and is replaced as a whole object.
-  // ===========================================================================
-  ProjectTrustState project_trust;
   std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
-  bool created = false;                        // True when this is a freshly created session rather than a resumed one.
 
-  // ===========================================================================
-  // Process-held live resources.
-  // Opened or constructed at startup and owning descriptors, threads, or
-  // mutexes. These cannot round-trip through disk and are not invocation
-  // inputs; they are infrastructure bound to this process.
-  // ===========================================================================
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+// Trust state.
+//
+// The project trust decision loaded for this session. Mutated when the user
+// adjusts trust (/trust commands); otherwise stable for the session lifetime.
+struct TrustState
+{
+  ProjectTrustState project_trust;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+// Session resources.
+//
+// Process-held live infrastructure bound to this process: the cross-process
+// lease, pre-opened anchor descriptors, the run controller and append target,
+// the bound read authority for detached capsules, and the shared
+// application-scoped services (subagent coordinator/delivery, title
+// coordinator, diagnostics, MCP config). These cannot round-trip through
+// disk; the three app-scoped services are rebound by replace_runtime_session
+// and mcp_config is set once at ACP session setup.
+struct SessionResources
+{
   // Persistent runtime owners hold a cross-process lease for the complete session lifetime.
   ava::session::SessionLease lease;
   // Pre-opened anchor descriptors for all writable directories. Opened once
@@ -155,12 +146,42 @@ struct Session_aggregate_base
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// Old aggregate for Session.
+// This class holds members that are still initialized by a designated initializer list.
+//
+// Members are grouped into cohorts by where their values come from and how long
+// they live. The grouping is documentation-only today, but it marks the seams
+// along which this aggregate is expected to be decomposed into smaller types.
+struct Session_aggregate_base
+{
+  InvocationInputs invocation_inputs_;          // Do NOT use this variable name outside of this file!
+  ResolvedPromptState resolved_prompt_state_;   // Do NOT use this variable name outside of this file!
+  ModelSelection model_selection_;              // Do NOT use this variable name outside of this file!
+  TrustState trust_state_;                      // Do NOT use this variable name outside of this file!
+  SessionResources resources_;                  // Do NOT use this variable name outside of this file!
+
+  // ===========================================================================
+  // Persistent session identity.
+  // `store` is the session's on-disk identity (a durable content handle);
+  // `created` records whether this Session was freshly created vs resumed.
+  // Resolved model/reasoning live in `model_selection_` above and are
+  // projected back out of the persisted entries on resume.
+  // ===========================================================================
+  ava::session::SessionStore store;
+  bool created = false;                         // True when this is a freshly created session rather than a resumed one.
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 // Hold the mutable application state associated with an open runtime session.
 //
 // The store may be persistent or ephemeral according to sessionless. Shared background jobs remain valid when the aggregate is moved or replaced.
-class Session : public Session_aggregate_base
+class Session : protected Session_aggregate_base
 {
  public:
+  using Session_aggregate_base::store;
+  using Session_aggregate_base::created;
+
   // Move constructors.
   Session(Session&& session) = default;
   Session(Session_aggregate_base&& base) : Session_aggregate_base(std::move(base)) { }
@@ -169,6 +190,26 @@ class Session : public Session_aggregate_base
   Session& operator=(Session&& session) = default;
 
   // Accessors.
+
+  // Base class accessors.
+  //
+  // The non-const overload is used to replace the whole bundle on mode/model changes;
+  // the const overload lets callers copy it out of a const Session without naming the member directly.
+
+  InvocationInputs& invocation_inputs() { return invocation_inputs_; }
+  InvocationInputs const& invocation_inputs() const { return invocation_inputs_; }
+
+  ResolvedPromptState& resolve_prompt_state() { return resolved_prompt_state_; }
+  ResolvedPromptState const& resolve_prompt_state() const { return resolved_prompt_state_; }
+
+  ModelSelection& model_selection() { return model_selection_; }
+  ModelSelection const& model_selection() const { return model_selection_; }
+
+  TrustState& trust_state() { return trust_state_; }
+  TrustState const& trust_state() const { return trust_state_; }
+
+  SessionResources& resources() { return resources_; }
+  SessionResources const& resources() const { return resources_; }
 
   // Invocation inputs.
   std::filesystem::path const& workspace_dir() const { return invocation_inputs_.workspace_dir; }
@@ -189,35 +230,54 @@ class Session : public Session_aggregate_base
   ava::session::SessionReadLimits const& session_read_limits() const { return invocation_inputs_.session_read_limits; }
   PromptOverrides const& prompt_overrides() const { return invocation_inputs_.prompt_overrides; }
 
+  // Model selection.
+  ava::config::ModelInfo const& model() const { return model_selection_.model; }
+  std::optional<ReasoningSelection> const& reasoning() const { return model_selection_.reasoning; }
+  std::optional<std::vector<std::string>> const& scoped_model_cycle() const { return model_selection_.scoped_model_cycle; }
+
+  // Trust state.
+  ProjectTrustState const& project_trust() const { return trust_state_.project_trust; }
+
+  // Session resources.
+  ava::session::SessionLease const& lease() const { return resources_.lease; }
+  std::shared_ptr<ava::core::AnchorSet> const& anchor_set() const { return resources_.anchor_set; }
+  std::shared_ptr<SessionRunController> const& run_controller() const { return resources_.run_controller; }
+  std::shared_ptr<ava::session::SessionAppendTarget> const& append_target() const { return resources_.append_target; }
+  std::optional<ava::session::SessionReadAuthority> const& bound_read_authority() const { return resources_.bound_read_authority; }
+  std::shared_ptr<ava::agent::SubagentCoordinator> const& subagent_coordinator() const { return resources_.subagent_coordinator; }
+  std::shared_ptr<ava::app::SubagentDeliveryManager> const& subagent_delivery_manager() const { return resources_.subagent_delivery_manager; }
+  std::shared_ptr<ava::app::SessionTitleCoordinator> const& session_title_coordinator() const { return resources_.session_title_coordinator; }
+  std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> const& diagnostics() const { return resources_.diagnostics; }
+  std::shared_ptr<ava::mcp::McpConfig const> const& mcp_config() const { return resources_.mcp_config; }
+
   // Bind a lifetime-safe history snapshot route to this session's exact lease
   // (or to its shared in-memory state in sessionless mode).
   [[nodiscard]] ava::core::Result<ava::session::SessionReadAuthority> read_authority() const
   {
-    if (bound_read_authority)
-      return *bound_read_authority;
+    if (resources_.bound_read_authority)
+      return *resources_.bound_read_authority;
     return invocation_inputs_.sessionless ? ava::session::SessionReadAuthority::create_ephemeral(store, invocation_inputs_.session_read_limits)
-                                          : ava::session::SessionReadAuthority::create_persistent(store, lease, invocation_inputs_.session_read_limits);
+                                           : ava::session::SessionReadAuthority::create_persistent(store, resources_.lease, invocation_inputs_.session_read_limits);
   }
 
   // Append through the session owner so writes remain serialized with active runs.
   [[nodiscard]] ava::core::VoidResult append_owned(ava::session::SessionEntry entry)
   {
-    if (!run_controller)
+    if (!resources_.run_controller)
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));
-    return run_controller->append(std::move(entry));
+    return resources_.run_controller->append(std::move(entry));
   }
 
   // Return the stable append route owned by this session, or an empty route when the controller is unavailable.
   [[nodiscard]] ava::agent::SessionAppendSink owner_append_route() const
   {
-    return run_controller ? run_controller->owner_append_route() : ava::agent::SessionAppendSink{};
+    return resources_.run_controller ? resources_.run_controller->owner_append_route() : ava::agent::SessionAppendSink{};
   }
 
- public:
   [[nodiscard]] CommandRegistry load_command_registry(CommandRegistryOptions options = {});
   [[nodiscard]] ava::agent::SessionAppendBatchSink owner_append_batch_route()
   {
-    return run_controller ? run_controller->owner_append_batch_route() : ava::agent::SessionAppendBatchSink{};
+    return resources_.run_controller ? resources_.run_controller->owner_append_batch_route() : ava::agent::SessionAppendBatchSink{};
   }
 
   AVA_DEBUG_PRINT_MEMBERS_ON_BASE(Session_aggregate_base)

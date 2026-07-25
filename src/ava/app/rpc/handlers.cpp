@@ -57,11 +57,11 @@ ava::core::Result<ava::config::ModelInfo> previous_runtime_model(runtime::Sessio
 ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session const& session, std::string_view injected_provider_id,
                                                              ava::provider::Provider const& injected_provider)
 {
-  if (session.model.provider_id == injected_provider_id)
+  if (session.model().provider_id == injected_provider_id)
   {
     return ProviderHandle{.provider = &injected_provider, .owned = nullptr};
   }
-  auto provider = create_runtime_provider(session.model.provider_id);
+  auto provider = create_runtime_provider(session.model().provider_id);
   if (!provider)
     return std::unexpected(std::move(provider.error()));
   return ProviderHandle{.provider = nullptr, .owned = std::move(*provider)};

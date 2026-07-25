@@ -18,7 +18,7 @@ ava::mcp::McpConfigLoadOptions mcp_config_options(runtime::Session const& sessio
 {
   auto options = ava::mcp::default_mcp_config_options(session.workspace_dir());
   options.global_config_file = session.paths().ava_config_dir / "mcp.json";
-  options.project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir() / ".ava" / "mcp.json" : std::filesystem::path{};
+  options.project_config_file = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "mcp.json" : std::filesystem::path{};
   return options;
 }
 

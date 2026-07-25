@@ -262,19 +262,17 @@ ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths con
   trust.workspace_dir = workspace;
   trust.trust_file = paths.ava_state_dir / "trusted-projects.json";
   trust.decision = ava::app::ProjectTrustDecision::Trusted;
-  ava::app::runtime::InvocationInputs const invocation_inputs = {
+  ava::app::runtime::InvocationInputs invocation_inputs = {
       .workspace_dir = workspace, .current_dir = workspace, .paths = paths, .sessionless = store ? store->is_ephemeral() : false};
+  ava::app::runtime::SessionResources session_resources{
+    .lease = {}, .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr)};
   return ava::app::runtime::Session_aggregate_base{.invocation_inputs_ = std::move(invocation_inputs),
                                                     .resolved_prompt_state_ = {},
+                                                    .model_selection_ = {.model = std::move(model)},
+                                                    .trust_state_ = {.project_trust = std::move(trust)},
+                                                    .resources_ = std::move(session_resources),
                                                     .store = std::move(*store),
-                                                    .model = std::move(model),
-                                                    .reasoning = std::nullopt,
-                                                    .project_trust = std::move(trust),
-                                                   .scoped_model_cycle = std::nullopt,
-                                                   .created = false,
-                                                   .lease = {},
-                                                   .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr),
-                                                   .subagent_coordinator = nullptr};
+                                                    .created = false};
 }
 
 std::string command_output_text(ava::core::Result<ava::app::CommandResult> const& command)

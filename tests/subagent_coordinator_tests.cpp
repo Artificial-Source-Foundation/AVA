@@ -1169,9 +1169,9 @@ void test_runtime_navigation_preserves_coordinator_and_child_authority()
     return;
   auto const unrelated_parent_id = replacement->store.session_id();
   expect(ava::app::replace_runtime_session(*visible, std::move(*replacement)).has_value(), "visible runtime session is replaced");
-  expect(visible->subagent_coordinator == coordinator && !other_process_activates(paths.ava_state_dir, original_parent_id),
+  expect(visible->subagent_coordinator() == coordinator && !other_process_activates(paths.ava_state_dir, original_parent_id),
          "process B cannot activate a parent after navigation while its child remains live");
-  expect(visible->subagent_coordinator == coordinator, "runtime replacement preserves the exact application coordinator");
+  expect(visible->subagent_coordinator() == coordinator, "runtime replacement preserves the exact application coordinator");
   {
     std::lock_guard lock(child->gate->mutex);
     expect(!child->gate->canceled, "runtime navigation does not cancel the running child");
@@ -1192,8 +1192,8 @@ void test_runtime_navigation_preserves_coordinator_and_child_authority()
   auto attempted = coordinator->record_delivery_attempt(original_parent_id, started->job.identity.job_id, "attempt_navigation", "fingerprint_navigation");
   auto acknowledged = attempted ? coordinator->acknowledge_delivery(original_parent_id, started->job.identity.job_id, "attempt_navigation", "turn_navigation")
                                 : ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot>(std::unexpected(std::move(attempted.error())));
-  if (visible->subagent_delivery_manager)
-    visible->subagent_delivery_manager->release_detached_parent(original_parent_id);
+  if (visible->subagent_delivery_manager())
+    visible->subagent_delivery_manager()->release_detached_parent(original_parent_id);
   expect(attempted && acknowledged && other_process_activates(paths.ava_state_dir, original_parent_id),
          "acknowledged detached delivery releases parent ownership for process B");
   auto persisted = child->store.load();

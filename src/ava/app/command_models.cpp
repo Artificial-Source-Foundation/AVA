@@ -175,20 +175,20 @@ std::string format_models_text(runtime::Session const& session, ava::config::Mod
   bool current_in_catalog = false;
 
   std::string output = "Models:\n";
-  output += "current " + session.model.provider_id + "/" + session.model.model_id + "\n";
-  output += session.reasoning ? "reasoning current " + session.reasoning->level + "\n" : "reasoning current default\n";
+  output += "current " + session.model().provider_id + "/" + session.model().model_id + "\n";
+  output += session.reasoning() ? "reasoning current " + session.reasoning()->level + "\n" : "reasoning current default\n";
   output += "default " + registry.default_provider_id + "/" + registry.default_model_id + "\n";
   if (!query.empty())
     output += "filter " + sanitize_inline_text(std::string(query)) + "\n";
   std::size_t shown = 0;
   for (auto const& model : models)
   {
-    current_in_catalog = current_in_catalog || (model.provider_id == session.model.provider_id && model.model_id == session.model.model_id);
+    current_in_catalog = current_in_catalog || (model.provider_id == session.model().provider_id && model.model_id == session.model().model_id);
     if (!model_matches_query(model, query))
       continue;
     ++shown;
     bool const registered = providers.contains(model.provider_id);
-    output += model.provider_id == session.model.provider_id && model.model_id == session.model.model_id ? "* " : "  ";
+    output += model.provider_id == session.model().provider_id && model.model_id == session.model().model_id ? "* " : "  ";
     output += model.provider_id + "/" + model.model_id;
     if (!model.display_name.empty())
       output += "  " + model.display_name;
@@ -222,7 +222,7 @@ std::string format_models_text(runtime::Session const& session, ava::config::Mod
   }
   if (!current_in_catalog)
   {
-    output += "* " + session.model.provider_id + "/" + session.model.model_id + "  current model outside catalog\n";
+    output += "* " + session.model().provider_id + "/" + session.model().model_id + "  current model outside catalog\n";
   }
   if (shown == 0 && !query.empty())
   {

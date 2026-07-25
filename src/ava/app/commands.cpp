@@ -903,27 +903,27 @@ ReloadReportRow reload_model_settings(runtime::Session& session)
   auto registry = ava::config::load_model_registry(session.paths());
   if (!registry)
     return reload_error_row("models", registry.error());
-  session.scoped_model_cycle = registry->scoped_model_cycle;
+  session.model_selection().scoped_model_cycle = registry->scoped_model_cycle;
   if (auto refreshed = refresh_runtime_parent_configuration(session); !refreshed)
     return reload_error_row("models", refreshed.error());
   ReloadReportRow row{.name = "models", .status = "loaded", .details = {}};
   append_reload_detail(row, "config", session.paths().models_file.string());
   append_reload_detail(row, "models", std::to_string(registry->models.size()));
-  append_reload_detail(row, "scoped_cycle", session.scoped_model_cycle ? "configured" : "not configured");
-  append_reload_detail(row, "active_model", session.model.provider_id + "/" + session.model.model_id + " (unchanged)");
+  append_reload_detail(row, "scoped_cycle", session.scoped_model_cycle() ? "configured" : "not configured");
+  append_reload_detail(row, "active_model", session.model().provider_id + "/" + session.model().model_id + " (unchanged)");
   return row;
 }
 
 ReloadReportRow reload_prompt_settings(runtime::Session& session)
 {
-  auto prompt_state = runtime::load_runtime_prompt_state(session.paths(), session.model, session.mode(), session.workspace_dir(), session.current_dir(),
-                                                         project_resources_trusted(session.project_trust), session.prompt_overrides());
+  auto prompt_state = runtime::load_runtime_prompt_state(session.paths(), session.model(), session.mode(), session.workspace_dir(), session.current_dir(),
+                                                         project_resources_trusted(session.project_trust()), session.prompt_overrides());
   if (!prompt_state)
     return reload_error_row("prompts", prompt_state.error());
   if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
     return reload_error_row("prompts", refreshed.error());
   ReloadReportRow row{.name = "prompts", .status = "loaded", .details = {}};
-  append_reload_detail(row, "project_resources", project_resources_trusted(session.project_trust) ? "enabled" : "skipped");
+  append_reload_detail(row, "project_resources", project_resources_trusted(session.project_trust()) ? "enabled" : "skipped");
   append_reload_detail(row, "context_sources", std::to_string(session.context_sources().size()));
   append_reload_detail(row, "freshness_sources", std::to_string(session.freshness_sources().size()));
   append_reload_detail(row, "base_prompt",
@@ -936,7 +936,7 @@ ReloadReportRow reload_prompt_settings(runtime::Session& session)
 ReloadReportRow reload_trust_settings(runtime::Session& session)
 {
   auto next_trust = load_project_trust_state(session.paths(), session.workspace_dir());
-  auto prompt_state = runtime::load_runtime_prompt_state(session.paths(), session.model, session.mode(), session.workspace_dir(), session.current_dir(),
+  auto prompt_state = runtime::load_runtime_prompt_state(session.paths(), session.model(), session.mode(), session.workspace_dir(), session.current_dir(),
                                                          project_resources_trusted(next_trust), session.prompt_overrides());
   if (!prompt_state)
   {
@@ -944,15 +944,15 @@ ReloadReportRow reload_trust_settings(runtime::Session& session)
     append_reload_detail(row, "trust_file", next_trust.trust_file.string());
     return row;
   }
-  session.project_trust = std::move(next_trust);
+  session.trust_state().project_trust = std::move(next_trust);
   if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
     return reload_error_row("trust", refreshed.error());
   ReloadReportRow row{.name = "trust", .status = "loaded", .details = {}};
-  append_reload_detail(row, "trust_file", session.project_trust.trust_file.string());
-  append_reload_detail(row, "decision", std::string(to_string(session.project_trust.decision)));
-  append_reload_detail(row, "project_resources", project_resources_trusted(session.project_trust) ? "enabled" : "skipped");
-  if (!session.project_trust.diagnostic.empty())
-    append_reload_detail(row, "diagnostic", session.project_trust.diagnostic);
+  append_reload_detail(row, "trust_file", session.project_trust().trust_file.string());
+  append_reload_detail(row, "decision", std::string(to_string(session.project_trust().decision)));
+  append_reload_detail(row, "project_resources", project_resources_trusted(session.project_trust()) ? "enabled" : "skipped");
+  if (!session.project_trust().diagnostic.empty())
+    append_reload_detail(row, "diagnostic", session.project_trust().diagnostic);
   return row;
 }
 
@@ -971,7 +971,7 @@ ReloadReportRow reload_compaction_settings(runtime::Session& session)
   append_reload_detail(row, "auto_threshold_tokens", std::to_string(config->auto_threshold_tokens));
   append_reload_detail(row, "auto_threshold_percent", std::to_string(config->auto_threshold_percent));
   append_reload_detail(row, "effective_threshold_tokens",
-                       std::to_string(ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens)));
+                       std::to_string(ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens)));
   append_reload_detail(row, "keep_recent_tokens", std::to_string(config->keep_recent_tokens));
   append_reload_detail(row, "keep_recent_turns", std::to_string(config->keep_recent_turns));
   append_reload_detail(row, "keep_recent_messages", std::to_string(config->keep_recent_messages));
@@ -1084,14 +1084,14 @@ std::string project_trust_summary(ProjectTrustState const& state)
 ava::core::Result<CommandResult> reload_project_trust_state(runtime::Session& session, std::string prefix)
 {
   auto next_trust = load_project_trust_state(session.paths(), session.workspace_dir());
-  auto prompt_state = runtime::load_runtime_prompt_state(session.paths(), session.model, session.mode(), session.workspace_dir(), session.current_dir(),
+  auto prompt_state = runtime::load_runtime_prompt_state(session.paths(), session.model(), session.mode(), session.workspace_dir(), session.current_dir(),
                                                          project_resources_trusted(next_trust), session.prompt_overrides());
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
-  session.project_trust = std::move(next_trust);
+  session.trust_state().project_trust = std::move(next_trust);
   if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
     return std::unexpected(std::move(refreshed.error()));
-  return handled_text(std::move(prefix) + "\n" + project_trust_summary(session.project_trust));
+  return handled_text(std::move(prefix) + "\n" + project_trust_summary(session.project_trust()));
 }
 
 ava::core::Result<CommandResult> run_trust_command(runtime::Session& session, std::string_view argument)
@@ -1099,7 +1099,7 @@ ava::core::Result<CommandResult> run_trust_command(runtime::Session& session, st
   auto const args = split_command_arguments(argument);
   auto const action = args.empty() ? std::string("status") : args.front();
   if (action == "status")
-    return handled_text(project_trust_summary(session.project_trust));
+    return handled_text(project_trust_summary(session.project_trust()));
   if (action == "project" || action == "trust" || action == "approve")
   {
     auto saved = set_project_trust_decision(session.paths(), session.workspace_dir(), true);
@@ -1138,7 +1138,7 @@ ava::plugin::PluginDiscoveryOptions skill_plugin_discovery_options(runtime::Sess
 {
   return ava::plugin::PluginDiscoveryOptions{
       .global_plugins_dir = session.paths().ava_config_dir / "plugins",
-      .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir() / ".ava" / "plugins" : std::filesystem::path{}};
+      .project_plugins_dir = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "plugins" : std::filesystem::path{}};
 }
 
 std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(ava::plugin::PluginDiagnostics const& diagnostics)
@@ -1162,7 +1162,7 @@ ava::core::Result<std::string> skill_prompt_message(runtime::Session& session, C
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = session.workspace_dir(),
       .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
-      .include_project_skills = project_resources_trusted(session.project_trust),
+      .include_project_skills = project_resources_trusted(session.project_trust()),
   });
   auto const match = std::ranges::find_if(loaded.skills, [&](ava::context::LoadedSkill const& skill) { return skill.name == entry.skill_name; });
   if (match == loaded.skills.end())
@@ -1222,7 +1222,7 @@ ava::core::Result<std::string> mcp_prompt_message(runtime::Session& session, Com
 {
   auto config_options = ava::mcp::default_mcp_config_options(session.workspace_dir());
   config_options.global_config_file = session.paths().ava_config_dir / "mcp.json";
-  config_options.project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir() / ".ava" / "mcp.json" : std::filesystem::path{};
+  config_options.project_config_file = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "mcp.json" : std::filesystem::path{};
   auto config = ava::mcp::load_mcp_config(config_options);
   if (!config)
     return std::unexpected(std::move(config.error()));

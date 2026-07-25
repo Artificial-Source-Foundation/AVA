@@ -203,7 +203,7 @@ std::filesystem::path const& AcpSessionHost::current_dir() const noexcept
 
 bool AcpSessionHost::accepts_images() const noexcept
 {
-  return std::ranges::find(session_.model.input_modalities, "image") != session_.model.input_modalities.end();
+  return std::ranges::find(session_.model().input_modalities, "image") != session_.model().input_modalities.end();
 }
 
 ava::core::VoidResult AcpSessionHost::send_text_update(std::string_view kind, std::string_view text, std::string_view message_id) const
@@ -224,13 +224,13 @@ ava::core::Result<std::uint64_t> AcpSessionHost::reserve_prompt()
     return std::unexpected(session_error("session is closing", session_id_));
   if (active_prompt_)
     return std::unexpected(session_error("session already has an active prompt", session_id_));
-  if (!session_.run_controller)
+  if (!session_.run_controller())
     return std::unexpected(session_error("session run controller is unavailable", session_id_));
   ++next_prompt_reservation_;
   if (next_prompt_reservation_ == 0)
     ++next_prompt_reservation_;
   auto const request_id = ava::core::make_id("acp-run");
-  auto admitted = session_.run_controller->admit(RunRequest{.request_id = request_id});
+  auto admitted = session_.run_controller()->admit(RunRequest{.request_id = request_id});
   if (!admitted)
     return std::unexpected(std::move(admitted.error()));
   active_prompt_ = true;
@@ -326,7 +326,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> AcpSessionHost
     // repository-controlled build/test text). The MCP/session restriction
     // below is the only ACP-local gate that remains.
     bool const session_mcp_allow_requires_exact_command =
-        session_.mcp_config && acp_mcp_operation(prompt.operation) && (*persistent)->action == PermissionAction::Allow;
+        session_.mcp_config() && acp_mcp_operation(prompt.operation) && (*persistent)->action == PermissionAction::Allow;
     bool const exact_session_mcp_allow =
         !session_mcp_allow_requires_exact_command || (!(*persistent)->command.empty() && (*persistent)->command == prompt.command);
     if ((*persistent)->action == PermissionAction::Deny || exact_session_mcp_allow)
@@ -343,7 +343,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> AcpSessionHost
   // Session MCP configuration originates from the same untrusted ACP client.
   // Only an exact protected persistent operator rule may authorize it; client
   // permission responses and in-memory session grants must never do so.
-  if (acp_mcp_operation(prompt.operation) && session_.mcp_config)
+  if (acp_mcp_operation(prompt.operation) && session_.mcp_config())
   {
     PermissionResolutionDecision decision(
         PermissionResolution::Deny, "persistent operator authorization is required: add an exact protected persistent Allow for this session MCP operation");
@@ -637,9 +637,9 @@ void AcpSessionHost::cancel() noexcept
   // stop callbacks never acquire the host mutex; no host-owned I/O or wait is
   // performed while arbitration is locked.
   std::lock_guard lock(mutex_);
-  if (!active_prompt_ || !session_.run_controller)
+  if (!active_prompt_ || !session_.run_controller())
     return;
-  auto accepted = session_.run_controller->request_stop(StopReason::UserCanceled);
+  auto accepted = session_.run_controller()->request_stop(StopReason::UserCanceled);
   if (accepted && *accepted)
   {
     ++cancel_generation_;
@@ -654,9 +654,9 @@ ava::core::VoidResult AcpSessionHost::close()
     std::lock_guard lock(mutex_);
     closing_ = true;
     permission_grants_.clear();
-    if (active_prompt_ && session_.run_controller)
+    if (active_prompt_ && session_.run_controller())
     {
-      auto accepted = session_.run_controller->request_stop(StopReason::UserCanceled);
+      auto accepted = session_.run_controller()->request_stop(StopReason::UserCanceled);
       if (accepted && *accepted)
       {
         ++cancel_generation_;
@@ -844,7 +844,7 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::create(st
   auto session = create_runtime_session_at(std::move(options), options_.launch_root, cwd);
   if (!session)
     return std::unexpected(std::move(session.error()));
-  session->mcp_config = std::move(mcp_config);
+  session->resources().mcp_config = std::move(mcp_config);
   auto inserted = insert_reserved(std::move(*session));
   release_reservation = false;
   return inserted;
@@ -872,7 +872,7 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::load(std:
   auto session = open_runtime_session_at(std::move(options), options_.launch_root, cwd, session_id);
   if (!session)
     return std::unexpected(std::move(session.error()));
-  session->mcp_config = std::move(mcp_config);
+  session->resources().mcp_config = std::move(mcp_config);
   auto inserted = insert_reserved(std::move(*session));
   release_reservation = false;
   return inserted;

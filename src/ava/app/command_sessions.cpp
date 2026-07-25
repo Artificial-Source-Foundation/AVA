@@ -545,8 +545,8 @@ runtime::Event base_command_event(runtime::Session const& session, runtime::Even
   event.timestamp = ava::session::now_timestamp();
   event.session_id = session.store.session_id();
   event.mode = session.mode();
-  event.provider_id = session.model.provider_id;
-  event.model_id = session.model.model_id;
+  event.provider_id = session.model().provider_id;
+  event.model_id = session.model().model_id;
   return event;
 }
 
@@ -655,9 +655,9 @@ ava::core::Result<runtime::Session> reopen_session(runtime::Session const& curre
   options.mode = current.mode();
   options.tool_visibility = current.tool_visibility();
   options.paths = current.paths();
-  options.subagent_coordinator = current.subagent_coordinator;
-  options.subagent_delivery_manager = current.subagent_delivery_manager;
-  options.session_title_coordinator = current.session_title_coordinator;
+  options.subagent_coordinator = current.subagent_coordinator();
+  options.subagent_delivery_manager = current.subagent_delivery_manager();
+  options.session_title_coordinator = current.session_title_coordinator();
   return open_runtime_session(options);
 }
 
@@ -671,9 +671,9 @@ ava::core::Result<runtime::Session> create_fresh_session(runtime::Session const&
   options.mode = current.mode();
   options.tool_visibility = current.tool_visibility();
   options.paths = current.paths();
-  options.subagent_coordinator = current.subagent_coordinator;
-  options.subagent_delivery_manager = current.subagent_delivery_manager;
-  options.session_title_coordinator = current.session_title_coordinator;
+  options.subagent_coordinator = current.subagent_coordinator();
+  options.subagent_delivery_manager = current.subagent_delivery_manager();
+  options.session_title_coordinator = current.session_title_coordinator();
   return open_runtime_session(options);
 }
 
@@ -687,9 +687,9 @@ runtime::OpenOptions owned_replacement_options(runtime::Session const& current)
   options.paths = current.paths();
   options.prompt_overrides = current.prompt_overrides();
   options.offline = current.is_offline();
-  options.subagent_coordinator = current.subagent_coordinator;
-  options.subagent_delivery_manager = current.subagent_delivery_manager;
-  options.session_title_coordinator = current.session_title_coordinator;
+  options.subagent_coordinator = current.subagent_coordinator();
+  options.subagent_delivery_manager = current.subagent_delivery_manager();
+  options.session_title_coordinator = current.session_title_coordinator();
   return options;
 }
 
@@ -715,10 +715,10 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
     return result;
   }
   auto const trimmed_name = trim_ascii(name);
-  auto recovered = session.store.recover_torn_tail(session.lease, session.session_read_limits());
+  auto recovered = session.store.recover_torn_tail(session.lease(), session.session_read_limits());
   if (!recovered)
     return std::unexpected(std::move(recovered.error()));
-  auto staged_recovery = session.store.recover_incomplete_assistant_output_suffix(session.lease, session.session_read_limits());
+  auto staged_recovery = session.store.recover_incomplete_assistant_output_suffix(session.lease(), session.session_read_limits());
   if (!staged_recovery)
     return std::unexpected(std::move(staged_recovery.error()));
   auto branched = ava::session::create_session_branch(
@@ -729,7 +729,7 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
                                          .name = trimmed_name.empty() ? std::nullopt : std::optional<std::string>(trimmed_name),
                                          .labels = std::nullopt,
                                          .read_limits = session.session_read_limits(),
-                                         .source_lease = &session.lease,
+                                         .source_lease = &session.lease(),
                                          .mode = mode,
                                          .actor = "tui"});
   if (!branched)
@@ -993,7 +993,7 @@ std::string format_session_stats_text(runtime::Session const& session, ava::sess
   std::ostringstream output;
   output << "Session stats\n";
   output << "  session: " << shorten_middle(session.store.session_id(), 32) << "   entries: " << stats.entry_count << '\n';
-  output << "  model: " << session.model.provider_id << '/' << session.model.model_id << "   mode: " << ava::agent::to_string(session.mode()) << '\n';
+  output << "  model: " << session.model().provider_id << '/' << session.model().model_id << "   mode: " << ava::agent::to_string(session.mode()) << '\n';
   output << "  workspace: " << compact_workspace_label(session.workspace_dir()) << "   cwd: " << compact_cwd_label(session.current_dir(), session.workspace_dir())
          << '\n';
   if (!stats.first_timestamp.empty() || !stats.last_timestamp.empty())
@@ -1248,19 +1248,19 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
-  auto const include_project_resources = project_resources_trusted(session.project_trust);
+  auto const include_project_resources = project_resources_trusted(session.project_trust());
   auto const project_lsp_config = session.workspace_dir() / ".ava" / "lsp.json";
   auto const lsp_inspection = ava::lsp::inspect_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
       .global_config_file = session.paths().ava_config_dir / "lsp.json",
       .project_config_file = include_project_resources ? project_lsp_config : std::filesystem::path{},
       .workspace_root = session.workspace_dir(),
-      .anchor_set = session.anchor_set,
+      .anchor_set = session.anchor_set(),
       .mode = session.mode(),
   });
   std::string output = "Context freshness:\n";
   output += "  mode=" + ava::agent::to_string(session.mode()) + "\n";
-  output += "  model=" + session.model.provider_id + "/" + session.model.model_id + "\n";
-  output += "  project_trust=" + std::string(to_string(session.project_trust.decision)) +
+  output += "  model=" + session.model().provider_id + "/" + session.model().model_id + "\n";
+  output += "  project_trust=" + std::string(to_string(session.project_trust().decision)) +
             " project_resources=" + (include_project_resources ? std::string("enabled") : std::string("skipped")) + "\n";
   if (prompt_matches_query(session, trimmed_query))
   {
@@ -1453,7 +1453,7 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
     start_event.attempt = attempt + 1;
     start_event.max_attempts = max_compaction_attempts;
     start_event.estimated_tokens = prepared->estimated_tokens;
-    start_event.threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens);
+    start_event.threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens);
     start_event.retained_tokens = prepared->retained_tokens;
     if (auto emitted = emit_command_event(request, std::move(start_event)); !emitted)
     {
@@ -1497,7 +1497,7 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
                                                 .instructions = instructions,
                                                 .config = *config,
                                                 .estimated_tokens = prepared->estimated_tokens,
-                                                .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens),
+                                                .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens),
                                                 .retained_tokens = prepared->retained_tokens,
                                                 .trigger = "manual",
                                                 .recent_context = prepared->recent_context,
@@ -1531,7 +1531,7 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
       end_event.attempt = attempt + 1;
       end_event.max_attempts = max_compaction_attempts;
       end_event.estimated_tokens = prepared->estimated_tokens;
-      end_event.threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens);
+      end_event.threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens);
       end_event.retained_tokens = prepared->retained_tokens;
       end_event.post_compaction_tokens = ava::session::estimate_tokens(*summary) + ava::session::estimate_tokens(instructions) + prepared->retained_tokens;
       end_event.summary_bytes = summary->size();
@@ -1810,12 +1810,12 @@ ava::core::Result<CommandResult> run_recover_persistence_command(runtime::Sessio
 {
   CommandResult result;
   result.handled = true;
-  if (!session.run_controller)
+  if (!session.run_controller())
   {
     add_output(result, "session append controller is unavailable");
     return result;
   }
-  if (auto recovered = session.run_controller->reset_persistence_failure(); !recovered)
+  if (auto recovered = session.run_controller()->reset_persistence_failure(); !recovered)
   {
     add_output(result, recovered.error().format());
     return result;

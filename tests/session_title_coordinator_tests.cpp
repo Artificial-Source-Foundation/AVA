@@ -121,7 +121,7 @@ std::shared_ptr<ava::app::SessionTitleCoordinator> make_coordinator(std::shared_
 
 ava::core::Result<std::string> seed_committed_ordinary_turn(ava::app::runtime::Session& session, std::string text)
 {
-  auto authority = session.append_target->read_authority();
+  auto authority = session.append_target()->read_authority();
   if (!authority)
     return std::unexpected(std::move(authority.error()));
   auto entries = authority->load();
@@ -132,7 +132,7 @@ ava::core::Result<std::string> seed_committed_ordinary_turn(ava::app::runtime::S
                                   .type = ava::session::EntryType::UserMessage,
                                   .timestamp = ava::session::now_timestamp(),
                                   .data_json = "{\"text\":\"" + ava::core::json::escape(text) + "\"}"};
-  if (auto appended = session.append_target->append(user); !appended)
+  if (auto appended = session.append_target()->append(user); !appended)
     return std::unexpected(std::move(appended.error()));
   auto const turn_id = ava::core::make_id("assistant_turn");
   auto output_data = ava::session::serialize_assistant_output_item_data_json(
@@ -159,7 +159,7 @@ ava::core::Result<std::string> seed_committed_ordinary_turn(ava::app::runtime::S
                                                  .type = ava::session::EntryType::AssistantTurnCommit,
                                                  .timestamp = ava::session::now_timestamp(),
                                                  .data_json = std::move(*commit_data)}};
-  if (auto appended = session.append_target->append_batch(std::move(batch)); !appended)
+  if (auto appended = session.append_target()->append_batch(std::move(batch)); !appended)
     return std::unexpected(std::move(appended.error()));
   return commit_entry_id;
 }
@@ -213,11 +213,11 @@ void test_title_config_uses_logical_runtime_anchors()
   options.current_dir = workspace;
   options.paths = paths;
   auto session = ava::app::open_runtime_session(options);
-  auto config_anchor = session ? session->anchor_set->find_anchor(paths.ava_config_dir)
+  auto config_anchor = session ? session->anchor_set()->find_anchor(paths.ava_config_dir)
                                : ava::core::Result<ava::core::AnchorSet::AnchorRef>(std::unexpected(session.error()));
-  auto state_anchor = session ? session->anchor_set->find_anchor(paths.ava_state_dir)
+  auto state_anchor = session ? session->anchor_set()->find_anchor(paths.ava_state_dir)
                               : ava::core::Result<ava::core::AnchorSet::AnchorRef>(std::unexpected(session.error()));
-  expect(session && session->session_title_coordinator && config_anchor && config_anchor->relative().empty() &&
+  expect(session && session->session_title_coordinator() && config_anchor && config_anchor->relative().empty() &&
              config_anchor->anchor().root == paths.ava_config_dir && state_anchor && state_anchor->relative().empty() &&
              state_anchor->anchor().root == paths.ava_state_dir,
          "session title config and state preserve trusted logical roots through shared descriptor anchors");
@@ -327,7 +327,7 @@ void test_direct_provider_generation_is_isolated()
   options.access_token = "fake-provider-token";
   coordinator.value()->schedule(*session, "Inspect isolated provider title generation", *seeded, options);
   expect(coordinator.value()->wait_until_idle(3s), "direct title provider generation becomes idle");
-  auto metadata = ava::session::load_session_metadata(session->store, session->lease);
+  auto metadata = ava::session::load_session_metadata(session->store, session->lease());
   bool isolated_request = false;
   {
     std::lock_guard lock(transport_state->mutex);
@@ -378,7 +378,7 @@ void test_coordinator_dedupes_and_preserves_manual_rename_races()
   expect(renamed.has_value(), renamed ? "manual rename wins title race" : renamed.error().format());
   state->allow_completion();
   expect(coordinator->wait_until_idle(3s), "title race coordinator becomes idle");
-  auto metadata = ava::session::load_session_metadata(session->store, session->lease);
+  auto metadata = ava::session::load_session_metadata(session->store, session->lease());
   expect(metadata && metadata->effective_title() == "Manual Rename" && metadata->generated_title == "First ordinary prompt Overview and" && state->calls == 1 &&
              state->source == "First ordinary prompt",
          "coordinator permanently deduplicates by session id, binds the first prompt, and never refines over a concurrent manual rename");
@@ -441,9 +441,9 @@ void test_session_specific_catalog_notifications_survive_navigation()
   auto named = ava::app::append_runtime_session_metadata(*new_session, {.name = "New Current Session", .actor = "test"});
   auto committed = seed_committed_ordinary_turn(*old_session, "Fallback Old Session Catalog Title");
   auto late_committed = seed_committed_ordinary_turn(*late_session, "Late Session Notification Title");
-  auto new_authority = new_session->append_target->read_authority();
+  auto new_authority = new_session->append_target()->read_authority();
   auto new_entries = new_authority ? new_authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(new_authority.error()));
-  auto marked = new_entries ? new_session->append_target->append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto marked = new_entries ? new_session->append_target()->append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                             .parent_id = new_entries->back().id,
                                                                                             .type = ava::session::EntryType::UserMessage,
                                                                                             .timestamp = "2099-01-01T00:00:00Z",
@@ -555,13 +555,13 @@ void test_queue_delay_allows_later_turns_after_captured_first_commit()
   if (!overflow_commit)
     return;
   coordinator->schedule(*overflow, "Queue pressure retains this fallback", *overflow_commit, options);
-  auto overflow_metadata = ava::session::load_session_metadata(overflow->store, overflow->lease);
+  auto overflow_metadata = ava::session::load_session_metadata(overflow->store, overflow->lease());
   expect(overflow_metadata && overflow_metadata->effective_title() == "Queue pressure retains this fallback",
          "a full provider-refinement queue still retains the synchronous fallback");
 
   state->allow_completion();
   expect(coordinator->wait_until_idle(3s), "queue-delay title coordinator becomes idle");
-  auto metadata = ava::session::load_session_metadata(delayed->store, delayed->lease);
+  auto metadata = ava::session::load_session_metadata(delayed->store, delayed->lease());
   expect(metadata && metadata->effective_title() == "Five Word Delayed Queue Title" && state->calls == 2,
          "captured first-turn identity remains valid when later turns append during queue delay");
   coordinator->shutdown();
@@ -588,7 +588,7 @@ void test_first_admission_permanently_binds_commit_identity()
   coordinator->schedule(*session, "The second turn must not be rebound", *second_commit, options);
   coordinator->schedule(*session, "The actual first ordinary title source", *first_commit, options);
   expect(coordinator->wait_until_idle(100ms), "invalid captured commit schedules no title work");
-  auto metadata = ava::session::load_session_metadata(session->store, session->lease);
+  auto metadata = ava::session::load_session_metadata(session->store, session->lease());
   expect(metadata && metadata->effective_title().empty() && state->calls == 0,
          "the first admission is permanent and a commit outside the first ordinary turn cannot be replaced later");
   coordinator->shutdown();
@@ -619,19 +619,19 @@ void test_fallback_append_failure_latches_without_retry()
     }
     return ::write(fd, bytes.data(), bytes.size());
   });
-  auto replacement = ava::session::SessionAppendTarget::create_persistent(session->store, session->lease, session->session_read_limits());
+  auto replacement = ava::session::SessionAppendTarget::create_persistent(session->store, session->lease(), session->session_read_limits());
   expect(replacement.has_value(), "append-latch target is recreated with the deterministic write seam");
   if (!replacement)
     return;
-  session->run_controller->shutdown();
-  session->append_target = *replacement;
-  session->run_controller = std::make_shared<ava::app::SessionRunController>(*replacement);
+  session->run_controller()->shutdown();
+  session->resources().append_target = *replacement;
+  session->resources().run_controller = std::make_shared<ava::app::SessionRunController>(*replacement);
 
   ava::app::runtime::RunOptions options;
   coordinator->schedule(*session, "Never retry a title metadata mutation", *committed, options);
   expect(coordinator->wait_until_idle(1s), "failed fallback leaves no provider refinement work queued");
   auto later = ava::app::append_runtime_session_metadata(*session, {.name = "must remain latched", .actor = "test"});
-  auto metadata = ava::session::load_session_metadata(session->store, session->lease);
+  auto metadata = ava::session::load_session_metadata(session->store, session->lease());
   expect(!later && metadata && metadata->effective_title().empty() && state->calls == 0 && write_calls->load() == 1,
          "title fallback uses the controller route, never retries a mutation error, and preserves its append-failure latch");
   coordinator->shutdown();
@@ -669,7 +669,7 @@ void test_runtime_trigger_is_after_completion_and_excludes_synthetic_turns()
   auto result = ava::app::run_prompt(*session, "Implement the runtime title trigger", provider, transport, options);
   expect(result && result->committed_turn_id && title_absent_at_done, "runtime does not trigger title work from the earlier Done event");
   expect(coordinator->wait_until_idle(3s), "runtime title trigger coordinator becomes idle");
-  auto metadata = ava::session::load_session_metadata(session->store, session->lease);
+  auto metadata = ava::session::load_session_metadata(session->store, session->lease());
   expect(metadata && metadata->effective_title() == "Five Word Runtime Trigger Title" && state->calls == 1 && coordinator->catalog_generation() == 2,
          "runtime triggers asynchronous title generation only after admission completion succeeds and publishes fallback/refinement catalog generations");
   options.event_sink = nullptr;
@@ -788,9 +788,9 @@ void test_shutdown_cancels_owned_generation()
   ava::app::runtime::RunOptions options;
   coordinator->schedule(*session, "Cancel this title generation safely", *seeded, options);
   expect(state->wait_started(), "shutdown title generation starts");
-  auto metadata_before_shutdown = ava::session::load_session_metadata(session->store, session->lease);
+  auto metadata_before_shutdown = ava::session::load_session_metadata(session->store, session->lease());
   coordinator->shutdown();
-  auto metadata_after_shutdown = ava::session::load_session_metadata(session->store, session->lease);
+  auto metadata_after_shutdown = ava::session::load_session_metadata(session->store, session->lease());
   {
     std::lock_guard lock(state->mutex);
     expect(state->stop_seen && metadata_before_shutdown && metadata_after_shutdown &&

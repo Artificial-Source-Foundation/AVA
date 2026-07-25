@@ -100,10 +100,10 @@ ava::core::VoidResult recover_source_session_for_mutation(runtime::Session& curr
 {
   if (source_session_id == current.store.session_id())
   {
-    auto recovered = current.store.recover_torn_tail(current.lease, current.session_read_limits());
+    auto recovered = current.store.recover_torn_tail(current.lease(), current.session_read_limits());
     if (!recovered)
       return std::unexpected(std::move(recovered.error()));
-    auto staged_recovery = current.store.recover_incomplete_assistant_output_suffix(current.lease, current.session_read_limits());
+    auto staged_recovery = current.store.recover_incomplete_assistant_output_suffix(current.lease(), current.session_read_limits());
     if (!staged_recovery)
       return std::unexpected(std::move(staged_recovery.error()));
     return {};
@@ -141,9 +141,9 @@ runtime::OpenOptions owned_replacement_options(runtime::Session const& current, 
   options.prompt_overrides = current.prompt_overrides();
   options.initial_reasoning_level = std::nullopt;
   options.offline = current.is_offline();
-  options.subagent_coordinator = current.subagent_coordinator;
-  options.subagent_delivery_manager = current.subagent_delivery_manager;
-  options.session_title_coordinator = current.session_title_coordinator;
+  options.subagent_coordinator = current.subagent_coordinator();
+  options.subagent_delivery_manager = current.subagent_delivery_manager();
+  options.session_title_coordinator = current.session_title_coordinator();
   return options;
 }
 
@@ -294,7 +294,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     std::string owner;
     {
       std::lock_guard lock(context.session_mutex);
-      coordinator = context.session.subagent_coordinator;
+      coordinator = context.session.subagent_coordinator();
       owner = context.session.store.session_id();
     }
     if (!coordinator)
@@ -581,7 +581,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (auto recovered = recover_source_session_for_mutation(context.session, *source_session_id, temporary_source_lease); !recovered)
       return handled(write_error(context.output, command.id, recovered.error()));
 
-    auto const* source_lease = *source_session_id == context.session.store.session_id() ? &context.session.lease : &*temporary_source_lease;
+    auto const* source_lease = *source_session_id == context.session.store.session_id() ? &context.session.lease() : &*temporary_source_lease;
     auto branched = ava::session::create_session_branch(ava::session::SessionBranchOptions{
         .workspace_dir = context.session.workspace_dir(),
         .root_dir = context.session.paths().sessions_dir,
@@ -649,7 +649,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     std::optional<ava::session::SessionLease> temporary_source_lease;
     if (auto recovered = recover_source_session_for_mutation(context.session, *source_session_id, temporary_source_lease); !recovered)
       return handled(write_error(context.output, command.id, recovered.error()));
-    auto const* source_lease = current_source ? &context.session.lease : &*temporary_source_lease;
+    auto const* source_lease = current_source ? &context.session.lease() : &*temporary_source_lease;
     auto options = ava::session::BranchSummaryOptions{.workspace_dir = context.session.workspace_dir(),
                                                       .root_dir = context.session.paths().sessions_dir,
                                                       .source_session_id = *source_session_id,

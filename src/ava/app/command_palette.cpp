@@ -554,7 +554,7 @@ ava::mcp::McpConfigLoadOptions mcp_config_options(runtime::Session const& sessio
 {
   auto options = ava::mcp::default_mcp_config_options(session.workspace_dir());
   options.global_config_file = session.paths().ava_config_dir / "mcp.json";
-  options.project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir() / ".ava" / "mcp.json" : std::filesystem::path{};
+  options.project_config_file = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "mcp.json" : std::filesystem::path{};
   return options;
 }
 
@@ -562,7 +562,7 @@ ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::Session co
 {
   return ava::plugin::PluginDiscoveryOptions{
       .global_plugins_dir = session.paths().ava_config_dir / "plugins",
-      .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir() / ".ava" / "plugins" : std::filesystem::path{}};
+      .project_plugins_dir = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "plugins" : std::filesystem::path{}};
 }
 
 std::filesystem::path plugin_enablement_file(runtime::Session const& session)
@@ -705,9 +705,9 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
   {
     auto& item = items[*index];
     for (auto const& action : {"show", "wait", "result", "cancel", "promote"}) add_completion(item, 0, action, "Subagent job control", "Sessions");
-    if (session.subagent_coordinator)
+    if (session.subagent_coordinator())
     {
-      for (auto const& job : session.subagent_coordinator->list(session.store.session_id()))
+      for (auto const& job : session.subagent_coordinator()->list(session.store.session_id()))
       {
         auto const description = std::string(ava::agent::to_string(job.job.execution)) + " · " + std::string(ava::agent::to_string(job.job.mode));
         for (auto const& action : {"show", "wait", "result", "cancel", "promote"})
@@ -747,7 +747,7 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
         .global_rules_file = session.paths().ava_config_dir / "permission-rules.json",
         .workspace_rules_file = session.workspace_dir() / ".ava" / "permission-rules.json",
         .workspace_dir = session.workspace_dir(),
-        .anchor_set = session.anchor_set,
+        .anchor_set = session.anchor_set(),
     };
     if (auto rules = ava::permissions::load_persistent_permission_rules(store))
     {
@@ -1215,7 +1215,7 @@ tui::SelectListView model_selector_view(runtime::Session const& session, std::st
 {
   auto registry = ava::config::load_model_registry(session.paths());
   if (registry)
-    return model_selector_view(*registry, session.model, std::move(footer_hint));
+    return model_selector_view(*registry, session.model(), std::move(footer_hint));
 
   return tui::SelectListView{.title = "Select model",
                              .subtitle = {},
@@ -1276,7 +1276,7 @@ tui::SelectListView scoped_model_selector_view(runtime::Session const& session, 
 {
   auto registry = ava::config::load_model_registry(session.paths());
   if (registry)
-    return scoped_model_selector_view(*registry, session.model, session.scoped_model_cycle, std::move(footer_hint));
+    return scoped_model_selector_view(*registry, session.model(), session.scoped_model_cycle(), std::move(footer_hint));
 
   return tui::SelectListView{.title = "Scoped model cycle",
                              .subtitle = {},

@@ -55,8 +55,8 @@ runtime::Event command_event(runtime::Session const& session, runtime::EventType
   event.timestamp = ava::session::now_timestamp();
   event.session_id = session.store.session_id();
   event.mode = session.mode();
-  event.provider_id = session.model.provider_id;
-  event.model_id = session.model.model_id;
+  event.provider_id = session.model().provider_id;
+  event.model_id = session.model().model_id;
   return event;
 }
 
@@ -197,12 +197,12 @@ void add_permission_request_ids(ava::agent::ToolTimelineEntry& entry, std::vecto
 
 ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permissions::PermissionResolver permission_resolver)
 {
-  auto const include_project_resources = project_resources_trusted(session.project_trust);
+  auto const include_project_resources = project_resources_trusted(session.project_trust());
   auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
       .global_config_file = session.paths().ava_config_dir / "lsp.json",
       .project_config_file = include_project_resources ? session.workspace_dir() / ".ava" / "lsp.json" : std::filesystem::path{},
       .workspace_root = session.workspace_dir(),
-      .anchor_set = session.anchor_set,
+      .anchor_set = session.anchor_set(),
       .mode = session.mode(),
       .permission_resolver = permission_resolver,
   });
@@ -219,7 +219,7 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
                                                                            .data_json = ava::tools::permission_audit_data_json(event)};
                                    return session.append_owned(std::move(entry));
                                  },
-                                 .anchor_set = session.anchor_set,
+                                 .anchor_set = session.anchor_set(),
                                  .ava_authority_roots = command_authority_roots_for_session(session),
                                  .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
                                  .plugin_global_plugins_dir = session.paths().ava_config_dir / "plugins",
@@ -231,8 +231,8 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
                                  .include_project_mcp_config = include_project_resources,
                                  .include_project_skills = include_project_resources,
                                  .session_id = session.store.session_id(),
-                                 .provider_id = session.model.provider_id,
-                                 .model_id = session.model.model_id,
+                                 .provider_id = session.model().provider_id,
+                                 .model_id = session.model().model_id,
                                  .current_dir = session.current_dir()};
 }
 

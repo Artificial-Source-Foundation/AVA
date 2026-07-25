@@ -115,7 +115,7 @@ std::string model_info_json(ava::config::ModelInfo const& model, ava::app::runti
   json += ",\"compatibility_quirks\":";
   json += string_array_json(model.compatibility_quirks);
   json += ',';
-  json += bool_field_json("selected", session.model.provider_id == model.provider_id && session.model.model_id == model.model_id);
+  json += bool_field_json("selected", session.model().provider_id == model.provider_id && session.model().model_id == model.model_id);
   json += '}';
   return json;
 }

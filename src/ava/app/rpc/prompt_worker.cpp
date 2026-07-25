@@ -75,7 +75,7 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
     std::string prompt_provider_id;
     {
       std::lock_guard lock(options.session_mutex);
-      prompt_provider_id = options.session.model.provider_id;
+      prompt_provider_id = options.session.model().provider_id;
     }
     auto prompt_options =
         ensure_prompt_runtime_options(options.paths, prompt_provider_id, std::move(options.runtime_options), options.auth_transport, "prompt");

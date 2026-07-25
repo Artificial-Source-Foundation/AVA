@@ -232,8 +232,8 @@ void test_builtin_session_alias_registers_as_current_stats_command()
   auto jobs = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs"});
   auto missing = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs show job_missing"});
   auto invalid_wait = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs wait job_missing nope"});
-  auto active_wait = ava::app::run_jobs_command(session.subagent_coordinator, session.store.session_id(), "wait job_missing 10", true);
-  auto active_result = ava::app::run_jobs_command(session.subagent_coordinator, session.store.session_id(), "result job_missing", true);
+  auto active_wait = ava::app::run_jobs_command(session.subagent_coordinator(), session.store.session_id(), "wait job_missing 10", true);
+  auto active_result = ava::app::run_jobs_command(session.subagent_coordinator(), session.store.session_id(), "result job_missing", true);
   auto active_list_arguments = ava::app::active_jobs_command_arguments(" /jobs ");
   auto active_promote_arguments = ava::app::active_jobs_command_arguments("/jobs promote job_1");
   auto unrelated_active_command = ava::app::active_jobs_command_arguments("/jobs-extra promote job_1");
@@ -287,7 +287,7 @@ void test_project_trust_gates_project_resource_commands()
   auto session = open_test_session(root, workspace);
   std::string const& system_prompt = session.system_prompt();
 
-  expect(session.project_trust.decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session.project_trust),
+  expect(session.project_trust().decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session.project_trust()),
          "runtime session defaults project resources to skipped without a trust decision");
   expect(system_prompt.find("Project AGENTS context still loads") != std::string::npos &&
          system_prompt.find("Global append instruction") != std::string::npos &&
@@ -317,7 +317,7 @@ void test_project_trust_gates_project_resource_commands()
   auto trust = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust project"});
   expect(trust && trust->handled && !trust->output.empty() && trust->output[0].find("trusted project resources") != std::string::npos &&
              trust->output[0].find("project_resources=enabled") != std::string::npos &&
-             session.project_trust.decision == ava::app::ProjectTrustDecision::Trusted,
+             session.project_trust().decision == ava::app::ProjectTrustDecision::Trusted,
          "/trust project persists trust outside the workspace and reloads the runtime prompt state");
   expect(system_prompt.find("Project system replacement") != std::string::npos &&
          system_prompt.find("Project append instruction") != std::string::npos &&
@@ -361,7 +361,7 @@ void test_project_trust_gates_project_resource_commands()
     auto failed_reload = ava::app::run_command(session, ava::app::CommandRequest{.command = "/reload trust"});
     expect(failed_reload && failed_reload->handled && !failed_reload->output.empty() && failed_reload->output[0].find("trust: error") != std::string::npos &&
                failed_reload->output[0].find("freshness source is not a regular file") != std::string::npos &&
-               session.project_trust.decision == ava::app::ProjectTrustDecision::Trusted,
+               session.project_trust().decision == ava::app::ProjectTrustDecision::Trusted,
            "/reload trust keeps the old trust state if dependent prompt reload fails");
     expect(system_prompt.find("Project system replacement") != std::string::npos &&
            system_prompt.find("Project append instruction") != std::string::npos,
@@ -382,7 +382,7 @@ void test_project_trust_gates_project_resource_commands()
   expect(reload_trust && reload_trust->handled && !reload_trust->output.empty() && reload_trust->output[0].find("Reload report:") != std::string::npos &&
              reload_trust->output[0].find("trust: loaded") != std::string::npos && reload_trust->output[0].find("decision: denied") != std::string::npos &&
              reload_trust->output[0].find("project_resources: skipped") != std::string::npos &&
-             session.project_trust.decision == ava::app::ProjectTrustDecision::Denied,
+             session.project_trust().decision == ava::app::ProjectTrustDecision::Denied,
          "/reload trust applies external deny decisions and disables project resources");
   expect(system_prompt.find("Project system replacement") == std::string::npos &&
          system_prompt.find("Project append instruction") == std::string::npos &&

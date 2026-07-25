@@ -358,7 +358,7 @@ void test_app_runtime_open_session_and_context_prompt()
   if (!session)
     return;
 
-  expect(session->created && session->mode() == ava::agent::Mode::Plan && session->model.model_id == "gpt-5.5",
+  expect(session->created && session->mode() == ava::agent::Mode::Plan && session->model().model_id == "gpt-5.5",
          "runtime session records created state, mode, and model");
   expect(session->context_sources().size() == 3, "runtime session records workspace and global context metadata");
   expect(!session->base_prompt().from_override && !session->base_prompt().source_path && session->base_prompt().byte_count > 0 &&
@@ -942,10 +942,10 @@ void test_app_runtime_project_trust_malformed_diagnostics()
   if (!session)
     return;
 
-  expect(session->project_trust.decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session->project_trust),
+  expect(session->project_trust().decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session->project_trust()),
          "malformed project trust file leaves project resources skipped");
-  expect(session->project_trust.diagnostic.find("malformed project trust file") != std::string::npos &&
-             session->project_trust.diagnostic.find(ava::app::project_trust_file(paths).string()) != std::string::npos,
+  expect(session->project_trust().diagnostic.find("malformed project trust file") != std::string::npos &&
+             session->project_trust().diagnostic.find(ava::app::project_trust_file(paths).string()) != std::string::npos,
          "runtime records a path-specific project trust parse diagnostic");
 
   auto status = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/trust status"});
@@ -956,7 +956,7 @@ void test_app_runtime_project_trust_malformed_diagnostics()
 
   auto trusted = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/trust project"});
   expect(trusted && trusted->handled && !trusted->output.empty() && trusted->output[0].find("project_resources=enabled") != std::string::npos &&
-             trusted->output[0].find("diagnostic=") == std::string::npos && session->project_trust.decision == ava::app::ProjectTrustDecision::Trusted,
+             trusted->output[0].find("diagnostic=") == std::string::npos && session->project_trust().decision == ava::app::ProjectTrustDecision::Trusted,
          "/trust project repairs a malformed trust file without retaining stale diagnostics");
 
   write_app_test_file(ava::app::project_trust_file(paths), "{\"decisions\":\"not an array\"}\n");
@@ -965,7 +965,7 @@ void test_app_runtime_project_trust_malformed_diagnostics()
              reloaded->output[0].find("decision: unknown") != std::string::npos &&
              reloaded->output[0].find("project_resources: skipped") != std::string::npos &&
              reloaded->output[0].find("diagnostic: invalid_argument: malformed project trust file") != std::string::npos &&
-             session->project_trust.decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session->project_trust),
+             session->project_trust().decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session->project_trust()),
          "/reload trust surfaces malformed trust diagnostics and keeps project resources fail-closed");
 }
 
@@ -1143,7 +1143,7 @@ void test_app_runtime_project_plugin_resources_follow_trust_gate()
                                [&](auto const& source) { return source.kind == kind && source.source_id == source_id && source.name == name; });
   };
 
-  expect(session->project_trust.decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session->project_trust),
+  expect(session->project_trust().decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session->project_trust()),
          "project plugin resource trust-gate test starts with project resources excluded");
   expect(session->system_prompt().find("Global enabled plugin prompt loads") != std::string::npos &&
              session->system_prompt().find("<name>global-triage</name>") != std::string::npos &&
@@ -1648,7 +1648,7 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
   expect(session.has_value(), "observed runtime compaction test opens session");
   if (!session)
     return;
-  session->model.context_window_tokens = 100;
+  session->model_selection().model.context_window_tokens = 100;
   auto seeded = session->append_owned({.id = "observed-old-context",
                                        .parent_id = "",
                                        .type = ava::session::EntryType::UserMessage,
@@ -2652,8 +2652,8 @@ void test_app_command_dispatcher()
   auto reload_models = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/reload models"});
   expect(reload_models && reload_models->handled && !reload_models->output.empty() && reload_models->output[0].find("models: loaded") != std::string::npos &&
              reload_models->output[0].find("scoped_cycle: configured") != std::string::npos &&
-             reload_models->output[0].find("active_model: openai/gpt-5.5 (unchanged)") != std::string::npos && session->scoped_model_cycle &&
-             session->scoped_model_cycle->size() == 1 && session->scoped_model_cycle->front() == "openai/gpt-5.5" && session->model.model_id == "gpt-5.5",
+             reload_models->output[0].find("active_model: openai/gpt-5.5 (unchanged)") != std::string::npos && session->scoped_model_cycle() &&
+             session->scoped_model_cycle()->size() == 1 && session->scoped_model_cycle()->front() == "openai/gpt-5.5" && session->model().model_id == "gpt-5.5",
          "command dispatcher /reload models refreshes model config without silently switching active model");
   auto reload_all = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/reload"});
   expect(reload_all && reload_all->handled && !reload_all->output.empty() && reload_all->output[0].find("display: loaded") != std::string::npos &&
@@ -2698,7 +2698,7 @@ void test_app_command_dispatcher()
                                          .branch_from_entry_id = {},
                                          .name = std::optional<std::string>("Review branch"),
                                          .labels = std::optional<std::vector<std::string>>(std::vector<std::string>{"review", "ui"}),
-                                         .source_lease = &session->lease,
+                                         .source_lease = &session->lease(),
                                          .mode = ava::session::SessionBranchMode::Fork,
                                          .actor = "test"});
   expect(branch.has_value(),
@@ -4164,10 +4164,10 @@ void test_runtime_model_switch_accepts_committed_openai_responses_reasoning()
   expect(portable_without_reasoning(projected_wrong_format) && portable_without_reasoning(projected_other_provider),
          "foreign reasoning format and cross-provider targets receive visible answer text through portable request projection");
 
-  auto controller = std::move(session->run_controller);
+  auto controller = std::move(session->resources().run_controller);
   auto rejected_append_switch = ava::app::switch_runtime_model(*session, *target);
-  session->run_controller = std::move(controller);
-  expect(!rejected_append_switch && session->model.provider_id == "openai" && session->model.model_id == "gpt-5.5",
+  session->resources().run_controller = std::move(controller);
+  expect(!rejected_append_switch && session->model().provider_id == "openai" && session->model().model_id == "gpt-5.5",
          "a model_change append failure is reported truthfully and leaves active runtime model state unchanged");
 
   auto switched = ava::app::switch_runtime_model(*session, *target);
@@ -4177,7 +4177,7 @@ void test_runtime_model_switch_accepts_committed_openai_responses_reasoning()
                                               entry.data_json.find(R"("previous_model":"gpt-5.5")") != std::string::npos &&
                                               entry.data_json.find(R"("model":"gpt-5.6-sol")") != std::string::npos;
                                      });
-  expect(switched && *switched && session->model.provider_id == "openai" && session->model.model_id == "gpt-5.6-sol" && appended_model_change,
+  expect(switched && *switched && session->model().provider_id == "openai" && session->model().model_id == "gpt-5.6-sol" && appended_model_change,
          "committed GPT-5.5 OpenAI Responses native reasoning safely switches to GPT-5.6 Sol and appends model_change");
 }
 
@@ -4419,8 +4419,8 @@ void test_application_catalog_current_session_incremental_refresh()
                                              .type = ava::session::EntryType::UserMessage,
                                              .timestamp = "2099-01-01T00:00:00Z",
                                              .data_json = R"({"text":"ordinary turn"})"};
-  auto fallback_appended = fallback ? session->append_target->append(*fallback) : ava::core::VoidResult(std::unexpected(fallback.error()));
-  auto activity_appended = fallback_appended ? session->append_target->append(activity) : fallback_appended;
+  auto fallback_appended = fallback ? session->append_target()->append(*fallback) : ava::core::VoidResult(std::unexpected(fallback.error()));
+  auto activity_appended = fallback_appended ? session->append_target()->append(activity) : fallback_appended;
   auto refreshed = activity_appended ? catalog.refresh_current_session(*session, {}) : ava::core::Result<bool>(std::unexpected(activity_appended.error()));
   auto after_fallback = catalog.snapshot();
   auto fallback_view = catalog.session_view(ava::app::SessionSelectorSort::Recent, {});
@@ -4438,7 +4438,7 @@ void test_application_catalog_current_session_incremental_refresh()
   refined_update.actor = "auto-title";
   refined_update.generated_title = "Refined catalog title";
   auto refined = ava::session::make_session_metadata_entry(std::move(refined_update), activity.id);
-  auto refined_appended = refined ? session->append_target->append(*refined) : ava::core::VoidResult(std::unexpected(refined.error()));
+  auto refined_appended = refined ? session->append_target()->append(*refined) : ava::core::VoidResult(std::unexpected(refined.error()));
   auto const title_changes = ava::app::SessionTitleCatalogChanges{.cursor = 7, .dirty_session_ids = {session->store.session_id()}};
   auto generation_refresh =
       refined_appended ? catalog.refresh_title_changes(*session, title_changes) : ava::core::Result<bool>(std::unexpected(refined_appended.error()));
@@ -4525,8 +4525,8 @@ void test_app_runtime_model_switch_persists_and_reopens()
   expect(session.has_value(), "runtime model switch test opens runtime session");
   if (!session)
     return;
-  expect(session->scoped_model_cycle && session->scoped_model_cycle->size() == 2 && (*session->scoped_model_cycle)[0] == "anthropic/claude-test" &&
-             (*session->scoped_model_cycle)[1] == "openai/gpt-5.5",
+  expect(session->scoped_model_cycle() && session->scoped_model_cycle()->size() == 2 && (*session->scoped_model_cycle())[0] == "anthropic/claude-test" &&
+             (*session->scoped_model_cycle())[1] == "openai/gpt-5.5",
          "runtime session restores persisted scoped model cycle");
   auto const session_id = session->store.session_id();
 
@@ -4536,7 +4536,7 @@ void test_app_runtime_model_switch_persists_and_reopens()
     return;
   auto switched = ava::app::switch_runtime_model(*session, *model);
   expect(switched.has_value() && *switched, "runtime model switch reports a change");
-  expect(session->model.provider_id == "anthropic" && session->model.model_id == "claude-test", "runtime model switch updates active session model");
+  expect(session->model().provider_id == "anthropic" && session->model().model_id == "claude-test", "runtime model switch updates active session model");
 
   auto entries = session->store.load();
   expect(entries.has_value(), "runtime model switch loads session entries");
@@ -4582,13 +4582,13 @@ void test_app_runtime_model_switch_persists_and_reopens()
   session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "runtime owner released for reopen test"));
   auto reopened = ava::app::open_runtime_session(reopen_options);
   expect(reopened.has_value(), "runtime releases its lease on normal lifetime end and reopens persisted session");
-  expect(reopened && reopened->model.provider_id == "anthropic" && reopened->model.model_id == "claude-test",
+  expect(reopened && reopened->model().provider_id == "anthropic" && reopened->model().model_id == "claude-test",
          "runtime reopen restores latest persisted model_change");
   bool restored_emoji_quirk = false;
   if (reopened)
   {
     auto const emoji_quirk = std::string("\xF0\x9F\x98\x80");
-    restored_emoji_quirk = std::ranges::find(reopened->model.compatibility_quirks, emoji_quirk) != reopened->model.compatibility_quirks.end();
+    restored_emoji_quirk = std::ranges::find(reopened->model().compatibility_quirks, emoji_quirk) != reopened->model().compatibility_quirks.end();
   }
   expect(restored_emoji_quirk, "runtime reopen decodes escaped supplementary-plane metadata");
   if (reopened)
@@ -4671,15 +4671,15 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
 
   auto project_current_request = [&]() {
     auto physical = session->store.load();
-    bool const supports_images = std::ranges::find(session->model.input_modalities, "image") != session->model.input_modalities.end();
+    bool const supports_images = std::ranges::find(session->model().input_modalities, "image") != session->model().input_modalities.end();
     return physical
                ? ava::agent::build_provider_messages_from_entries(
                      *physical,
-                     ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = session->model.provider_id,
-                                                                                               .model_id = session->model.model_id,
-                                                                                               .api_family = session->model.api_family,
-                                                                                               .reasoning_format = session->model.reasoning_format,
-                                                                                               .supports_tools = session->model.supports_tools.value_or(false),
+                     ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = session->model().provider_id,
+                                                                                               .model_id = session->model().model_id,
+                                                                                               .api_family = session->model().api_family,
+                                                                                               .reasoning_format = session->model().reasoning_format,
+                                                                                               .supports_tools = session->model().supports_tools.value_or(false),
                                                                                                .supports_images = supports_images}})
                : ava::core::Result<std::vector<ava::provider::ChatMessage>>(std::unexpected(std::move(physical.error())));
   };
@@ -4704,7 +4704,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
     return;
   auto switched_no_tools = ava::app::switch_runtime_model(*session, *no_tools_model);
   expect(switched_no_tools.has_value() && *switched_no_tools, "runtime switches immediately to a model without tool support after tool history");
-  expect(session->model.provider_id == "openai" && session->model.model_id == "no-tools",
+  expect(session->model().provider_id == "openai" && session->model().model_id == "no-tools",
          "tool-history model switch updates active state without scanning history");
   auto no_tools_request = project_current_request();
   expect(no_tools_request &&
@@ -4729,7 +4729,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
     return;
   auto switched_anthropic = ava::app::switch_runtime_model(*session, *anthropic_replay);
   expect(switched_anthropic.has_value() && *switched_anthropic, "runtime allows switch to Anthropic model that can replay Anthropic reasoning");
-  expect(session->model.provider_id == "anthropic" && session->model.model_id == "claude-replay", "compatible reasoning switch updates active model");
+  expect(session->model().provider_id == "anthropic" && session->model().model_id == "claude-replay", "compatible reasoning switch updates active model");
 
   auto kimi_model = ava::app::resolve_runtime_model(paths, "kimi", "kimi-k2-thinking");
   expect(kimi_model.has_value(), "runtime resolves Kimi model");
@@ -4737,7 +4737,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
     return;
   auto switched_reasoning = ava::app::switch_runtime_model(*session, *kimi_model);
   expect(switched_reasoning.has_value() && *switched_reasoning, "runtime switches immediately across incompatible reasoning providers");
-  expect(session->model.provider_id == "kimi" && session->model.model_id == "kimi-k2-thinking",
+  expect(session->model().provider_id == "kimi" && session->model().model_id == "kimi-k2-thinking",
          "cross-provider reasoning switch updates active state without scanning history");
   auto cross_reasoning_request = project_current_request();
   expect(cross_reasoning_request && std::ranges::none_of(*cross_reasoning_request,
@@ -4757,7 +4757,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
   auto switched_no_tools_after_compaction = ava::app::switch_runtime_model(*session, *no_tools_model);
   expect(switched_no_tools_after_compaction.has_value() && *switched_no_tools_after_compaction,
          "runtime ignores pre-compaction native history for switch compatibility");
-  expect(session->model.provider_id == "openai" && session->model.model_id == "no-tools", "post-compaction switch updates active model");
+  expect(session->model().provider_id == "openai" && session->model().model_id == "no-tools", "post-compaction switch updates active model");
 
   auto appended_large_image = session->append_owned(ava::session::SessionEntry{
       .id = ava::core::make_id("entry"),
@@ -4774,7 +4774,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
   auto switched_large_image = ava::app::switch_runtime_model(*session, *anthropic_image);
   expect(switched_large_image.has_value() && *switched_large_image,
          "runtime switches immediately despite historical images exceeding the target's provider-specific limit");
-  expect(session->model.provider_id == "anthropic" && session->model.model_id == "claude-image",
+  expect(session->model().provider_id == "anthropic" && session->model().model_id == "claude-image",
          "image-history model switch updates active state without scanning history");
   auto anthropic_image_request = project_current_request();
   expect(anthropic_image_request &&
@@ -4804,7 +4804,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
   auto switched_deepseek_to_kimi = ava::app::switch_runtime_model(*session, *kimi_model);
   expect(switched_deepseek_to_kimi.has_value() && *switched_deepseek_to_kimi,
          "runtime switches immediately across providers that use the same reasoning format");
-  expect(session->model.provider_id == "kimi" && session->model.model_id == "kimi-k2-thinking",
+  expect(session->model().provider_id == "kimi" && session->model().model_id == "kimi-k2-thinking",
          "same-format cross-provider switch updates active state without replaying native reasoning");
 
   auto appended_deepseek_compaction = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
@@ -4826,7 +4826,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
 
   auto switched_kimi = ava::app::switch_runtime_model(*session, *kimi_model);
   expect(switched_kimi.has_value() && !*switched_kimi, "switching to the already-active Kimi model remains an accepted no-op");
-  expect(session->model.provider_id == "kimi" && session->model.model_id == "kimi-k2-thinking", "accepted Kimi no-op preserves the active model");
+  expect(session->model().provider_id == "kimi" && session->model().model_id == "kimi-k2-thinking", "accepted Kimi no-op preserves the active model");
 
   auto moonshot_model = ava::app::resolve_runtime_model(paths, "moonshot", "kimi-k2.6");
   expect(moonshot_model.has_value(), "runtime resolves Moonshot model");
@@ -4834,7 +4834,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
     return;
   auto switched_moonshot = ava::app::switch_runtime_model(*session, *moonshot_model);
   expect(switched_moonshot.has_value() && *switched_moonshot, "runtime switches immediately without a native-reasoning preservation quirk");
-  expect(session->model.provider_id == "moonshot" && session->model.model_id == "kimi-k2.6",
+  expect(session->model().provider_id == "moonshot" && session->model().model_id == "kimi-k2.6",
          "Moonshot switch updates active state while request projection owns replay safety");
 
   auto entries = session->store.load();
@@ -4911,7 +4911,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
 
   auto selected =
       ava::app::set_runtime_reasoning(*session, ava::app::runtime::ReasoningSelection{.level = " low ", .budget_tokens = std::nullopt, .display = ""});
-  expect(selected.has_value() && *selected && session->reasoning && session->reasoning->level == "low",
+  expect(selected.has_value() && *selected && session->reasoning() && session->reasoning()->level == "low",
          "runtime reasoning selection validates, normalizes, and updates state");
 
   auto duplicate =
@@ -4957,7 +4957,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
          "a second runtime cannot inspect reasoning by bypassing the active owner's lease");
 
   auto cleared = ava::app::set_runtime_reasoning(*session, std::nullopt);
-  expect(cleared.has_value() && *cleared && !session->reasoning, "runtime reasoning selection can be cleared");
+  expect(cleared.has_value() && *cleared && !session->reasoning(), "runtime reasoning selection can be cleared");
 
   auto reselected =
       ava::app::set_runtime_reasoning(*session, ava::app::runtime::ReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
@@ -4974,7 +4974,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
     expect(!kimi_budget.has_value() && kimi_budget.error().format().find("Kimi reasoning supports level only") != std::string::npos,
            "runtime reasoning selection rejects unsupported OpenAI-compatible budget/display controls");
     auto switched_back = ava::app::switch_runtime_model(*session, *openai_model);
-    expect(switched_back.has_value() && *switched_back && !session->reasoning, "runtime model switches clear active reasoning selection");
+    expect(switched_back.has_value() && *switched_back && !session->reasoning(), "runtime model switches clear active reasoning selection");
     auto reopened_after_switch = ava::app::open_runtime_session(reopen_options);
     expect(!reopened_after_switch && reopened_after_switch.error().message().find("already owned") != std::string::npos,
            "runtime model-change persistence remains exclusively owned until the active runtime ends");
@@ -5010,11 +5010,11 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
   expect(anthropic_proxy.has_value(), "runtime reasoning test finds custom Anthropic-compatible model");
   if (anthropic_proxy)
   {
-    session->model = *anthropic_proxy;
-    session->reasoning.reset();
+    session->model_selection().model = *anthropic_proxy;
+    session->model_selection().reasoning.reset();
     auto cycled = ava::app::cycle_runtime_reasoning(*session);
-    expect(cycled.has_value() && session->reasoning && session->reasoning->level == "enabled" && session->reasoning->budget_tokens &&
-               *session->reasoning->budget_tokens == 4096,
+    expect(cycled.has_value() && session->reasoning() && session->reasoning()->level == "enabled" && session->reasoning()->budget_tokens &&
+               *session->reasoning()->budget_tokens == 4096,
            "runtime reasoning cycling uses API-family fallback profile for custom Anthropic-compatible models");
     auto missing_budget =
         ava::app::set_runtime_reasoning(*session, ava::app::runtime::ReasoningSelection{.level = "enabled", .budget_tokens = std::nullopt, .display = ""});
@@ -5149,7 +5149,7 @@ void test_app_runtime_initial_reasoning_level_option()
   open_options.initial_reasoning_level = " high ";
 
   auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value() && session->reasoning && session->reasoning->level == "high", "runtime startup applies initial reasoning level");
+  expect(session.has_value() && session->reasoning() && session->reasoning()->level == "high", "runtime startup applies initial reasoning level");
   if (!session)
     return;
   auto const session_id = session->store.session_id();
@@ -5167,7 +5167,7 @@ void test_app_runtime_initial_reasoning_level_option()
   clear_options.requested_session_id = session_id;
   clear_options.initial_reasoning_level = "off";
   auto cleared = ava::app::open_runtime_session(clear_options);
-  expect(cleared.has_value() && !cleared->reasoning, "runtime startup reasoning accepts off as clear_reasoning alias");
+  expect(cleared.has_value() && !cleared->reasoning(), "runtime startup reasoning accepts off as clear_reasoning alias");
   if (cleared)
   {
     auto cleared_entries = cleared->store.load();

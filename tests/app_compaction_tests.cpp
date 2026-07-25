@@ -355,7 +355,7 @@ void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
   expect(session.has_value(), "provider cancellation auto compaction test opens runtime session");
   if (!session)
     return;
-  session->model.context_window_tokens = 100;
+  session->model_selection().model.context_window_tokens = 100;
   static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_canceled_auto_compact",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
@@ -512,8 +512,8 @@ void test_app_compaction_model_selection_uses_runtime_catalog()
   auto unknown_config = ava::session::parse_compaction_config(R"({"provider":"anthropic","model":"not-configured"})");
   auto unknown = unknown_config ? ava::app::resolve_compaction_config(*session, std::move(*unknown_config))
                                 : ava::core::Result<ava::session::CompactionConfig>(std::unexpected(unknown_config.error()));
-  expect(active && active->provider_id == session->model.provider_id && active->model_id == session->model.model_id && same &&
-             same->provider_id == session->model.provider_id && same->model_id == "gpt-5.5" && cross && cross->provider_id == "anthropic" &&
+  expect(active && active->provider_id == session->model().provider_id && active->model_id == session->model().model_id && same &&
+             same->provider_id == session->model().provider_id && same->model_id == "gpt-5.5" && cross && cross->provider_id == "anthropic" &&
              cross->model_id == "claude-sonnet-4-5" && !unknown && unknown.error().format().find("compaction_model: not-configured") != std::string::npos,
          "compaction selection defaults active, resolves same/cross-provider overrides, and rejects unknown models without fallback");
 }
@@ -747,7 +747,7 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context()
   expect(session.has_value(), "auto compaction test opens runtime session");
   if (!session)
     return;
-  session->model.context_window_tokens = 100;
+  session->model_selection().model.context_window_tokens = 100;
 
   std::string const old_context = "old context marker " + std::string(420, 'x');
   static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_old_user",
@@ -811,7 +811,7 @@ void test_app_auto_compaction_recent_context_respects_token_budget()
   expect(session.has_value(), "recent context token budget test opens runtime session");
   if (!session)
     return;
-  session->model.context_window_tokens = 1000;
+  session->model_selection().model.context_window_tokens = 1000;
   for (int index = 0; index < 4; ++index)
   {
     static_cast<void>(session->append_owned(
@@ -858,7 +858,7 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely()
   expect(session.has_value(), "recent context UTF-8 truncation test opens runtime session");
   if (!session)
     return;
-  session->model.context_window_tokens = 1000;
+  session->model_selection().model.context_window_tokens = 1000;
 
   std::string emoji_tail;
   for (int index = 0; index < 80; ++index) emoji_tail += "\xF0\x9F\x98\x80";
@@ -907,7 +907,7 @@ void test_app_auto_compaction_explicit_zero_disables()
   expect(session.has_value(), "disabled auto compaction test opens runtime session");
   if (!session)
     return;
-  session->model.context_window_tokens = 10;
+  session->model_selection().model.context_window_tokens = 10;
   static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_big_user",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
@@ -942,7 +942,7 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
   expect(session.has_value(), "default threshold auto compaction test opens runtime session");
   if (!session)
     return;
-  session->model.context_window_tokens = std::nullopt;
+  session->model_selection().model.context_window_tokens = std::nullopt;
 
   auto const config = ava::session::default_compaction_config();
   auto const threshold = ava::session::effective_auto_threshold_tokens(config, std::nullopt);
@@ -983,7 +983,7 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
   expect(session.has_value(), "auto compaction revalidation test opens runtime session");
   if (!session)
     return;
-  session->model.context_window_tokens = 100;
+  session->model_selection().model.context_window_tokens = 100;
 
   static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_revalidate_big",
                                                                      .parent_id = "",
@@ -1028,7 +1028,7 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
   expect(session.has_value(), "repeated stale auto compaction test opens runtime session");
   if (!session)
     return;
-  session->model.context_window_tokens = 100;
+  session->model_selection().model.context_window_tokens = 100;
 
   static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_repeated_stale_big",
                                                                      .parent_id = "",

@@ -234,8 +234,8 @@ ava::app::RuntimeProviderRunBundleFactory delivery_factory(std::shared_ptr<Deliv
       state->exact_builtin_tools_empty = options.exact_builtin_tool_names && options.exact_builtin_tool_names->empty();
       state->project_resources_isolated = options.isolate_project_resources;
       state->session_mcp_disabled = options.disable_session_mcp;
-      state->observed_model_id = session.model.model_id;
-      state->observed_reasoning_level = session.reasoning ? session.reasoning->level : std::string{};
+      state->observed_model_id = session.model().model_id;
+      state->observed_reasoning_level = session.reasoning() ? session.reasoning()->level : std::string{};
       state->delivery_run_request_id = options.request_id.value_or("");
       state->changed.notify_all();
     }
@@ -392,7 +392,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   options.access_token = "navigation-token";
   expect(fixture.manager->refresh_parent(*fixture.session, options).has_value(), "navigation parent capsule refreshes");
   auto const parent_id = fixture.session->store.session_id();
-  auto* const parent_controller = fixture.session->run_controller.get();
+  auto* const parent_controller = fixture.session->run_controller().get();
   ava::app::runtime::OpenOptions continue_options;
   continue_options.workspace_dir = fixture.session->workspace_dir();
   continue_options.current_dir = fixture.session->current_dir();
@@ -401,9 +401,9 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   continue_options.subagent_coordinator = fixture.coordinator;
   continue_options.subagent_delivery_manager = fixture.manager;
   auto continued = ava::app::open_runtime_session(continue_options);
-  expect(continued && continued->run_controller.get() == parent_controller,
+  expect(continued && continued->run_controller().get() == parent_controller,
          "continue attaches the retained last parent before attempting pathname lease reacquisition");
-  auto guard = fixture.session->run_controller->admit({.request_id = "active-parent-turn"});
+  auto guard = fixture.session->run_controller()->admit({.request_id = "active-parent-turn"});
   expect(guard.has_value(), "parent active turn is admitted before child terminal publication");
   auto started = start_completed(fixture, "child_navigation");
   if (!guard || started.job.identity.job_id.empty())
@@ -451,7 +451,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   reopen.current_dir = fixture.session->current_dir();
   reopen.requested_session_id = parent_id.substr(0, 12);
   auto retained = ava::app::open_runtime_session(reopen);
-  expect(retained && retained->run_controller.get() == parent_controller,
+  expect(retained && retained->run_controller().get() == parent_controller,
          "reopening a retained parent attaches its exact shared controller without lease reacquisition conflict");
   admission->release();
   expect(state->wait_completed(), "inactive retained parent delivery completes after navigation");
@@ -514,7 +514,7 @@ void test_capsule_generation_release_and_active_retention()
   auto retained_after_old_release = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir(), true);
   expect(retained_after_old_release && retained_after_old_release->has_value(), "an old generation release cannot erase a newer refresh");
 
-  auto guard = fixture.session->run_controller->admit({.request_id = "capsule-active-retention"});
+  auto guard = fixture.session->run_controller()->admit({.request_id = "capsule-active-retention"});
   fixture.manager->release_parent_if_unused(fixture.session->store.session_id(), *second);
   auto retained_while_active = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir(), true);
   expect(guard && retained_while_active && retained_while_active->has_value(), "active prompt/controller state retains its exact capsule generation");
@@ -565,7 +565,7 @@ void test_runtime_mutations_refresh_retained_delivery_configuration()
   options.access_token = "stale-before-mutation-token";
   expect(fixture.manager->refresh_parent(*fixture.session, options).has_value(), "runtime mutation fixture retains initial configuration");
 
-  auto model = fixture.session->model;
+  auto model = fixture.session->model();
   model.model_id = "gpt-5.5-delivery-refresh-test";
   model.display_name = "Delivery refresh test model";
   auto switched = ava::app::switch_runtime_model(*fixture.session, std::move(model));
@@ -576,10 +576,10 @@ void test_runtime_mutations_refresh_retained_delivery_configuration()
              "; " + (reasoned ? std::string("reasoning-ok") : reasoned.error().format()));
 
   auto retained = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir(), true);
-  expect(retained && *retained && (*retained)->model.model_id == fixture.session->model.model_id && (*retained)->reasoning &&
-             (*retained)->reasoning->level == "low" && (*retained)->mode() == fixture.session->mode() &&
+  expect(retained && *retained && (*retained)->model().model_id == fixture.session->model().model_id && (*retained)->reasoning() &&
+             (*retained)->reasoning()->level == "low" && (*retained)->mode() == fixture.session->mode() &&
              (*retained)->system_prompt() == fixture.session->system_prompt() && (*retained)->workspace_dir() == fixture.session->workspace_dir() &&
-             (*retained)->anchor_set == fixture.session->anchor_set,
+             (*retained)->anchor_set() == fixture.session->anchor_set(),
          "retained-session attachment returns the latest configuration with the exact logical workspace and shared AnchorSet authority");
 
   auto started = start_completed(fixture, "child_runtime_mutation");
@@ -588,7 +588,7 @@ void test_runtime_mutations_refresh_retained_delivery_configuration()
   expect(state->wait_completed(), "automatic delivery runs after central runtime mutations");
   {
     std::lock_guard lock(state->mutex);
-    expect(state->observed_model_id == fixture.session->model.model_id && state->observed_reasoning_level == "low" &&
+    expect(state->observed_model_id == fixture.session->model().model_id && state->observed_reasoning_level == "low" &&
                state->retained_credential_at_factory.empty(),
            "delivery selects the latest configuration generation and forces fresh credential resolution");
   }
@@ -834,8 +834,8 @@ void test_forged_text_marker_cannot_ack_delivery()
   forged_turn.text = "user-forged marker response";
   forged_turn.finish_reason = ava::provider::ProviderFinishReason::Completed;
   forged_turn.ordered_items.push_back(ava::agent::OrderedAssistantItem{.item = ava::agent::AssistantTextItem{.text = forged_turn.text}});
-  auto forged_commit = ava::agent::append_assistant_turn(fixture.session->owner_append_batch_route(), forged_turn, fixture.session->model.provider_id,
-                                                         fixture.session->model.model_id, {}, std::nullopt);
+  auto forged_commit = ava::agent::append_assistant_turn(fixture.session->owner_append_batch_route(), forged_turn, fixture.session->model().provider_id,
+                                                         fixture.session->model().model_id, {}, std::nullopt);
   expect(terminal && attempt && forged_user && forged_commit, "forged-marker fixture commits ordinary user text and a corresponding assistant turn");
 
   ava::app::runtime::RunOptions options;
@@ -877,8 +877,8 @@ void test_restart_reconciliation_acks_existing_commit_without_rerun()
   turn.text = "already integrated";
   turn.finish_reason = ava::provider::ProviderFinishReason::Completed;
   turn.ordered_items.push_back(ava::agent::OrderedAssistantItem{.item = ava::agent::AssistantTextItem{.text = "already integrated"}});
-  auto persisted = ava::agent::append_assistant_turn(fixture.session->owner_append_batch_route(), turn, fixture.session->model.provider_id,
-                                                     fixture.session->model.model_id, {}, std::nullopt);
+  auto persisted = ava::agent::append_assistant_turn(fixture.session->owner_append_batch_route(), turn, fixture.session->model().provider_id,
+                                                     fixture.session->model().model_id, {}, std::nullopt);
   expect(appended_user && persisted, "reconciliation fixture commits marker and assistant transaction before simulated ack crash");
 
   ava::app::runtime::RunOptions options;

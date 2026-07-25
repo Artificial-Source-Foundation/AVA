@@ -513,7 +513,7 @@ std::optional<std::string> token_status_for_session(ava::app::runtime::Session c
   auto stats = ava::session::compute_session_stats(*entries);
   if (!stats)
     return std::nullopt;
-  return compact_token_status(*stats, session.model.context_window_tokens);
+  return compact_token_status(*stats, session.model().context_window_tokens);
 }
 
 std::string session_selector_footer_hint(ava::app::SessionSelectorSort sort, bool named_only, bool show_paths, bool show_archived, bool show_label_time)
@@ -566,16 +566,16 @@ void store_model_scope(ava::app::runtime::Session& session, std::vector<std::str
   auto normalized = normalized_model_scope(candidate, all_values);
   if (reset_full_scope_to_all && normalized.size() == all_values.size())
   {
-    session.scoped_model_cycle = std::nullopt;
+    session.model_selection().scoped_model_cycle = std::nullopt;
     return;
   }
-  session.scoped_model_cycle = std::move(normalized);
+  session.model_selection().scoped_model_cycle = std::move(normalized);
 }
 
 std::vector<std::string> active_model_scope_or_all(ava::app::runtime::Session const& session, std::vector<std::string> const& all_values)
 {
-  if (session.scoped_model_cycle)
-    return normalized_model_scope(*session.scoped_model_cycle, all_values);
+  if (session.scoped_model_cycle())
+    return normalized_model_scope(*session.scoped_model_cycle(), all_values);
   return all_values;
 }
 
@@ -619,12 +619,12 @@ ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::runtim
   auto const all_values = registered_model_cycle_values(session);
   if (!contains_value(all_values, value))
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model is not available for scoped cycling"));
-  if (!session.scoped_model_cycle)
+  if (!session.scoped_model_cycle())
   {
-    session.scoped_model_cycle = std::vector<std::string>{std::string(value)};
+    session.model_selection().scoped_model_cycle = std::vector<std::string>{std::string(value)};
     return refreshed_scoped_model_selector(session, previous);
   }
-  auto next = normalized_model_scope(*session.scoped_model_cycle, all_values);
+  auto next = normalized_model_scope(*session.scoped_model_cycle(), all_values);
   if (contains_value(next, value))
     std::erase(next, std::string(value));
   else
@@ -713,11 +713,11 @@ ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(ava::app::runti
 ava::core::Result<std::string> save_scoped_model_cycle(ava::app::runtime::Session& session)
 {
   std::optional<std::vector<std::string>> scope_to_save = std::nullopt;
-  if (session.scoped_model_cycle)
+  if (session.scoped_model_cycle())
   {
     auto const all_values = registered_model_cycle_values(session);
-    scope_to_save = normalized_model_scope(*session.scoped_model_cycle, all_values);
-    session.scoped_model_cycle = scope_to_save;
+    scope_to_save = normalized_model_scope(*session.scoped_model_cycle(), all_values);
+    session.model_selection().scoped_model_cycle = scope_to_save;
   }
 
   auto saved = ava::config::store_scoped_model_cycle(session.paths(), scope_to_save);
@@ -835,7 +835,7 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
     add_output(line_result, ava::app::offline_provider_error("prompt").format() + std::string(offline_suffix));
     return line_result;
   }
-  auto const provider_id = provider_override.empty() ? std::string_view(state.session.model.provider_id) : provider_override;
+  auto const provider_id = provider_override.empty() ? std::string_view(state.session.model().provider_id) : provider_override;
   ava::provider::CurlCliTransport transport;
   auto credential = ava::config::provider_credential_for_request(state.session.paths(), provider_id, transport);
   if (!credential)
@@ -1017,7 +1017,7 @@ int run_line_shell(ShellState state)
 {
   std::cout << "AVA " << version::kDisplayVersion << " terminal shell\n";
   std::cout << "mode: " << ava::agent::to_string(state.session.mode()) << " | session: " << state.session.store.session_id() << "\n";
-  std::cout << "provider: " << state.session.model.provider_id << " | model: " << state.session.model.model_id << "\n";
+  std::cout << "provider: " << state.session.model().provider_id << " | model: " << state.session.model().model_id << "\n";
   print_shell_help();
 
   std::string line;
@@ -1080,7 +1080,7 @@ int run_tui(ShellState state)
   }
   auto hotkeys = command_hotkeys_from_key_bindings(key_bindings);
   auto const initial_title_catalog_cursor =
-      state.session.session_title_coordinator ? state.session.session_title_coordinator->catalog_changes_since(0).cursor : std::size_t{0};
+      state.session.session_title_coordinator() ? state.session.session_title_coordinator()->catalog_changes_since(0).cursor : std::size_t{0};
   auto initial_application_catalog = ava::app::build_application_catalog_cache(state.session, hotkeys);
   ava::app::ApplicationCatalogCoordinator application_catalog(std::move(initial_application_catalog), initial_title_catalog_cursor);
   auto model_display = [](ava::config::ModelInfo const& model) {
@@ -1107,11 +1107,11 @@ int run_tui(ShellState state)
   };
   auto capture_title_catalog_changes = [&state, &application_catalog]() {
     auto const cursor = application_catalog.title_catalog_cursor();
-    return state.session.session_title_coordinator ? state.session.session_title_coordinator->catalog_changes_since(cursor)
+    return state.session.session_title_coordinator() ? state.session.session_title_coordinator()->catalog_changes_since(cursor)
                                                    : ava::app::SessionTitleCatalogChanges{.cursor = cursor};
   };
   auto refresh_title_catalog = [&state, &application_catalog, &hotkeys, &capture_title_catalog_changes]() -> ava::core::Result<bool> {
-    if (!state.session.session_title_coordinator)
+    if (!state.session.session_title_coordinator())
       return false;
     return application_catalog.refresh_title_changes(state.session, capture_title_catalog_changes(), hotkeys);
   };
@@ -1124,8 +1124,8 @@ int run_tui(ShellState state)
     auto delivery = application_catalog.delivery_snapshot();
     return ava::tui::TuiRuntimeStateSnapshot{
         .mode = ava::agent::to_string(state.session.mode()),
-        .provider = state.session.model.provider_id,
-        .model = model_display(state.session.model),
+        .provider = state.session.model().provider_id,
+        .model = model_display(state.session.model()),
         .session_id = state.session.store.session_id(),
         .session_path = state.session.store.session_path().string(),
         .workspace = state.session.current_dir().empty() ? state.session.workspace_dir().string() : state.session.current_dir().string(),
@@ -1137,7 +1137,7 @@ int run_tui(ShellState state)
         .file_references = std::move(delivery.file_references),
         .workspace_catalog_generation = delivery.workspace_catalog_generation,
         .custom_themes = custom_theme_options(),
-        .project_trust = project_trust_snapshot(state.session.project_trust)};
+        .project_trust = project_trust_snapshot(state.session.project_trust())};
   };
   auto session_selector_sort = ava::app::SessionSelectorSort::Recent;
   bool session_selector_named_only = false;
@@ -1202,8 +1202,8 @@ int run_tui(ShellState state)
   auto initial_catalog_snapshot = application_catalog.snapshot();
   auto result = ava::tui::run_interactive_composer(ava::tui::TuiRuntimeOptions{
       .mode = ava::agent::to_string(state.session.mode()),
-      .provider = state.session.model.provider_id,
-      .model = model_display(state.session.model),
+      .provider = state.session.model().provider_id,
+      .model = model_display(state.session.model()),
       .session_id = state.session.store.session_id(),
       .session_path = state.session.store.session_path().string(),
       .workspace = state.session.current_dir().empty() ? state.session.workspace_dir().string() : state.session.current_dir().string(),
@@ -1217,13 +1217,13 @@ int run_tui(ShellState state)
       .file_references = initial_catalog_snapshot.file_references,
       .workspace_catalog_generation = initial_catalog_snapshot.workspace_catalog_generation,
       .custom_themes = custom_theme_options(),
-      .project_trust = project_trust_snapshot(state.session.project_trust),
+      .project_trust = project_trust_snapshot(state.session.project_trust()),
       .key_bindings = key_bindings,
       .token_status_provider = [&state]() { return token_status_for_session(state.session); },
       .reasoning_status_provider = [&state]() { return ava::app::reasoning_status_for_session(state.session); },
       .create_active_run_queues =
           [&state](ava::app::EventEnvelopeSink event_sink) {
-            auto const active_job_coordinator = state.session.subagent_coordinator;
+            auto const active_job_coordinator = state.session.subagent_coordinator();
             auto const active_job_owner = state.session.store.session_id();
             auto queue = std::make_shared<ava::app::InteractiveRunQueue>(active_job_owner, ava::core::make_id("request"), std::move(event_sink));
             return ava::tui::TuiActiveRunQueues{
@@ -1330,7 +1330,7 @@ int run_tui(ShellState state)
             else if (line_result.ordinary_turn_committed)
             {
               bool current_refreshed = false;
-              if (state.session.session_title_coordinator)
+              if (state.session.session_title_coordinator())
               {
                 auto refreshed = refresh_title_catalog();
                 if (!refreshed)

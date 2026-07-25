@@ -112,8 +112,8 @@ runtime::Event runtime_error_event(runtime::Session const& session, ava::core::E
   event.timestamp = ava::session::now_timestamp();
   event.session_id = session.store.session_id();
   event.mode = session.mode();
-  event.provider_id = session.model.provider_id;
-  event.model_id = session.model.model_id;
+  event.provider_id = session.model().provider_id;
+  event.model_id = session.model().model_id;
   event.error_category = ava::core::to_string(error.category());
   event.error_message = error.message();
   event.error_details = error.format();
@@ -229,7 +229,7 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   ava::provider::Transport& auth_transport =
       options.transport_override ? options.transport_override->get() : static_cast<ava::provider::Transport&>(default_transport);
   auto registry = ava::provider::builtin_provider_registry();
-  auto default_provider = registry.create(session->model.provider_id);
+  auto default_provider = registry.create(session->model().provider_id);
   if (!default_provider)
   {
     err << terminal_output_text(default_provider.error().format(), sanitize_stderr) << '\n';
@@ -241,7 +241,7 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   runtime_options.offline = session->is_offline() || options.open_options.offline;
   if (!runtime_options.offline)
   {
-    auto request_credential = ava::config::provider_credential_for_request(session->paths(), session->model.provider_id, auth_transport);
+    auto request_credential = ava::config::provider_credential_for_request(session->paths(), session->model().provider_id, auth_transport);
     if (!request_credential)
     {
       err << terminal_output_text(request_credential.error().format(), sanitize_stderr) << '\n';
@@ -249,7 +249,7 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
     }
     if (!*request_credential)
     {
-      err << "print mode requires auth for provider `" << terminal_output_text(session->model.provider_id, sanitize_stderr) << "`. Configure a credential in "
+      err << "print mode requires auth for provider `" << terminal_output_text(session->model().provider_id, sanitize_stderr) << "`. Configure a credential in "
           << terminal_output_text(session->paths().auth_file.string(), sanitize_stderr) << " or the provider API key environment variable\n";
       return 1;
     }

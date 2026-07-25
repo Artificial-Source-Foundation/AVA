@@ -33,11 +33,11 @@ ava::core::Result<std::vector<ava::config::ModelInfo>> runtime_model_catalog(run
     if (providers.contains(model.provider_id))
       registered.push_back(model);
 
-  if (!session.scoped_model_cycle)
+  if (!session.scoped_model_cycle())
     return registered;
   std::vector<ava::config::ModelInfo> scoped;
-  scoped.reserve(session.scoped_model_cycle->size());
-  for (auto const& id : *session.scoped_model_cycle)
+  scoped.reserve(session.scoped_model_cycle()->size());
+  for (auto const& id : *session.scoped_model_cycle())
   {
     auto found = std::ranges::find_if(registered, [&](auto const& model) { return id == model_key(model.provider_id, model.model_id); });
     if (found != registered.end())
@@ -53,7 +53,7 @@ ava::core::Result<ava::config::ModelInfo> select_runtime_model(runtime::Session 
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model is required"));
   if (provider_id && !provider_id->empty())
     return resolve_runtime_model(session.paths(), *provider_id, model_id);
-  if (auto current = resolve_runtime_model(session.paths(), session.model.provider_id, model_id); current)
+  if (auto current = resolve_runtime_model(session.paths(), session.model().provider_id, model_id); current)
     return current;
 
   auto models = runtime_model_catalog(session);
@@ -89,7 +89,7 @@ ava::core::Result<ava::config::ModelInfo> cycle_runtime_model(runtime::Session c
   std::size_t selected = direction < 0 ? models->size() - 1 : 0;
   for (std::size_t index = 0; index < models->size(); ++index)
   {
-    if ((*models)[index].provider_id == session.model.provider_id && (*models)[index].model_id == session.model.model_id)
+    if ((*models)[index].provider_id == session.model().provider_id && (*models)[index].model_id == session.model().model_id)
     {
       selected = direction < 0 ? (index == 0 ? models->size() - 1 : index - 1) : (index + 1) % models->size();
       break;

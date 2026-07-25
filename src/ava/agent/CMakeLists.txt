@@ -5,6 +5,7 @@ add_library(ava_agent
   "agent_turn_executor.cpp"
   "agent_turn_provider.cpp"
   "agent_turn_subagents.cpp"
+  "agent_turn_tools.cpp"
   "assistant_turn.cpp"
   "history_projection.cpp"
   "background_job_registry.cpp"

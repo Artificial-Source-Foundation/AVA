@@ -14,6 +14,7 @@ add_library(ava_session
   "session_store_authority.cpp"
   "session_store_catalog.cpp"
   "session_store_read.cpp"
+  "session_store_recovery.cpp"
   "session_store_rollback.cpp"
   "session_tree.cpp"
   "stats.cpp"

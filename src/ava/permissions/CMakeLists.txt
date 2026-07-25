@@ -1,5 +1,9 @@
 add_library(ava_permissions
   "permission.cpp"
+  "permission_rule_codec.cpp"
+  "permission_rule_file.cpp"
+  "permission_rule_matching.cpp"
+  "permission_rule_path.cpp"
   "permission_rules.cpp"
 )
 

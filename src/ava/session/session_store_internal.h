@@ -61,6 +61,17 @@ struct SessionStore::ObservationAttachment
 
 namespace detail {
 
+enum class AppendCommitState
+{
+  NotStarted,
+  PartialOrUnknown,
+  CommittedToLeasedInode,
+};
+
+[[nodiscard]] std::string_view append_commit_state_text(AppendCommitState state);
+[[nodiscard]] bool has_append_commit_state(ava::core::Error const& error);
+[[nodiscard]] ava::core::Error with_append_commit_state(ava::core::Error error, AppendCommitState state, std::filesystem::path const& path);
+
 class ScopedFd
 {
  public:

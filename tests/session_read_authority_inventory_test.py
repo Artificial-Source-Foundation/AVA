@@ -60,8 +60,8 @@ def main() -> int:
     require_text(source, "src/ava/agent/message_builder.h", "build_messages(ava::session::SessionReadAuthority read_authority", failures)
     require_text(source, "src/ava/app/runtime_compaction.h", "compact_runtime_context(Session& session, ava::session::SessionReadAuthority read_authority", failures)
     require_text(source, "src/ava/agent/agent_loop.h", "std::optional<ava::session::SessionReadAuthority> session_read_authority", failures)
-    require_text(source, "src/ava/app/runtime/Session.h", "create_ephemeral(store, session_read_limits)", failures)
-    require_text(source, "src/ava/app/runtime/Session.h", "create_persistent(store, lease, session_read_limits)", failures)
+    require_text(source, "src/ava/app/runtime/Session.h", "create_ephemeral(store, invocation_inputs_.session_read_limits)", failures)
+    require_text(source, "src/ava/app/runtime/Session.h", "create_persistent(store, lease, invocation_inputs_.session_read_limits)", failures)
     require_text(source, "src/ava/session/session_store.cpp", "state_->store.load_bounded(*state_->lease, state_->limits)", failures)
     require_text(source, "src/ava/session/session_store.cpp", "state_->store.load_bounded(state_->limits)", failures)
 

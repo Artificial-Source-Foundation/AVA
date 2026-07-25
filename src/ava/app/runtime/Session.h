@@ -35,39 +35,78 @@ class SubagentDeliveryManager;
 
 namespace ava::app::runtime {
 
-// Old aggregate for Session.
-// This class holds members that are still initialized by a designated initializer list.
-struct Session_aggregate_base
+// Invocation inputs.
+//
+// Mirrors of OpenOptions describing how this session was opened. None of
+// these are restored from the store on resume; each is sourced from the
+// OpenOptions of the current process invocation.
+//
+struct InvocationInputs
 {
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
   ava::agent::Mode mode = ava::agent::Mode::Build;
-  ava::agent::ToolVisibilityOptions tool_visibility;
+  ava::agent::ToolVisibilityOptions tool_visibility = {};
   ava::config::XdgPaths paths;
-  bool sessionless = false;
-
-  ava::session::SessionStore store;
-  // Persistent runtime owners hold a cross-process lease for the complete session lifetime.
-  ava::session::SessionLease lease;
-  ava::config::ModelInfo model;
-  BasePromptMetadata base_prompt;
+  bool sessionless;
+  bool is_offline_ = false;
+  // Additional writable directories beyond workspace_dir (e.g., user-configured paths).
+  // These are opened as anchor descriptors at startup and made available to tools via ToolContext::anchor_set.
+  std::vector<std::filesystem::path> additional_writable_dirs = {};
   // Resolved once at open time and reused by every runtime history reader.
   ava::session::SessionReadLimits session_read_limits = ava::session::legacy_unbounded_session_read_limits();
-  // Additional writable directories beyond workspace_dir (e.g., user-configured
-  // paths). These are opened as anchor descriptors at startup and made
-  // available to tools via ToolContext::anchor_set.
-  std::vector<std::filesystem::path> additional_writable_dirs = {};
+  PromptOverrides prompt_overrides = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+// Old aggregate for Session.
+// This class holds members that are still initialized by a designated initializer list.
+//
+// Members are grouped into cohorts by where their values come from and how long
+// they live. The grouping is documentation-only today, but it marks the seams
+// along which this aggregate is expected to be decomposed into smaller types.
+struct Session_aggregate_base
+{
+  InvocationInputs invocation_inputs_;          // Do NOT use this variable name outside of this file!
+
+  // Accessor.
+  InvocationInputs& invocation_inputs() { return invocation_inputs_; }
+
+  // ===========================================================================
+  // Persistent session identity.
+  // The durable content handle plus attributes projected back out of it on
+  // resume. `store` is the session's on-disk identity; `model` and `reasoning`
+  // are re-derived from the persisted entries rather than stored as fields.
+  // ===========================================================================
+  ava::session::SessionStore store;
+  ava::config::ModelInfo model;
+  std::optional<ReasoningSelection> reasoning = std::nullopt;
+
+  // ===========================================================================
+  // Re-derived state.
+  // Recomputed from config and workspace on every open, including resume.
+  // None of these round-trip through the store as fields.
+  // ===========================================================================
+  BasePromptMetadata base_prompt;
+  std::string system_prompt;
+  std::vector<ContextSourceMetadata> context_sources;
+  std::vector<FreshnessSourceMetadata> freshness_sources;
+  ProjectTrustState project_trust;
+  std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
+  bool created = false;                        // True when this is a freshly created session rather than a resumed one.
+
+  // ===========================================================================
+  // Process-held live resources.
+  // Opened or constructed at startup and owning descriptors, threads, or
+  // mutexes. These cannot round-trip through disk and are not invocation
+  // inputs; they are infrastructure bound to this process.
+  // ===========================================================================
+  // Persistent runtime owners hold a cross-process lease for the complete session lifetime.
+  ava::session::SessionLease lease;
   // Pre-opened anchor descriptors for all writable directories. Opened once
   // at session creation and shared across all prompts and subagent loops.
   std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
-  ProjectTrustState project_trust;
-  PromptOverrides prompt_overrides;
-  std::vector<ContextSourceMetadata> context_sources;
-  std::vector<FreshnessSourceMetadata> freshness_sources;
-  std::string system_prompt;
-  std::optional<ReasoningSelection> reasoning = std::nullopt;
-  std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
-  bool created = false;
   std::shared_ptr<SessionRunController> run_controller = nullptr;
   // Immutable append target bound into the controller-owned serialized routes.
   // Tests and retained runtime capsules may inspect/copy it, but mutations flow
@@ -94,19 +133,28 @@ struct Session_aggregate_base
 // The store may be persistent or ephemeral according to sessionless. Shared background jobs remain valid when the aggregate is moved or replaced.
 class Session : public Session_aggregate_base
 {
-  // One member at a time we will make them private :(
- private:
-  bool is_offline_ = false;
-
  public:
   // Move constructors.
   Session(Session&& session) = default;
-  Session(Session_aggregate_base&& base, bool is_offline = false) : Session_aggregate_base(std::move(base)), is_offline_(is_offline) { }
+  Session(Session_aggregate_base&& base) : Session_aggregate_base(std::move(base)) { }
 
+  // Called from replace_runtime_session.
   Session& operator=(Session&& session) = default;
 
   // Accessors.
-  bool is_offline() const { return is_offline_; }
+
+  // Invocation inputs.
+  std::filesystem::path const& workspace_dir() const { return invocation_inputs_.workspace_dir; }
+  std::filesystem::path const& current_dir() const noexcept { return invocation_inputs_.current_dir; }
+  ava::agent::Mode mode() const { return invocation_inputs_.mode; }
+  ava::agent::ToolVisibilityOptions const& tool_visibility() const { return invocation_inputs_.tool_visibility; }
+  ava::config::XdgPaths const& paths() const { return invocation_inputs_.paths; }
+  bool sessionless() const { return invocation_inputs_.sessionless; }
+  bool is_offline() const { return invocation_inputs_.is_offline_; }
+  std::vector<std::filesystem::path> const& additional_writable_dirs() const { return invocation_inputs_.additional_writable_dirs; }
+  // Resolved once at open time and reused by every runtime history reader.
+  ava::session::SessionReadLimits const& session_read_limits() const { return invocation_inputs_.session_read_limits; }
+  PromptOverrides const& prompt_overrides() const { return invocation_inputs_.prompt_overrides; }
 
   // Bind a lifetime-safe history snapshot route to this session's exact lease
   // (or to its shared in-memory state in sessionless mode).
@@ -114,8 +162,8 @@ class Session : public Session_aggregate_base
   {
     if (bound_read_authority)
       return *bound_read_authority;
-    return sessionless ? ava::session::SessionReadAuthority::create_ephemeral(store, session_read_limits)
-                       : ava::session::SessionReadAuthority::create_persistent(store, lease, session_read_limits);
+    return invocation_inputs_.sessionless ? ava::session::SessionReadAuthority::create_ephemeral(store, invocation_inputs_.session_read_limits)
+                                          : ava::session::SessionReadAuthority::create_persistent(store, lease, invocation_inputs_.session_read_limits);
   }
 
   // Append through the session owner so writes remain serialized with active runs.

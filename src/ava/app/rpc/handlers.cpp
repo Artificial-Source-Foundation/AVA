@@ -38,7 +38,7 @@ ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::Sessi
     return std::unexpected(invalid_rpc("set_model requires model"));
   if (command.provider && !command.provider->empty())
   {
-    return resolve_runtime_model(session.paths, *command.provider, *command.model);
+    return resolve_runtime_model(session.paths(), *command.provider, *command.model);
   }
 
   return select_runtime_model(session, std::nullopt, *command.model);

@@ -198,7 +198,7 @@ std::string const& AcpSessionHost::session_id() const noexcept
 
 std::filesystem::path const& AcpSessionHost::current_dir() const noexcept
 {
-  return session_.current_dir;
+  return session_.current_dir();
 }
 
 bool AcpSessionHost::accepts_images() const noexcept

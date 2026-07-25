@@ -413,7 +413,7 @@ void test_coordinator_fallback_and_navigation_lifetime()
     expect(ava::app::replace_runtime_session(*session, std::move(*replacement)).has_value(), "visible session navigation succeeds during title work");
   state->allow_completion();
   expect(coordinator->wait_until_idle(3s), "navigation title coordinator becomes idle");
-  auto summaries = ava::session::SessionStore::list_sessions(session->workspace_dir, session->paths.sessions_dir);
+  auto summaries = ava::session::SessionStore::list_sessions(session->workspace_dir(), session->paths().sessions_dir);
   auto found = summaries ? std::ranges::find_if(*summaries, [&](auto const& item) { return item.session_id == source_id; }) : decltype(summaries->begin()){};
   expect(summaries && found != summaries->end() && found->title == "Five Word Navigation Provider Title",
          "provider refinement survives in-process navigation through its retained controller-owned route" +
@@ -462,7 +462,7 @@ void test_session_specific_catalog_notifications_survive_navigation()
   };
   auto tree_builder = [&](ava::app::runtime::Session const& current) {
     ++tree_builds;
-    return ava::session::build_session_tree(current.workspace_dir, current.paths.sessions_dir, current.store.session_id());
+    return ava::session::build_session_tree(current.workspace_dir(), current.paths().sessions_dir, current.store.session_id());
   };
   auto cache = ava::app::build_application_catalog_cache(*old_session, {}, workspace_walker, tree_builder);
   ava::app::ApplicationCatalogCoordinator catalog(std::move(cache));
@@ -619,7 +619,7 @@ void test_fallback_append_failure_latches_without_retry()
     }
     return ::write(fd, bytes.data(), bytes.size());
   });
-  auto replacement = ava::session::SessionAppendTarget::create_persistent(session->store, session->lease, session->session_read_limits);
+  auto replacement = ava::session::SessionAppendTarget::create_persistent(session->store, session->lease, session->session_read_limits());
   expect(replacement.has_value(), "append-latch target is recreated with the deterministic write seam");
   if (!replacement)
     return;

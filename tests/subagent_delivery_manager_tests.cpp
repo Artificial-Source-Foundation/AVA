@@ -359,7 +359,7 @@ void test_idle_delivery_and_terminal_before_registration()
   expect(entries && marker_count == 1, "synthetic delivery persists one stable deduplication marker");
   expect(permission_callbacks.load() == 0 && question_callbacks.load() == 0 && exact_file_calls->load() == 0 && command_executor_calls->load() == 0,
          "automatic delivery never invokes frontend, ACP-like file, or command executor callbacks");
-  auto released_capsule = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir, true);
+  auto released_capsule = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir(), true);
   expect(released_capsule && !*released_capsule, "acknowledged delivery releases its retained parent capsule, exact lease duplicate, and credential snapshot");
   std::size_t factories_after_ack = 0;
   {
@@ -394,8 +394,8 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   auto const parent_id = fixture.session->store.session_id();
   auto* const parent_controller = fixture.session->run_controller.get();
   ava::app::runtime::OpenOptions continue_options;
-  continue_options.workspace_dir = fixture.session->workspace_dir;
-  continue_options.current_dir = fixture.session->current_dir;
+  continue_options.workspace_dir = fixture.session->workspace_dir();
+  continue_options.current_dir = fixture.session->current_dir();
   continue_options.paths = fixture.paths;
   continue_options.continue_last_session = true;
   continue_options.subagent_coordinator = fixture.coordinator;
@@ -447,8 +447,8 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   expect(ava::app::replace_runtime_session(*fixture.session, std::move(*replacement)).has_value(), "navigation replaces the visible session");
 
   ava::app::runtime::OpenOptions reopen = base;
-  reopen.workspace_dir = fixture.session->workspace_dir;
-  reopen.current_dir = fixture.session->current_dir;
+  reopen.workspace_dir = fixture.session->workspace_dir();
+  reopen.current_dir = fixture.session->current_dir();
   reopen.requested_session_id = parent_id.substr(0, 12);
   auto retained = ava::app::open_runtime_session(reopen);
   expect(retained && retained->run_controller.get() == parent_controller,
@@ -511,12 +511,12 @@ void test_capsule_generation_release_and_active_retention()
   if (!first || !second)
     return;
   fixture.manager->release_parent_if_unused(fixture.session->store.session_id(), *first);
-  auto retained_after_old_release = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir, true);
+  auto retained_after_old_release = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir(), true);
   expect(retained_after_old_release && retained_after_old_release->has_value(), "an old generation release cannot erase a newer refresh");
 
   auto guard = fixture.session->run_controller->admit({.request_id = "capsule-active-retention"});
   fixture.manager->release_parent_if_unused(fixture.session->store.session_id(), *second);
-  auto retained_while_active = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir, true);
+  auto retained_while_active = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir(), true);
   expect(guard && retained_while_active && retained_while_active->has_value(), "active prompt/controller state retains its exact capsule generation");
   if (guard)
   {
@@ -526,7 +526,7 @@ void test_capsule_generation_release_and_active_retention()
     static_cast<void>(guard->complete({.run_id = {}, .reason = ava::app::StopReason::Completed}));
   }
   fixture.manager->release_parent_if_unused(fixture.session->store.session_id(), *second);
-  auto released = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir, true);
+  auto released = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir(), true);
   expect(released && !*released, "the exact current inactive generation releases when no live or pending job needs it");
 
   auto third = fixture.manager->refresh_parent(*fixture.session, first_options);
@@ -542,7 +542,7 @@ void test_capsule_generation_release_and_active_retention()
   }
   if (third)
     fixture.manager->release_parent_if_unused(fixture.session->store.session_id(), *third);
-  auto retained_for_job = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir, true);
+  auto retained_for_job = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir(), true);
   expect(third && fourth && job && job_started && retained_for_job && retained_for_job->has_value(),
          "deterministic old-release versus newer-refresh/job-start keeps the current generation");
   {
@@ -575,10 +575,10 @@ void test_runtime_mutations_refresh_retained_delivery_configuration()
          "successful central model and reasoning mutations refresh parent configuration: " + (switched ? std::string("model-ok") : switched.error().format()) +
              "; " + (reasoned ? std::string("reasoning-ok") : reasoned.error().format()));
 
-  auto retained = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir, true);
+  auto retained = fixture.manager->retained_session(fixture.session->store.session_id(), fixture.session->workspace_dir(), true);
   expect(retained && *retained && (*retained)->model.model_id == fixture.session->model.model_id && (*retained)->reasoning &&
-             (*retained)->reasoning->level == "low" && (*retained)->mode == fixture.session->mode &&
-             (*retained)->system_prompt == fixture.session->system_prompt && (*retained)->workspace_dir == fixture.session->workspace_dir &&
+             (*retained)->reasoning->level == "low" && (*retained)->mode() == fixture.session->mode() &&
+             (*retained)->system_prompt == fixture.session->system_prompt && (*retained)->workspace_dir() == fixture.session->workspace_dir() &&
              (*retained)->anchor_set == fixture.session->anchor_set,
          "retained-session attachment returns the latest configuration with the exact logical workspace and shared AnchorSet authority");
 

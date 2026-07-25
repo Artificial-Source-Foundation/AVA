@@ -720,7 +720,7 @@ ava::core::Result<std::string> save_scoped_model_cycle(ava::app::runtime::Sessio
     session.scoped_model_cycle = scope_to_save;
   }
 
-  auto saved = ava::config::store_scoped_model_cycle(session.paths, scope_to_save);
+  auto saved = ava::config::store_scoped_model_cycle(session.paths(), scope_to_save);
   if (!saved)
     return std::unexpected(std::move(saved.error()));
 
@@ -837,7 +837,7 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
   }
   auto const provider_id = provider_override.empty() ? std::string_view(state.session.model.provider_id) : provider_override;
   ava::provider::CurlCliTransport transport;
-  auto credential = ava::config::provider_credential_for_request(state.session.paths, provider_id, transport);
+  auto credential = ava::config::provider_credential_for_request(state.session.paths(), provider_id, transport);
   if (!credential)
   {
     add_output(line_result, credential.error().format() + std::string(offline_suffix));
@@ -885,7 +885,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
   {
     if (is_compact_command(line))
     {
-      auto loaded_config = ava::session::load_compaction_config(state.session.paths);
+      auto loaded_config = ava::session::load_compaction_config(state.session.paths());
       if (!loaded_config)
       {
         add_output(line_result, loaded_config.error().format());
@@ -1016,14 +1016,14 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
 int run_line_shell(ShellState state)
 {
   std::cout << "AVA " << version::kDisplayVersion << " terminal shell\n";
-  std::cout << "mode: " << ava::agent::to_string(state.session.mode) << " | session: " << state.session.store.session_id() << "\n";
+  std::cout << "mode: " << ava::agent::to_string(state.session.mode()) << " | session: " << state.session.store.session_id() << "\n";
   std::cout << "provider: " << state.session.model.provider_id << " | model: " << state.session.model.model_id << "\n";
   print_shell_help();
 
   std::string line;
   while (true)
   {
-    std::cout << "\n[" << ava::agent::to_string(state.session.mode) << "] ava> " << std::flush;
+    std::cout << "\n[" << ava::agent::to_string(state.session.mode()) << "] ava> " << std::flush;
     if (!std::getline(std::cin, line))
     {
       std::cout << '\n';
@@ -1052,7 +1052,7 @@ int run_tui(ShellState state)
 {
   auto key_bindings = ava::tui::default_key_bindings();
   std::string keybind_status;
-  if (auto loaded = ava::tui::load_key_bindings(state.session.paths.ava_config_dir / "keybinds.json"); loaded)
+  if (auto loaded = ava::tui::load_key_bindings(state.session.paths().ava_config_dir / "keybinds.json"); loaded)
   {
     key_bindings = std::move(*loaded);
   }
@@ -1063,14 +1063,14 @@ int run_tui(ShellState state)
   auto display_watch_state = std::make_shared<std::optional<ava::app::TuiDisplaySettingsWatchState>>();
   auto display_watch_mutex = std::make_shared<std::mutex>();
   auto refresh_display_watch_state = [&state, display_watch_state, display_watch_mutex]() -> ava::core::VoidResult {
-    auto watched = ava::app::load_tui_display_settings_watch_state(state.session.paths);
+    auto watched = ava::app::load_tui_display_settings_watch_state(state.session.paths());
     if (!watched)
       return std::unexpected(std::move(watched.error()));
     std::lock_guard lock(*display_watch_mutex);
     *display_watch_state = std::move(*watched);
     return {};
   };
-  if (auto display_settings = ava::app::apply_tui_display_settings(state.session.paths); !display_settings)
+  if (auto display_settings = ava::app::apply_tui_display_settings(state.session.paths()); !display_settings)
   {
     append_status_line(keybind_status, display_settings.error().format());
   }
@@ -1088,7 +1088,7 @@ int run_tui(ShellState state)
   };
   auto custom_theme_options = [&state]() {
     std::vector<ava::tui::ThemeOptionItem> themes;
-    for (auto const& theme : ava::app::available_tui_custom_themes(state.session.paths))
+    for (auto const& theme : ava::app::available_tui_custom_themes(state.session.paths()))
     {
       themes.push_back(ava::tui::ThemeOptionItem{.name = theme.name, .detail = theme.path.string()});
     }
@@ -1096,12 +1096,12 @@ int run_tui(ShellState state)
   };
   auto runtime_open_options = [&state]() {
     ava::app::runtime::OpenOptions options;
-    options.workspace_dir = state.session.workspace_dir;
-    options.current_dir = state.session.current_dir;
-    options.mode = state.session.mode;
-    options.tool_visibility = state.session.tool_visibility;
-    options.paths = state.session.paths;
-    options.sessionless = state.session.sessionless;
+    options.workspace_dir = state.session.workspace_dir();
+    options.current_dir = state.session.current_dir();
+    options.mode = state.session.mode();
+    options.tool_visibility = state.session.tool_visibility();
+    options.paths = state.session.paths();
+    options.sessionless = state.session.sessionless();
     options.offline = state.session.is_offline();
     return options;
   };
@@ -1123,13 +1123,13 @@ int run_tui(ShellState state)
     static_cast<void>(refresh_title_catalog());
     auto delivery = application_catalog.delivery_snapshot();
     return ava::tui::TuiRuntimeStateSnapshot{
-        .mode = ava::agent::to_string(state.session.mode),
+        .mode = ava::agent::to_string(state.session.mode()),
         .provider = state.session.model.provider_id,
         .model = model_display(state.session.model),
         .session_id = state.session.store.session_id(),
         .session_path = state.session.store.session_path().string(),
-        .workspace = state.session.current_dir.empty() ? state.session.workspace_dir.string() : state.session.current_dir.string(),
-        .git_branch = git_branch_for_sidebar(state.session.workspace_dir),
+        .workspace = state.session.current_dir().empty() ? state.session.workspace_dir().string() : state.session.current_dir().string(),
+        .git_branch = git_branch_for_sidebar(state.session.workspace_dir()),
         .context_source_count = state.session.context_sources.size(),
         .status = std::move(status),
         .slash_commands = std::move(delivery.slash_commands),
@@ -1201,13 +1201,13 @@ int run_tui(ShellState state)
   }
   auto initial_catalog_snapshot = application_catalog.snapshot();
   auto result = ava::tui::run_interactive_composer(ava::tui::TuiRuntimeOptions{
-      .mode = ava::agent::to_string(state.session.mode),
+      .mode = ava::agent::to_string(state.session.mode()),
       .provider = state.session.model.provider_id,
       .model = model_display(state.session.model),
       .session_id = state.session.store.session_id(),
       .session_path = state.session.store.session_path().string(),
-      .workspace = state.session.current_dir.empty() ? state.session.workspace_dir.string() : state.session.current_dir.string(),
-      .git_branch = git_branch_for_sidebar(state.session.workspace_dir),
+      .workspace = state.session.current_dir().empty() ? state.session.workspace_dir().string() : state.session.current_dir().string(),
+      .git_branch = git_branch_for_sidebar(state.session.workspace_dir()),
       .app_version = std::string(version::kDisplayVersion),
       .context_source_count = state.session.context_sources.size(),
       .initial_status = keybind_status,
@@ -1361,7 +1361,7 @@ int run_tui(ShellState state)
         }
         if (!source.is_absolute())
         {
-          auto const base = state.session.current_dir.empty() ? state.session.workspace_dir : state.session.current_dir;
+          auto const base = state.session.current_dir().empty() ? state.session.workspace_dir() : state.session.current_dir();
           source = base / source;
         }
         return ava::session::import_image_attachment(state.session.store, source);
@@ -1379,7 +1379,7 @@ int run_tui(ShellState state)
         auto result = ava::app::run_command(state.session, ava::app::CommandRequest{.command = "/mode"});
         if (!result)
           return std::unexpected(std::move(result.error()));
-        return ava::agent::to_string(state.session.mode);
+        return ava::agent::to_string(state.session.mode());
       },
       .on_cycle_reasoning = [&state]() -> ava::core::Result<std::string> { return ava::app::cycle_runtime_reasoning(state.session); },
       .on_cycle_model = [&state, &state_snapshot](bool forward) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
@@ -1393,7 +1393,7 @@ int run_tui(ShellState state)
       },
       .on_reload_key_bindings = [&state, &key_bindings, &hotkeys, &state_snapshot,
                                  &application_catalog]() -> ava::core::Result<ava::tui::TuiKeyBindingReloadResult> {
-        auto loaded = ava::tui::load_key_bindings(state.session.paths.ava_config_dir / "keybinds.json");
+        auto loaded = ava::tui::load_key_bindings(state.session.paths().ava_config_dir / "keybinds.json");
         if (!loaded)
           return std::unexpected(std::move(loaded.error()));
         key_bindings = std::move(*loaded);
@@ -1403,7 +1403,7 @@ int run_tui(ShellState state)
       },
       .on_reload_display_settings = [&state, &state_snapshot, &refresh_display_watch_state, &application_catalog,
                                      &hotkeys]() -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
-        auto loaded = ava::app::apply_tui_display_settings(state.session.paths);
+        auto loaded = ava::app::apply_tui_display_settings(state.session.paths());
         if (!loaded)
           return std::unexpected(std::move(loaded.error()));
         if (auto watched = refresh_display_watch_state(); !watched)
@@ -1413,7 +1413,7 @@ int run_tui(ShellState state)
       },
       .on_maybe_reload_display_settings = [&state, &state_snapshot, &application_catalog, &hotkeys, display_watch_state,
                                            display_watch_mutex]() -> ava::core::Result<std::optional<ava::tui::TuiRuntimeStateSnapshot>> {
-        auto watched = ava::app::load_tui_display_settings_watch_state(state.session.paths);
+        auto watched = ava::app::load_tui_display_settings_watch_state(state.session.paths());
         if (!watched)
           return std::unexpected(std::move(watched.error()));
         std::lock_guard lock(*display_watch_mutex);
@@ -1421,7 +1421,7 @@ int run_tui(ShellState state)
         {
           return std::optional<ava::tui::TuiRuntimeStateSnapshot>{};
         }
-        auto loaded = ava::app::apply_tui_display_settings(state.session.paths);
+        auto loaded = ava::app::apply_tui_display_settings(state.session.paths());
         if (!loaded)
           return std::unexpected(std::move(loaded.error()));
         *display_watch_state = std::move(*watched);
@@ -1543,7 +1543,7 @@ int run_tui(ShellState state)
         {
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model selection is missing provider/model"));
         }
-        auto model = ava::app::resolve_runtime_model(state.session.paths, value.substr(0, separator), value.substr(separator + 1));
+        auto model = ava::app::resolve_runtime_model(state.session.paths(), value.substr(0, separator), value.substr(separator + 1));
         if (!model)
           return std::unexpected(std::move(model.error()));
         auto switched = ava::app::switch_runtime_model(state.session, std::move(*model));

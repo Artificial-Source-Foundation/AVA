@@ -256,7 +256,7 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
     ava::core::VoidResult config_valid = {};
     {
       std::lock_guard lock(options.session_mutex);
-      paths = options.session.paths;
+      paths = options.session.paths();
       session_offline = options.session.is_offline();
       auto loaded_config = ava::session::load_compaction_config(paths);
       if (!loaded_config)
@@ -573,7 +573,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       ava::config::XdgPaths paths;
       {
         std::lock_guard lock(session_mutex);
-        paths = session.paths;
+        paths = session.paths();
         auto result = run_command(session, CommandRequest{.command = std::move(slash_command),
                                                           .event_sink = make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(command->id)),
                                                           .permission_resolver = runtime_options.permission_resolver,
@@ -966,8 +966,8 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       std::filesystem::path current_dir;
       {
         std::lock_guard lock(session_mutex);
-        paths = session.paths;
-        current_dir = session.current_dir.empty() ? session.workspace_dir : session.current_dir;
+        paths = session.paths();
+        current_dir = session.current_dir().empty() ? session.workspace_dir() : session.current_dir();
         image_attachments.reserve((command->attachments ? command->attachments->size() : 0U) + (command->images ? command->images->size() : 0U));
         if (command->attachments)
         {

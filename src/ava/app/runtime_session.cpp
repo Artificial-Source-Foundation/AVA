@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/runtime.h"
@@ -7,16 +8,15 @@
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_prompt.h"
 #include "ava/app/runtime_reasoning.h"
-#include "ava/core/string_utils.h"
 #include "ava/app/session_title_coordinator.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/config/session_title_config.h"
-#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/ids.h"
+#include "ava/core/string_utils.h"
 #include "ava/core/trusted_home.h"
 
 #include <filesystem>
@@ -158,8 +158,8 @@ ava::core::Result<std::shared_ptr<SubagentDeliveryManager>> delivery_manager_for
   return SubagentDeliveryManager::create({.coordinator = std::move(*coordinator)});
 }
 
-ava::core::Result<std::shared_ptr<SessionTitleCoordinator>> title_coordinator_for_options(
-    runtime::OpenOptions const& options, std::shared_ptr<ava::core::AnchorSet> const& anchor_set)
+ava::core::Result<std::shared_ptr<SessionTitleCoordinator>> title_coordinator_for_options(runtime::OpenOptions const& options,
+                                                                                          std::shared_ptr<ava::core::AnchorSet> const& anchor_set)
 {
   if (options.session_title_coordinator)
     return options.session_title_coordinator;
@@ -338,8 +338,8 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
     }
     auto const config_anchor = anchor_set->find_anchor(options.paths.ava_config_dir);
     auto const state_anchor = anchor_set->find_anchor(options.paths.ava_state_dir);
-    if (!anchor_set->find_anchor(workspace_dir) || !anchor_set->find_anchor(spill_dir) || !config_anchor || !config_anchor->relative().empty() || !state_anchor ||
-        !state_anchor->relative().empty() ||
+    if (!anchor_set->find_anchor(workspace_dir) || !anchor_set->find_anchor(spill_dir) || !config_anchor || !config_anchor->relative().empty() ||
+        !state_anchor || !state_anchor->relative().empty() ||
         std::ranges::any_of(options.additional_writable_dirs, [&](auto const& directory) { return !anchor_set->find_anchor(directory); }))
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to retain all required runtime anchors"));
   }
@@ -377,34 +377,35 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
     title_coordinator = std::move(*created_coordinator);
   }
 
-  runtime::Session session({.workspace_dir = workspace_dir,
-                           .current_dir = current_dir,
-                           .mode = options.mode,
-                           .tool_visibility = options.tool_visibility,
-                           .paths = options.paths,
-                           .sessionless = sessionless,
-                           .store = std::move(store),
-                           .lease = std::move(lease),
-                           .model = std::move(model),
-                           .base_prompt = std::move(prompt_state->base_prompt),
-                           .session_read_limits = session_read_limits,
-                           .additional_writable_dirs = options.additional_writable_dirs,
-                           .anchor_set = std::move(anchor_set),
-                           .project_trust = std::move(project_trust),
-                           .prompt_overrides = options.prompt_overrides,
-                           .context_sources = std::move(prompt_state->context_sources),
-                           .freshness_sources = std::move(prompt_state->freshness_sources),
-                           .system_prompt = std::move(prompt_state->system_prompt),
-                           .reasoning = std::move(reasoning),
-                           .scoped_model_cycle = registry.scoped_model_cycle,
-                           .created = created,
-                           .run_controller = std::make_shared<SessionRunController>(*append_target),
-                           .append_target = std::move(*append_target),
-                           .subagent_coordinator = delivery_manager->coordinator(),
-                           .subagent_delivery_manager = std::move(delivery_manager),
-                           .session_title_coordinator = std::move(title_coordinator),
-                           .diagnostics = options.diagnostics},
-                           options.offline);
+  runtime::InvocationInputs const invocation_inputs{.workspace_dir = workspace_dir,
+                                                    .current_dir = current_dir,
+                                                    .mode = options.mode,
+                                                    .tool_visibility = options.tool_visibility,
+                                                    .paths = options.paths,
+                                                    .sessionless = sessionless,
+                                                    .is_offline_ = options.offline,
+                                                    .additional_writable_dirs = options.additional_writable_dirs,
+                                                    .session_read_limits = session_read_limits,
+                                                    .prompt_overrides = options.prompt_overrides};
+  runtime::Session session({.invocation_inputs_ = std::move(invocation_inputs),
+                            .store = std::move(store),
+                            .model = std::move(model),
+                            .reasoning = std::move(reasoning),
+                            .base_prompt = std::move(prompt_state->base_prompt),
+                            .system_prompt = std::move(prompt_state->system_prompt),
+                            .context_sources = std::move(prompt_state->context_sources),
+                            .freshness_sources = std::move(prompt_state->freshness_sources),
+                            .project_trust = std::move(project_trust),
+                            .scoped_model_cycle = registry.scoped_model_cycle,
+                            .created = created,
+                            .lease = std::move(lease),
+                            .anchor_set = std::move(anchor_set),
+                            .run_controller = std::make_shared<SessionRunController>(*append_target),
+                            .append_target = std::move(*append_target),
+                            .subagent_coordinator = delivery_manager->coordinator(),
+                            .subagent_delivery_manager = std::move(delivery_manager),
+                            .session_title_coordinator = std::move(title_coordinator),
+                            .diagnostics = options.diagnostics});
 
   if (options.initial_reasoning_level)
   {
@@ -599,8 +600,7 @@ ava::core::Result<runtime::Session> open_owned_runtime_session(runtime::OpenOpti
   auto staged_recovery = store.recover_incomplete_assistant_output_suffix(lease, session_read_limits);
   if (!staged_recovery)
     return std::unexpected(std::move(staged_recovery.error()));
-  return construct_runtime_session(options, store, lease, created, true, false, false, options.subagent_delivery_manager,
-                                   options.session_title_coordinator);
+  return construct_runtime_session(options, store, lease, created, true, false, false, options.subagent_delivery_manager, options.session_title_coordinator);
 }
 
 ava::core::VoidResult replace_runtime_session(runtime::Session& destination, runtime::Session&& replacement)
@@ -610,8 +610,8 @@ ava::core::VoidResult replace_runtime_session(runtime::Session& destination, run
   auto coordinator = destination.subagent_coordinator;
   auto delivery_manager = destination.subagent_delivery_manager;
   auto title_coordinator = destination.session_title_coordinator;
-  auto const detached_parent_id = destination.sessionless ? std::string{} : destination.store.session_id();
-  bool const leaves_detached_parent = !detached_parent_id.empty() && (replacement.sessionless || replacement.store.session_id() != detached_parent_id);
+  auto const detached_parent_id = destination.sessionless() ? std::string{} : destination.store.session_id();
+  bool const leaves_detached_parent = !detached_parent_id.empty() && (replacement.sessionless() || replacement.store.session_id() != detached_parent_id);
   destination.run_controller.reset();
   destination = std::move(replacement);
   if (delivery_manager)

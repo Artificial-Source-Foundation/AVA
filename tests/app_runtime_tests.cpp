@@ -358,7 +358,7 @@ void test_app_runtime_open_session_and_context_prompt()
   if (!session)
     return;
 
-  expect(session->created && session->mode == ava::agent::Mode::Plan && session->model.model_id == "gpt-5.5",
+  expect(session->created && session->mode() == ava::agent::Mode::Plan && session->model.model_id == "gpt-5.5",
          "runtime session records created state, mode, and model");
   expect(session->context_sources.size() == 3, "runtime session records workspace and global context metadata");
   expect(!session->base_prompt.from_override && !session->base_prompt.source_path && session->base_prompt.byte_count > 0 &&
@@ -408,7 +408,7 @@ void test_app_runtime_no_session_mode()
   open_options.sessionless = true;
 
   auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value() && session->sessionless && session->store.is_ephemeral(), "runtime opens no-session mode with an ephemeral store");
+  expect(session.has_value() && session->sessionless() && session->store.is_ephemeral(), "runtime opens no-session mode with an ephemeral store");
   if (!session)
     return;
 
@@ -884,8 +884,8 @@ void test_app_runtime_cli_prompt_overrides()
   expect(session->base_prompt.from_override && !session->base_prompt.source_path &&
              session->base_prompt.byte_count == std::string_view("cli system prompt").size() && session->base_prompt.content_fingerprint != 0,
          "cli --system-prompt is recorded as base prompt metadata");
-  expect(session->prompt_overrides.system_prompt && *session->prompt_overrides.system_prompt == "cli system prompt" &&
-             session->prompt_overrides.append_system_prompts.size() == 2,
+  expect(session->prompt_overrides().system_prompt && *session->prompt_overrides().system_prompt == "cli system prompt" &&
+             session->prompt_overrides().append_system_prompts.size() == 2,
          "runtime session retains cli prompt overrides for reloads");
   expect(session->system_prompt.find("cli system prompt") != std::string::npos && session->system_prompt.find("cli append prompt one") != std::string::npos &&
              session->system_prompt.find("cli append prompt two") != std::string::npos &&
@@ -916,7 +916,7 @@ void test_app_runtime_cli_prompt_overrides()
          "context freshness reports repeated cli append prompt overrides as inline sources");
 
   auto switched_mode = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/mode"});
-  expect(switched_mode && switched_mode->handled && session->mode == ava::agent::Mode::Build &&
+  expect(switched_mode && switched_mode->handled && session->mode() == ava::agent::Mode::Build &&
              session->system_prompt.find("cli system prompt") != std::string::npos &&
              session->system_prompt.find("cli append prompt two") != std::string::npos &&
              session->system_prompt.find("Implement changes directly") == std::string::npos,
@@ -2884,7 +2884,7 @@ void test_app_command_dispatcher()
          "command dispatcher /permissions list reflects removed persistent rules");
 
   auto mode = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/mode"});
-  expect(mode && mode->handled && session->mode == ava::agent::Mode::Build && !mode->output.empty() && mode->output[0].find("build") != std::string::npos,
+  expect(mode && mode->handled && session->mode() == ava::agent::Mode::Build && !mode->output.empty() && mode->output[0].find("build") != std::string::npos,
          "command dispatcher /mode toggles runtime mode");
   expect(session->system_prompt != plan_system_prompt && session->system_prompt.find("Implement changes directly") != std::string::npos &&
              session->system_prompt.find("dispatcher context changed after session open") != std::string::npos,
@@ -2901,7 +2901,7 @@ void test_app_command_dispatcher()
              connect->output[0].find("Stored moonshot API key credential") != std::string::npos,
          "command dispatcher /login alias stores provider API key credentials via masked prompt");
   ava::tests::FakeTransport credential_transport({});
-  auto slash_moonshot = ava::config::provider_credential_for_request(session->paths, "moonshot", credential_transport);
+  auto slash_moonshot = ava::config::provider_credential_for_request(session->paths(), "moonshot", credential_transport);
   expect(slash_moonshot && slash_moonshot->has_value() && (*slash_moonshot)->access_token == "slash-moonshot-api-key" &&
              (*slash_moonshot)->credential_type == "api_key",
          "slash provider connect writes loadable provider credential");
@@ -2930,7 +2930,7 @@ void test_app_command_dispatcher()
   expect(connect_modal && connect_modal->handled && connect_prompt_count == 2 && !connect_modal->output.empty() &&
              connect_modal->output[0].find("Stored anthropic API key credential") != std::string::npos,
          "command dispatcher /connect walks provider and secret modals for API-key-only providers");
-  auto slash_anthropic = ava::config::provider_credential_for_request(session->paths, "anthropic", credential_transport);
+  auto slash_anthropic = ava::config::provider_credential_for_request(session->paths(), "anthropic", credential_transport);
   expect(slash_anthropic && slash_anthropic->has_value() && (*slash_anthropic)->access_token == "slash-api-key" &&
              (*slash_anthropic)->credential_type == "api_key",
          "slash provider connect modal writes loadable API key credential");
@@ -2986,7 +2986,7 @@ void test_app_command_dispatcher()
   expect(connect_openai_modal && connect_openai_modal->handled && openai_connect_prompt_count == 3 && !connect_openai_modal->output.empty() &&
              connect_openai_modal->output[0].find("Stored openai API key credential") != std::string::npos,
          "command dispatcher /connect OpenAI walks provider, method, and secret modals");
-  auto slash_openai_from_modal = ava::config::load_openai_credential(session->paths);
+  auto slash_openai_from_modal = ava::config::load_openai_credential(session->paths());
   expect(slash_openai_from_modal && slash_openai_from_modal->has_value() && (*slash_openai_from_modal)->type == ava::config::OpenAICredentialType::ApiKey &&
              (*slash_openai_from_modal)->access_token == "slash-openai-modal-api-key",
          "slash OpenAI connect modal writes loadable OpenAI credential");
@@ -3044,7 +3044,7 @@ void test_app_command_dispatcher()
   expect(connect_openai_api && connect_openai_api->handled && saw_openai_secret_prompt && !connect_openai_api->output.empty() &&
              connect_openai_api->output[0].find("Stored openai API key credential") != std::string::npos,
          "command dispatcher /connect openai api-key prompts once and stores OpenAI API key credential");
-  auto slash_openai = ava::config::load_openai_credential(session->paths);
+  auto slash_openai = ava::config::load_openai_credential(session->paths());
   expect(slash_openai && slash_openai->has_value() && (*slash_openai)->type == ava::config::OpenAICredentialType::ApiKey &&
              (*slash_openai)->access_token == "slash-openai-api-key",
          "slash OpenAI API key connect writes loadable OpenAI credential");
@@ -4455,7 +4455,7 @@ void test_application_catalog_current_session_incremental_refresh()
   std::size_t topology_build_calls = 0;
   auto successful_tree_builder = [&](ava::app::runtime::Session const& current) {
     ++topology_build_calls;
-    return ava::session::build_session_tree(current.workspace_dir, current.paths.sessions_dir, current.store.session_id());
+    return ava::session::build_session_tree(current.workspace_dir(), current.paths().sessions_dir, current.store.session_id());
   };
   auto const captured_before_topology = ava::app::SessionTitleCatalogChanges{.cursor = 8, .dirty_session_ids = {"old_session_dirty_before_switch"}};
   auto topology_refresh = catalog.refresh_session_tree_and_consume_title_changes(*session, captured_before_topology, {}, successful_tree_builder);

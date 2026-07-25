@@ -46,7 +46,7 @@ ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(r
                                                                                std::string_view purpose)
 {
   auto auth_transport = std::make_unique<ava::provider::CurlCliTransport>();
-  auto prepared = prepare_runtime_credentials(session.paths, session.model.provider_id, std::move(options), *auth_transport, purpose);
+  auto prepared = prepare_runtime_credentials(session.paths(), session.model.provider_id, std::move(options), *auth_transport, purpose);
   if (!prepared)
     return std::unexpected(std::move(prepared.error()));
 

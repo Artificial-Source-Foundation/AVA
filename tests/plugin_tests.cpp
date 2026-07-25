@@ -262,28 +262,22 @@ ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths con
   trust.workspace_dir = workspace;
   trust.trust_file = paths.ava_state_dir / "trusted-projects.json";
   trust.decision = ava::app::ProjectTrustDecision::Trusted;
-  return ava::app::runtime::Session_aggregate_base{
-      .workspace_dir = workspace,
-      .current_dir = workspace,
-      .mode = ava::agent::Mode::Build,
-      .tool_visibility = {},
-      .paths = paths,
-      .sessionless = false,
-      .store = std::move(*store),
-      .lease = {},
-      .model = std::move(model),
-      .base_prompt = {},
-      .project_trust = std::move(trust),
-      .prompt_overrides = {},
-      .context_sources = {},
-      .freshness_sources = {},
-      .system_prompt = {},
-      .reasoning = std::nullopt,
-      .scoped_model_cycle = std::nullopt,
-      .created = false,
-      .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr),
-      .subagent_coordinator = nullptr
-    };
+  ava::app::runtime::InvocationInputs const invocation_inputs = {
+      .workspace_dir = workspace, .current_dir = workspace, .paths = paths, .sessionless = store ? store->is_ephemeral() : false};
+  return ava::app::runtime::Session_aggregate_base{.invocation_inputs_ = std::move(invocation_inputs),
+                                                   .store = std::move(*store),
+                                                   .model = std::move(model),
+                                                   .reasoning = std::nullopt,
+                                                   .base_prompt = {},
+                                                   .system_prompt = {},
+                                                   .context_sources = {},
+                                                   .freshness_sources = {},
+                                                   .project_trust = std::move(trust),
+                                                   .scoped_model_cycle = std::nullopt,
+                                                   .created = false,
+                                                   .lease = {},
+                                                   .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr),
+                                                   .subagent_coordinator = nullptr};
 }
 
 std::string command_output_text(ava::core::Result<ava::app::CommandResult> const& command)

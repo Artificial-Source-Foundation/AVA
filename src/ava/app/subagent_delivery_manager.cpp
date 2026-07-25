@@ -123,36 +123,27 @@ runtime::RunOptions detached_run_options(runtime::RunOptions const& source)
 runtime::Session detached_session(runtime::Session const& source, ava::session::SessionLease lease, ava::session::SessionReadAuthority authority,
                                   std::shared_ptr<SubagentDeliveryManager> manager)
 {
-  return runtime::Session({.workspace_dir = source.workspace_dir,
-                          .current_dir = source.current_dir,
-                          .mode = source.mode,
-                          .tool_visibility = source.tool_visibility,
-                          .paths = source.paths,
-                          .sessionless = source.sessionless,
-                          .store = source.store,
-                          .lease = std::move(lease),
-                          .model = source.model,
-                          .base_prompt = source.base_prompt,
-                          .session_read_limits = source.session_read_limits,
-                          .additional_writable_dirs = source.additional_writable_dirs,
-                          .anchor_set = source.anchor_set,
-                          .project_trust = source.project_trust,
-                          .prompt_overrides = source.prompt_overrides,
-                          .context_sources = source.context_sources,
-                          .freshness_sources = source.freshness_sources,
-                          .system_prompt = source.system_prompt,
-                          .reasoning = source.reasoning,
-                          .scoped_model_cycle = source.scoped_model_cycle,
-                          .created = source.created,
-                          .run_controller = source.run_controller,
-                          .append_target = source.append_target,
-                          .bound_read_authority = std::move(authority),
-                          .subagent_coordinator = source.subagent_coordinator,
-                          .subagent_delivery_manager = std::move(manager),
-                          .session_title_coordinator = source.session_title_coordinator,
-                          .diagnostics = source.diagnostics,
-                          .mcp_config = source.mcp_config},
-                          source.is_offline());
+  return runtime::Session({.invocation_inputs_ = source.invocation_inputs_,
+                           .store = source.store,
+                           .model = source.model,
+                           .reasoning = source.reasoning,
+                           .base_prompt = source.base_prompt,
+                           .system_prompt = source.system_prompt,
+                           .context_sources = source.context_sources,
+                           .freshness_sources = source.freshness_sources,
+                           .project_trust = source.project_trust,
+                           .scoped_model_cycle = source.scoped_model_cycle,
+                           .created = source.created,
+                           .lease = std::move(lease),
+                           .anchor_set = source.anchor_set,
+                           .run_controller = source.run_controller,
+                           .append_target = source.append_target,
+                           .bound_read_authority = std::move(authority),
+                           .subagent_coordinator = source.subagent_coordinator,
+                           .subagent_delivery_manager = std::move(manager),
+                           .session_title_coordinator = source.session_title_coordinator,
+                           .diagnostics = source.diagnostics,
+                           .mcp_config = source.mcp_config});
 }
 
 std::string delivery_marker(ava::agent::SubagentJobIdentity const& identity)
@@ -295,7 +286,7 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
 {
   if (!session.run_controller)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot retain a parent without a run controller"));
-  if (!session.sessionless)
+  if (!session.sessionless())
   {
     auto activated = coordinator_->activate_parent(session.store.session_id());
     if (!activated)
@@ -305,7 +296,7 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
   if (!authority)
     return std::unexpected(std::move(authority.error()));
   ava::session::SessionLease lease;
-  if (!session.sessionless)
+  if (!session.sessionless())
   {
     auto duplicated = session.lease.duplicate();
     if (!duplicated)
@@ -367,7 +358,7 @@ ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration(runt
   if (!authority)
     return std::unexpected(std::move(authority.error()));
   ava::session::SessionLease lease;
-  if (!session.sessionless)
+  if (!session.sessionless())
   {
     auto duplicated = session.lease.duplicate();
     if (!duplicated)
@@ -468,7 +459,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
     if (found != parents_.end())
     {
       runtime::session_ts::rat session_r(found->second->session);
-      if (normalized_workspace_identity(session_r->workspace_dir) != expected_workspace)
+      if (normalized_workspace_identity(session_r->workspace_dir()) != expected_workspace)
         return std::unexpected(retained_owner_not_found(session_id));
       capsule = found->second;
     }
@@ -479,7 +470,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
         if (!retained_id.starts_with(session_id))
           continue;
         runtime::session_ts::rat session_r(retained->session);
-        if (normalized_workspace_identity(session_r->workspace_dir) != expected_workspace)
+        if (normalized_workspace_identity(session_r->workspace_dir()) != expected_workspace)
         {
           saw_foreign_owner = true;
           continue;
@@ -506,7 +497,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
     if (!authority)
       return std::unexpected(std::move(authority.error()));
     ava::session::SessionLease lease;
-    if (!session_r->sessionless)
+    if (!session_r->sessionless())
     {
       auto duplicated = session_r->lease.duplicate();
       if (!duplicated)

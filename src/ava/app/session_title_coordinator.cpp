@@ -632,7 +632,7 @@ void SessionTitleCoordinator::start()
 void SessionTitleCoordinator::schedule(runtime::Session const& session, std::string_view original_user_text, std::string_view committed_turn_id,
                                        runtime::RunOptions const& run_options) noexcept
 {
-  if (!options_.config.enabled || session.sessionless || !session.created || !session.run_controller || !session.anchor_set || committed_turn_id.empty())
+  if (!options_.config.enabled || session.sessionless() || !session.created || !session.run_controller || !session.anchor_set || committed_turn_id.empty())
     return;
   try
   {
@@ -660,7 +660,7 @@ void SessionTitleCoordinator::schedule(runtime::Session const& session, std::str
               .read_authority = std::move(*read_authority),
               .append_controller = session.run_controller,
               .append_route = std::move(append_route),
-              .request = SessionTitleGenerationRequest{.paths = session.paths,
+              .request = SessionTitleGenerationRequest{.paths = session.paths(),
                                                        .active_model = session.model,
                                                        .config = options_.config,
                                                        .anchor_set = session.anchor_set,

@@ -24,7 +24,7 @@ ava::core::Result<std::unique_ptr<ava::provider::Provider>> create_runtime_provi
 
 ava::core::Result<std::vector<ava::config::ModelInfo>> runtime_model_catalog(runtime::Session const& session)
 {
-  auto registry = ava::config::load_model_registry(session.paths);
+  auto registry = ava::config::load_model_registry(session.paths());
   if (!registry)
     return std::unexpected(std::move(registry.error()));
   auto providers = ava::provider::builtin_provider_registry();
@@ -52,8 +52,8 @@ ava::core::Result<ava::config::ModelInfo> select_runtime_model(runtime::Session 
   if (model_id.empty())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model is required"));
   if (provider_id && !provider_id->empty())
-    return resolve_runtime_model(session.paths, *provider_id, model_id);
-  if (auto current = resolve_runtime_model(session.paths, session.model.provider_id, model_id); current)
+    return resolve_runtime_model(session.paths(), *provider_id, model_id);
+  if (auto current = resolve_runtime_model(session.paths(), session.model.provider_id, model_id); current)
     return current;
 
   auto models = runtime_model_catalog(session);

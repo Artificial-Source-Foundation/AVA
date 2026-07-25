@@ -195,8 +195,8 @@ void print_exit_card(ava::app::runtime::Session const& session, int status)
   art(" █████   █████    ░░███      █████   █████");
   art("░░░░░   ░░░░░      ░░░      ░░░░░   ░░░░░");
   std::cout << '\n';
-  std::cout << bold << "AVA " << reset << exit_status_text(status, session.sessionless) << ". " << muted << "Ready when you are." << reset << '\n';
-  if (session.sessionless)
+  std::cout << bold << "AVA " << reset << exit_status_text(status, session.sessionless()) << ". " << muted << "Ready when you are." << reset << '\n';
+  if (session.sessionless())
   {
     std::cout << muted << "History: " << reset << "not saved (--no-session)\n";
     return;

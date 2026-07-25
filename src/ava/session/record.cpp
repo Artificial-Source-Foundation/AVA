@@ -1,12 +1,20 @@
 #include "sys.h"
 #include "ava/session/record.h"
 #include "ava/core/json.h"
+#include "ava/core/strict_json.h"
 
+#include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstddef>
+#include <ctime>
+#include <filesystem>
 #include <iomanip>
 #include <istream>
 #include <optional>
 #include <sstream>
+#include <string>
+#include <string_view>
 #include <utility>
 
 namespace ava::session {
@@ -543,6 +551,175 @@ std::string json_escape(std::string_view value)
     }
   }
   return result;
+}
+
+std::string to_string(EntryType type)
+{
+  switch (type)
+  {
+    case EntryType::SessionStart:
+      return "session_start";
+    case EntryType::SessionMetadata:
+      return "session_metadata";
+    case EntryType::UserMessage:
+      return "user_message";
+    case EntryType::AssistantMessage:
+      return "assistant_message";
+    case EntryType::ToolCall:
+      return "tool_call";
+    case EntryType::ToolResult:
+      return "tool_result";
+    case EntryType::PermissionDecision:
+      return "permission_decision";
+    case EntryType::ModeChange:
+      return "mode_change";
+    case EntryType::ModelChange:
+      return "model_change";
+    case EntryType::ReasoningBlock:
+      return "reasoning_block";
+    case EntryType::ReasoningChange:
+      return "reasoning_change";
+    case EntryType::AssistantOutputItem:
+      return "assistant_output_item";
+    case EntryType::AssistantTurnCommit:
+      return "assistant_turn_commit";
+    case EntryType::Compaction:
+      return "compaction";
+    case EntryType::BranchSummary:
+      return "branch_summary";
+    case EntryType::Error:
+      return "error";
+    case EntryType::Cancel:
+      return "cancel";
+  }
+  return "error";
+}
+
+ava::core::Result<EntryType> parse_entry_type(std::string_view value)
+{
+  if (value == "session_start")
+    return EntryType::SessionStart;
+  if (value == "session_metadata")
+    return EntryType::SessionMetadata;
+  if (value == "user_message")
+    return EntryType::UserMessage;
+  if (value == "assistant_message")
+    return EntryType::AssistantMessage;
+  if (value == "tool_call")
+    return EntryType::ToolCall;
+  if (value == "tool_result")
+    return EntryType::ToolResult;
+  if (value == "permission_decision")
+    return EntryType::PermissionDecision;
+  if (value == "mode_change")
+    return EntryType::ModeChange;
+  if (value == "model_change")
+    return EntryType::ModelChange;
+  if (value == "reasoning_block")
+    return EntryType::ReasoningBlock;
+  if (value == "reasoning_change")
+    return EntryType::ReasoningChange;
+  if (value == "assistant_output_item")
+    return EntryType::AssistantOutputItem;
+  if (value == "assistant_turn_commit")
+    return EntryType::AssistantTurnCommit;
+  if (value == "compaction")
+    return EntryType::Compaction;
+  if (value == "branch_summary")
+    return EntryType::BranchSummary;
+  if (value == "error")
+    return EntryType::Error;
+  if (value == "cancel")
+    return EntryType::Cancel;
+
+  auto error = ava::core::Error(ava::core::ErrorCategory::Session, "unknown session entry type");
+  error.with_context("type", std::string(value));
+  return std::unexpected(std::move(error));
+}
+
+ava::core::Result<std::optional<SyntheticDeliveryProvenance>> parse_synthetic_delivery_provenance(SessionEntry const& entry)
+{
+  if (entry.type != EntryType::UserMessage)
+    return std::optional<SyntheticDeliveryProvenance>{};
+  if (ava::core::validate_strict_json(entry.data_json, ava::core::json::kMaxNestingDepth) != ava::core::StrictJsonStatus::Valid)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "user message provenance requires strict JSON"));
+  auto const provenance_start = ava::core::json::field_value_start(entry.data_json, "provenance");
+  if (!provenance_start)
+    return std::optional<SyntheticDeliveryProvenance>{};
+  if (*provenance_start >= entry.data_json.size() || entry.data_json[*provenance_start] != '{')
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "synthetic delivery provenance must be an object"));
+  std::size_t end = *provenance_start;
+  std::size_t depth = 0;
+  std::size_t member_count = 0;
+  bool in_string = false;
+  bool escaped = false;
+  for (; end < entry.data_json.size(); ++end)
+  {
+    char const ch = entry.data_json[end];
+    if (in_string)
+    {
+      if (escaped)
+        escaped = false;
+      else if (ch == '\\')
+        escaped = true;
+      else if (ch == '"')
+        in_string = false;
+      continue;
+    }
+    if (ch == '"')
+      in_string = true;
+    else if (ch == '{')
+      ++depth;
+    else if (ch == '}')
+    {
+      if (--depth == 0)
+        break;
+    }
+    else if (ch == ':' && depth == 1)
+      ++member_count;
+  }
+  if (end >= entry.data_json.size() || member_count != 3)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "synthetic delivery provenance has missing or unknown fields"));
+  auto const provenance = std::string_view(entry.data_json).substr(*provenance_start, end - *provenance_start + 1);
+  auto source = ava::core::json::string_field(provenance, "source");
+  auto delivery_id = ava::core::json::string_field(provenance, "delivery_id");
+  auto prompt_fingerprint = ava::core::json::string_field(provenance, "prompt_fingerprint");
+  if (!source || !delivery_id || !prompt_fingerprint)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "synthetic delivery provenance fields must be strings"));
+  SyntheticDeliveryProvenance parsed{
+      .delivery_id = std::move(*delivery_id), .prompt_fingerprint = std::move(*prompt_fingerprint), .source = std::move(*source)};
+  auto valid_id = [](std::string_view value) {
+    return !value.empty() && value.size() <= kMaxSyntheticDeliveryProvenanceIdBytes && std::ranges::all_of(value, [](char ch) {
+      auto const byte = static_cast<unsigned char>(ch);
+      return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') || ch == '_' || ch == '-' || ch == '.' || ch == ':';
+    });
+  };
+  if (parsed.source != kSyntheticSubagentDeliverySource || !valid_id(parsed.delivery_id) || !valid_id(parsed.prompt_fingerprint))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "synthetic delivery provenance is unsupported or exceeds its bounds"));
+  return std::optional<SyntheticDeliveryProvenance>(std::move(parsed));
+}
+
+bool is_internal_replay_user_message(SessionEntry const& entry)
+{
+  if (entry.type != EntryType::UserMessage)
+    return false;
+  auto const start = ava::core::json::field_value_start(entry.data_json, "internal_replay");
+  return start && entry.data_json.substr(*start, 4) == "true";
+}
+
+std::string now_timestamp()
+{
+  auto const now = std::chrono::system_clock::now();
+  auto const time = std::chrono::system_clock::to_time_t(now);
+  std::tm tm{};
+#ifdef _WIN32
+  gmtime_s(&tm, &time);
+#else
+  gmtime_r(&time, &tm);
+#endif
+  std::ostringstream out;
+  out << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+  return out.str();
 }
 
 }  // namespace ava::session

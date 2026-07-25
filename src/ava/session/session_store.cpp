@@ -1,8 +1,7 @@
 #include "sys.h"
-#include "ava/config/xdg_paths.h"
-#include "ava/session/EphemeralState.h"
 #include "ava/session/record.h"
 #include "ava/session/session_store.h"
+#include "ava/session/session_store_internal.h"
 #include "ava/session/validation.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -13,22 +12,25 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
+#include <filesystem>
+#include <functional>
 #include <iomanip>
-#include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <optional>
 #include <sstream>
+#include <string>
 #include <string_view>
+#include <system_error>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <sys/file.h>
@@ -40,55 +42,55 @@
 
 namespace ava::session {
 
-struct SessionStore::ObservationAttachment
+namespace detail {
+
+ScopedFd::ScopedFd(int fd) noexcept : fd_(fd)
 {
-  mutable std::mutex mutex;
-  std::shared_ptr<ava::observability::RunObservation> observation;
-  std::shared_ptr<ava::observability::TraceContext const> context;
-  std::uint64_t generation = 0;
-  std::atomic_bool enabled = false;
-  std::atomic_bool fail_next_attachment_for_test = false;
-};
+}
 
-namespace {
-
-class ScopedFd
+ScopedFd::ScopedFd(ScopedFd&& other) noexcept : fd_(std::exchange(other.fd_, -1))
 {
- public:
-  explicit ScopedFd(int fd = -1) noexcept : fd_(fd) { }
-  ScopedFd(ScopedFd const&) = delete;
-  ScopedFd& operator=(ScopedFd const&) = delete;
-  ScopedFd(ScopedFd&& other) noexcept : fd_(std::exchange(other.fd_, -1)) { }
-  ScopedFd& operator=(ScopedFd&& other) noexcept
-  {
-    if (this != &other)
-    {
-      reset();
-      fd_ = std::exchange(other.fd_, -1);
-    }
-    return *this;
-  }
-  ~ScopedFd() { reset(); }
+}
 
-  [[nodiscard]] int get() const noexcept { return fd_; }
-  [[nodiscard]] int release() noexcept { return std::exchange(fd_, -1); }
-  [[nodiscard]] int close_checked() noexcept
+ScopedFd& ScopedFd::operator=(ScopedFd&& other) noexcept
+{
+  if (this != &other)
   {
-    if (fd_ < 0)
-      return 0;
-    int const fd = std::exchange(fd_, -1);
-    return ::close(fd) == 0 ? 0 : errno;
+    reset();
+    fd_ = std::exchange(other.fd_, -1);
   }
-  void reset(int fd = -1) noexcept
-  {
-    if (fd_ >= 0)
-      static_cast<void>(::close(fd_));
-    fd_ = fd;
-  }
+  return *this;
+}
 
- private:
-  int fd_ = -1;
-};
+ScopedFd::~ScopedFd()
+{
+  reset();
+}
+
+int ScopedFd::get() const noexcept
+{
+  return fd_;
+}
+
+int ScopedFd::release() noexcept
+{
+  return std::exchange(fd_, -1);
+}
+
+int ScopedFd::close_checked() noexcept
+{
+  if (fd_ < 0)
+    return 0;
+  int const fd = std::exchange(fd_, -1);
+  return ::close(fd) == 0 ? 0 : errno;
+}
+
+void ScopedFd::reset(int fd) noexcept
+{
+  if (fd_ >= 0)
+    static_cast<void>(::close(fd_));
+  fd_ = fd;
+}
 
 std::string project_key(std::filesystem::path const& workspace_dir)
 {
@@ -119,7 +121,7 @@ std::mutex& append_mutex_for_path(std::filesystem::path const& path)
   return *mutex;
 }
 
-ava::core::Error path_io_error(std::string message, std::filesystem::path const& path, int error_number = 0)
+ava::core::Error path_io_error(std::string message, std::filesystem::path const& path, int error_number)
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::Io, std::move(message));
   error.with_context("path", path.string());
@@ -128,58 +130,11 @@ ava::core::Error path_io_error(std::string message, std::filesystem::path const&
   return error;
 }
 
-ava::core::Result<std::pair<int, off_t>> open_regular_snapshot(std::filesystem::path const& path, std::size_t max_file_bytes)
+ava::core::Error append_authority_error(std::string message, std::filesystem::path const& path)
 {
-  // Inspect the final component with O_PATH first. In particular, never open a
-  // pathname replaced by a FIFO through blocking O_RDONLY before classifying it.
-  ScopedFd metadata_fd(::open(path.c_str(), O_PATH | O_CLOEXEC | O_NOFOLLOW));
-  if (metadata_fd.get() < 0)
-  {
-    auto category =
-        errno == ENOENT ? ava::core::ErrorCategory::NotFound : (errno == ELOOP ? ava::core::ErrorCategory::PermissionDenied : ava::core::ErrorCategory::Io);
-    auto error = ava::core::Error(category, errno == ENOENT ? "session not found" : "failed to securely inspect session file");
-    error.with_context("path", path.string()).with_context("cause", std::strerror(errno));
-    return std::unexpected(std::move(error));
-  }
-  struct stat metadata_status{};
-  int metadata_error = fstat(metadata_fd.get(), &metadata_status) == 0 ? 0 : errno;
-  int metadata_close_error = metadata_fd.close_checked();
-  if (metadata_error != 0)
-    return std::unexpected(path_io_error("failed to inspect session file metadata", path, metadata_error));
-  if (metadata_close_error != 0)
-    return std::unexpected(path_io_error("failed to close session file metadata descriptor", path, metadata_close_error));
-  if (!S_ISREG(metadata_status.st_mode))
-  {
-    if (S_ISLNK(metadata_status.st_mode))
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "session path must not be a symlink");
-      error.with_context("path", path.string());
-      return std::unexpected(std::move(error));
-    }
-    return std::unexpected(path_io_error("session path is not a regular file", path));
-  }
-  if (metadata_status.st_size < 0)
-    return std::unexpected(path_io_error("session snapshot has an invalid size", path));
-  auto const size = static_cast<std::uintmax_t>(metadata_status.st_size);
-  if (size > max_file_bytes)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session file exceeds bounded read limit");
-    error.with_context("path", path.string()).with_context("max_file_bytes", std::to_string(max_file_bytes));
-    return std::unexpected(std::move(error));
-  }
-
-  ScopedFd fd(::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW));
-  if (fd.get() < 0)
-    return std::unexpected(path_io_error("failed to securely open session snapshot", path, errno));
-  struct stat status{};
-  int status_error = fstat(fd.get(), &status) == 0 ? 0 : errno;
-  if (status_error != 0 || !S_ISREG(status.st_mode) || metadata_status.st_dev != status.st_dev || metadata_status.st_ino != status.st_ino)
-  {
-    if (status_error != 0)
-      return std::unexpected(path_io_error("failed to inspect session snapshot", path, status_error));
-    return std::unexpected(path_io_error("session snapshot target changed while opening", path));
-  }
-  return std::pair<int, off_t>(fd.release(), metadata_status.st_size);
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
+  error.with_context("path", path.string());
+  return error;
 }
 
 ava::core::VoidResult validate_read_limits(SessionReadLimits const& limits)
@@ -232,118 +187,63 @@ ava::core::Result<SessionEntry> parse_strict_session_record(std::string_view lin
   return entry;
 }
 
-ava::core::VoidResult visit_session_snapshot_fd(int fd, off_t snapshot_size, std::filesystem::path const& path, SessionReadLimits const& limits,
-                                                SessionEntryVisitor const& visitor, SessionCancelCallback const& cancel_requested,
-                                                bool tolerate_invalid_final_suffix, std::function<void()> const* after_first_read_for_test = nullptr)
+bool same_file_identity(struct stat const& left, struct stat const& right)
 {
-  std::array<char, 8192> buffer{};
-  std::string line;
-  line.reserve(std::min<std::size_t>(limits.max_line_bytes, buffer.size()));
-  std::size_t entry_count = 0;
-  auto consume_line = [&](bool final_unterminated) -> ava::core::Result<bool> {
-    auto const strict_status = ava::core::validate_strict_json(line, ava::core::json::kMaxNestingDepth);
-    if (tolerate_invalid_final_suffix && final_unterminated && strict_status == ava::core::StrictJsonStatus::Invalid)
-    {
-      line.clear();
-      return false;
-    }
-    if (strict_status != ava::core::StrictJsonStatus::Valid)
-      return std::unexpected(strict_session_record_error(strict_status, path, final_unterminated));
-    if (++entry_count > limits.max_entries)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session entry count exceeds bounded read limit");
-      error.with_context("max_entries", std::to_string(limits.max_entries));
-      return std::unexpected(std::move(error));
-    }
-    auto entry = parse_strict_session_record(line, path, final_unterminated);
-    if (!entry)
-      return std::unexpected(std::move(entry.error()));
-    auto keep_going = visitor(*entry);
-    if (!keep_going)
-      return std::unexpected(std::move(keep_going.error()));
-    line.clear();
-    return *keep_going;
-  };
-
-  off_t offset = 0;
-  bool ran_read_hook = false;
-  while (offset < snapshot_size)
-  {
-    if (cancel_requested && cancel_requested())
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session read canceled"));
-    auto const remaining = snapshot_size - offset;
-    auto const wanted = remaining < static_cast<off_t>(buffer.size()) ? static_cast<std::size_t>(remaining) : buffer.size();
-    ssize_t count = 0;
-    do
-    {
-      count = ::pread(fd, buffer.data(), wanted, offset);
-    } while (count < 0 && errno == EINTR);
-    if (count < 0)
-      return std::unexpected(path_io_error("failed while reading session file", path, errno));
-    if (count == 0 || static_cast<std::size_t>(count) > wanted)
-      return std::unexpected(path_io_error("session file shrank or became unreadable during bounded read", path));
-    offset += count;
-
-    if (!ran_read_hook && after_first_read_for_test != nullptr && *after_first_read_for_test)
-    {
-      ran_read_hook = true;
-      try
-      {
-        (*after_first_read_for_test)();
-      }
-      catch (...)
-      {
-        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "lease-bound session read test hook failed"));
-      }
-    }
-
-    for (ssize_t index = 0; index < count; ++index)
-    {
-      char const ch = buffer[static_cast<std::size_t>(index)];
-      if (ch == '\n')
-      {
-        auto keep_going = consume_line(false);
-        if (!keep_going)
-          return std::unexpected(std::move(keep_going.error()));
-        if (!*keep_going)
-          return {};
-      }
-      else
-      {
-        if (line.size() >= limits.max_line_bytes)
-        {
-          auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session line exceeds bounded read limit");
-          error.with_context("path", path.string()).with_context("max_line_bytes", std::to_string(limits.max_line_bytes));
-          return std::unexpected(std::move(error));
-        }
-        line.push_back(ch);
-      }
-    }
-  }
-  if (!line.empty())
-  {
-    auto keep_going = consume_line(true);
-    if (!keep_going)
-      return std::unexpected(std::move(keep_going.error()));
-  }
-  return {};
+  return S_ISREG(left.st_mode) && S_ISREG(right.st_mode) && left.st_dev == right.st_dev && left.st_ino == right.st_ino;
 }
 
-ava::core::VoidResult visit_regular_session_snapshot(std::filesystem::path const& path, SessionReadLimits const& limits, SessionEntryVisitor const& visitor,
-                                                     SessionCancelCallback const& cancel_requested, bool tolerate_invalid_final_suffix)
+bool same_directory_identity(struct stat const& left, struct stat const& right)
 {
-  auto opened = open_regular_snapshot(path, limits.max_file_bytes);
-  if (!opened)
-    return std::unexpected(std::move(opened.error()));
-  ScopedFd fd(opened->first);
-  auto visited = visit_session_snapshot_fd(fd.get(), opened->second, path, limits, visitor, cancel_requested, tolerate_invalid_final_suffix);
-  int const close_error = fd.close_checked();
-  if (!visited)
-    return std::unexpected(std::move(visited.error()));
-  if (close_error != 0)
-    return std::unexpected(path_io_error("failed to close session snapshot", path, close_error));
-  return {};
+  return S_ISDIR(left.st_mode) && S_ISDIR(right.st_mode) && left.st_dev == right.st_dev && left.st_ino == right.st_ino;
 }
+
+SessionTraceScope::SessionTraceScope(std::shared_ptr<ava::observability::RunObservation> observation,
+                                     std::shared_ptr<ava::observability::TraceContext const> context, ava::observability::TraceEventType attempt,
+                                     ava::observability::TraceEventType result, std::optional<EntryType> entry_type, bool ephemeral) noexcept
+    : observation_(std::move(observation)), context_(std::move(context)), result_(result), entry_type_(entry_type), ephemeral_(ephemeral)
+{
+  observation_->emit(attempt, *context_, [this](auto& event) {
+    event.phase = ava::observability::TracePhase::Session;
+    if (entry_type_)
+      event.fields = {{.key = "entry_type", .value = to_string(*entry_type_)}, {.key = "ephemeral", .value = ephemeral_ ? "true" : "false"}};
+    else
+      event.fields = {{.key = "ephemeral", .value = ephemeral_ ? "true" : "false"}};
+  });
+}
+
+SessionTraceScope::~SessionTraceScope() noexcept
+{
+  observation_->emit(result_, *context_, [this](auto& event) {
+    event.phase = ava::observability::TracePhase::Session;
+    event.outcome = outcome_;
+    if (result_ == ava::observability::TraceEventType::SessionLoadResult)
+      event.fields = {{.key = "ephemeral", .value = ephemeral_ ? "true" : "false"}, {.key = "entry_count", .value = std::to_string(entry_count_)}};
+    else
+      event.fields = {{.key = "entry_type", .value = to_string(*entry_type_)}, {.key = "ephemeral", .value = ephemeral_ ? "true" : "false"}};
+  });
+}
+
+void SessionTraceScope::succeed(std::size_t entry_count) noexcept
+{
+  outcome_ = ava::observability::TraceOutcome::Success;
+  entry_count_ = entry_count;
+}
+
+}  // namespace detail
+
+namespace {
+
+using detail::append_authority_error;
+using detail::append_mutex_for_path;
+using detail::parse_strict_session_record;
+using detail::path_io_error;
+using detail::project_key;
+using detail::same_directory_identity;
+using detail::same_file_identity;
+using detail::ScopedFd;
+using detail::SessionTraceScope;
+using detail::strict_session_record_error;
+using detail::validate_read_limits;
 
 bool write_all(int fd, std::string_view bytes, int& error_number)
 {
@@ -375,19 +275,7 @@ ava::core::VoidResult check_recovery_cancellation(SessionCancelCallback const& c
   return {};
 }
 
-bool same_file_identity(struct stat const& left, struct stat const& right)
-{
-  return S_ISREG(left.st_mode) && S_ISREG(right.st_mode) && left.st_dev == right.st_dev && left.st_ino == right.st_ino;
-}
-
 using ava::core::normalized_absolute_path;
-
-ava::core::Error append_authority_error(std::string message, std::filesystem::path const& path)
-{
-  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
-  error.with_context("path", path.string());
-  return error;
-}
 
 enum class AppendCommitState
 {
@@ -503,11 +391,6 @@ int renameat2_no_replace(int parent_fd, std::string const& source_name, std::str
 bool renameat2_no_replace_unavailable(int error_number)
 {
   return error_number == ENOSYS || error_number == EINVAL || error_number == EOPNOTSUPP;
-}
-
-bool same_directory_identity(struct stat const& left, struct stat const& right)
-{
-  return S_ISDIR(left.st_mode) && S_ISDIR(right.st_mode) && left.st_dev == right.st_dev && left.st_ino == right.st_ino;
 }
 
 bool unchanged_file_snapshot(struct stat const& current, struct stat const& initial)
@@ -768,49 +651,6 @@ ava::core::Result<std::filesystem::path> quarantine_session_suffix(int parent_fd
   error.with_context("path", (parent_path / session_name).string());
   return std::unexpected(std::move(error));
 }
-
-class SessionTraceScope
-{
- public:
-  SessionTraceScope(std::shared_ptr<ava::observability::RunObservation> observation, std::shared_ptr<ava::observability::TraceContext const> context,
-                    ava::observability::TraceEventType attempt, ava::observability::TraceEventType result, std::optional<EntryType> entry_type,
-                    bool ephemeral) noexcept
-      : observation_(std::move(observation)), context_(std::move(context)), result_(result), entry_type_(entry_type), ephemeral_(ephemeral)
-  {
-    observation_->emit(attempt, *context_, [this](auto& event) {
-      event.phase = ava::observability::TracePhase::Session;
-      if (entry_type_)
-        event.fields = {{.key = "entry_type", .value = to_string(*entry_type_)}, {.key = "ephemeral", .value = ephemeral_ ? "true" : "false"}};
-      else
-        event.fields = {{.key = "ephemeral", .value = ephemeral_ ? "true" : "false"}};
-    });
-  }
-  ~SessionTraceScope() noexcept
-  {
-    observation_->emit(result_, *context_, [this](auto& event) {
-      event.phase = ava::observability::TracePhase::Session;
-      event.outcome = outcome_;
-      if (result_ == ava::observability::TraceEventType::SessionLoadResult)
-        event.fields = {{.key = "ephemeral", .value = ephemeral_ ? "true" : "false"}, {.key = "entry_count", .value = std::to_string(entry_count_)}};
-      else
-        event.fields = {{.key = "entry_type", .value = to_string(*entry_type_)}, {.key = "ephemeral", .value = ephemeral_ ? "true" : "false"}};
-    });
-  }
-  void succeed(std::size_t entry_count = 0) noexcept
-  {
-    outcome_ = ava::observability::TraceOutcome::Success;
-    entry_count_ = entry_count;
-  }
-
- private:
-  std::shared_ptr<ava::observability::RunObservation> observation_;
-  std::shared_ptr<ava::observability::TraceContext const> context_;
-  ava::observability::TraceEventType result_;
-  std::optional<EntryType> entry_type_;
-  bool ephemeral_ = false;
-  std::size_t entry_count_ = 0;
-  ava::observability::TraceOutcome outcome_ = ava::observability::TraceOutcome::Error;
-};
 
 }  // namespace
 
@@ -2495,628 +2335,6 @@ ava::core::Result<std::optional<AssistantOutputSuffixRecovery>> SessionStore::re
       .quarantine_path = std::move(*quarantined), .removed_entry_count = records.size() - *suffix_start_index, .removed_byte_count = removed_byte_count});
 }
 
-ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const
-{
-  std::optional<SessionTraceScope> trace;
-  if (observation_attachment_->enabled.load(std::memory_order_acquire))
-  {
-    std::shared_ptr<ava::observability::RunObservation> observation;
-    try
-    {
-      std::shared_ptr<ava::observability::TraceContext const> context;
-      {
-        std::lock_guard lock(observation_attachment_->mutex);
-        observation = observation_attachment_->observation;
-        context = observation_attachment_->context;
-      }
-      if (observation && observation->enabled() && context)
-      {
-        trace.emplace(std::move(observation), std::move(context), ava::observability::TraceEventType::SessionLoadAttempt,
-                      ava::observability::TraceEventType::SessionLoadResult, std::nullopt, is_ephemeral());
-      }
-    }
-    catch (...)
-    {
-      if (observation)
-        observation->account_external_failure();
-    }
-  }
-  if (auto valid_session_id = validate_session_id(options_.session_id); !valid_session_id)
-  {
-    return std::unexpected(std::move(valid_session_id.error()));
-  }
-
-  if (ephemeral_state_)
-  {
-    std::lock_guard lock(ephemeral_state_->entries_mutex);
-    auto entries = ephemeral_state_->entries;
-    if (trace)
-      trace->succeed(entries.size());
-    return entries;
-  }
-
-  auto const path = session_path();
-  auto& append_mutex = append_mutex_for_path(path);
-  std::lock_guard append_lock(append_mutex);
-
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (status_error || !std::filesystem::exists(status))
-  {
-    if (trace)
-      trace->succeed();
-    return std::vector<SessionEntry>{};
-  }
-  if (std::filesystem::is_symlink(status))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "session path must not be a symlink");
-    error.with_context("session_id", session_id());
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
-  if (!std::filesystem::is_regular_file(status))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session path is not a regular file");
-    error.with_context("session_id", session_id());
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
-
-  std::ifstream file(path);
-  if (!file)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to open session file");
-    error.with_context("session_id", session_id());
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
-
-  std::vector<SessionEntry> entries;
-  std::string line;
-  while (true)
-  {
-    auto line_read = read_limited_session_line(file, line);
-    if (!line_read)
-      return std::unexpected(line_read.error());
-    if (!*line_read)
-      break;
-    auto entry = parse_session_entry_line(line, path);
-    if (!entry)
-      return std::unexpected(std::move(entry.error()));
-    entries.push_back(std::move(*entry));
-  }
-  if (trace)
-    trace->succeed(entries.size());
-  return entries;
-}
-
-ava::core::VoidResult SessionStore::visit_entries(SessionReadLimits limits, SessionEntryVisitor const& visitor, SessionCancelCallback cancel_requested) const
-{
-  if (auto valid = validate_read_limits(limits); !valid)
-    return valid;
-  if (!visitor)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session entry visitor is required"));
-  if (auto valid_session_id = validate_session_id(options_.session_id); !valid_session_id)
-    return valid_session_id;
-
-  if (ephemeral_state_)
-  {
-    std::vector<SessionEntry> snapshot;
-    {
-      std::lock_guard lock(ephemeral_state_->entries_mutex);
-      if (ephemeral_state_->entries.size() > limits.max_entries)
-        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "session entry count exceeds bounded read limit"));
-      snapshot = ephemeral_state_->entries;
-    }
-    for (auto const& entry : snapshot)
-    {
-      if (cancel_requested && cancel_requested())
-        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session read canceled"));
-      auto keep_going = visitor(entry);
-      if (!keep_going)
-        return std::unexpected(std::move(keep_going.error()));
-      if (!*keep_going)
-        break;
-    }
-    return {};
-  }
-
-  // Reads are pinned to one descriptor/fstat byte snapshot. No registry or
-  // append mutex is held across open/read/parse; a concurrently incomplete
-  // trailing record fails this transient read rather than being accepted.
-  return visit_regular_session_snapshot(session_path(), limits, visitor, cancel_requested, false);
-}
-
-ava::core::VoidResult SessionStore::visit_entries_leased(SessionLease const& lease, SessionReadLimits limits, SessionEntryVisitor const& visitor,
-                                                         SessionCancelCallback cancel_requested, bool invoke_after_lease_bound_read_test_hook) const
-{
-  if (auto valid = validate_read_limits(limits); !valid)
-    return valid;
-  if (!visitor)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session entry visitor is required"));
-  if (auto valid_session_id = validate_session_id(options_.session_id); !valid_session_id)
-    return valid_session_id;
-  if (ephemeral_state_)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "lease-bound reads require a persistent session store"));
-  if (!lease.active())
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "lease-bound session read requires an active session lease"));
-
-  auto const path = normalized_absolute_path(session_path());
-  if (path != lease.canonical_path())
-  {
-    auto error = append_authority_error("session lease does not exactly match the persistent read target", path);
-    error.with_context("lease_path", lease.canonical_path().string());
-    return std::unexpected(std::move(error));
-  }
-  auto const parent_path = path.parent_path();
-  auto const session_name = path.filename().string();
-  if (session_name.empty())
-    return std::unexpected(path_io_error("lease-bound session read target has no basename", path));
-
-  ScopedFd parent_fd(::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
-  if (parent_fd.get() < 0)
-    return std::unexpected(path_io_error("failed to anchor lease-bound session read directory", parent_path, errno));
-
-  struct stat initial_parent_status{};
-  if (fstat(parent_fd.get(), &initial_parent_status) != 0 || !S_ISDIR(initial_parent_status.st_mode))
-  {
-    int const error_number = errno;
-    return std::unexpected(path_io_error("lease-bound session read parent is not a directory", parent_path, error_number));
-  }
-
-  struct ReadIdentity
-  {
-    struct stat lease_status{};
-    struct stat named_status{};
-  };
-  auto validate_identity = [&](std::string_view timing) -> ava::core::Result<ReadIdentity> {
-    ReadIdentity identity;
-    if (fstat(lease.fd_, &identity.lease_status) != 0)
-      return std::unexpected(path_io_error("failed to inspect session lease " + std::string(timing), path, errno));
-    if (fstatat(parent_fd.get(), session_name.c_str(), &identity.named_status, AT_SYMLINK_NOFOLLOW) != 0)
-      return std::unexpected(path_io_error("failed to inspect leased session name " + std::string(timing), path, errno));
-    if (!same_file_identity(identity.lease_status, identity.named_status) || identity.lease_status.st_nlink != 1 || identity.named_status.st_nlink != 1)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "lease-bound session read target was replaced " + std::string(timing));
-      error.with_context("timing", std::string(timing));
-      error.with_context("lease_links", std::to_string(identity.lease_status.st_nlink));
-      error.with_context("name_links", std::to_string(identity.named_status.st_nlink));
-      return std::unexpected(std::move(error));
-    }
-
-    struct stat anchored_parent_status{};
-    if (fstat(parent_fd.get(), &anchored_parent_status) != 0)
-      return std::unexpected(path_io_error("failed to inspect anchored session directory " + std::string(timing), parent_path, errno));
-    if (!same_directory_identity(initial_parent_status, anchored_parent_status))
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "anchored session directory changed during lease-bound read");
-      error.with_context("timing", std::string(timing)).with_context("path", parent_path.string());
-      return std::unexpected(std::move(error));
-    }
-
-    ScopedFd publication_fd(::open(parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
-    if (publication_fd.get() < 0)
-      return std::unexpected(path_io_error("failed to re-open session directory publication " + std::string(timing), parent_path, errno));
-    struct stat publication_status{};
-    int const publication_error = fstat(publication_fd.get(), &publication_status) == 0 ? 0 : errno;
-    int const publication_close_error = publication_fd.close_checked();
-    if (publication_error != 0)
-      return std::unexpected(path_io_error("failed to inspect session directory publication " + std::string(timing), parent_path, publication_error));
-    if (publication_close_error != 0)
-      return std::unexpected(path_io_error("failed to close session directory publication " + std::string(timing), parent_path, publication_close_error));
-    if (!same_directory_identity(initial_parent_status, publication_status))
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session directory publication changed during lease-bound read");
-      error.with_context("timing", std::string(timing)).with_context("path", parent_path.string());
-      return std::unexpected(std::move(error));
-    }
-    return identity;
-  };
-
-  auto initial = validate_identity("before snapshot");
-  if (!initial)
-    return std::unexpected(std::move(initial.error()));
-  if (initial->lease_status.st_size < 0)
-    return std::unexpected(path_io_error("lease-bound session snapshot has an invalid size", path));
-  auto const initial_size = initial->lease_status.st_size;
-  if (static_cast<std::uintmax_t>(initial_size) > limits.max_file_bytes)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session file exceeds bounded read limit");
-    error.with_context("path", path.string()).with_context("max_file_bytes", std::to_string(limits.max_file_bytes));
-    return std::unexpected(std::move(error));
-  }
-
-  auto visited =
-      visit_session_snapshot_fd(lease.fd_, initial_size, path, limits, visitor, cancel_requested, false,
-                                invoke_after_lease_bound_read_test_hook && after_lease_bound_read_for_test_ ? &after_lease_bound_read_for_test_ : nullptr);
-  auto final = validate_identity("after snapshot");
-  if (final && (!same_file_identity(initial->lease_status, final->lease_status) || final->lease_status.st_size < initial_size ||
-                final->named_status.st_size < initial_size))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "leased session inode shrank or changed during snapshot");
-    error.with_context("path", path.string());
-    final = std::unexpected(std::move(error));
-  }
-  int const parent_close_error = parent_fd.close_checked();
-  if (!final)
-    return std::unexpected(std::move(final.error()));
-  if (!visited)
-    return std::unexpected(std::move(visited.error()));
-  if (parent_close_error != 0)
-    return std::unexpected(path_io_error("failed to close lease-bound session read directory", parent_path, parent_close_error));
-  return {};
-}
-
-ava::core::Result<std::vector<SessionEntry>> SessionStore::load(SessionLease const& lease) const
-{
-  return load_bounded(lease, legacy_unbounded_session_read_limits());
-}
-
-ava::core::Result<std::vector<SessionEntry>> SessionStore::load_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested) const
-{
-  std::vector<SessionEntry> entries;
-  entries.reserve(std::min<std::size_t>(limits.max_entries, 256));
-  auto visited = visit_entries(
-      limits,
-      [&](SessionEntry const& entry) -> ava::core::Result<bool> {
-        entries.push_back(entry);
-        return true;
-      },
-      std::move(cancel_requested));
-  if (!visited)
-    return std::unexpected(std::move(visited.error()));
-  return entries;
-}
-
-ava::core::Result<std::vector<SessionEntry>> SessionStore::load_bounded(SessionLease const& lease, SessionReadLimits limits,
-                                                                        SessionCancelCallback cancel_requested) const
-{
-  std::vector<SessionEntry> entries;
-  entries.reserve(std::min<std::size_t>(limits.max_entries, 256));
-  auto visited = visit_entries_leased(
-      lease, limits,
-      [&](SessionEntry const& entry) -> ava::core::Result<bool> {
-        entries.push_back(entry);
-        return true;
-      },
-      std::move(cancel_requested));
-  if (!visited)
-    return std::unexpected(std::move(visited.error()));
-  return entries;
-}
-
-ava::core::Result<SessionSummary> SessionStore::inspect_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested) const
-{
-  SessionSummary summary{.session_id = session_id(), .path = session_path(), .last_updated = {}, .entry_count = 0, .original_cwd = {}, .title = {}};
-  bool has_manual_title = false;
-  auto visited = visit_entries(
-      limits,
-      [&](SessionEntry const& entry) -> ava::core::Result<bool> {
-        ++summary.entry_count;
-        summary.last_updated = entry.timestamp;
-        if (entry.type == EntryType::SessionMetadata)
-        {
-          if (auto name = ava::core::json::string_field(entry.data_json, "name"))
-          {
-            summary.title = std::move(*name);
-            has_manual_title = true;
-          }
-          else if (!has_manual_title)
-          {
-            if (auto generated = ava::core::json::string_field(entry.data_json, "generated_title"))
-              summary.title = std::move(*generated);
-          }
-        }
-        if (entry.type == EntryType::SessionStart || entry.type == EntryType::SessionMetadata)
-        {
-          if (auto cwd = ava::core::json::string_field(entry.data_json, "original_cwd"); cwd && !cwd->empty())
-          {
-            std::filesystem::path candidate(*cwd);
-            if (!candidate.is_absolute() || candidate.lexically_normal() != candidate)
-              return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "persisted session cwd is invalid"));
-            if (!summary.original_cwd.empty() && summary.original_cwd != candidate)
-              return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "persisted session cwd changed"));
-            summary.original_cwd = std::move(candidate);
-          }
-        }
-        return true;
-      },
-      std::move(cancel_requested));
-  if (!visited)
-    return std::unexpected(std::move(visited.error()));
-  return summary;
-}
-
-ava::core::Result<SessionSummary> SessionStore::inspect_bounded(SessionLease const& lease, SessionReadLimits limits,
-                                                                SessionCancelCallback cancel_requested) const
-{
-  SessionSummary summary{.session_id = session_id(), .path = session_path(), .last_updated = {}, .entry_count = 0, .original_cwd = {}, .title = {}};
-  bool has_manual_title = false;
-  auto visited = visit_entries_leased(
-      lease, limits,
-      [&](SessionEntry const& entry) -> ava::core::Result<bool> {
-        ++summary.entry_count;
-        summary.last_updated = entry.timestamp;
-        if (entry.type == EntryType::SessionMetadata)
-        {
-          if (auto name = ava::core::json::string_field(entry.data_json, "name"))
-          {
-            summary.title = std::move(*name);
-            has_manual_title = true;
-          }
-          else if (!has_manual_title)
-          {
-            if (auto generated = ava::core::json::string_field(entry.data_json, "generated_title"))
-              summary.title = std::move(*generated);
-          }
-        }
-        if (entry.type == EntryType::SessionStart || entry.type == EntryType::SessionMetadata)
-        {
-          if (auto cwd = ava::core::json::string_field(entry.data_json, "original_cwd"); cwd && !cwd->empty())
-          {
-            std::filesystem::path candidate(*cwd);
-            if (!candidate.is_absolute() || candidate.lexically_normal() != candidate)
-              return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "persisted session cwd is invalid"));
-            if (!summary.original_cwd.empty() && summary.original_cwd != candidate)
-              return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "persisted session cwd changed"));
-            summary.original_cwd = std::move(candidate);
-          }
-        }
-        return true;
-      },
-      std::move(cancel_requested));
-  if (!visited)
-    return std::unexpected(std::move(visited.error()));
-  return summary;
-}
-
-ava::core::Result<SessionSummary> SessionStore::inspect_bounded_for_listing(SessionReadLimits limits, bool inspect_metadata,
-                                                                            SessionCancelCallback cancel_requested) const
-{
-  if (auto valid = validate_read_limits(limits); !valid)
-    return std::unexpected(std::move(valid.error()));
-  SessionSummary summary{.session_id = session_id(), .path = session_path(), .last_updated = {}, .entry_count = 0, .original_cwd = {}, .title = {}};
-  bool has_manual_title = false;
-  auto visited = visit_regular_session_snapshot(
-      session_path(), limits,
-      [&](SessionEntry const& entry) -> ava::core::Result<bool> {
-        ++summary.entry_count;
-        summary.last_updated = entry.timestamp;
-        if (inspect_metadata && entry.type == EntryType::SessionMetadata)
-        {
-          if (auto name = ava::core::json::string_field(entry.data_json, "name"))
-          {
-            summary.title = std::move(*name);
-            has_manual_title = true;
-          }
-          else if (!has_manual_title)
-          {
-            if (auto generated = ava::core::json::string_field(entry.data_json, "generated_title"))
-              summary.title = std::move(*generated);
-          }
-        }
-        if (inspect_metadata && (entry.type == EntryType::SessionStart || entry.type == EntryType::SessionMetadata))
-        {
-          if (auto cwd = ava::core::json::string_field(entry.data_json, "original_cwd"); cwd && !cwd->empty())
-          {
-            std::filesystem::path candidate(*cwd);
-            if (!candidate.is_absolute() || candidate.lexically_normal() != candidate)
-              return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "persisted session cwd is invalid"));
-            if (!summary.original_cwd.empty() && summary.original_cwd != candidate)
-              return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "persisted session cwd changed"));
-            summary.original_cwd = std::move(candidate);
-          }
-        }
-        return true;
-      },
-      cancel_requested, true);
-  if (!visited)
-    return std::unexpected(std::move(visited.error()));
-  return summary;
-}
-
-ava::core::Result<SessionStore> SessionStore::create(std::filesystem::path const& workspace_dir, std::filesystem::path const& root_dir)
-{
-  return SessionStore(SessionStoreOptions{
-      .root_dir = root_dir,
-      .workspace_dir = workspace_dir,
-      .session_id = ava::core::make_id("session"),
-  });
-}
-
-ava::core::Result<SessionStore> SessionStore::create_ephemeral(std::filesystem::path const& workspace_dir)
-{
-  std::error_code temp_error;
-  auto temp_root = std::filesystem::temp_directory_path(temp_error);
-  if (temp_error)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to resolve temporary directory for ephemeral session");
-    error.with_context("cause", temp_error.message());
-    return std::unexpected(std::move(error));
-  }
-
-  auto scratch_root = temp_root / ("ava-" + ava::core::make_id("ephemeral-session"));
-  return SessionStore(
-      SessionStoreOptions{
-          .root_dir = scratch_root,
-          .workspace_dir = workspace_dir,
-          .session_id = ava::core::make_id("session"),
-      },
-      std::make_shared<EphemeralState>(scratch_root));
-}
-
-ava::core::Result<SessionStore> SessionStore::open(std::filesystem::path const& workspace_dir, std::string session_id, std::filesystem::path const& root_dir)
-{
-  if (auto valid_session_id = validate_session_id(session_id); !valid_session_id)
-  {
-    return std::unexpected(std::move(valid_session_id.error()));
-  }
-
-  SessionStore store(SessionStoreOptions{
-      .root_dir = root_dir,
-      .workspace_dir = workspace_dir,
-      .session_id = std::move(session_id),
-  });
-  auto opened = open_regular_snapshot(store.session_path(), std::numeric_limits<std::size_t>::max());
-  if (!opened)
-  {
-    auto error = std::move(opened.error());
-    error.with_context("session_id", store.session_id());
-    return std::unexpected(std::move(error));
-  }
-  ScopedFd snapshot_fd(opened->first);
-  if (int const close_error = snapshot_fd.close_checked(); close_error != 0)
-    return std::unexpected(path_io_error("failed to close session open snapshot", store.session_path(), close_error));
-  return store;
-}
-
-ava::core::Result<std::vector<SessionSummary>> SessionStore::list_sessions(std::filesystem::path const& workspace_dir, std::filesystem::path const& root_dir)
-{
-  auto const directory = root_dir / project_key(workspace_dir);
-  std::error_code exists_error;
-  bool const directory_exists = std::filesystem::exists(directory, exists_error);
-  if (exists_error)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect session directory");
-    error.with_context("path", directory.string());
-    error.with_context("cause", exists_error.message());
-    return std::unexpected(std::move(error));
-  }
-  if (!directory_exists)
-  {
-    return std::vector<SessionSummary>{};
-  }
-
-  std::vector<SessionSummary> summaries;
-  std::error_code iter_error;
-  for (std::filesystem::directory_iterator iter(directory, iter_error), end; iter != end; iter.increment(iter_error))
-  {
-    if (iter_error)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to list sessions");
-      error.with_context("path", directory.string());
-      error.with_context("cause", iter_error.message());
-      return std::unexpected(std::move(error));
-    }
-    auto const& entry = *iter;
-    std::error_code entry_error;
-    auto const entry_status = entry.symlink_status(entry_error);
-    if (entry_error || std::filesystem::is_symlink(entry_status) || !std::filesystem::is_regular_file(entry_status) || entry.path().extension() != ".jsonl")
-    {
-      continue;
-    }
-    auto const session_id = entry.path().stem().string();
-    auto store = SessionStore::open(workspace_dir, session_id, root_dir);
-    if (!store)
-    {
-      continue;
-    }
-    auto summary = store->inspect_bounded_for_listing(SessionReadLimits{.max_file_bytes = std::numeric_limits<std::size_t>::max(),
-                                                                        .max_line_bytes = kMaxSessionLineBytes,
-                                                                        .max_entries = std::numeric_limits<std::size_t>::max()},
-                                                      true);
-    if (!summary)
-    {
-      if (is_unsupported_session_version_error(summary.error()))
-      {
-        auto error = std::move(summary.error());
-        error.with_context("session_id", session_id);
-        return std::unexpected(std::move(error));
-      }
-      continue;
-    }
-    summaries.push_back(std::move(*summary));
-  }
-
-  std::ranges::sort(summaries, [](SessionSummary const& left, SessionSummary const& right) {
-    std::error_code left_error;
-    std::error_code right_error;
-    auto const left_time = std::filesystem::last_write_time(left.path, left_error);
-    auto const right_time = std::filesystem::last_write_time(right.path, right_error);
-    if (!left_error && !right_error && left_time != right_time)
-    {
-      return left_time > right_time;
-    }
-    return left.session_id > right.session_id;
-  });
-
-  return summaries;
-}
-
-ava::core::Result<std::vector<SessionSummary>> SessionStore::list_sessions_bounded(std::filesystem::path const& workspace_dir,
-                                                                                   std::filesystem::path const& root_dir, SessionListLimits limits,
-                                                                                   SessionCancelCallback cancel_requested)
-{
-  if (limits.max_sessions == 0 || limits.max_total_file_bytes == 0)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session list limits must be non-zero"));
-  if (auto valid = validate_read_limits(limits.per_session); !valid)
-    return std::unexpected(std::move(valid.error()));
-
-  auto const directory = root_dir / project_key(workspace_dir);
-  std::error_code exists_error;
-  if (!std::filesystem::exists(directory, exists_error))
-  {
-    if (!exists_error)
-      return std::vector<SessionSummary>{};
-    return std::unexpected(path_io_error("failed to inspect session directory", directory, exists_error.value()));
-  }
-
-  std::vector<std::pair<std::string, std::filesystem::path>> candidates;
-  std::size_t total_file_bytes = 0;
-  std::error_code iter_error;
-  for (std::filesystem::directory_iterator iter(directory, iter_error), end; iter != end; iter.increment(iter_error))
-  {
-    if (cancel_requested && cancel_requested())
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session list canceled"));
-    if (iter_error)
-      return std::unexpected(path_io_error("failed to list sessions", directory, iter_error.value()));
-    auto const& entry = *iter;
-    std::error_code status_error;
-    auto const status = entry.symlink_status(status_error);
-    if (status_error || std::filesystem::is_symlink(status) || !std::filesystem::is_regular_file(status) || entry.path().extension() != ".jsonl")
-      continue;
-    auto id = entry.path().stem().string();
-    if (!validate_session_id(id))
-      continue;
-    if (candidates.size() >= limits.max_sessions)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session count exceeds bounded list limit");
-      error.with_context("max_sessions", std::to_string(limits.max_sessions));
-      return std::unexpected(std::move(error));
-    }
-    std::error_code size_error;
-    auto const size = entry.file_size(size_error);
-    if (size_error || size > limits.per_session.max_file_bytes || size > limits.max_total_file_bytes - total_file_bytes)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session files exceed bounded list byte limit");
-      error.with_context("max_total_file_bytes", std::to_string(limits.max_total_file_bytes));
-      return std::unexpected(std::move(error));
-    }
-    total_file_bytes += static_cast<std::size_t>(size);
-    candidates.emplace_back(std::move(id), entry.path());
-  }
-  if (iter_error)
-    return std::unexpected(path_io_error("failed to list sessions", directory, iter_error.value()));
-
-  std::vector<SessionSummary> summaries;
-  summaries.reserve(candidates.size());
-  for (auto const& [id, path] : candidates)
-  {
-    (void)path;
-    SessionStore store(SessionStoreOptions{.root_dir = root_dir, .workspace_dir = workspace_dir, .session_id = id});
-    auto summary = store.inspect_bounded_for_listing(limits.per_session, true, cancel_requested);
-    if (!summary)
-      return std::unexpected(std::move(summary.error()));
-    summaries.push_back(std::move(*summary));
-  }
-  std::ranges::sort(summaries, [](SessionSummary const& left, SessionSummary const& right) {
-    if (left.last_updated != right.last_updated)
-      return left.last_updated > right.last_updated;
-    return left.session_id > right.session_id;
-  });
-  return summaries;
-}
-
 SessionLease::SessionLease(int fd, std::filesystem::path canonical_path, bool created) : fd_(fd), canonical_path_(std::move(canonical_path)), created_(created)
 {
 }
@@ -3837,187 +3055,6 @@ ava::core::Result<SessionReadAuthority> SessionAppendTarget::read_authority() co
 bool SessionAppendTarget::is_ephemeral() const noexcept
 {
   return !lease_.has_value();
-}
-
-std::filesystem::path SessionStore::default_root_dir()
-{
-  return ava::config::xdg_paths().sessions_dir;
-}
-
-SessionReadLimits legacy_unbounded_session_read_limits()
-{
-  return SessionReadLimits{.max_file_bytes = std::numeric_limits<std::size_t>::max(),
-                           .max_line_bytes = kMaxSessionLineBytes,
-                           .max_entries = std::numeric_limits<std::size_t>::max()};
-}
-
-std::string to_string(EntryType type)
-{
-  switch (type)
-  {
-    case EntryType::SessionStart:
-      return "session_start";
-    case EntryType::SessionMetadata:
-      return "session_metadata";
-    case EntryType::UserMessage:
-      return "user_message";
-    case EntryType::AssistantMessage:
-      return "assistant_message";
-    case EntryType::ToolCall:
-      return "tool_call";
-    case EntryType::ToolResult:
-      return "tool_result";
-    case EntryType::PermissionDecision:
-      return "permission_decision";
-    case EntryType::ModeChange:
-      return "mode_change";
-    case EntryType::ModelChange:
-      return "model_change";
-    case EntryType::ReasoningBlock:
-      return "reasoning_block";
-    case EntryType::ReasoningChange:
-      return "reasoning_change";
-    case EntryType::AssistantOutputItem:
-      return "assistant_output_item";
-    case EntryType::AssistantTurnCommit:
-      return "assistant_turn_commit";
-    case EntryType::Compaction:
-      return "compaction";
-    case EntryType::BranchSummary:
-      return "branch_summary";
-    case EntryType::Error:
-      return "error";
-    case EntryType::Cancel:
-      return "cancel";
-  }
-  return "error";
-}
-
-ava::core::Result<EntryType> parse_entry_type(std::string_view value)
-{
-  if (value == "session_start")
-    return EntryType::SessionStart;
-  if (value == "session_metadata")
-    return EntryType::SessionMetadata;
-  if (value == "user_message")
-    return EntryType::UserMessage;
-  if (value == "assistant_message")
-    return EntryType::AssistantMessage;
-  if (value == "tool_call")
-    return EntryType::ToolCall;
-  if (value == "tool_result")
-    return EntryType::ToolResult;
-  if (value == "permission_decision")
-    return EntryType::PermissionDecision;
-  if (value == "mode_change")
-    return EntryType::ModeChange;
-  if (value == "model_change")
-    return EntryType::ModelChange;
-  if (value == "reasoning_block")
-    return EntryType::ReasoningBlock;
-  if (value == "reasoning_change")
-    return EntryType::ReasoningChange;
-  if (value == "assistant_output_item")
-    return EntryType::AssistantOutputItem;
-  if (value == "assistant_turn_commit")
-    return EntryType::AssistantTurnCommit;
-  if (value == "compaction")
-    return EntryType::Compaction;
-  if (value == "branch_summary")
-    return EntryType::BranchSummary;
-  if (value == "error")
-    return EntryType::Error;
-  if (value == "cancel")
-    return EntryType::Cancel;
-
-  auto error = ava::core::Error(ava::core::ErrorCategory::Session, "unknown session entry type");
-  error.with_context("type", std::string(value));
-  return std::unexpected(std::move(error));
-}
-
-ava::core::Result<std::optional<SyntheticDeliveryProvenance>> parse_synthetic_delivery_provenance(SessionEntry const& entry)
-{
-  if (entry.type != EntryType::UserMessage)
-    return std::optional<SyntheticDeliveryProvenance>{};
-  if (ava::core::validate_strict_json(entry.data_json, ava::core::json::kMaxNestingDepth) != ava::core::StrictJsonStatus::Valid)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "user message provenance requires strict JSON"));
-  auto const provenance_start = ava::core::json::field_value_start(entry.data_json, "provenance");
-  if (!provenance_start)
-    return std::optional<SyntheticDeliveryProvenance>{};
-  if (*provenance_start >= entry.data_json.size() || entry.data_json[*provenance_start] != '{')
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "synthetic delivery provenance must be an object"));
-  std::size_t end = *provenance_start;
-  std::size_t depth = 0;
-  std::size_t member_count = 0;
-  bool in_string = false;
-  bool escaped = false;
-  for (; end < entry.data_json.size(); ++end)
-  {
-    char const ch = entry.data_json[end];
-    if (in_string)
-    {
-      if (escaped)
-        escaped = false;
-      else if (ch == '\\')
-        escaped = true;
-      else if (ch == '"')
-        in_string = false;
-      continue;
-    }
-    if (ch == '"')
-      in_string = true;
-    else if (ch == '{')
-      ++depth;
-    else if (ch == '}')
-    {
-      if (--depth == 0)
-        break;
-    }
-    else if (ch == ':' && depth == 1)
-      ++member_count;
-  }
-  if (end >= entry.data_json.size() || member_count != 3)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "synthetic delivery provenance has missing or unknown fields"));
-  auto const provenance = std::string_view(entry.data_json).substr(*provenance_start, end - *provenance_start + 1);
-  auto source = ava::core::json::string_field(provenance, "source");
-  auto delivery_id = ava::core::json::string_field(provenance, "delivery_id");
-  auto prompt_fingerprint = ava::core::json::string_field(provenance, "prompt_fingerprint");
-  if (!source || !delivery_id || !prompt_fingerprint)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "synthetic delivery provenance fields must be strings"));
-  SyntheticDeliveryProvenance parsed{
-      .delivery_id = std::move(*delivery_id), .prompt_fingerprint = std::move(*prompt_fingerprint), .source = std::move(*source)};
-  auto valid_id = [](std::string_view value) {
-    return !value.empty() && value.size() <= kMaxSyntheticDeliveryProvenanceIdBytes && std::ranges::all_of(value, [](char ch) {
-      auto const byte = static_cast<unsigned char>(ch);
-      return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') || ch == '_' || ch == '-' || ch == '.' || ch == ':';
-    });
-  };
-  if (parsed.source != kSyntheticSubagentDeliverySource || !valid_id(parsed.delivery_id) || !valid_id(parsed.prompt_fingerprint))
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "synthetic delivery provenance is unsupported or exceeds its bounds"));
-  return std::optional<SyntheticDeliveryProvenance>(std::move(parsed));
-}
-
-bool is_internal_replay_user_message(SessionEntry const& entry)
-{
-  if (entry.type != EntryType::UserMessage)
-    return false;
-  auto const start = ava::core::json::field_value_start(entry.data_json, "internal_replay");
-  return start && entry.data_json.substr(*start, 4) == "true";
-}
-
-std::string now_timestamp()
-{
-  auto const now = std::chrono::system_clock::now();
-  auto const time = std::chrono::system_clock::to_time_t(now);
-  std::tm tm{};
-#ifdef _WIN32
-  gmtime_s(&tm, &time);
-#else
-  gmtime_r(&time, &tm);
-#endif
-  std::ostringstream out;
-  out << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
-  return out.str();
 }
 
 }  // namespace ava::session

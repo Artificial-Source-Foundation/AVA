@@ -69,7 +69,7 @@ def main() -> int:
     require_text(source, "src/ava/session/session_tree.cpp", "load_session_metadata(*store)", failures)
     require_text(source, "src/ava/session/session_metadata.cpp", "auto entries = store.load();", failures)
     require_text(source, "src/ava/session/transcript.cpp", "auto entries = store.load_bounded(", failures)
-    require_text(source, "src/ava/session/session_store.cpp", "inspect_bounded_for_listing", failures)
+    require_text(source, "src/ava/session/session_store_read.cpp", "inspect_bounded_for_listing", failures)
 
     if failures:
         print("\n\n".join(failures), file=sys.stderr)

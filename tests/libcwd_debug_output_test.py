@@ -145,6 +145,11 @@ def main() -> int:
                     "LIBCWD_RCFILE_NAME": str(base_rcfile),
                     "LIBCWD_RCFILE_OVERRIDE_NAME": str(override_rcfile),
                     "LIBCWD_NO_STARTUP_MSGS": "1",
+                    # AVA_DEBUG_OUTPUT_DIR is not set for this base environment, so
+                    # ask ava::app::debug_init() to skip NAMESPACE_DEBUG::init()
+                    # entirely. Cases below that set AVA_DEBUG_OUTPUT_DIR pop this
+                    # again so libcwd is initialized and routed to a per-suite log.
+                    "AVA_NO_DEBUG_OUTPUT": "1",
                 }
             )
             base_env.pop("AVA_DEBUG_OUTPUT_DIR", None)
@@ -166,6 +171,7 @@ def main() -> int:
             output_directory = root / "debug-output"
             opted_env = base_env.copy()
             opted_env["AVA_DEBUG_OUTPUT_DIR"] = str(output_directory)
+            opted_env.pop("AVA_NO_DEBUG_OUTPUT", None)
             concurrent_processes = [
                 start(ava, ["core_mode"], opted_env, root),
                 start(ava, ["diagnostics"], opted_env, root),
@@ -207,6 +213,7 @@ def main() -> int:
 
             relative_env = base_env.copy()
             relative_env["AVA_DEBUG_OUTPUT_DIR"] = "relative-debug-output"
+            relative_env.pop("AVA_NO_DEBUG_OUTPUT", None)
             relative_result = run(ava, ["core_mode"], relative_env, root)
             require(relative_result.returncode == 2, "relative output directory did not fail with status 2")
             require(

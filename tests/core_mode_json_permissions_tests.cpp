@@ -52,6 +52,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -109,6 +110,19 @@ void expect_lifecycle_death(void (*child_action)(), std::string_view description
   }
   if (child == 0)
   {
+    // The child is expected to abort; nothing it writes is part of any test
+    // assertion (the parent only checks WTERMSIG == SIGABRT). In particular
+    // the intentional LIBCWD_ASSERT in the lifecycle invariants emits
+    // libcwd's dc::core "COREDUMP" diagnostic to std::cerr, which would
+    // otherwise leak into the test process's stderr. Point fd 2 at
+    // /dev/null so the child may write whatever it wants before aborting
+    // without polluting the parent's stderr.
+    int devnull = ::open("/dev/null", O_WRONLY);
+    if (devnull >= 0)
+    {
+      ::dup2(devnull, STDERR_FILENO);
+      ::close(devnull);
+    }
     child_action();
     _exit(EXIT_SUCCESS);
   }

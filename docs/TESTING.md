@@ -28,7 +28,7 @@ Plugin/MCP contract changes should also follow [`docs/plugin-compatibility-polic
 
 In libcwd-enabled builds, set `AVA_DEBUG_OUTPUT_DIR` to an absolute path to capture `ava_tests` libcwd output without contaminating normal stdout or stderr. The final directory is created when absent and otherwise validated as a current-user, non-symlink directory with exact mode 0700. Logs are private mode-0600 files named `ava_tests.<suite>.libcwd.log` (`all` for no argument and `invalid` for invalid arguments); each invocation truncates its deterministic file, while distinct CTest suites can write in parallel without colliding. The setting is ignored by libcwd-disabled builds.
 
-The caller's `LIBCWD_RCFILE_NAME` and `LIBCWD_RCFILE_OVERRIDE_NAME` remain authoritative for channel selection. CTest suppresses only pre-main startup output by setting `LIBCWD_NO_STARTUP_MSGS=1`. Use the same startup environment for direct invocations when completely quiet pre-main behavior is required:
+The caller's `LIBCWD_RCFILE_NAME` and `LIBCWD_RCFILE_OVERRIDE_NAME` remain authoritative for channel selection. CTest suppresses only pre-main startup output, by setting `LIBCWD_NO_STARTUP_MSGS=1`. And, if `AVA_DEBUG_OUTPUT_DIR` isn't set, later output by setting `AVA_NO_DEBUG_OUTPUT=1`. Use the same startup environment for direct invocations when completely quiet pre-main behavior is required:
 
 ```sh
 LIBCWD_NO_STARTUP_MSGS=1 AVA_DEBUG_OUTPUT_DIR=/absolute/private/debug-logs ./build/ava_tests session

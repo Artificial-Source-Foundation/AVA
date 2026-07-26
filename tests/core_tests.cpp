@@ -1,12 +1,9 @@
 #include "sys.h"
 #include "tests/support/libcwd_test_output.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/ava_debug.h"
 #include "ava/core/path.h"
 #include "ava/core/trusted_home.h"
-
-#ifdef DEBUGGLOBAL
-#include "utils/GlobalObjectManager.h"
-#endif
 
 #include <array>
 #include <cstdlib>
@@ -113,6 +110,10 @@ constexpr std::array kTestSuites{
 #endif
 };
 
+// Derive the per-suite token used to name the libcwd log file
+// (ava_tests.<token>.libcwd.log). "all" when no suite argument is given,
+// the suite name when it matches a registered suite, "invalid" otherwise
+// (which also keeps path separators in a bad argv[1] out of the filename).
 std::string_view libcwd_suite_token(int argc, char** argv)
 {
   if (argc == 1)
@@ -160,15 +161,15 @@ int print_failures()
 
 int main(int argc, char** argv)
 {
-#ifdef DEBUGGLOBAL
-  GlobalObjectManager::main_entered();
-#endif
+  // Keep this the very first statement: ava::app::debug_init() skips
+  // NAMESPACE_DEBUG::init() when AVA_NO_DEBUG_OUTPUT is set (the test harness
+  // sets that whenever AVA_DEBUG_OUTPUT_DIR is not configured) and otherwise
+  // runs the same preamble debug::init() does, including GlobalObjectManager
+  // main-entry bookkeeping when DEBUGGLOBAL is configured.
+  Debug(ava::app::debug_init());
 
   std::string_view const debug_suite_token = libcwd_suite_token(argc, argv);
   ava::test::LibcwdTestOutput libcwd_output(debug_suite_token);
-  Debug(NAMESPACE_DEBUG::init());
-  libcwd_output.after_libcwd_init();
-  Dout(dc::notice, "AVA libcwd routing marker: suite=" << debug_suite_token);
   if (!libcwd_output.setup_succeeded())
   {
     std::cerr << "failed to configure libcwd test output: " << libcwd_output.setup_error() << '\n';
@@ -180,6 +181,8 @@ int main(int argc, char** argv)
     std::cerr << "usage: ava_tests [suite]\n";
     return 2;
   }
+
+  Dout(dc::notice, "AVA libcwd routing marker: suite=" << debug_suite_token);
 
   // CTest may change the working directory without updating $PWD, which
   // would cause logical_cwd() to throw. Verify and fix $PWD to match the

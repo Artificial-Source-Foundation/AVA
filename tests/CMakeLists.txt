@@ -229,8 +229,12 @@ foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
   # Keep pre-main libcwd diagnostics quiet without replacing the caller's
   # rcfile policy. ava_tests itself routes all output produced from main.
+  # AVA_NO_DEBUG_OUTPUT makes ava::app::debug_init() skip NAMESPACE_DEBUG::init()
+  # entirely so no libcwd output can reach stdout/stderr; a developer who wants
+  # per-suite log files sets AVA_DEBUG_OUTPUT_DIR and runs ava_tests directly
+  # (LibcwdTestOutput then routes to ava_tests.<suite>.libcwd.log).
   set_tests_properties(ava_tests.${AVA_TEST_SUITE} PROPERTIES
-    ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1")
+    ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1;AVA_NO_DEBUG_OUTPUT=1")
 endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.containment PROPERTIES SKIP_RETURN_CODE 77)
@@ -787,7 +791,7 @@ if(OptionEnableLibcwd)
     NAME ava_debug.print_members_format
     COMMAND ava_tests debug)
   set_tests_properties(ava_debug.print_members_format PROPERTIES
-    ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1")
+    ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1;AVA_NO_DEBUG_OUTPUT=1")
 
   if(Python3_Interpreter_FOUND)
     add_test(

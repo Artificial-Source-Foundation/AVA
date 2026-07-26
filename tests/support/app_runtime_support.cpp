@@ -1,9 +1,11 @@
+#include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <ranges>
 #include <utility>
 #include <sys/stat.h>
@@ -78,6 +80,12 @@ void write_app_test_file(std::filesystem::path const& path, std::string const& t
   std::filesystem::create_directories(path.parent_path());
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << text;
+}
+
+std::string app_read_binary_file(std::filesystem::path const& path)
+{
+  std::ifstream file(path, std::ios::binary);
+  return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
 }
 
 void BlockingInputBuf::push(std::string text)

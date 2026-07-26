@@ -3,6 +3,9 @@ add_library(ava_lsp
   "builtin_recipes.cpp"
   "configured_provider.cpp"
   "lsp_client.cpp"
+  "lsp_process.cpp"
+  "lsp_protocol.cpp"
+  "lsp_transport.cpp"
 )
 
 target_include_directories(ava_lsp PUBLIC "${CMAKE_SOURCE_DIR}/src")

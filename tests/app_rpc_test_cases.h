@@ -1,0 +1,56 @@
+#pragma once
+
+namespace ava::tests::app_rpc_test {
+
+void test_app_rpc_prompt_payload_serialization();
+void test_app_rpc_prompt_result_tool_timeline_golden_payloads();
+void test_app_rpc_parsing_and_response_serialization();
+void test_app_rpc_identifier_validation();
+void test_app_rpc_prompt_with_fake_transport_streams_events();
+void test_app_rpc_offline_allows_local_protocol_and_rejects_prompt_before_provider_request();
+void test_app_rpc_prompt_imports_image_attachments();
+void test_app_rpc_prompt_imports_inline_image_uploads();
+void test_app_rpc_prompt_rejects_inline_image_upload_mime_mismatch();
+void test_app_rpc_prompt_streams_provider_deltas_before_final_response();
+void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event();
+void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag();
+void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request();
+void test_app_rpc_malformed_line_recovery_and_unknown_command();
+void test_app_rpc_state_list_sessions_and_open_session();
+void test_app_rpc_job_controls_are_active_safe_and_redacted();
+void test_app_rpc_current_session_reads_reject_path_replacement();
+void test_app_rpc_session_metadata_name_and_labels();
+void test_app_rpc_session_tree_command_and_switch_navigation();
+void test_app_rpc_session_fork_and_clone_commands();
+void test_app_rpc_branch_construction_failure_rolls_back_created_file();
+void test_app_rpc_noncurrent_branch_source_recovers_torn_tail();
+void test_app_rpc_summarize_branch_appends_to_source_session();
+void test_app_rpc_model_commands();
+void test_app_rpc_reasoning_commands();
+void test_app_rpc_reasoning_model_serialization_exposes_resolved_maps();
+void test_app_rpc_protocol_version_and_session_commands();
+void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit();
+void test_app_rpc_protocol_version_and_resolver_reply_errors();
+void test_app_rpc_mcp_command_responses();
+void test_app_rpc_command_responses_for_context_compact_export();
+void test_app_rpc_direct_run_command_permission_reply_executes_and_audits();
+void test_app_rpc_direct_run_command_permission_denial_blocks_execution();
+void test_app_rpc_direct_run_command_active_rejects_and_cancels_process();
+void test_app_rpc_compact_provider_failure_is_error_response();
+void test_app_rpc_production_catalog_and_golden_contract();
+void test_app_rpc_contract_validation_regressions();
+void test_app_rpc_utf8_recovery_and_framing();
+void test_app_rpc_terminal_publication_gates_prompt_id_reuse();
+void test_app_rpc_parent_terminal_precedes_queued_follow_up_start();
+void test_app_rpc_eof_during_blocked_parent_publication_skips_follow_up();
+void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs();
+void test_app_rpc_worker_output_failure_wakes_blocked_input();
+void test_app_rpc_mode_forwards_nonstdin_wake();
+void test_app_rpc_posix_line_reader_wake_eof_and_fd_lifetime();
+void test_app_rpc_stream_line_reader_terminal_outcomes();
+void test_app_rpc_stream_reader_wake_badbit_is_canceled();
+void test_app_rpc_unterminated_final_command_executes();
+void test_app_rpc_newline_terminated_oversized_line_recovers();
+void test_app_rpc_compact_cancellation_is_error_response_without_provider_request();
+
+}  // namespace ava::tests::app_rpc_test

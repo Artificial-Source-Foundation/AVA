@@ -130,11 +130,11 @@ function(ava_apply_warnings target)
       target_compile_options(${target} PRIVATE -Wno-error=maybe-uninitialized)
     endif()
     # Limit number of errors to two.
-    target_compile_options(${target} PRIVATE
-      $<$<CXX_COMPILER_ID:GNU>:-fmax-errors=2>
-      $<$<CXX_COMPILER_ID:Clang>:-ferror-limit=2>
-      $<$<CXX_COMPILER_ID:AppleClang>:-ferror-limit=2>
-    )
+#    target_compile_options(${target} PRIVATE
+#      $<$<CXX_COMPILER_ID:GNU>:-fmax-errors=2>
+#      $<$<CXX_COMPILER_ID:Clang>:-ferror-limit=2>
+#      $<$<CXX_COMPILER_ID:AppleClang>:-ferror-limit=2>
+#    )
   endif()
 endfunction()
 

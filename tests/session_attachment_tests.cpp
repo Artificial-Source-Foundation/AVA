@@ -1,0 +1,612 @@
+#include "sys.h"
+#include "tests/session_test_declarations.h"
+#include "tests/support/session_test_support.h"
+#include "tests/support/test_harness.h"
+#include "ava/agent/message_builder.h"
+#include "ava/session/attachments.h"
+#include "ava/session/session_branch.h"
+#include "ava/session/session_store.h"
+#include "ava/session/validation.h"
+#include "ava/provider/provider.h"
+#include "ava/provider/provider_utils.h"
+#include "ava/core/result.h"
+
+#include <algorithm>
+#include <expected>
+#include <filesystem>
+#include <fstream>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <utility>
+#include <vector>
+#include <sys/stat.h>
+#include <unistd.h>
+
+namespace session_tests {
+namespace {
+std::optional<std::filesystem::path> created_session_rollback_quarantine(std::filesystem::path const& session_path)
+{
+  auto const prefix = "." + session_path.filename().string() + ".rollback.";
+  std::error_code iterator_error;
+  for (std::filesystem::directory_iterator iterator(session_path.parent_path(), iterator_error), end; !iterator_error && iterator != end;
+       iterator.increment(iterator_error))
+  {
+    if (iterator->path().filename().string().starts_with(prefix))
+      return iterator->path();
+  }
+  return std::nullopt;
+}
+
+}  // namespace
+
+void test_image_attachment_message_reconstruction_and_validation()
+{
+  std::string const attachment_json = R"({"id":"img_1","type":"image","mime_type":"image/png","byte_size":1234,)"
+                                      R"("sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                      R"("storage_path":"attachments/img_1.png"})";
+  std::vector<ava::session::SessionEntry> const entries = {
+      ava::session::SessionEntry{.id = "image_user",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = "{\"text\":\"describe this\",\"attachments\":[" + attachment_json + "]}"}};
+
+  auto messages = ava::agent::build_provider_messages_from_entries(
+      entries, ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "openai",
+                                                                                         .model_id = "gpt-image",
+                                                                                         .api_family = "openai_responses",
+                                                                                         .reasoning_format = "openai_responses",
+                                                                                         .supports_tools = false,
+                                                                                         .supports_images = true},
+                                               .active_turn_user_entry_ids = {"image_user"}});
+  expect(messages && messages->size() == 1, "active image user message reconstructs as one provider message");
+  if (!messages || messages->empty())
+    return;
+  expect((*messages)[0].content.find("describe this") != std::string::npos &&
+             (*messages)[0].content.find("[image attachment: id=img_1 mime=image/png bytes=1234]") != std::string::npos,
+         "image user message keeps text fallback metadata without raw bytes");
+  expect((*messages)[0].content_parts.size() == 2 && (*messages)[0].content_parts[0].type == ava::provider::ContentPartType::Text &&
+             (*messages)[0].content_parts[1].type == ava::provider::ContentPartType::Image && (*messages)[0].content_parts[1].attachment_id == "img_1" &&
+             (*messages)[0].content_parts[1].mime_type == "image/png" && (*messages)[0].content_parts[1].storage_path == "attachments/img_1.png" &&
+             (*messages)[0].content_parts[1].byte_size == 1234,
+         "image user message carries provider-neutral image content metadata");
+
+  auto const valid = ava::session::validate_session_replay(entries);
+  expect(valid.ok(), "image attachment metadata validates when bounded and referenced");
+
+  std::vector<ava::session::SessionEntry> const inline_data_entries = {
+      ava::session::SessionEntry{.id = "image_inline",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = R"({"text":"bad","attachments":[{"id":"img_2","type":"image","mime_type":"image/png",)"
+                                              R"("byte_size":12,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                              R"("storage_path":"attachments/img_2.png","data_base64":"AAAA"}]})"}};
+  auto const inline_validation = ava::session::validate_session_replay(inline_data_entries);
+  expect(!inline_validation.ok() && inline_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects inline image bytes in message attachment metadata");
+
+  std::vector<ava::session::SessionEntry> const unsupported_mime_entries = {
+      ava::session::SessionEntry{.id = "image_svg",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = R"({"text":"bad","attachments":[{"id":"img_3","type":"image","mime_type":"image/svg+xml",)"
+                                              R"("byte_size":12,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                              R"("storage_path":"attachments/img_3.svg"}]})"}};
+  auto const mime_validation = ava::session::validate_session_replay(unsupported_mime_entries);
+  expect(!mime_validation.ok() && mime_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects unsupported image attachment MIME types");
+
+  std::vector<ava::session::SessionEntry> const mixed_array_entries = {
+      ava::session::SessionEntry{.id = "image_mixed_array",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = "{\"text\":\"bad\",\"attachments\":[" + attachment_json + R"(,"raw-bytes"]})"}};
+  auto const mixed_array_validation = ava::session::validate_session_replay(mixed_array_entries);
+  expect(!mixed_array_validation.ok() && mixed_array_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects non-object attachment array elements");
+
+  std::vector<ava::session::SessionEntry> const unknown_raw_entries = {
+      ava::session::SessionEntry{.id = "image_unknown_raw",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = R"({"text":"bad","attachments":[{"id":"img_4","type":"image","mime_type":"image/png",)"
+                                              R"("byte_size":12,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                              R"("storage_path":"attachments/img_4.png","raw_bytes_base64":"AAAA"}]})"}};
+  auto const unknown_raw_validation = ava::session::validate_session_replay(unknown_raw_entries);
+  expect(!unknown_raw_validation.ok() && unknown_raw_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects unknown attachment fields that could carry inline bytes");
+
+  std::vector<ava::session::SessionEntry> const traversal_path_entries = {
+      ava::session::SessionEntry{.id = "image_traversal",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = R"({"text":"bad","attachments":[{"id":"img_5","type":"image","mime_type":"image/png",)"
+                                              R"("byte_size":12,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                              R"("storage_path":"../img_5.png"}]})"}};
+  auto const traversal_validation = ava::session::validate_session_replay(traversal_path_entries);
+  expect(!traversal_validation.ok() && traversal_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects escaping image storage paths");
+
+  std::vector<ava::session::SessionEntry> const unanchored_path_entries = {
+      ava::session::SessionEntry{.id = "image_unanchored",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = R"({"text":"bad","attachments":[{"id":"img_6","type":"image","mime_type":"image/png",)"
+                                              R"("byte_size":12,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                              R"("storage_path":"README.md"}]})"}};
+  auto const unanchored_validation = ava::session::validate_session_replay(unanchored_path_entries);
+  expect(!unanchored_validation.ok() && unanchored_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects image storage paths outside attachments namespace");
+
+  std::vector<ava::session::SessionEntry> const fractional_size_entries = {
+      ava::session::SessionEntry{.id = "image_fractional_size",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = R"({"text":"bad","attachments":[{"id":"img_6a","type":"image","mime_type":"image/png",)"
+                                              R"("byte_size":12.5,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                              R"("storage_path":"attachments/img_6a.png"}]})"}};
+  auto const fractional_size_validation = ava::session::validate_session_replay(fractional_size_entries);
+  expect(!fractional_size_validation.ok() && fractional_size_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects fractional image byte sizes");
+  auto const fractional_size_sanitized = ava::session::sanitized_message_data_json(fractional_size_entries.front().data_json);
+  expect(fractional_size_sanitized.find("attachments") == std::string::npos, "message data sanitizer omits fractional image byte sizes");
+  auto const fractional_size_messages = ava::agent::build_provider_messages_from_entries(fractional_size_entries);
+  expect(!fractional_size_messages && fractional_size_messages.error().message().find("provider replay") != std::string::npos,
+         "provider replay rejects invalid fractional image byte sizes instead of dropping image metadata");
+
+  std::vector<ava::session::SessionEntry> const exponent_size_entries = {
+      ava::session::SessionEntry{.id = "image_exponent_size",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = R"({"text":"bad","attachments":[{"id":"img_6b","type":"image","mime_type":"image/png",)"
+                                              R"("byte_size":1e3,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                              R"("storage_path":"attachments/img_6b.png"}]})"}};
+  auto const exponent_size_validation = ava::session::validate_session_replay(exponent_size_entries);
+  expect(!exponent_size_validation.ok() && exponent_size_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects exponent image byte sizes");
+
+  std::vector<ava::session::SessionEntry> const duplicate_key_entries = {
+      ava::session::SessionEntry{.id = "image_duplicate_key",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = R"({"text":"bad","attachments":[{"id":"img_7","id":"img_8","type":"image","mime_type":"image/png",)"
+                                              R"("byte_size":12,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                              R"("storage_path":"attachments/img_7.png"}]})"}};
+  auto const duplicate_key_validation = ava::session::validate_session_replay(duplicate_key_entries);
+  expect(!duplicate_key_validation.ok() && duplicate_key_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects duplicate image attachment object keys");
+
+  std::vector<ava::session::SessionEntry> const duplicate_id_entries = {
+      ava::session::SessionEntry{.id = "image_duplicate_id",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = "{\"text\":\"bad\",\"attachments\":[" + attachment_json + "," + attachment_json + "]}"}};
+  auto const duplicate_id_validation = ava::session::validate_session_replay(duplicate_id_entries);
+  expect(!duplicate_id_validation.ok() && duplicate_id_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects duplicate image attachment ids");
+  auto const duplicate_id_sanitized = ava::session::sanitized_message_data_json(duplicate_id_entries.front().data_json);
+  expect(duplicate_id_sanitized.find("attachments") == std::string::npos, "message data sanitizer omits duplicate image attachment ids");
+
+  std::vector<ava::session::SessionEntry> const duplicate_top_level_entries = {
+      ava::session::SessionEntry{.id = "image_duplicate_top_level",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = "{\"text\":\"bad\",\"attachments\":[" + attachment_json + R"(],"attachments":["raw-bytes"]})"}};
+  auto const duplicate_top_level_validation = ava::session::validate_session_replay(duplicate_top_level_entries);
+  expect(
+      !duplicate_top_level_validation.ok() && duplicate_top_level_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+      "session replay rejects duplicate top-level message attachment keys");
+  auto const duplicate_top_level_sanitized = ava::session::sanitized_message_data_json(duplicate_top_level_entries.front().data_json);
+  expect(duplicate_top_level_sanitized.find("raw-bytes") == std::string::npos, "message data sanitizer omits duplicate top-level attachment payloads");
+
+  std::vector<ava::session::SessionEntry> const escaped_top_level_entries = {
+      ava::session::SessionEntry{.id = "image_escaped_top_level",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = "{\"text\":\"bad\",\"attach\\u006dents\":[" + attachment_json + "]}"}};
+  auto const escaped_top_level_validation = ava::session::validate_session_replay(escaped_top_level_entries);
+  expect(!escaped_top_level_validation.ok() && escaped_top_level_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects escaped top-level message keys in attachment-bearing data");
+
+  std::vector<ava::session::SessionEntry> const assistant_attachment_entries = {
+      ava::session::SessionEntry{.id = "assistant_image",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-05-08T00:00:00Z",
+                                 .data_json = "{\"text\":\"assistant\",\"attachments\":[" + attachment_json + "]}"}};
+  auto const assistant_validation = ava::session::validate_session_replay(assistant_attachment_entries);
+  expect(!assistant_validation.ok() && assistant_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects assistant image attachments until assistant image semantics exist");
+  auto const assistant_sanitized = ava::session::sanitized_message_data_json(assistant_attachment_entries.front().data_json, false);
+  expect(assistant_sanitized.find("attachments") == std::string::npos,
+         "message data sanitizer omits assistant image attachment metadata when attachments are disallowed");
+
+  auto const sanitized = ava::session::sanitized_message_data_json(unknown_raw_entries.front().data_json);
+  expect(sanitized.find("raw_bytes_base64") == std::string::npos && sanitized.find("AAAA") == std::string::npos,
+         "message data sanitizer omits unknown attachment fields and inline bytes");
+
+  ava::provider::ProviderRequest text_only_request{
+      .provider_id = "test", .model_id = "text-only", .system_prompt = "", .messages = *messages, .tools_json = {}};
+  auto const text_only = ava::provider::validate_image_content_parts(text_only_request, false);
+  expect(!text_only && text_only.error().message().find("does not support image input") != std::string::npos,
+         "provider image validation rejects image parts for text-only models");
+  auto const image_model = ava::provider::validate_image_content_parts(text_only_request, true);
+  expect(image_model.has_value(), "provider image validation accepts bounded user image metadata for image models");
+
+  auto too_many_images = *messages;
+  too_many_images[0].content_parts.clear();
+  for (int index = 0; index < 17; ++index)
+  {
+    too_many_images[0].content_parts.push_back(ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                                          .attachment_id = "img_" + std::to_string(index),
+                                                                          .mime_type = "image/png",
+                                                                          .storage_path = "attachments/img_" + std::to_string(index) + ".png",
+                                                                          .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                                          .byte_size = 1});
+  }
+  ava::provider::ProviderRequest too_many_request{
+      .provider_id = "test", .model_id = "image-model", .system_prompt = "", .messages = too_many_images, .tools_json = {}};
+  auto const too_many = ava::provider::validate_image_content_parts(too_many_request, true);
+  expect(!too_many && too_many.error().message().find("count") != std::string::npos, "provider image validation caps image attachment count per request");
+
+  auto too_large_total = *messages;
+  too_large_total[0].content_parts.clear();
+  for (int index = 0; index < 3; ++index)
+  {
+    too_large_total[0].content_parts.push_back(ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                                          .attachment_id = "big_" + std::to_string(index),
+                                                                          .mime_type = "image/png",
+                                                                          .storage_path = "attachments/big_" + std::to_string(index) + ".png",
+                                                                          .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                                          .byte_size = 15 * 1024 * 1024});
+  }
+  too_many_request.messages = too_large_total;
+  auto const too_large = ava::provider::validate_image_content_parts(too_many_request, true);
+  expect(!too_large && too_large.error().message().find("total byte size") != std::string::npos,
+         "provider image validation caps aggregate image bytes per request");
+
+  auto invalid_path_messages = *messages;
+  invalid_path_messages[0].content_parts[1].storage_path = "/tmp/img_1.png";
+  ava::provider::ProviderRequest invalid_path_request{
+      .provider_id = "test", .model_id = "image-model", .system_prompt = "", .messages = invalid_path_messages, .tools_json = {}};
+  auto const invalid_path = ava::provider::validate_image_content_parts(invalid_path_request, true);
+  expect(!invalid_path && invalid_path.error().message().find("storage path") != std::string::npos,
+         "provider image validation rejects absolute image storage paths");
+  invalid_path_messages[0].content_parts[1].storage_path = "README.md";
+  invalid_path_request.messages = invalid_path_messages;
+  auto const unanchored_path = ava::provider::validate_image_content_parts(invalid_path_request, true);
+  expect(!unanchored_path && unanchored_path.error().message().find("storage path") != std::string::npos,
+         "provider image validation rejects storage paths outside attachments namespace");
+}
+
+void test_synthetic_delivery_provenance_validation()
+{
+  ava::session::SessionEntry legacy{.id = "legacy_user",
+                                    .parent_id = "",
+                                    .type = ava::session::EntryType::UserMessage,
+                                    .timestamp = "2026-07-20T00:00:00Z",
+                                    .data_json = R"({"text":"ordinary legacy message"})"};
+  auto legacy_provenance = ava::session::parse_synthetic_delivery_provenance(legacy);
+  expect(legacy_provenance && !*legacy_provenance, "legacy ordinary user messages remain compatible without synthetic provenance");
+
+  auto synthetic = legacy;
+  synthetic.id = "synthetic_user";
+  synthetic.data_json =
+      R"({"text":"backend delivery","provenance":{"source":"synthetic_subagent_delivery","delivery_id":"delivery_1","prompt_fingerprint":"0123456789abcdef"}})";
+  auto parsed = ava::session::parse_synthetic_delivery_provenance(synthetic);
+  auto valid_replay = ava::session::validate_session_replay({synthetic});
+  expect(parsed && *parsed && (*parsed)->delivery_id == "delivery_1" && (*parsed)->prompt_fingerprint == "0123456789abcdef" && valid_replay.ok(),
+         "session-v4 parsing retains strict bounded backend-only delivery provenance");
+
+  auto malformed = synthetic;
+  malformed.id = "malformed_synthetic_user";
+  malformed.data_json =
+      R"({"text":"bad","provenance":{"source":"synthetic_subagent_delivery","delivery_id":"delivery_1","prompt_fingerprint":"0123456789abcdef","forged":true}})";
+  auto malformed_replay = ava::session::validate_session_replay({malformed});
+  auto oversized = synthetic;
+  oversized.id = "oversized_synthetic_user";
+  oversized.data_json = "{\"text\":\"bad\",\"provenance\":{\"source\":\"synthetic_subagent_delivery\",\"delivery_id\":\"" +
+                        std::string(ava::session::kMaxSyntheticDeliveryProvenanceIdBytes + 1, 'x') + "\",\"prompt_fingerprint\":\"0123456789abcdef\"}}";
+  auto oversized_replay = ava::session::validate_session_replay({oversized});
+  expect(!malformed_replay.ok() && !oversized_replay.ok(), "session-v4 parsing rejects unknown and unbounded synthetic provenance fields");
+}
+
+void test_image_attachment_storage_boundary()
+{
+  auto const root = create_empty_root("image-attachment-storage");
+
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto store = ava::session::SessionStore::create(workspace, root / "sessions");
+  expect(store.has_value(), "session store opens for image attachment storage test");
+  if (!store)
+    return;
+
+  auto const attachment_root = ava::session::attachment_storage_root(*store);
+  auto const attachment_path = attachment_root / "attachments" / "img_1.txt";
+  std::filesystem::create_directories(attachment_path.parent_path());
+  {
+    std::ofstream file(attachment_path, std::ios::binary);
+    file << "hello";
+  }
+
+  ava::session::ImageAttachmentRef attachment{.id = "img_1",
+                                              .mime_type = "image/png",
+                                              .storage_path = "attachments/img_1.txt",
+                                              .sha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+                                              .byte_size = 5};
+  auto loaded = ava::session::load_image_attachment(*store, attachment);
+  expect(loaded && loaded->bytes == "hello" && loaded->path == attachment_path.lexically_normal(),
+         "image attachment storage loads only verified session-owned bytes");
+
+  auto escaped = ava::session::resolve_attachment_storage_path(*store, "attachments/../secrets.txt");
+  expect(!escaped, "image attachment storage rejects escaping relative paths");
+
+  auto wrong_size = attachment;
+  wrong_size.byte_size = 4;
+  auto const size_result = ava::session::load_image_attachment(*store, wrong_size);
+  expect(!size_result && size_result.error().message().find("byte size") != std::string::npos,
+         "image attachment storage verifies file size before returning bytes");
+
+  auto wrong_hash = attachment;
+  wrong_hash.sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
+  auto const hash_result = ava::session::load_image_attachment(*store, wrong_hash);
+  expect(!hash_result && hash_result.error().message().find("sha256") != std::string::npos, "image attachment storage verifies sha256 before returning bytes");
+
+  auto const symlink_path = attachment_root / "attachments" / "link.txt";
+  std::error_code symlink_error;
+  std::filesystem::create_symlink(attachment_path, symlink_path, symlink_error);
+  if (!symlink_error)
+  {
+    auto symlink_attachment = attachment;
+    symlink_attachment.storage_path = "attachments/link.txt";
+    auto const symlink_result = ava::session::load_image_attachment(*store, symlink_attachment);
+    expect(!symlink_result && symlink_result.error().message().find("symlink") != std::string::npos,
+           "image attachment storage rejects symlink attachment paths");
+  }
+
+  auto const outside_dir = root / "outside";
+  std::filesystem::create_directories(outside_dir);
+  auto const outside_file = outside_dir / "secret.txt";
+  {
+    std::ofstream file(outside_file, std::ios::binary);
+    file << "hello";
+  }
+  auto const symlink_directory = attachment_root / "attachments" / "linked-dir";
+  symlink_error.clear();
+  std::filesystem::create_directory_symlink(outside_dir, symlink_directory, symlink_error);
+  if (!symlink_error)
+  {
+    auto intermediate_symlink = attachment;
+    intermediate_symlink.storage_path = "attachments/linked-dir/secret.txt";
+    auto const intermediate_result = ava::session::load_image_attachment(*store, intermediate_symlink);
+    expect(!intermediate_result && intermediate_result.error().message().find("symlink") != std::string::npos,
+           "image attachment storage rejects symlinked attachment directories");
+  }
+
+  auto symlink_root_store = ava::session::SessionStore::create(workspace, root / "symlink-root-sessions");
+  expect(symlink_root_store.has_value(), "session store opens for symlinked attachment root test");
+  if (symlink_root_store)
+  {
+    auto const symlink_root = ava::session::attachment_storage_root(*symlink_root_store);
+    std::filesystem::create_directories(symlink_root.parent_path());
+    symlink_error.clear();
+    std::filesystem::create_directory_symlink(outside_dir, symlink_root, symlink_error);
+    if (!symlink_error)
+    {
+      auto const symlink_root_result = ava::session::load_image_attachment(*symlink_root_store, attachment);
+      expect(!symlink_root_result && symlink_root_result.error().message().find("symlink") != std::string::npos,
+             "image attachment storage rejects symlinked attachment roots");
+    }
+  }
+}
+
+void test_image_attachment_import()
+{
+  auto const root = create_empty_root("image-attachment-import");
+
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto store = ava::session::SessionStore::create(workspace, root / "sessions");
+  expect(store.has_value(), "session store opens for image attachment import test");
+  if (!store)
+    return;
+
+  auto const image_path = root / "input.png";
+  auto const bytes = ava::test::session_test_tiny_png_bytes();
+  ava::test::write_session_test_binary_file(image_path, bytes);
+
+  auto imported = ava::session::import_image_attachment(*store, image_path);
+  expect(imported && imported->id.starts_with("img_") && imported->mime_type == "image/png" && imported->storage_path.starts_with("attachments/") &&
+             imported->byte_size == bytes.size(),
+         "image attachment import stores byte-sniffed PNG metadata under the session attachment namespace");
+  if (!imported)
+    return;
+  auto loaded = ava::session::load_image_attachment(*store, *imported);
+  expect(loaded && loaded->bytes == bytes, "imported image attachment reloads only after size and sha verification");
+
+  auto const unsupported_path = root / "not-image.txt";
+  ava::test::write_session_test_binary_file(unsupported_path, "hello");
+  auto unsupported = ava::session::import_image_attachment(*store, unsupported_path);
+  expect(!unsupported && unsupported.error().message().find("unsupported image format") != std::string::npos,
+         "image attachment import rejects unsupported byte signatures");
+
+  auto const outside = root / "outside.png";
+  ava::test::write_session_test_binary_file(outside, bytes);
+  auto const link = root / "linked.png";
+  std::error_code symlink_error;
+  std::filesystem::create_symlink(outside, link, symlink_error);
+  if (!symlink_error)
+  {
+    auto symlink_import = ava::session::import_image_attachment(*store, link);
+    expect(!symlink_import && symlink_import.error().message().find("symlink") != std::string::npos, "image attachment import rejects symlink source paths");
+  }
+}
+
+void test_created_session_rollback_is_identity_safe_and_preserves_attachments()
+{
+  auto const root = create_empty_root("created-session-rollback");
+
+  auto const workspace = root / "workspace";
+  auto const sessions_dir = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto create_owned = [&]() -> std::pair<ava::session::SessionStore, ava::session::SessionLease> {
+    auto store = ava::session::SessionStore::create(workspace, sessions_dir);
+    expect(store.has_value(), "created-session rollback test creates a store");
+    if (!store)
+      return {ava::session::SessionStore(ava::session::SessionStoreOptions{}), ava::session::SessionLease{}};
+    auto lease = ava::session::SessionLease::create_and_acquire(store->session_path());
+    expect(lease.has_value(), "created-session rollback test acquires the creating lease");
+    if (!lease)
+      return {std::move(*store), ava::session::SessionLease{}};
+    return {std::move(*store), std::move(*lease)};
+  };
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      auto removed = store.remove_created_file(lease);
+      expect(removed && !std::filesystem::exists(path) && !created_session_rollback_quarantine(path),
+             "created-session rollback removes exactly the creating JSONL without leaving a quarantine sibling");
+    }
+  }
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      auto const parked_original = root / "parked-original.jsonl";
+      store.set_before_created_file_rollback_detach_for_test([&] {
+        std::filesystem::rename(path, parked_original);
+        ava::test::write_session_test_binary_file(path, "replacement-session");
+      });
+      auto removed = store.remove_created_file(lease);
+      expect(!removed && ava::test::read_session_test_binary_file(path) == "replacement-session" && std::filesystem::exists(parked_original),
+             "created-session rollback fails closed and preserves a replaced session basename");
+    }
+  }
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      auto const parked_original = root / "fifo-parked-original.jsonl";
+      store.set_before_created_file_rollback_detach_for_test([&] {
+        std::filesystem::rename(path, parked_original);
+        expect(::mkfifo(path.c_str(), 0600) == 0, "created-session rollback test installs a FIFO replacement");
+      });
+      auto removed = store.remove_created_file(lease);
+      std::error_code fifo_status_error;
+      auto const fifo_status = std::filesystem::symlink_status(path, fifo_status_error);
+      expect(!removed && !fifo_status_error && std::filesystem::is_fifo(fifo_status) && std::filesystem::exists(parked_original) &&
+                 !created_session_rollback_quarantine(path),
+             "created-session rollback inspects a FIFO replacement without blocking and restores it without deletion");
+    }
+  }
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      auto const original_parent = path.parent_path();
+      auto const moved_parent = root / "moved-session-parent";
+      store.set_after_created_file_rollback_detach_for_test([&] {
+        std::filesystem::rename(original_parent, moved_parent);
+        std::filesystem::create_directories(original_parent);
+        ava::test::write_session_test_binary_file(path, "parent-replacement-session");
+      });
+      auto removed = store.remove_created_file(lease);
+      expect(removed && ava::test::read_session_test_binary_file(path) == "parent-replacement-session" &&
+                 !created_session_rollback_quarantine(moved_parent / path.filename()),
+             "descriptor-anchored rollback cannot redirect deletion into a replacement parent directory");
+    }
+  }
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      store.set_after_created_file_rollback_detach_for_test([&] { ava::test::write_session_test_binary_file(path, "republished-session"); });
+      auto removed = store.remove_created_file(lease);
+      expect(!removed && ava::test::read_session_test_binary_file(path) == "republished-session" && created_session_rollback_quarantine(path) &&
+                 removed.error().format().find("created session name was republished") != std::string::npos &&
+                 removed.error().format().find("quarantine_path:") != std::string::npos,
+             "rollback preserves and reports its exact quarantine when the original name is republished after detach");
+    }
+  }
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      auto const parked_original = root / "mismatch-parked-original.jsonl";
+      store.set_after_created_file_rollback_detach_for_test([&] {
+        auto quarantine = created_session_rollback_quarantine(path);
+        if (!quarantine)
+          return;
+        std::filesystem::rename(*quarantine, parked_original);
+        ava::test::write_session_test_binary_file(*quarantine, "quarantine-replacement");
+      });
+      auto removed = store.remove_created_file(lease);
+      expect(!removed && std::filesystem::exists(parked_original) && ava::test::read_session_test_binary_file(path) == "quarantine-replacement" &&
+                 !created_session_rollback_quarantine(path),
+             "rollback restores a detached quarantine mismatch to the original name without deleting either inode");
+    }
+  }
+
+  {
+    auto [store, creating_lease] = create_owned();
+    if (!creating_lease.canonical_path().empty())
+    {
+      auto const path = store.session_path();
+      auto no_token = store.remove_created_file(ava::session::SessionLease{});
+      creating_lease = ava::session::SessionLease{};
+      auto noncreating_lease = ava::session::SessionLease::acquire(path);
+      auto noncreating =
+          noncreating_lease ? store.remove_created_file(*noncreating_lease) : ava::core::VoidResult(std::unexpected(std::move(noncreating_lease.error())));
+      expect(!no_token && !noncreating && std::filesystem::exists(path),
+             "created-session rollback rejects missing and non-creating leases without deleting the session");
+    }
+  }
+
+  {
+    auto [store, lease] = create_owned();
+    if (!lease.canonical_path().empty())
+    {
+      auto const attachment_file = ava::session::attachment_storage_root(store) / "nested" / "attachment.bin";
+      ava::test::write_session_test_binary_file(attachment_file, "retained attachment bytes");
+      ava::core::Error primary(ava::core::ErrorCategory::Unknown, "runtime construction failed");
+      ava::session::rollback_created_session_with_context(store, lease, primary);
+      auto const formatted = primary.format();
+      expect(!std::filesystem::exists(store.session_path()) && ava::test::read_session_test_binary_file(attachment_file) == "retained attachment bytes" &&
+                 primary.message() == "runtime construction failed" && formatted.find("created_session_id: " + store.session_id()) != std::string::npos &&
+                 formatted.find("rollback_attachment_path: " + ava::session::attachment_storage_root(store).string()) != std::string::npos &&
+                 formatted.find("rollback_attachment_disposition: preserved") != std::string::npos,
+             "session rollback preserves an attachment subtree byte-for-byte and reports its retained path without replacing the primary error");
+    }
+  }
+}
+
+}  // namespace session_tests

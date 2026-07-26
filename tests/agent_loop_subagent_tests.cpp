@@ -1,0 +1,808 @@
+#include "sys.h"
+#include "tests/agent_loop_test_declarations.h"
+#include "tests/support/agent_loop_test_support.h"
+#include "tests/support/fake_transport.h"
+#include "tests/support/test_harness.h"
+#include "ava/app/command_jobs.h"
+#include "ava/agent/agent_loop.h"
+#include "ava/session/assistant_output.h"
+#include "ava/session/session_store.h"
+#include "ava/session/validation.h"
+#include "ava/provider/openai_provider.h"
+#include "ava/core/json.h"
+#include "ava/core/result.h"
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <expected>
+#include <filesystem>
+#include <fstream>
+#include <future>
+#include <initializer_list>
+#include <iterator>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <ranges>
+#include <string>
+#include <system_error>
+#include <thread>
+#include <utility>
+#include <variant>
+#include <vector>
+#include <sys/stat.h>
+
+using agent_loop_test::BlockingBackgroundTransport;
+using agent_loop_test::SharedFakeTransport;
+using agent_loop_test::sse_response;
+using agent_loop_test::tool_call_sse;
+using agent_loop_test::TraceCollector;
+
+void test_agent_loop_task_subagent_runs_child_session()
+{
+  auto const root = create_empty_root("agent-task-subagent");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto const session_root = root / "sessions";
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
+                                                    "data: "
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
+                                                    "\\\"description\\\":\\\"Check docs\\\",\\\"prompt\\\":\\\"Return child result only.\\\","
+                                                    "\\\"subagent_type\\\":\\\"general\\\",\\\"task_id\\\":\\\"\\\",\\\"command\\\":\\\"\\\","
+                                                    "\\\"background\\\":false}\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child result\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent saw task\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  int prompts = 0;
+  std::optional<ava::permissions::PermissionPrompt> captured_prompt;
+  auto trace_collector = std::make_shared<TraceCollector>();
+  auto observation = std::make_shared<ava::observability::RunObservation>(trace_collector);
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                          .mode = ava::agent::Mode::Build,
+                                                          .provider_id = "openai",
+                                                          .model_id = "gpt-5.5",
+                                                          .system_prompt = "system prompt",
+                                                          .access_token = "token",
+                                                          .permission_resolver = [&prompts, &captured_prompt](ava::permissions::PermissionPrompt const& prompt)
+                                                              -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+                                                            ++prompts;
+                                                            captured_prompt = prompt;
+                                                            return ava::permissions::PermissionResolution::Allow;
+                                                          },
+                                                          .append_entry = append_route_for_test(store),
+                                                          .append_batch = append_batch_route_for_test(store),
+                                                          .session_read_authority = read_authority_for_test(store),
+                                                          .observation = observation});
+
+  auto result = loop.run_turn("delegate", store, provider, transport);
+  expect(result && result->final_text == "parent saw task" && result->tool_calls == 1 && result->provider_iterations == 2 && prompts == 1,
+         "agent loop runs foreground task subagents and continues the parent turn");
+  expect(captured_prompt && captured_prompt->operation == ava::permissions::Operation::TaskRun && captured_prompt->tool_name == "task" &&
+             captured_prompt->command == "general" && captured_prompt->target_path == workspace,
+         "task subagent dispatch requests explicit task permission");
+  expect(transport.requests().size() == 3, "task subagent uses parent-child-parent provider request order");
+  if (transport.requests().size() == 3)
+  {
+    expect(transport.requests()[0].body.find("\"name\":\"task\"") != std::string::npos, "parent provider request exposes the task tool schema");
+    expect(transport.requests()[1].body.find("Return child result only.") != std::string::npos, "child provider request receives the delegated prompt");
+    expect(transport.requests()[1].body.find("\"name\":\"task\"") == std::string::npos &&
+               transport.requests()[1].body.find("\"name\":\"job\"") == std::string::npos,
+           "child provider request hides recursive task and job tool access");
+    expect(transport.requests()[2].body.find("child result") != std::string::npos, "parent continuation receives child task result context");
+  }
+
+  auto entries = store.load();
+  expect(entries.has_value(), "task parent session loads");
+  bool saw_task_call = false;
+  bool saw_task_result = false;
+  bool saw_task_permission = false;
+  if (entries)
+  {
+    auto const projection = ava::session::classify_assistant_output(*entries);
+    for (auto const& turn : projection.turns)
+    {
+      for (auto const& item : turn.items)
+      {
+        if (auto const* function = std::get_if<ava::session::AssistantOutputFunctionCall>(&item.item.payload))
+          saw_task_call = saw_task_call || function->name == "task";
+      }
+    }
+    for (auto const& entry : *entries)
+    {
+      saw_task_result =
+          saw_task_result ||
+          (entry.type == ava::session::EntryType::ToolResult && entry.data_json.find("\\\"tool\\\":\\\"task\\\"") != std::string::npos &&
+           entry.data_json.find("child result") != std::string::npos && entry.data_json.find("\"assistant_output_entry_id\":") != std::string::npos);
+      saw_task_permission = saw_task_permission ||
+                            (entry.type == ava::session::EntryType::PermissionDecision && entry.data_json.find("\"operation\":\"task\"") != std::string::npos &&
+                             entry.data_json.find("\"resolution\":\"allow\"") != std::string::npos);
+    }
+  }
+  expect(saw_task_call && saw_task_result && saw_task_permission,
+         "task parent session persists committed task function, bound result, and permission decision");
+  auto const parent_validation = entries ? ava::session::validate_session_replay(*entries) : ava::session::SessionReplayValidation{};
+  expect(entries && parent_validation.ok(), "task parent session passes strict replay validation");
+  auto summaries = ava::session::SessionStore::list_sessions(workspace, session_root);
+  expect(summaries && summaries->size() == 2, "task subagent creates a persisted child session beside the parent");
+  bool saw_child_metadata = false;
+  bool saw_child_prompt = false;
+  bool saw_child_answer = false;
+  if (summaries)
+  {
+    for (auto const& summary : *summaries)
+    {
+      if (summary.session_id == store.session_id())
+        continue;
+      auto child_store = ava::session::SessionStore::open(workspace, summary.session_id, session_root);
+      if (!child_store)
+        continue;
+      auto child_entries = child_store->load();
+      if (!child_entries)
+        continue;
+      for (auto const& entry : *child_entries)
+      {
+        saw_child_metadata = saw_child_metadata || (entry.type == ava::session::EntryType::SessionMetadata &&
+                                                    entry.data_json.find("\"parent_session_id\":\"parent\"") != std::string::npos &&
+                                                    entry.data_json.find("@general subagent") != std::string::npos);
+        saw_child_prompt =
+            saw_child_prompt || (entry.type == ava::session::EntryType::UserMessage && entry.data_json.find("Return child result only.") != std::string::npos);
+        if (entry.type == ava::session::EntryType::AssistantTurnCommit)
+        {
+          auto const projection = ava::session::classify_assistant_output(*child_entries);
+          for (auto const& turn : projection.turns)
+            for (auto const& item : turn.items)
+              if (auto const* text = std::get_if<ava::session::AssistantOutputText>(&item.item.payload))
+                saw_child_answer = saw_child_answer || text->text == "child result";
+        }
+      }
+    }
+  }
+  expect(saw_child_metadata && saw_child_prompt && saw_child_answer, "task child session records parent linkage, delegated prompt, and child answer");
+  std::lock_guard trace_lock(trace_collector->mutex);
+  auto trace = ava::observability::validate_and_score_trace(trace_collector->events);
+  std::map<std::string, unsigned> starts, terminals;
+  bool child_parent_correlation = false;
+  for (auto const& event : trace_collector->events)
+  {
+    starts[event.run_id] += event.type == ava::observability::TraceEventType::AgentRunStart;
+    terminals[event.run_id] += event.type == ava::observability::TraceEventType::AgentRunTerminal;
+    child_parent_correlation =
+        child_parent_correlation || (!event.parent_run_id.empty() && event.parent_session_id == "parent" && event.session_id != event.parent_session_id);
+  }
+  expect(trace.valid && starts.size() == 2 && starts == terminals && child_parent_correlation,
+         "observed foreground task has separate parent/child lifecycles, fresh child session IDs, and typed parent correlation");
+}
+
+void test_agent_loop_child_rejects_unadvertised_task_and_job_calls()
+{
+  auto const root = temp_root() / "agent-child-rejects-job-controls";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "simulated-child"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response(tool_call_sse("call_nested_task", "task", R"({"description":"nested","prompt":"must not run","subagent_type":"general"})") +
+                    "data: [DONE]\n\n"),
+       sse_response(tool_call_sse("call_nested_job", "job", R"({"action":"list"})") + "data: [DONE]\n\n"),
+       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child controls rejected\"}\n\ndata: [DONE]\n\n")});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "child system prompt",
+      .access_token = "token",
+      .tool_visibility = {.excluded_tools = {"task", "job"}},
+      .permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+      .trace_context =
+          {.run_id = {}, .turn_id = {}, .session_id = {}, .provider_id = {}, .parent_run_id = {}, .parent_turn_id = {}, .parent_session_id = "parent-session"},
+  });
+  auto result = loop.run_turn("malicious child tool calls", store, provider, transport);
+  auto const requests = transport.requests();
+  bool const schemas_hidden = requests.size() == 3 && requests.front().body.find("\"name\":\"task\"") == std::string::npos &&
+                              requests.front().body.find("\"name\":\"job\"") == std::string::npos;
+  expect(result && result->final_text == "child controls rejected" && result->tool_calls == 2 && requests.size() == 3,
+         "child malicious task/job calls return bounded tool errors and the child continues");
+  expect(requests.size() == 3 && requests[1].body.find("unknown tool") != std::string::npos, "child malicious task call cannot start a recursive subagent");
+  expect(requests.size() == 3 && requests[2].body.find("unknown tool") != std::string::npos, "child malicious job call cannot reach a coordinator");
+  expect(schemas_hidden, "child provider schema hides both task and job controls");
+}
+
+void test_agent_loop_coordinated_foreground_uses_fresh_worker_and_preserves_result_accounting()
+{
+  auto const root = temp_root() / "agent-task-coordinated-foreground";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  std::filesystem::permissions(root, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "parent-coordinated"});
+  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = root / "state"});
+  expect(coordinator_result.has_value(), coordinator_result ? "coordinated foreground fixture creates coordinator"
+                                                            : "coordinated foreground fixture creates coordinator: " + coordinator_result.error().format());
+  if (!coordinator_result)
+    return;
+  auto coordinator = *coordinator_result;
+  ava::provider::OpenAIProvider const parent_provider("https://api.example.test");
+  ava::tests::FakeTransport parent_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
+                                                           "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
+                                                           "\\\"description\\\":\\\"Fresh child\\\",\\\"prompt\\\":\\\"Return fresh child result.\\\","
+                                                           "\\\"subagent_type\\\":\\\"general\\\"}\"}\n\n"
+                                                           "data: [DONE]\n\n"),
+                                              sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent received fresh child\"}\n\n"
+                                                           "data: [DONE]\n\n")});
+  auto const full_child_summary = std::string(17U * 1024U, 'x') + "FULL_FOREGROUND_TAIL";
+  auto child_responses = std::make_shared<std::vector<ava::provider::HttpResponse>>(std::initializer_list<ava::provider::HttpResponse>{
+      sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"" + full_child_summary + "\"}\n\ndata: [DONE]\n\n")});
+  auto child_requests = std::make_shared<std::vector<ava::provider::HttpRequest>>();
+  auto child_mutex = std::make_shared<std::mutex>();
+  auto resume_state = std::make_shared<BlockingBackgroundTransport::State>();
+  auto provider_creations = std::make_shared<std::atomic<unsigned>>(0);
+  auto transport_creations = std::make_shared<std::atomic<unsigned>>(0);
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .background_provider_factory = [provider_creations]() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
+        provider_creations->fetch_add(1, std::memory_order_relaxed);
+        std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
+        return provider;
+      },
+      .background_transport_factory = [child_responses, child_requests, child_mutex, resume_state,
+                                       transport_creations]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
+        auto const creation = transport_creations->fetch_add(1, std::memory_order_relaxed) + 1;
+        if (creation == 1)
+        {
+          std::unique_ptr<ava::provider::Transport> transport = std::make_unique<SharedFakeTransport>(child_responses, child_requests, child_mutex);
+          return transport;
+        }
+        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
+            resume_state, sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"resumed child result\"}\n\n"
+                                       "data: [DONE]\n\n"));
+        return transport;
+      },
+      .subagent_coordinator = coordinator,
+      .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+  });
+
+  auto result = loop.run_turn("delegate through coordinator", store, parent_provider, parent_transport);
+  auto jobs = coordinator->list(store.session_id());
+  expect(result && result->final_text == "parent received fresh child" && parent_transport.requests().size() == 2 && jobs.size() == 1,
+         "coordinated foreground child returns synchronously without using the parent transport");
+  expect(provider_creations->load(std::memory_order_relaxed) == 1 && transport_creations->load(std::memory_order_relaxed) == 1 && child_requests->size() == 1,
+         "coordinated foreground owns exactly one fresh provider and transport worker");
+  if (child_requests->size() == 1)
+    expect(child_requests->front().body.find("\"name\":\"task\"") == std::string::npos &&
+               child_requests->front().body.find("\"name\":\"job\"") == std::string::npos,
+           "coordinated child provider request cannot expose recursive task/job execution");
+  expect(jobs.size() == 1 && jobs.front().job.execution == ava::agent::SubagentExecutionState::Completed &&
+             jobs.front().job.delivery == ava::agent::SubagentDeliveryState::Direct && jobs.front().job.summary &&
+             jobs.front().job.summary->size() == 16U * 1024U && jobs.front().job.summary_truncated && jobs.front().job.provider_iterations == 1 &&
+             jobs.front().job.tool_calls == 0 && jobs.front().job.tool_iterations == 0,
+         "coordinated foreground durably bounds summary text while preserving direct accounting metadata");
+  auto parent_entries = store.load();
+  bool const persisted_full_result =
+      parent_entries && std::ranges::any_of(*parent_entries, [](ava::session::SessionEntry const& entry) {
+        return entry.type == ava::session::EntryType::ToolResult && entry.data_json.find("FULL_FOREGROUND_TAIL") != std::string::npos;
+      });
+  expect(persisted_full_result && parent_transport.requests().size() == 2 &&
+             parent_transport.requests()[1].body.find("\\\"provider_iterations\\\":1") != std::string::npos,
+         "foreground task result preserves the exact untruncated final text and accounting before normal provider-context limiting");
+
+  if (jobs.empty())
+    return;
+  auto const task_id = jobs.front().job.identity.task_id;
+  ava::tests::FakeTransport resume_parent_transport(
+      {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_resume\",\"name\":\"task\"}\n\n"
+                    "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_resume\",\"delta\":\"{"
+                    "\\\"description\\\":\\\"Resume fresh child\\\",\\\"prompt\\\":\\\"Continue and wait.\\\","
+                    "\\\"subagent_type\\\":\\\"general\\\",\\\"task_id\\\":\\\"" +
+                    task_id +
+                    "\\\"}\"}\n\n"
+                    "data: [DONE]\n\n"),
+       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent received resumed promotion\"}\n\n"
+                    "data: [DONE]\n\n")});
+  auto resumed_parent =
+      std::async(std::launch::async, [&] { return loop.run_turn("resume coordinated child", store, parent_provider, resume_parent_transport); });
+  expect(resume_state->wait_for_request(std::chrono::milliseconds(1000)), "completed child session starts a later foreground worker with the same task_id");
+  auto resumed_jobs = coordinator->list(store.session_id());
+  auto resumed_job =
+      std::ranges::find_if(resumed_jobs, [](auto const& snapshot) { return snapshot.job.execution == ava::agent::SubagentExecutionState::Running; });
+  expect(resumed_jobs.size() == 2 && resumed_job != resumed_jobs.end() && resumed_job->job.identity.task_id == task_id &&
+             resumed_job->job.identity.child_session_id == jobs.front().job.identity.child_session_id &&
+             resumed_job->job.identity.job_id != jobs.front().job.identity.job_id &&
+             resumed_job->job.identity.delivery_id != jobs.front().job.identity.delivery_id,
+         "foreground resume reuses child identity sequentially with fresh job and delivery identities");
+  if (resumed_job == resumed_jobs.end())
+  {
+    resume_state->release_success();
+    static_cast<void>(resumed_parent.get());
+    return;
+  }
+  auto const resumed_job_id = resumed_job->job.identity.job_id;
+  auto promoted_resume = coordinator->promote(store.session_id(), resumed_job_id);
+  bool const resumed_parent_woke = resumed_parent.wait_for(std::chrono::seconds(1)) == std::future_status::ready;
+  if (!resumed_parent_woke)
+    resume_state->release_success();
+  auto resumed_result = resumed_parent.get();
+  expect(promoted_resume && promoted_resume->job.was_promoted && resumed_parent_woke && resumed_result &&
+             resumed_result->final_text == "parent received resumed promotion",
+         "a resumed foreground run can be promoted and wakes the parent without restarting");
+  resume_state->release_success();
+  auto resumed_terminal = coordinator->wait(store.session_id(), resumed_job_id, std::chrono::seconds(1));
+  expect(resumed_terminal && resumed_terminal->job.execution == ava::agent::SubagentExecutionState::Completed &&
+             resumed_terminal->job.delivery == ava::agent::SubagentDeliveryState::Pending && provider_creations->load(std::memory_order_relaxed) == 2 &&
+             transport_creations->load(std::memory_order_relaxed) == 2,
+         "promoted resumed worker completes once with pending delivery and fresh provider/transport ownership");
+}
+
+void test_agent_loop_foreground_promotion_wakes_parent_without_restarting_child()
+{
+  auto const root = temp_root() / "agent-task-foreground-promotion";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  std::filesystem::permissions(root, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "parent-promote"});
+  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = root / "state"});
+  expect(coordinator_result.has_value(),
+         coordinator_result ? "promotion fixture creates coordinator" : "promotion fixture creates coordinator: " + coordinator_result.error().format());
+  if (!coordinator_result)
+    return;
+  auto coordinator = *coordinator_result;
+  auto child_state = std::make_shared<BlockingBackgroundTransport::State>();
+  auto provider_creations = std::make_shared<std::atomic<unsigned>>(0);
+  auto transport_creations = std::make_shared<std::atomic<unsigned>>(0);
+  ava::provider::OpenAIProvider const parent_provider("https://api.example.test");
+  ava::tests::FakeTransport parent_transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
+                                                           "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
+                                                           "\\\"description\\\":\\\"Promote child\\\",\\\"prompt\\\":\\\"Wait for promotion.\\\","
+                                                           "\\\"subagent_type\\\":\\\"general\\\"}\"}\n\n"
+                                                           "data: [DONE]\n\n"),
+                                              sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent resumed after promotion\"}\n\n"
+                                                           "data: [DONE]\n\n")});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .background_provider_factory = [provider_creations]() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
+        provider_creations->fetch_add(1, std::memory_order_relaxed);
+        std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
+        return provider;
+      },
+      .background_transport_factory = [child_state, transport_creations]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
+        transport_creations->fetch_add(1, std::memory_order_relaxed);
+        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
+            child_state, sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"late child result\"}\n\n"
+                                      "data: [DONE]\n\n"));
+        return transport;
+      },
+      .subagent_coordinator = coordinator,
+      .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+  });
+
+  auto parent = std::async(std::launch::async, [&] { return loop.run_turn("delegate then promote", store, parent_provider, parent_transport); });
+  expect(child_state->wait_for_request(std::chrono::milliseconds(1000)), "foreground promotion child reaches its fresh transport");
+  auto jobs = coordinator->list(store.session_id());
+  expect(jobs.size() == 1, "foreground promotion publishes one stable job before waiting");
+  ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot> promoted =
+      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing promotion job"));
+  ava::core::Result<ava::app::CommandResult> active_command =
+      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing active promotion command"));
+  if (!jobs.empty())
+  {
+    active_command = ava::app::run_jobs_command(coordinator, store.session_id(), "promote " + jobs.front().job.identity.job_id, true);
+    promoted = coordinator->snapshot(store.session_id(), jobs.front().job.identity.job_id);
+  }
+  expect(active_command && !active_command->output.empty() && promoted && promoted->job.was_promoted &&
+             promoted->job.execution == ava::agent::SubagentExecutionState::Running,
+         "out-of-band active-run /jobs promote durably changes mode while preserving the running worker");
+  bool const parent_woke = parent.wait_for(std::chrono::seconds(1)) == std::future_status::ready;
+  if (!parent_woke)
+    child_state->release_success();
+  auto parent_result = parent.get();
+  expect(parent_woke && parent_result && parent_result->final_text == "parent resumed after promotion",
+         "live foreground /jobs promote wakes the parent tool call without a restart or modal boundary");
+  expect(provider_creations->load(std::memory_order_relaxed) == 1 && transport_creations->load(std::memory_order_relaxed) == 1,
+         "promotion never restarts or replaces the child worker");
+  if (parent_transport.requests().size() == 2 && promoted)
+    expect(parent_transport.requests()[1].body.find(promoted->job.identity.job_id) != std::string::npos &&
+               parent_transport.requests()[1].body.find("promoted") != std::string::npos,
+           "promoted task result returns the same running job identity to the parent");
+  child_state->release_success();
+  if (promoted)
+  {
+    auto completed = coordinator->wait(store.session_id(), promoted->job.identity.job_id, std::chrono::seconds(1));
+    expect(completed && completed->job.execution == ava::agent::SubagentExecutionState::Completed &&
+               completed->job.delivery == ava::agent::SubagentDeliveryState::Pending && completed->job.summary == "late child result",
+           "promoted worker continues unchanged and atomically records pending delivery at completion");
+  }
+}
+
+void test_agent_loop_promoted_failure_persists_sanitized_child_error()
+{
+  auto const root = temp_root() / "agent-task-promoted-failure";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  std::filesystem::permissions(root, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+  auto const session_root = root / "sessions";
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-promoted-failure"});
+  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = root / "state"});
+  if (!coordinator_result)
+  {
+    expect(false, "promoted failure fixture creates coordinator");
+    return;
+  }
+  auto coordinator = *coordinator_result;
+  auto child_state = std::make_shared<BlockingBackgroundTransport::State>();
+  ava::provider::OpenAIProvider const parent_provider("https://api.example.test");
+  ava::tests::FakeTransport parent_transport(
+      {sse_response(tool_call_sse("call_promoted_failure", "task",
+                                  R"({"description":"Promoted failure","prompt":"Fail after promotion.","subagent_type":"general","mode":"foreground"})") +
+                    "data: [DONE]\n\n"),
+       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent saw promotion\"}\n\n"
+                    "data: [DONE]\n\n")});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .background_provider_factory = []() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
+        std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
+        return provider;
+      },
+      .background_transport_factory = [child_state]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
+        auto secret_body = std::string("{\"error\":{\"message\":\"credential=promoted-secret command=curl --token promoted-secret\"}}");
+        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
+            child_state, ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = std::move(secret_body)});
+        return transport;
+      },
+      .subagent_coordinator = coordinator,
+      .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+  });
+
+  auto parent = std::async(std::launch::async, [&] { return loop.run_turn("delegate promoted failure", store, parent_provider, parent_transport); });
+  expect(child_state->wait_for_request(std::chrono::milliseconds(1000)), "promoted failure child reaches transport");
+  auto jobs = coordinator->list(store.session_id());
+  if (jobs.empty())
+  {
+    child_state->release_success();
+    static_cast<void>(parent.get());
+    expect(false, "promoted failure publishes job");
+    return;
+  }
+  auto promoted = coordinator->promote(store.session_id(), jobs.front().job.identity.job_id);
+  expect(promoted && promoted->job.was_promoted, "promoted failure switches the running foreground job to background delivery");
+  auto parent_result = parent.get();
+  expect(parent_result && parent_result->final_text == "parent saw promotion", "promoted failure releases the parent before child terminal failure");
+  child_state->release_success();
+  auto failed = coordinator->wait(store.session_id(), jobs.front().job.identity.job_id, std::chrono::seconds(1));
+  auto child_store = ava::session::SessionStore::open(workspace, jobs.front().job.identity.child_session_id, session_root);
+  auto child_entries = child_store ? child_store->load()
+                                   : ava::core::Result<std::vector<ava::session::SessionEntry>>(
+                                         std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "child unavailable")));
+  bool const safe_error = child_entries && std::ranges::any_of(*child_entries, [](auto const& entry) {
+                            return entry.type == ava::session::EntryType::Error && entry.data_json.find("subagent job failed") != std::string::npos &&
+                                   entry.data_json.find("promoted-secret") == std::string::npos && entry.data_json.find("curl --token") == std::string::npos;
+                          });
+  expect(failed && failed->job.execution == ava::agent::SubagentExecutionState::Failed && failed->job.delivery == ava::agent::SubagentDeliveryState::Pending &&
+             failed->job.error == "subagent job failed" && safe_error,
+         "a promoted child failure persists one sanitized bounded child error and safe coordinator result");
+}
+
+void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_background_children()
+{
+  auto run_case = [](bool background) {
+    auto const root = create_empty_root(background ? "agent-task-authority-background" : "agent-task-authority-foreground");
+    std::error_code remove_error;
+    std::filesystem::remove_all(root, remove_error);
+    auto const workspace = root / "workspace";
+    std::filesystem::create_directories(workspace);
+    expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+           "task authority-root fixture keeps sealed planning roots owner-only");
+    ava::session::SessionStore store(ava::session::SessionStoreOptions{
+        .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = background ? "task-authority-bg" : "task-authority-fg"});
+    ava::provider::OpenAIProvider const provider("https://api.example.test");
+    auto const task_arguments = std::string(R"({"description":"authority child","prompt":"run child bash","subagent_type":"general","background":)") +
+                                (background ? "true}" : "false}");
+    auto const child_bash = tool_call_sse("call_child_bash", "bash", R"({"command":"ls"})") + "data: [DONE]\n\n";
+    int task_prompts = 0;
+    auto collector = std::make_shared<TraceCollector>();
+    auto observation = std::make_shared<ava::observability::RunObservation>(collector);
+    std::shared_ptr<ava::agent::BackgroundJobRegistry> registry;
+    std::shared_ptr<std::vector<ava::provider::HttpResponse>> background_responses;
+    std::shared_ptr<std::vector<ava::provider::HttpRequest>> background_requests;
+    std::shared_ptr<std::mutex> background_mutex;
+    ava::tests::FakeTransport transport(
+        background ? std::vector<ava::provider::HttpResponse>{sse_response(tool_call_sse("call_task", "task", task_arguments) + "data: [DONE]\n\n"),
+                                                              sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent queued\"}\n\n"
+                                                                           "data: [DONE]\n\n")}
+                   : std::vector<ava::provider::HttpResponse>{sse_response(tool_call_sse("call_task", "task", task_arguments) + "data: [DONE]\n\n"),
+                                                              sse_response(child_bash),
+                                                              sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child denied\"}\n\n"
+                                                                           "data: [DONE]\n\n"),
+                                                              sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent continued\"}\n\n"
+                                                                           "data: [DONE]\n\n")});
+    if (background)
+    {
+      registry = std::make_shared<ava::agent::BackgroundJobRegistry>();
+      background_responses = std::make_shared<std::vector<ava::provider::HttpResponse>>(std::vector<ava::provider::HttpResponse>{
+          sse_response(child_bash), sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child denied\"}\n\n"
+                                                 "data: [DONE]\n\n")});
+      background_requests = std::make_shared<std::vector<ava::provider::HttpRequest>>();
+      background_mutex = std::make_shared<std::mutex>();
+    }
+
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+        .workspace_dir = workspace,
+        .anchor_set = command_anchors_for_test(workspace, store.session_path().parent_path() / "spill"),
+        .mode = ava::agent::Mode::Build,
+        .provider_id = "openai",
+        .model_id = "gpt-5.5",
+        .system_prompt = "system prompt",
+        .access_token = "token",
+        .ava_authority_roots = {workspace},
+        .permission_resolver =
+            [&task_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+          ++task_prompts;
+          expect(prompt.operation == ava::permissions::Operation::TaskRun, "authority-root child only prompts to authorize its parent task");
+          return ava::permissions::PermissionResolution::Allow;
+        },
+        .background_provider_factory = background ? []() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
+          std::unique_ptr<ava::provider::Provider> child = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
+          return child;
+        }
+        : decltype(ava::agent::AgentLoopOptions{}.background_provider_factory){},
+        .background_transport_factory =
+            background ? [background_responses, background_requests, background_mutex]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
+          std::unique_ptr<ava::provider::Transport> child = std::make_unique<SharedFakeTransport>(background_responses, background_requests, background_mutex);
+          return child;
+        }
+        : decltype(ava::agent::AgentLoopOptions{}.background_transport_factory){},
+        .background_jobs = registry,
+        .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
+        .observation = observation,
+    });
+    auto result = loop.run_turn("delegate authority child", store, provider, transport);
+
+    bool child_completed = !background;
+    std::vector<ava::provider::HttpRequest> child_requests;
+    if (background)
+    {
+      auto jobs = registry->snapshot();
+      if (!jobs.empty())
+      {
+        auto completed = registry->wait(jobs.front().job_id, std::chrono::milliseconds(1000));
+        child_completed = completed && completed->state == ava::agent::BackgroundJobState::Completed && completed->final_text == "child denied";
+      }
+      registry->join_finished();
+      std::lock_guard lock(*background_mutex);
+      child_requests = *background_requests;
+    }
+    bool process_started = false;
+    {
+      std::lock_guard lock(collector->mutex);
+      process_started = std::ranges::any_of(
+          collector->events, [](ava::observability::TraceEvent const& event) { return event.type == ava::observability::TraceEventType::ProcessStart; });
+    }
+    auto const child_error_propagated =
+        background ? child_requests.size() == 2 && child_requests[1].body.find("must not overlap with any AVA authority root") != std::string::npos
+                   : transport.requests().size() == 4 && transport.requests()[2].body.find("must not overlap with any AVA authority root") != std::string::npos;
+    expect(result && task_prompts == 1 && child_completed && child_error_propagated && !process_started,
+           background ? "background child copies AVA authority roots before its AgentLoop starts and blocks overlapping model commands"
+                      : "foreground child copies AVA authority roots before its AgentLoop starts and blocks overlapping model commands");
+  };
+
+  run_case(false);
+  run_case(true);
+}
+
+void test_agent_loop_task_subagent_recovers_torn_child_before_resume()
+{
+  auto const root = create_empty_root("agent-task-subagent-torn-resume");
+
+  auto const workspace = root / "workspace";
+  auto const session_root = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto child = ava::session::SessionStore::create(workspace, session_root);
+  expect(child.has_value(), "torn child resume test creates a child session");
+  if (!child)
+    return;
+  auto metadata = append_session_metadata_for_test(
+      *child, ava::session::SessionMetadataUpdate{.name = "resumable child", .parent_session_id = "parent-resume", .actor = "subagent"});
+  expect(metadata.has_value(), "torn child resume test seeds child metadata");
+  if (!metadata)
+    return;
+  auto const child_id = child->session_id();
+  auto const child_path = child->session_path();
+  auto const valid_child_bytes = [&] {
+    std::ifstream file(child_path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+  }();
+  {
+    std::ofstream file(child_path, std::ios::binary | std::ios::app);
+    file << "{\"version\":3,\"id\":\"torn-child";
+  }
+
+  ava::session::SessionStore parent(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-resume"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  auto const task_arguments = std::string("{\\\"description\\\":\\\"Resume child\\\",\\\"prompt\\\":\\\"Continue child.\\\",") +
+                              "\\\"subagent_type\\\":\\\"general\\\",\\\"task_id\\\":\\\"" + child_id + "\\\"}";
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_resume\",\"name\":\"task\"}\n\n"
+                                                    "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_resume\",\"delta\":\"" +
+                                                    task_arguments +
+                                                    "\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"resumed child answer\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent resumed child\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .append_entry = append_route_for_test(parent),
+      .append_batch = append_batch_route_for_test(parent),
+      .session_read_authority = read_authority_for_test(parent),
+  });
+
+  auto result = loop.run_turn("resume torn child", parent, provider, transport);
+  std::ifstream repaired_file(child_path, std::ios::binary);
+  std::string repaired_bytes{std::istreambuf_iterator<char>(repaired_file), std::istreambuf_iterator<char>()};
+  auto child_entries = child->load();
+  bool quarantine_found = false;
+  auto const quarantine_prefix = child_path.filename().string() + ".torn-tail.";
+  std::error_code iter_error;
+  for (std::filesystem::directory_iterator iterator(child_path.parent_path(), iter_error), end; !iter_error && iterator != end; iterator.increment(iter_error))
+  {
+    quarantine_found = quarantine_found || iterator->path().filename().string().starts_with(quarantine_prefix);
+  }
+  expect(result && result->final_text == "parent resumed child" && transport.requests().size() == 3 && child_entries && child_entries->size() >= 3 &&
+             repaired_bytes.starts_with(valid_child_bytes) && repaired_bytes.find("torn-child") == std::string::npos && quarantine_found,
+         "foreground task_id resume owns and recovers a torn child before loading and running it");
+}
+
+void test_subagent_config_loads_project_definitions()
+{
+  auto const root = create_empty_root("subagent-config");
+
+  auto const workspace = root / "workspace";
+  auto const agent_dir = workspace / ".ava" / "agents";
+  std::filesystem::create_directories(agent_dir);
+  {
+    std::ofstream file(agent_dir / "reviewer.md", std::ios::binary | std::ios::trunc);
+    file << "---\n"
+            "name: reviewer\n"
+            "description: Review implementation details.\n"
+            "tools: read-only\n"
+            "---\n"
+            "Inspect files and return concise review findings.";
+  }
+  {
+    std::ofstream file(agent_dir / "general.md", std::ios::binary | std::ios::trunc);
+    file << "---\n"
+            "description: Attempt to override builtin.\n"
+            "---\n"
+            "Should be ignored.";
+  }
+
+  auto loaded = ava::agent::load_subagents(
+      ava::agent::SubagentLoadOptions{.workspace_root = workspace, .global_agent_dirs = {}, .project_agent_dirs = {agent_dir}, .include_project_agents = true});
+  auto const* reviewer = ava::agent::find_subagent(loaded.subagents, "reviewer");
+  auto const* general = ava::agent::find_subagent(loaded.subagents, "general");
+  expect(reviewer && reviewer->description == "Review implementation details." && reviewer->tool_preset == ava::agent::SubagentToolPreset::ReadOnly &&
+             reviewer->system_prompt.find("Inspect files") != std::string::npos,
+         "subagent config loads project-defined read-only subagents");
+  expect(general && general->builtin, "subagent config keeps builtin subagents from project override");
+  expect(std::ranges::any_of(
+             loaded.diagnostics,
+             [](ava::agent::SubagentDiagnostic const& diagnostic) { return diagnostic.message.find("collides with a builtin") != std::string::npos; }),
+         "subagent config reports builtin-name collisions");
+
+  auto untrusted = ava::agent::load_subagents(ava::agent::SubagentLoadOptions{
+      .workspace_root = workspace, .global_agent_dirs = {}, .project_agent_dirs = {agent_dir}, .include_project_agents = false});
+  expect(ava::agent::find_subagent(untrusted.subagents, "reviewer") == nullptr, "project subagents are gated by project resource trust");
+}
+
+void test_agent_loop_custom_subagent_definition_controls_prompt_and_tools()
+{
+  auto const root = create_empty_root("agent-task-custom-subagent");
+
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto const session_root = root / "sessions";
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-custom"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
+                                                    "data: "
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
+                                                    "\\\"description\\\":\\\"Review docs\\\",\\\"prompt\\\":\\\"Return review result.\\\","
+                                                    "\\\"subagent_type\\\":\\\"reviewer\\\"}\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"review result\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"custom done\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .subagents = {ava::agent::SubagentDefinition{.name = "reviewer",
+                                                   .description = "Read-only reviewer",
+                                                   .system_prompt = "CUSTOM REVIEWER ROLE",
+                                                   .tool_preset = ava::agent::SubagentToolPreset::ReadOnly}},
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+  });
+
+  auto result = loop.run_turn("delegate custom", store, provider, transport);
+  expect(result && result->final_text == "custom done" && transport.requests().size() == 3, "agent loop runs configured custom subagents");
+  if (transport.requests().size() == 3)
+  {
+    expect(transport.requests()[1].body.find("CUSTOM REVIEWER ROLE") != std::string::npos, "custom subagent system prompt is appended to child request");
+    expect(transport.requests()[1].body.find("\"name\":\"read_file\"") != std::string::npos, "read-only custom subagents retain read tools");
+    expect(transport.requests()[1].body.find("\"name\":\"bash\"") == std::string::npos &&
+               transport.requests()[1].body.find("\"name\":\"write_file\"") == std::string::npos &&
+               transport.requests()[1].body.find("\"name\":\"task\"") == std::string::npos,
+           "read-only custom subagents hide mutation, shell, and recursive task tools");
+  }
+}

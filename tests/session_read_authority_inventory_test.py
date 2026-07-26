@@ -62,14 +62,15 @@ def main() -> int:
     require_text(source, "src/ava/agent/agent_loop.h", "std::optional<ava::session::SessionReadAuthority> session_read_authority", failures)
     require_text(source, "src/ava/app/runtime/Session.h", "create_ephemeral(store, invocation_inputs_.session_read_limits)", failures)
     require_text(source, "src/ava/app/runtime/Session.h", "create_persistent(store, resources_.lease, invocation_inputs_.session_read_limits)", failures)
-    require_text(source, "src/ava/session/session_store.cpp", "state_->store.load_bounded(*state_->lease, state_->limits)", failures)
-    require_text(source, "src/ava/session/session_store.cpp", "state_->store.load_bounded(state_->limits)", failures)
+    require_text(source, "src/ava/session/session_store_authority.cpp", "struct SessionReadAuthority::State", failures)
+    require_text(source, "src/ava/session/session_store_authority.cpp", "state_->store.load_bounded(*state_->lease, state_->limits)", failures)
+    require_text(source, "src/ava/session/session_store_authority.cpp", "state_->store.load_bounded(state_->limits)", failures)
 
     # Keep the small observational pathname inventory visible and intentional.
     require_text(source, "src/ava/session/session_tree.cpp", "load_session_metadata(*store)", failures)
     require_text(source, "src/ava/session/session_metadata.cpp", "auto entries = store.load();", failures)
     require_text(source, "src/ava/session/transcript.cpp", "auto entries = store.load_bounded(", failures)
-    require_text(source, "src/ava/session/session_store.cpp", "inspect_bounded_for_listing", failures)
+    require_text(source, "src/ava/session/session_store_read.cpp", "inspect_bounded_for_listing", failures)
 
     if failures:
         print("\n\n".join(failures), file=sys.stderr)

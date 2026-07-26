@@ -1,0 +1,51 @@
+"""Independent tmux TUI smoke scenarios."""
+
+from .suspend_resume import scenario_suspend_resume
+from .keybind_conflict import scenario_keybind_conflict
+from .theme_env import scenario_theme_env
+from .theme_persisted import scenario_theme_persisted
+from .active_run import scenario_active_run
+from .restore_followup import scenario_restore_followup
+from .main_startup_trust_keybinds import scenario_main_startup_trust_keybinds
+from .main_models_selectors import scenario_main_models_selectors
+from .main_editor_input import scenario_main_editor_input
+from .main_slash_completions import scenario_main_slash_completions
+from .main_permission_flow import scenario_main_permission_flow
+from .main_question_flow import scenario_main_question_flow
+from .main_session_mgmt import scenario_main_session_mgmt
+from .main_paste_scrollback_attach import scenario_main_paste_scrollback_attach
+
+
+SCENARIOS = (
+    "suspend_resume",
+    "keybind_conflict",
+    "theme_env",
+    "theme_persisted",
+    "active_run",
+    "restore_followup",
+    "main_startup_trust_keybinds",
+    "main_models_selectors",
+    "main_editor_input",
+    "main_slash_completions",
+    "main_permission_flow",
+    "main_question_flow",
+    "main_session_mgmt",
+    "main_paste_scrollback_attach",
+)
+
+SCENARIO_HANDLERS = {
+    "suspend_resume": scenario_suspend_resume,
+    "keybind_conflict": scenario_keybind_conflict,
+    "theme_env": scenario_theme_env,
+    "theme_persisted": scenario_theme_persisted,
+    "active_run": scenario_active_run,
+    "restore_followup": scenario_restore_followup,
+    "main_startup_trust_keybinds": scenario_main_startup_trust_keybinds,
+    "main_models_selectors": scenario_main_models_selectors,
+    "main_editor_input": scenario_main_editor_input,
+    "main_slash_completions": scenario_main_slash_completions,
+    "main_permission_flow": scenario_main_permission_flow,
+    "main_question_flow": scenario_main_question_flow,
+    "main_session_mgmt": scenario_main_session_mgmt,
+    "main_paste_scrollback_attach": scenario_main_paste_scrollback_attach,
+}

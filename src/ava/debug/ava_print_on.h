@@ -65,6 +65,9 @@ using utils::has_print_on::operator<<;
 
 namespace permissions {
 using utils::has_print_on::operator<<;
+namespace permission_rules_internal {
+using utils::has_print_on::operator<<;
+} // namespace permission_rules_internal
 } // namespace permissions
 
 namespace plugin {

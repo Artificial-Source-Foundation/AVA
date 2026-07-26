@@ -1,0 +1,44 @@
+#pragma once
+
+namespace session_tests {
+void test_session_store_round_trip();
+void test_bounded_session_reads_strictly_classify_framed_records();
+void test_ephemeral_session_store_stays_in_memory();
+void test_session_record_round_trip();
+void test_session_tree_metadata_entries_validate_and_export();
+void test_session_tree_index_derives_branches();
+void test_session_tree_index_handles_parent_cycles();
+void test_session_branch_fork_and_clone_copy_source_safely();
+void test_session_branch_summary_appends_to_source_session();
+void test_session_stats_helper();
+void test_session_stats_saturates_large_usage_and_costs();
+void test_session_stats_omits_incomplete_cost_total();
+void test_session_stats_flags_legacy_assistant_tokens_without_cost();
+void test_assistant_output_v4_session_schema_and_replay();
+void test_session_stats_projects_mixed_v3_v4_history();
+void test_session_replay_validation();
+void test_session_lease_creation_and_link_safety();
+void test_session_torn_tail_recovery();
+void test_session_torn_tail_listing();
+void test_session_resume_and_listing();
+void test_session_compaction_entry_round_trip();
+void test_session_markdown_export();
+void test_session_portable_jsonl_sanitizer();
+void test_compaction_config_and_thresholds();
+void test_compaction_context_reconstruction();
+void test_tool_content_parts_reconstruction();
+void test_portable_omitted_reasoning_is_dropped_from_provider_replay();
+void test_image_attachment_message_reconstruction_and_validation();
+void test_synthetic_delivery_provenance_validation();
+void test_image_attachment_storage_boundary();
+void test_image_attachment_import();
+void test_created_session_rollback_is_identity_safe_and_preserves_attachments();
+void test_assistant_output_append_target_state_and_batches();
+void test_incomplete_assistant_output_suffix_recovery();
+void test_lease_bound_session_reads_hold_exact_authority();
+void test_session_read_authority_binding_and_descriptor_lifetime();
+void test_session_read_authority_retains_runtime_policy();
+void test_session_append_authority_and_commit_state();
+void test_logical_session_projection_v4_public_privacy_and_compatibility();
+void test_provider_base64_encoding();
+}  // namespace session_tests

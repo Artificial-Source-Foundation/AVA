@@ -11,15 +11,25 @@ set(CURSES_NEED_WIDE TRUE)
 find_package(Curses REQUIRED)
 
 add_library(ava_test_support
+  "support/acp_test_support.cpp"
+  "support/agent_loop_test_support.cpp"
+  "support/app_rpc_test_support.cpp"
   "support/app_runtime_support.cpp"
   "support/fake_transport.cpp"
   "support/libcwd_test_output.cpp"
+  "support/session_test_support.cpp"
   "support/test_harness.cpp"
 )
 target_link_libraries(ava_test_support PUBLIC ${AVA_BACKEND_LIBRARIES})
 target_include_directories(ava_test_support PUBLIC ${CMAKE_SOURCE_DIR})
 ava_apply_warnings(ava_test_support)
 ava_apply_sanitizers(ava_test_support)
+
+add_library(ava_tui_test_support "support/tui_test_support.cpp")
+target_link_libraries(ava_tui_test_support PRIVATE ava_test_support)
+target_include_directories(ava_tui_test_support PUBLIC ${CMAKE_SOURCE_DIR})
+ava_apply_warnings(ava_tui_test_support)
+ava_apply_sanitizers(ava_tui_test_support)
 
 add_executable(ava_fake_lsp_server "support/fake_lsp_server.cpp")
 target_link_libraries(ava_fake_lsp_server PRIVATE ${AVA_BACKEND_LIBRARIES})
@@ -47,9 +57,23 @@ ava_apply_warnings(ava_rpc_broken_pipe_subprocess_test)
 ava_apply_sanitizers(ava_rpc_broken_pipe_subprocess_test)
 
 set(AVA_TESTS_SOURCES
+  "acp_client_tools_tests.cpp"
+  "acp_content_tests.cpp"
+  "acp_peer_delivery_tests.cpp"
+  "acp_peer_lifecycle_tests.cpp"
+  "acp_permission_gateway_tests.cpp"
+  "acp_service_tests.cpp"
   "acp_tests.cpp"
+  "agent_loop_background_job_tests.cpp"
+  "agent_loop_background_subagent_tests.cpp"
+  "agent_loop_command_safety_tests.cpp"
+  "agent_loop_core_tests.cpp"
+  "agent_loop_history_tests.cpp"
+  "agent_loop_interaction_tests.cpp"
   "agent_loop_resilience_tests.cpp"
+  "agent_loop_subagent_tests.cpp"
   "agent_loop_tests.cpp"
+  "agent_loop_tool_execution_tests.cpp"
   "agent_tool_dispatcher_tests.cpp"
   "app_compaction_tests.cpp"
   "app_command_registry_tests.cpp"
@@ -57,7 +81,28 @@ set(AVA_TESTS_SOURCES
   "app_rpc_queue_tests.cpp"
   "app_rpc_resolver_tests.cpp"
   "app_rpc_tests.cpp"
+  "app_rpc_commands_tests.cpp"
+  "app_rpc_direct_tests.cpp"
+  "app_rpc_line_reader_tests.cpp"
+  "app_rpc_prompt_tests.cpp"
+  "app_rpc_publication_tests.cpp"
+  "app_rpc_serialization_tests.cpp"
+  "app_rpc_session_tests.cpp"
   "app_runtime_tests.cpp"
+  "app_command_classification_tests.cpp"
+  "app_event_serialization_tests.cpp"
+  "app_runtime_startup_tests.cpp"
+  "app_runtime_plugin_tests.cpp"
+  "app_runtime_prompt_tests.cpp"
+  "app_runtime_command_tests.cpp"
+  "app_runtime_command_ui_tests.cpp"
+  "app_runtime_command_catalog_tests.cpp"
+  "app_runtime_command_auth_tests.cpp"
+  "app_runtime_command_tool_tests.cpp"
+  "app_runtime_command_session_tests.cpp"
+  "app_runtime_session_command_tests.cpp"
+  "app_runtime_catalog_tests.cpp"
+  "app_runtime_model_tests.cpp"
   "config_context_auth_oauth_tests.cpp"
   "command_tests.cpp"
   "core_tests.cpp"
@@ -72,8 +117,24 @@ set(AVA_TESTS_SOURCES
   "provider_anthropic_tests.cpp"
   "provider_gemini_tests.cpp"
   "provider_live_smoke_tests.cpp"
+  "provider_openai_compatible_tests.cpp"
+  "provider_openai_contract_http_tests.cpp"
+  "provider_openai_contract_request_tests.cpp"
+  "provider_openai_contract_sse_tests.cpp"
+  "provider_openai_contract_terminal_tests.cpp"
+  "provider_openai_limits_tests.cpp"
+  "provider_openai_output_tests.cpp"
   "provider_openai_tests.cpp"
   "session_tests.cpp"
+  "session_assistant_output_tests.cpp"
+  "session_attachment_tests.cpp"
+  "session_authority_tests.cpp"
+  "session_compaction_tests.cpp"
+  "session_projection_tests.cpp"
+  "session_recovery_tests.cpp"
+  "session_stats_tests.cpp"
+  "session_store_tests.cpp"
+  "session_tree_tests.cpp"
   "session_run_controller_tests.cpp"
   "session_title_coordinator_tests.cpp"
   "subagent_coordinator_tests.cpp"
@@ -85,6 +146,17 @@ set(AVA_TESTS_SOURCES
   "tools_search_tests.cpp"
   "tools_tests.cpp"
   "tui_composer_tests.cpp"
+  "tui_completion_tests.cpp"
+  "tui_composer_rendering_tests.cpp"
+  "tui_keybinding_tests.cpp"
+  "tui_markdown_tests.cpp"
+  "tui_modal_tests.cpp"
+  "tui_permission_tests.cpp"
+  "tui_runtime_state_tests.cpp"
+  "tui_selector_tests.cpp"
+  "tui_terminal_input_tests.cpp"
+  "tui_tool_card_tests.cpp"
+  "tui_transcript_tests.cpp"
   "run_observer_tests.cpp"
   "runtime_diagnostics_tests.cpp"
   "containment_tests.cpp"
@@ -96,7 +168,7 @@ if(OptionEnableLibcwd)
 endif()
 
 add_executable(ava_tests ${AVA_TESTS_SOURCES})
-target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support ${AICXX_OBJECTS_LIST})
+target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support ava_tui_test_support ${AICXX_OBJECTS_LIST})
 target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS})
 add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_provider_server)
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")

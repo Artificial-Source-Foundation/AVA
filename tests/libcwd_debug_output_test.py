@@ -147,7 +147,6 @@ def main() -> int:
                     "LIBCWD_NO_STARTUP_MSGS": "1",
                 }
             )
-            base_env.pop("LIBCWD_PRINT_LOADING", None)
             base_env.pop("AVA_DEBUG_OUTPUT_DIR", None)
 
             default_result = run(ava, ["core_mode"], base_env, root)

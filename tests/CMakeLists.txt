@@ -230,8 +230,7 @@ foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   # Keep pre-main libcwd diagnostics quiet without replacing the caller's
   # rcfile policy. ava_tests itself routes all output produced from main.
   set_tests_properties(ava_tests.${AVA_TEST_SUITE} PROPERTIES
-    ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1"
-    ENVIRONMENT_MODIFICATION "LIBCWD_PRINT_LOADING=unset:")
+    ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1")
 endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.containment PROPERTIES SKIP_RETURN_CODE 77)
@@ -788,8 +787,7 @@ if(OptionEnableLibcwd)
     NAME ava_debug.print_members_format
     COMMAND ava_tests debug)
   set_tests_properties(ava_debug.print_members_format PROPERTIES
-    ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1"
-    ENVIRONMENT_MODIFICATION "LIBCWD_PRINT_LOADING=unset:")
+    ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1")
 
   if(Python3_Interpreter_FOUND)
     add_test(
@@ -801,8 +799,7 @@ if(OptionEnableLibcwd)
       TIMEOUT 120
       TIMEOUT_SIGNAL_NAME SIGTERM
       TIMEOUT_SIGNAL_GRACE_PERIOD 10
-      ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1;LIBCWD_NO_STARTUP_MSGS=1"
-      ENVIRONMENT_MODIFICATION "LIBCWD_PRINT_LOADING=unset:")
+      ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1;LIBCWD_NO_STARTUP_MSGS=1")
   endif()
 endif()
 

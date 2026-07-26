@@ -44,7 +44,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_pre
     {
       jump_mode = ComposerJumpMode::None;
       snapshot.status = "jump cancelled";
-      return to_input_handling(renderer_.render());
+      return to_input_handling(renderer_.request_render());
     }
     if (auto const target = printable_jump_target(active_input))
     {
@@ -60,7 +60,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_pre
       draft_state.clear_selection();
       snapshot.status =
           jump_composer_draft_to_character(draft, *target, forward) ? (forward ? "jumped forward" : "jumped backward") : "jump character not found";
-      return to_input_handling(renderer_.render());
+      return to_input_handling(renderer_.request_render());
     }
     jump_mode = ComposerJumpMode::None;
   }
@@ -72,7 +72,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_pre
   {
     pending_escape_clear = false;
     static_cast<void>(draft_state.copy_selection(snapshot));
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::Interrupt))
   {
@@ -94,11 +94,11 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_pre
   if (active_event.key == Key::Character)
   {
     insert_active_text(active_input);
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (draft_state.extend_selection_for_key(active_event.key, snapshot))
   {
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (active_event.key == Key::CtrlHome || active_event.key == Key::CtrlEnd)
   {
@@ -114,7 +114,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_pre
     draft.vertical_column = std::string::npos;
     draft.yank_start = std::string::npos;
     draft.yank_end = std::string::npos;
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   return InputHandling::Unhandled;
 }
@@ -153,7 +153,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_com
       draft_input.clear();
       snapshot.status = "command selected - press Enter to queue";
     }
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::AutocompleteAccept) && navigation_.file_reference_palette_active())
   {
@@ -162,7 +162,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_com
     {
       snapshot.status = "reference disabled: " + *disabled_reason;
       static_cast<void>(beep());
-      return to_input_handling(renderer_.render());
+      return to_input_handling(renderer_.request_render());
     }
     auto selection = navigation_.selected_completion_text(selected_slash_command_index);
     draft_state.clear_selection();
@@ -173,7 +173,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_com
     history_index.reset();
     draft_input.clear();
     snapshot.status = "file reference selected";
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::AutocompleteAccept) && navigation_.path_completion_palette_active())
   {
@@ -182,7 +182,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_com
     {
       snapshot.status = "path disabled: " + *disabled_reason;
       static_cast<void>(beep());
-      return to_input_handling(renderer_.render());
+      return to_input_handling(renderer_.request_render());
     }
     auto selection = navigation_.selected_completion_text(selected_slash_command_index);
     draft_state.clear_selection();
@@ -193,7 +193,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_com
     history_index.reset();
     draft_input.clear();
     snapshot.status = "path selected";
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::AutocompleteAccept))
   {
@@ -215,7 +215,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_com
           path_completion_force_active = false;
           snapshot.status = "path disabled: " + *disabled_reason;
           static_cast<void>(beep());
-          return to_input_handling(renderer_.render());
+          return to_input_handling(renderer_.request_render());
         }
         auto selection = navigation_.selected_completion_text(0);
         draft_state.clear_selection();
@@ -229,7 +229,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_com
         selected_slash_command_index = 0;
         snapshot.status = "path suggestions";
       }
-      return to_input_handling(renderer_.render());
+      return to_input_handling(renderer_.request_render());
     }
   }
   return InputHandling::Unhandled;
@@ -254,7 +254,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_act
   if (is_action(active_event, TuiAction::NewLine))
   {
     draft_state.insert_newline();
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::ExternalEditor))
   {
@@ -282,7 +282,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_act
     path_completion_force_active = false;
     jump_mode = is_action(active_event, TuiAction::JumpForward) ? ComposerJumpMode::Forward : ComposerJumpMode::Backward;
     snapshot.status = is_action(active_event, TuiAction::JumpForward) ? "jump forward: type character" : "jump backward: type character";
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::MessageFollowUp))
   {
@@ -293,7 +293,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_act
     if (auto handled = reject_disabled_visible_completion())
       return to_input_handling(*handled);
     if (active_event.key == Key::Enter && draft_state.convert_backslash_enter_to_newline(snapshot))
-      return to_input_handling(renderer_.render());
+      return to_input_handling(renderer_.request_render());
     if (auto handled = run_active_command(state))
       return to_input_handling(*handled);
     return to_input_handling(queue_active_draft(state, false));

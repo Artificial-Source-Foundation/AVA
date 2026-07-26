@@ -12,6 +12,7 @@ from tui_smoke_helpers import (
     tmux,
     wait_for,
     wait_for_absent,
+    wait_for_screen_state,
 )
 from .common import _finish_main
 
@@ -93,14 +94,33 @@ def scenario_main_question_flow(ctx: SmokeContext) -> None:
     multi = wait_for(
         tmux_exe,
         multi_session,
-        r"(?s)\? Pick.*Choose providers.*› 1\. · Alpha.*2\. · Beta",
+        r"(?s)\? Pick.*Choose providers.*› 1\. · Alpha.*2\. · Beta.*3\. · Gamma",
         "multi question dock",
     )
-    send_keys(tmux_exe, multi_session, "Space", "Down")
+    wheel_down = "\x1b[<65;4;6M"
+    send_literal(tmux_exe, multi_session, wheel_down * 12 + " ")
+    multi_wheel_burst = wait_for(
+        tmux_exe,
+        multi_session,
+        r"(?s)\? Pick.*1\. · Alpha.*› 2\. ✓ Beta.*3\. · Gamma",
+        "multi question wheel burst queue synchronization",
+    )
+    if "after multi question reply" in multi_wheel_burst:
+        raise RuntimeError(f"question wheel burst unexpectedly resolved the prompt\nscreen:\n{multi_wheel_burst}")
+    save_evidence(root, "question-wheel-burst-governed", multi_wheel_burst)
+    wheel_up = "\x1b[<64;4;6M"
+    send_literal(tmux_exe, multi_session, wheel_up * 12 + wheel_down + " ")
+    wait_for(
+        tmux_exe,
+        multi_session,
+        r"(?s)› 1\. ✓ Alpha.*2\. ✓ Beta.*3\. · Gamma",
+        "multi question queued wheels discarded while the following Space is processed",
+    )
+    send_keys(tmux_exe, multi_session, "Space", "Down", "Space", "Up", "Space", "Down")
     multi_keyboard = wait_for(
         tmux_exe,
         multi_session,
-        r"(?s)1\. ✓ Alpha.*› 2\. · Beta",
+        r"(?s)1\. ✓ Alpha.*› 2\. · Beta.*3\. · Gamma",
         "multi question keyboard toggle and selection",
     )
     beta_row = next(
@@ -145,7 +165,14 @@ def scenario_main_question_flow(ctx: SmokeContext) -> None:
         r"after multi question reply",
         "multi question resolution",
     )
-    multi_resolved = wait_for_absent(tmux_exe, multi_session, r"Esc stop", "multi question settled idle state")
+    multi_resolved = wait_for_screen_state(
+        tmux_exe,
+        multi_session,
+        lambda screen: "? Pick" not in screen
+        and "Esc stop" not in screen
+        and screen.count("after multi question reply") == 1,
+        "multi question settled idle state",
+    )
     if "? Pick" in multi_resolved or multi_resolved.count("after multi question reply") != 1:
         raise RuntimeError(f"multi resolution left the dock open or duplicated the reply\nscreen:\n{multi_resolved}")
     _finish_main(tmux_exe, multi_session)

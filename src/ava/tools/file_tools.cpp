@@ -317,10 +317,12 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   std::string preflight_source;
   std::string preflight_rule_id;
   std::string preflight_reason;
-  if (operation == ava::permissions::Operation::RunCommand && command_metadata && decision.action == ava::permissions::PermissionAction::Allow &&
-      context.command_deny_preflight)
+  auto const needs_auto_allow_deny_preflight =
+      decision.action == ava::permissions::PermissionAction::Allow && context.auto_allow_deny_preflight &&
+      ((operation == ava::permissions::Operation::RunCommand && command_metadata) || operation == ava::permissions::Operation::TaskRun);
+  if (needs_auto_allow_deny_preflight)
   {
-    auto preflight = context.command_deny_preflight(ava::permissions::PermissionPrompt{
+    auto preflight = context.auto_allow_deny_preflight(ava::permissions::PermissionPrompt{
         .permission_request_id = permission_request_id,
         .tool_call_id = context.current_call_id,
         .operation = operation,
@@ -337,8 +339,8 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
     {
       decision.action = ava::permissions::PermissionAction::Deny;
       decision.risk = ava::permissions::PermissionRisk::Critical;
-      decision.reason = preflight ? (preflight->reason.empty() ? std::string("command denied by persistent policy") : preflight->reason)
-                                  : "persistent command deny preflight failed: " + preflight.error().format();
+      decision.reason = preflight ? (preflight->reason.empty() ? std::string("operation denied by persistent policy") : preflight->reason)
+                                  : "persistent deny preflight failed: " + preflight.error().format();
       preflight_source = preflight && !preflight->resolution_source.empty() ? preflight->resolution_source : "persistent_rule_error";
       preflight_rule_id = preflight ? preflight->rule_id : std::string{};
       preflight_reason = decision.reason;

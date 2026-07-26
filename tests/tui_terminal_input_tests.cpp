@@ -10,10 +10,12 @@
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/text_wrap.h"
 
+#include <algorithm>
 #include <clocale>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -850,11 +852,29 @@ struct VirtualTerminalResult
   bool base_drawn = false;
   bool modal_drawn = false;
   bool cursor_restored_after_modal = false;
+  bool cached_row_draw_preserves_unchanged_lower_row = false;
+  bool graphic_overlay_cache_stable = false;
   bool processing_footer_updates_stable = false;
   bool processing_footer_output_is_quiet = false;
   bool processing_footer_output_is_plain = false;
   bool cursor_forced_visible_for_teardown = false;
 };
+
+std::optional<std::string> ncurses_screen_row(std::size_t row)
+{
+  if (row >= static_cast<std::size_t>(LINES > 0 ? LINES : 0))
+    return std::nullopt;
+  std::string text;
+  text.reserve(static_cast<std::size_t>(COLS > 0 ? COLS : 0));
+  for (int column = 0; column < COLS; ++column)
+  {
+    auto const cell = mvwinch(stdscr, static_cast<int>(row), column);
+    if (cell == static_cast<chtype>(ERR))
+      return std::nullopt;
+    text.push_back(static_cast<char>(cell & A_CHARTEXT));
+  }
+  return text;
+}
 
 VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile const& profile)
 {
@@ -933,6 +953,114 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
     getyx(stdscr, cursor_y, cursor_x);
     result.cursor_restored_after_modal = restored_drawn && cursor_x == static_cast<int>(expected_column - 1) && cursor_y >= 0 && cursor_y < LINES;
 
+    auto exercise_cached_row_draw = [&]() {
+      static_cast<void>(resizeterm(14, 80));
+      auto cached_snapshot = snapshot;
+      cached_snapshot.width = 80;
+      cached_snapshot.height = 14;
+      cached_snapshot.transcript.clear();
+      cached_snapshot.input = "UPPER-CACHE-ROW\nLOWER-CACHE-ROW";
+      cached_snapshot.input_cursor = cached_snapshot.input.size();
+      ava::tui::detail::CompletionMatchCache completion_cache;
+      ava::tui::detail::TranscriptLayoutCache transcript_cache;
+      ava::tui::detail::ScreenRowCache screen_cache;
+      if (!ava::tui::detail::draw_screen_cached(cached_snapshot, completion_cache, cached_snapshot.file_references_generation, transcript_cache,
+                                                cached_snapshot.transcript_generation, screen_cache))
+      {
+        return false;
+      }
+
+      auto const initial_surfaces = screen_cache.surfaces;
+      auto const upper = std::ranges::find_if(initial_surfaces, [](std::string const& line) { return line.find("UPPER-CACHE-ROW") != std::string::npos; });
+      auto const lower = std::ranges::find_if(initial_surfaces, [](std::string const& line) { return line.find("LOWER-CACHE-ROW") != std::string::npos; });
+      if (upper == initial_surfaces.end() || lower == initial_surfaces.end())
+        return false;
+      auto const upper_row = static_cast<std::size_t>(std::distance(initial_surfaces.begin(), upper));
+      auto const lower_row = static_cast<std::size_t>(std::distance(initial_surfaces.begin(), lower));
+      auto const initial_lower_screen_row = ncurses_screen_row(lower_row);
+      if (lower_row != upper_row + 1 || !initial_lower_screen_row || initial_lower_screen_row->find("LOWER-CACHE-ROW") == std::string::npos)
+        return false;
+
+      cached_snapshot.input.replace(0, std::string_view("UPPER-CACHE-ROW").size(), "EDITD-CACHE-ROW");
+      if (!ava::tui::detail::draw_screen_cached(cached_snapshot, completion_cache, cached_snapshot.file_references_generation, transcript_cache,
+                                                cached_snapshot.transcript_generation, screen_cache))
+      {
+        return false;
+      }
+      auto const changed_rows = ava::tui::detail::changed_screen_rows(initial_surfaces, screen_cache.surfaces, {}, false);
+      auto const retained_lower_screen_row = ncurses_screen_row(lower_row);
+      return changed_rows == std::vector<std::size_t>{upper_row} && retained_lower_screen_row &&
+             retained_lower_screen_row->find("LOWER-CACHE-ROW") != std::string::npos;
+    };
+    result.cached_row_draw_preserves_unchanged_lower_row = exercise_cached_row_draw();
+
+    auto exercise_graphic_overlay_cache = [&]() {
+      if (profile.no_color)
+        return true;
+      static_cast<void>(resizeterm(14, 80));
+      auto graphic_snapshot = snapshot;
+      graphic_snapshot.width = 80;
+      graphic_snapshot.height = 14;
+      graphic_snapshot.pending_attachments = {ava::tui::PendingAttachmentItem{
+          .label = "cached-preview.png",
+          .detail = "(image/png) persistent graphic cache regression",
+          .preview = ava::tui::PendingAttachmentItem::Preview{.protocol = ava::tui::TerminalImageProtocol::Kitty,
+                                                              .base64_data = std::make_shared<std::string const>("GRAPHIC_CACHE_FIRST_PAYLOAD"),
+                                                              .dimensions = ava::tui::ImageDimensions{.width_px = 20, .height_px = 20},
+                                                              .image_id = 424242}}};
+      ava::tui::detail::CompletionMatchCache completion_cache;
+      ava::tui::detail::TranscriptLayoutCache transcript_cache;
+      ava::tui::detail::ScreenRowCache screen_cache;
+      auto const saved_stdout = dup(STDOUT_FILENO);
+      if (saved_stdout < 0 || std::fflush(stdout) != 0 || dup2(fileno(output), STDOUT_FILENO) < 0)
+      {
+        if (saved_stdout >= 0)
+          static_cast<void>(close(saved_stdout));
+        return false;
+      }
+      auto restore_stdout = [&]() {
+        static_cast<void>(std::fflush(stdout));
+        static_cast<void>(dup2(saved_stdout, STDOUT_FILENO));
+        static_cast<void>(close(saved_stdout));
+      };
+      auto draw_and_capture = [&]() -> std::optional<std::string> {
+        if (std::fflush(stdout) != 0 || std::fflush(output) != 0 || std::fseek(output, 0, SEEK_END) != 0)
+          return std::nullopt;
+        auto const before = std::ftell(output);
+        if (before < 0 ||
+            !ava::tui::detail::draw_screen_cached(graphic_snapshot, completion_cache, graphic_snapshot.file_references_generation, transcript_cache,
+                                                  graphic_snapshot.transcript_generation, screen_cache) ||
+            std::fflush(stdout) != 0 || std::fflush(output) != 0)
+        {
+          return std::nullopt;
+        }
+        auto const after = std::ftell(output);
+        if (after < before || std::fseek(output, before, SEEK_SET) != 0)
+          return std::nullopt;
+        std::string captured(static_cast<std::size_t>(after - before), '\0');
+        if (!captured.empty() && std::fread(captured.data(), 1, captured.size(), output) != captured.size())
+          return std::nullopt;
+        if (std::fseek(output, 0, SEEK_END) != 0)
+          return std::nullopt;
+        return captured;
+      };
+
+      auto const first = draw_and_capture();
+      auto const identical = draw_and_capture();
+      graphic_snapshot.pending_attachments.front().preview->base64_data = std::make_shared<std::string const>("GRAPHIC_CACHE_CHANGED_PAYLOAD");
+      auto const changed = draw_and_capture();
+      screen_cache.valid = false;
+      auto const invalidated = draw_and_capture();
+      graphic_snapshot.pending_attachments.clear();
+      auto const removed = draw_and_capture();
+      restore_stdout();
+      auto const deletion = ava::tui::delete_kitty_image(424242);
+      return first && identical && changed && invalidated && removed && first->find("GRAPHIC_CACHE_FIRST_PAYLOAD") != std::string::npos &&
+             identical->find("GRAPHIC_CACHE_FIRST_PAYLOAD") == std::string::npos && changed->find("GRAPHIC_CACHE_CHANGED_PAYLOAD") != std::string::npos &&
+             invalidated->find("GRAPHIC_CACHE_CHANGED_PAYLOAD") != std::string::npos && removed->find(deletion) != std::string::npos;
+    };
+    result.graphic_overlay_cache_stable = exercise_graphic_overlay_cache();
+
     auto exercise_processing_footer = [&](ava::tui::ComposerSnapshot footer_snapshot) {
       static_cast<void>(resizeterm(static_cast<int>(footer_snapshot.height), static_cast<int>(footer_snapshot.width)));
       footer_snapshot.processing = true;
@@ -968,11 +1096,12 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
       auto const expected_footer_column = footer_canvas.left + ava::tui::detail::input_cursor_column(footer_snapshot, footer_canvas.content_width);
       ava::tui::detail::CompletionMatchCache completion_cache;
       ava::tui::detail::TranscriptLayoutCache transcript_cache;
+      ava::tui::detail::ScreenRowCache screen_cache;
       for (std::size_t frame = 0; frame != 4; ++frame)
       {
         footer_snapshot.spinner_frame = frame;
         if (!ava::tui::detail::draw_processing_footer_cached(footer_snapshot, completion_cache, footer_snapshot.file_references_generation, transcript_cache,
-                                                             footer_snapshot.transcript_generation))
+                                                             footer_snapshot.transcript_generation, screen_cache))
         {
           restore_stdout();
           return false;
@@ -1061,12 +1190,13 @@ void test_ncurses_newterm_smoke_without_real_tty()
     if (result.screen_created)
       ++exercised;
     expect(result.screen_created, "ncurses smoke test creates a screen without a real terminal for " + profile.name);
-    expect(
-        result.base_drawn && result.modal_drawn && result.cursor_restored_after_modal && result.processing_footer_updates_stable &&
-            result.processing_footer_output_is_quiet && result.processing_footer_output_is_plain && result.cursor_forced_visible_for_teardown,
-        "ncurses smoke test draws base/modal frames, updates processing footers without terminal clears, cursor toggles, graphics, or NO_COLOR bold styling, "
-        "and forces the cursor visible for teardown for " +
-            profile.name);
+    expect(result.base_drawn && result.modal_drawn && result.cursor_restored_after_modal && result.cached_row_draw_preserves_unchanged_lower_row &&
+               result.graphic_overlay_cache_stable && result.processing_footer_updates_stable && result.processing_footer_output_is_quiet &&
+               result.processing_footer_output_is_plain && result.cursor_forced_visible_for_teardown,
+           "ncurses smoke test draws base/modal frames, preserves unchanged rows, suppresses identical graphic payloads while retransmitting changes and "
+           "invalidations and deleting removed Kitty images, updates processing footers without terminal clears, cursor toggles, graphics, or NO_COLOR bold "
+           "styling, and forces the cursor visible for teardown for " +
+               profile.name);
   }
   expect(exercised == profiles.size(),
          "ncurses smoke test covers xterm and screen terminfo plus tmux, kitty, wezterm, and ssh-like environment "

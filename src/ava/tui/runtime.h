@@ -139,6 +139,7 @@ struct TuiRuntimeOptions
   TuiKeyBindings key_bindings = default_key_bindings();
   // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
   std::function<std::optional<std::string>()> token_status_provider;
+  std::function<std::optional<std::string>()> active_context_status_provider;
   std::function<std::optional<std::string>()> reasoning_status_provider;
   std::function<TuiActiveRunQueues(ava::app::EventEnvelopeSink)> create_active_run_queues;
   std::function<TuiSubmitResult(std::string const&, TuiSubmitContext)> on_submit;

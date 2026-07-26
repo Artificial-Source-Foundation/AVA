@@ -313,7 +313,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       active_select_list_ = ActiveSelectList::Hotkeys;
       snapshot.status = "keybindings opened";
       transcript_scroll_offset = 0;
-      if (!renderer_.render())
+      if (!renderer_.request_render())
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
       }
@@ -328,7 +328,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       detached_new_output_count = 0;
       detached_sidebar_snapshot.reset();
       snapshot.status = "session overview opened";
-      if (!renderer_.render())
+      if (!renderer_.request_render())
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
       }
@@ -338,6 +338,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     {
       push_history(input_history, submitted);
       presentation_state_.refresh_token_status(options_);
+      presentation_state_.refresh_active_context_status(options_);
       presentation_state_.refresh_reasoning_status(options_);
       auto settings_snapshot = snapshot;
       settings_snapshot.sidebar = sidebar;
@@ -345,7 +346,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       active_select_list_ = ActiveSelectList::Settings;
       snapshot.status = "settings opened";
       transcript_scroll_offset = 0;
-      if (!renderer_.render())
+      if (!renderer_.request_render())
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
       }
@@ -406,9 +407,8 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       if (tool_index)
       {
         auto const& tool = *snapshot.transcript[*tool_index].tool;
-        snapshot.status = detail::tool_card_details_visible(tool, snapshot.tool_details_visible)
-                              ? (tool_query->empty() ? "latest tool details visible" : "matching tool details visible")
-                              : (tool_query->empty() ? "latest tool details compact" : "matching tool details compact");
+        snapshot.status = (tool_query->empty() ? "latest tool details " : "matching tool details ") +
+                          std::string(to_string(detail::tool_card_presentation(tool, snapshot.tool_presentation)));
       }
       else
       {
@@ -509,15 +509,22 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       }
       return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
     }
-    if (submitted == "/details")
+    if (submitted == "/details" || submitted == "/details compact" || submitted == "/details rich" || submitted == "/details expanded")
     {
       push_history(input_history, submitted);
-      snapshot.tool_details_visible = !snapshot.tool_details_visible;
+      if (submitted == "/details compact")
+        snapshot.tool_presentation = ToolPresentation::Compact;
+      else if (submitted == "/details rich")
+        snapshot.tool_presentation = ToolPresentation::Rich;
+      else if (submitted == "/details expanded")
+        snapshot.tool_presentation = ToolPresentation::Expanded;
+      else
+        snapshot.tool_presentation = snapshot.tool_presentation == ToolPresentation::Expanded ? ToolPresentation::Rich : ToolPresentation::Expanded;
       push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
       push_transcript(snapshot, TranscriptItem{.label = "ava",
-                                               .text = snapshot.tool_details_visible ? "tool details are now visible" : "tool details are now compact",
+                                               .text = "tool details are now " + std::string(to_string(snapshot.tool_presentation)),
                                                .meta = assistant_meta_for_snapshot(snapshot)});
-      snapshot.status = snapshot.tool_details_visible ? "tool details visible" : "tool details compact";
+      snapshot.status = "tool details " + std::string(to_string(snapshot.tool_presentation));
       transcript_scroll_offset = 0;
       if (!renderer_.render())
       {

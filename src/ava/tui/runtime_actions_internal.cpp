@@ -336,7 +336,7 @@ bool RuntimeActionController::open_model_selector()
   active_select_list_ = ActiveSelectList::Model;
   snapshot.status = "model selector opened";
   renderer_.transcript_scroll_offset = 0;
-  return renderer_.render();
+  return renderer_.request_render();
 }
 
 bool RuntimeActionController::open_scoped_model_selector()
@@ -354,7 +354,7 @@ bool RuntimeActionController::open_scoped_model_selector()
   active_select_list_ = ActiveSelectList::ScopedModels;
   snapshot.status = "scoped model selector opened";
   renderer_.transcript_scroll_offset = 0;
-  return renderer_.render();
+  return renderer_.request_render();
 }
 
 bool RuntimeActionController::open_session_selector()
@@ -372,7 +372,7 @@ bool RuntimeActionController::open_session_selector()
   active_select_list_ = ActiveSelectList::Session;
   snapshot.status = "session selector opened";
   renderer_.transcript_scroll_offset = 0;
-  return renderer_.render();
+  return renderer_.request_render();
 }
 
 void RuntimeActionController::cycle_model(bool forward)

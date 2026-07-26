@@ -9,9 +9,11 @@
 #include "ava/tui/runtime_draft_internal.h"
 #include "ava/tui/runtime_input_internal.h"
 #include "ava/tui/runtime_internal.h"
+#include "ava/tui/runtime_navigation_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/terminal.h"
+#include "ava/tui/tool_cards.h"
 
 #include <optional>
 #include <string>
@@ -21,6 +23,7 @@
 
 namespace ava::tui {
 using runtime_commands::shell_helper_submission;
+using runtime_commands::tool_command_argument;
 using runtime_transcript::assistant_meta_for_snapshot;
 using runtime_transcript::push_history;
 using runtime_transcript::push_transcript;
@@ -66,14 +69,14 @@ bool RuntimeActiveRunController::restore_latest_queued_message(RuntimeActiveRunS
   if (!active_queues || !active_queues->restore_latest)
   {
     snapshot.status = "active-run restore unavailable";
-    return renderer_.render();
+    return renderer_.request_render();
   }
   auto restored = active_queues->restore_latest();
   if (!restored)
   {
     snapshot.status = restored.error().format();
     static_cast<void>(beep());
-    return renderer_.render();
+    return renderer_.request_render();
   }
   auto const restored_text = restored->steering ? "/steer " + restored->message : restored->message;
   draft_state_.clear_selection();
@@ -85,7 +88,7 @@ bool RuntimeActiveRunController::restore_latest_queued_message(RuntimeActiveRunS
   slash_palette_suppressed = false;
   path_completion_force_active = false;
   snapshot.status = restored->steering ? "steering restored" : "follow-up restored";
-  return renderer_.render();
+  return renderer_.request_render();
 }
 
 std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActiveRunState& state)
@@ -104,6 +107,17 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
   auto& detached_new_output_count = renderer_.detached_new_output_count;
   auto& detached_sidebar_snapshot = renderer_.detached_sidebar_snapshot;
   auto& active_queues = state.active_queues;
+  auto clear_local_command_draft = [&]() {
+    draft_state_.clear_selection();
+    reset_composer_draft(draft);
+    jump_mode = ComposerJumpMode::None;
+    draft_scroll_offset = 0;
+    history_index.reset();
+    draft_input.clear();
+    selected_slash_command_index = 0;
+    slash_palette_suppressed = false;
+    path_completion_force_active = false;
+  };
   if (draft.text == "/sidebar")
   {
     push_history(input_history, draft.text);
@@ -122,11 +136,51 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
     detached_new_output_count = 0;
     detached_sidebar_snapshot.reset();
     snapshot.status = "session overview opened";
-    return renderer_.render();
+    return renderer_.request_render();
   }
-  if (!active_queues || !active_queues->run_nonblocking_command || draft.text.empty())
+  if (draft.text.empty())
     return std::nullopt;
   auto const submitted_command = expanded_composer_draft_text(draft);
+  if (submitted_command == "/details" || submitted_command == "/details compact" || submitted_command == "/details rich" ||
+      submitted_command == "/details expanded")
+  {
+    push_history(input_history, submitted_command);
+    renderer_.synchronize_detached_transcript_layout();
+    if (submitted_command == "/details compact")
+      snapshot.tool_presentation = ToolPresentation::Compact;
+    else if (submitted_command == "/details rich")
+      snapshot.tool_presentation = ToolPresentation::Rich;
+    else if (submitted_command == "/details expanded")
+      snapshot.tool_presentation = ToolPresentation::Expanded;
+    else
+      snapshot.tool_presentation = snapshot.tool_presentation == ToolPresentation::Expanded ? ToolPresentation::Rich : ToolPresentation::Expanded;
+    clear_local_command_draft();
+    transcript_scroll_offset = 0;
+    detached_new_output_count = 0;
+    detached_sidebar_snapshot.reset();
+    snapshot.status = "tool details " + std::string(to_string(snapshot.tool_presentation));
+    return renderer_.request_render();
+  }
+  if (auto const tool_query = tool_command_argument(submitted_command))
+  {
+    push_history(input_history, submitted_command);
+    auto const tool_index = navigation_.toggle_matching_tool_details(*tool_query);
+    if (tool_index)
+    {
+      auto const& tool = *snapshot.transcript[*tool_index].tool;
+      snapshot.status = (tool_query->empty() ? "latest tool details " : "matching tool details ") +
+                        std::string(to_string(detail::tool_card_presentation(tool, snapshot.tool_presentation)));
+    }
+    else
+    {
+      snapshot.status = tool_query->empty() ? "no tool details to show" : "no matching tool details to show";
+      static_cast<void>(beep());
+    }
+    clear_local_command_draft();
+    return renderer_.request_render();
+  }
+  if (!active_queues || !active_queues->run_nonblocking_command)
+    return std::nullopt;
   auto const dispatch = dispatch_tui_active_nonblocking_command_gated(completion_snapshot(), *active_queues, submitted_command);
   if (dispatch.kind == TuiActiveNonblockingCommandDispatchKind::Unrecognized)
     return std::nullopt;
@@ -134,7 +188,7 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
   {
     snapshot.status = dispatch.status;
     static_cast<void>(beep());
-    return renderer_.render();
+    return renderer_.request_render();
   }
   push_history(input_history, submitted_command);
   push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted_command});
@@ -151,7 +205,7 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
   slash_palette_suppressed = false;
   path_completion_force_active = false;
   snapshot.status = dispatch.output.empty() ? "job command complete" : dispatch.output.back();
-  return renderer_.render();
+  return renderer_.request_render();
 }
 
 std::optional<bool> RuntimeActiveRunController::reject_disabled_visible_completion()
@@ -163,7 +217,7 @@ std::optional<bool> RuntimeActiveRunController::reject_disabled_visible_completi
   {
     snapshot.status = *disabled_status;
     static_cast<void>(beep());
-    return renderer_.render();
+    return renderer_.request_render();
   }
   return std::nullopt;
 }
@@ -186,7 +240,7 @@ bool RuntimeActiveRunController::queue_active_draft(RuntimeActiveRunState& state
   if (draft.text.empty())
   {
     snapshot.status = "type a follow-up before queueing";
-    return renderer_.render();
+    return renderer_.request_render();
   }
   if (!follow_up_only && draft.text == "/restore")
   {
@@ -197,27 +251,27 @@ bool RuntimeActiveRunController::queue_active_draft(RuntimeActiveRunState& state
   if ((draft.text.starts_with('/') || shell_helper_submission(draft.text)) && !steering_draft)
   {
     snapshot.status = "commands run between turns";
-    return renderer_.render();
+    return renderer_.request_render();
   }
   if (run_cancel_requested.load())
   {
     snapshot.status = "stop requested; queueing disabled";
-    return renderer_.render();
+    return renderer_.request_render();
   }
   if (!active_queues)
   {
     snapshot.status = "active-run queue unavailable";
-    return renderer_.render();
+    return renderer_.request_render();
   }
   if (steering_draft && !active_queues->queue_steering)
   {
     snapshot.status = "active-run steering unavailable";
-    return renderer_.render();
+    return renderer_.request_render();
   }
   if (!steering_draft && !active_queues->queue_follow_up)
   {
     snapshot.status = "active-run follow-up unavailable";
-    return renderer_.render();
+    return renderer_.request_render();
   }
 
   auto queued_text = expanded_composer_draft_text(draft);
@@ -226,7 +280,7 @@ bool RuntimeActiveRunController::queue_active_draft(RuntimeActiveRunState& state
   {
     snapshot.status = queued.error().format();
     static_cast<void>(beep());
-    return renderer_.render();
+    return renderer_.request_render();
   }
   push_history(input_history, queued_text);
   draft_state_.clear_selection();
@@ -238,7 +292,7 @@ bool RuntimeActiveRunController::queue_active_draft(RuntimeActiveRunState& state
   selected_slash_command_index = 0;
   slash_palette_suppressed = false;
   snapshot.status = steering_draft ? "steering queued" : "follow-up queued";
-  return renderer_.render();
+  return renderer_.request_render();
 }
 
 void RuntimeActiveRunController::insert_active_text(runtime_input::RuntimeInput const& active_input)
@@ -274,8 +328,15 @@ void RuntimeActiveRunController::insert_active_text(runtime_input::RuntimeInput 
 
 bool RuntimeActiveRunController::handle_input(RuntimeActiveRunState& state, runtime_input::RuntimeInput const& active_input)
 {
+  if (active_input.event.key != Key::MouseWheelUp && active_input.event.key != Key::MouseWheelDown)
+    renderer_.wheel_governor.reset();
   if (active_input.resize)
     return renderer_.render();
+  if ((active_input.event.key == Key::MouseWheelUp || active_input.event.key == Key::MouseWheelDown) &&
+      !runtime_wheel_input_accepted(renderer_.wheel_governor, active_input.event.key))
+  {
+    return true;
+  }
 
   auto result = handle_preemptive_input(state, active_input);
   if (result != InputHandling::Unhandled)

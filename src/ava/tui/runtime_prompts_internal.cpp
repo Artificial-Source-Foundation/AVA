@@ -9,11 +9,14 @@
 #include "ava/tui/session_grants.h"
 #include "ava/tui/terminal.h"
 
+#include <algorithm>
+#include <chrono>
 #include <utility>
 #include <curses.h>
 
 namespace ava::tui {
 using runtime_input::read_curses_input;
+using runtime_input::read_curses_input_with_timeout;
 using runtime_input::RuntimeInput;
 using runtime_transcript::copy_text_from_answer;
 using runtime_transcript::copy_text_to_terminal_clipboard;
@@ -22,6 +25,12 @@ using runtime_views::permission_prompt_status;
 using runtime_views::permission_prompt_view;
 using runtime_views::question_answer_from_view;
 using runtime_views::question_prompt_view;
+
+bool detail::prompt_wheel_input_suppressed(Key key, std::optional<std::chrono::steady_clock::time_point> const& deadline,
+                                           std::chrono::steady_clock::time_point now)
+{
+  return (key == Key::MouseWheelUp || key == Key::MouseWheelDown) && deadline && now < *deadline;
+}
 
 PendingPermissionRequest::PendingPermissionRequest(ava::permissions::PermissionPrompt prompt_in) : prompt(std::move(prompt_in))
 {
@@ -249,9 +258,20 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     return decision;
   };
 
+  WheelBurstGovernor wheel_governor;
+  std::optional<std::chrono::steady_clock::time_point> wheel_suppression_deadline;
   while (true)
   {
-    auto const choice_input = read_curses_input();
+    std::optional<RuntimeInput> choice_input;
+    if (wheel_suppression_deadline)
+    {
+      auto const remaining = std::max(std::chrono::steady_clock::duration::zero(), *wheel_suppression_deadline - std::chrono::steady_clock::now());
+      choice_input = read_curses_input_with_timeout(std::chrono::ceil<std::chrono::milliseconds>(remaining));
+    }
+    else
+    {
+      choice_input = read_curses_input();
+    }
     if (stop_requested && stop_requested())
     {
       return resolve_choice(PermissionPromptChoice::Deny);
@@ -267,8 +287,16 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
       static_cast<void>(render());
       return ava::permissions::PermissionResolution::Deny;
     }
-    if (choice_input.resize)
+    if (!choice_input)
     {
+      wheel_governor.reset();
+      wheel_suppression_deadline.reset();
+      continue;
+    }
+    if (choice_input->resize)
+    {
+      wheel_governor.reset();
+      wheel_suppression_deadline.reset();
       if (!render())
       {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render permission prompt"));
@@ -276,7 +304,15 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
       continue;
     }
 
-    if (choice_input.event.key == Key::Escape && request_stop)
+    auto const wheel_input = choice_input->event.key == Key::MouseWheelUp || choice_input->event.key == Key::MouseWheelDown;
+    if (detail::prompt_wheel_input_suppressed(choice_input->event.key, wheel_suppression_deadline))
+      continue;
+    if (!wheel_input)
+      wheel_suppression_deadline.reset();
+    if (!runtime_wheel_input_accepted(wheel_governor, choice_input->event.key))
+      continue;
+
+    if (choice_input->event.key == Key::Escape && request_stop)
     {
       static_cast<void>(request_stop());
       return resolve_choice(PermissionPromptChoice::Deny);
@@ -284,7 +320,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
 
     auto input_result = snapshot.permission_prompt
                             ? handle_permission_prompt_input(
-                                  snapshot.permission_prompt->selected_choice, choice_input.event, snapshot.permission_prompt->allow_session_available,
+                                  snapshot.permission_prompt->selected_choice, choice_input->event, snapshot.permission_prompt->allow_session_available,
                                   snapshot.permission_prompt->allow_remember_available, snapshot.permission_prompt->deny_remember_available)
                             : PermissionPromptInputResult{};
     if (input_result.action == PermissionPromptInputAction::ResolveAllow)
@@ -314,7 +350,12 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
         if (snapshot.permission_prompt)
           snapshot.permission_prompt->selected_choice = input_result.selected_choice;
       }
-      static_cast<void>(render());
+      if (!render())
+      {
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render permission prompt"));
+      }
+      if (wheel_input)
+        wheel_suppression_deadline = std::chrono::steady_clock::now() + WheelBurstGovernor::kAcceptedEventInterval;
       continue;
     }
 
@@ -383,16 +424,21 @@ ava::core::Result<ava::agent::QuestionAnswer> RuntimePromptCoordinator::resolve_
     return ava::core::Result<ava::agent::QuestionAnswer>{std::move(answer)};
   };
 
-  auto read_question_input = [&]() {
-    if (!prompt.auto_resolve)
+  WheelBurstGovernor wheel_governor;
+  std::optional<std::chrono::steady_clock::time_point> wheel_suppression_deadline;
+  auto read_question_input = [&]() -> std::optional<RuntimeInput> {
+    if (!prompt.auto_resolve && !wheel_suppression_deadline)
       return read_curses_input();
-    static_cast<void>(wtimeout(stdscr, 100));
-    auto input = read_curses_input();
-    static_cast<void>(wtimeout(stdscr, -1));
-    return input;
-  };
 
-  auto no_input = [](RuntimeInput const& input) { return !input.resize && input.event.key == Key::Unknown && input.text.empty() && !input.bracketed_paste; };
+    auto timeout = std::chrono::milliseconds{100};
+    if (wheel_suppression_deadline)
+    {
+      auto const remaining = std::max(std::chrono::steady_clock::duration::zero(), *wheel_suppression_deadline - std::chrono::steady_clock::now());
+      auto const wheel_timeout = std::chrono::ceil<std::chrono::milliseconds>(remaining);
+      timeout = prompt.auto_resolve ? std::min(timeout, wheel_timeout) : wheel_timeout;
+    }
+    return read_curses_input_with_timeout(timeout);
+  };
 
   while (true)
   {
@@ -414,26 +460,39 @@ ava::core::Result<ava::agent::QuestionAnswer> RuntimePromptCoordinator::resolve_
       static_cast<void>(render());
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question prompt interrupted"));
     }
-    if (question_input.resize)
+    if (!question_input)
     {
+      wheel_governor.reset();
+      wheel_suppression_deadline.reset();
+      continue;
+    }
+    if (question_input->resize)
+    {
+      wheel_governor.reset();
+      wheel_suppression_deadline.reset();
       if (!render())
       {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render question prompt"));
       }
       continue;
     }
-    if (prompt.auto_resolve && no_input(question_input))
+    auto const wheel_input = question_input->event.key == Key::MouseWheelUp || question_input->event.key == Key::MouseWheelDown;
+    if (detail::prompt_wheel_input_suppressed(question_input->event.key, wheel_suppression_deadline))
+      continue;
+    if (!wheel_input)
+      wheel_suppression_deadline.reset();
+    if (!runtime_wheel_input_accepted(wheel_governor, question_input->event.key))
       continue;
 
     auto input_result = [&]() {
       if (!snapshot.question_prompt)
         return QuestionPromptInputResult{};
-      if (question_input.event.key == Key::MouseLeftClick)
+      if (question_input->event.key == Key::MouseLeftClick)
       {
-        if (auto const clicked = question_option_for_screen_position(snapshot, question_input.event.mouse_row, question_input.event.mouse_column))
+        if (auto const clicked = question_option_for_screen_position(snapshot, question_input->event.mouse_row, question_input->event.mouse_column))
           return activate_question_option(*snapshot.question_prompt, *clicked);
       }
-      return handle_question_prompt_input(*snapshot.question_prompt, question_input.event);
+      return handle_question_prompt_input(*snapshot.question_prompt, question_input->event);
     }();
     if (input_result.action == QuestionPromptInputAction::Cancel)
       return cancel_question();
@@ -504,6 +563,8 @@ ava::core::Result<ava::agent::QuestionAnswer> RuntimePromptCoordinator::resolve_
       {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render question prompt"));
       }
+      if (wheel_input)
+        wheel_suppression_deadline = std::chrono::steady_clock::now() + WheelBurstGovernor::kAcceptedEventInterval;
       continue;
     }
 

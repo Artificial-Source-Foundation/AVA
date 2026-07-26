@@ -1654,8 +1654,9 @@ void test_model_and_prompt_config()
   expect(inferred_family.family == "gpt-5", "GPT-5.5 model id infers GPT-5 prompt family");
 
   auto prompt = ava::config::select_prompt(paths, selected, ava::agent::Mode::Build);
-  expect(prompt && !prompt->from_override && !prompt->source_path && prompt->text.find("Provider=openai") != std::string::npos,
-         "builtin prompt selects by provider and family");
+  expect(prompt && !prompt->from_override && !prompt->source_path && prompt->text.find("Provider=openai") != std::string::npos &&
+             prompt->text.find("Do not narrate or restate routine successful tool calls") != std::string::npos,
+         "builtin prompt selects by provider and family with concise no-routine-success-narration guidance");
   std::filesystem::create_directories(paths.prompts_dir / "openai" / "gpt-5");
   {
     std::ofstream file(paths.prompts_dir / "openai" / "gpt-5" / "plan.txt", std::ios::binary | std::ios::trunc);

@@ -3,6 +3,7 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/app/commands.h"
+#include "ava/app/line_shell_internal.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
@@ -13,6 +14,7 @@
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_types.h"
 #include "ava/session/assistant_output.h"
+#include "ava/session/compaction.h"
 #include "ava/session/record.h"
 #include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
@@ -108,6 +110,53 @@ void test_app_runtime_open_session_and_context_prompt()
     auto reopened_entries = reopened->store.load();
     expect(reopened_entries && reopened_entries->size() == 1, "runtime reopened session does not append another session_start");
   }
+}
+
+void test_app_active_context_status_tracks_compaction_projection()
+{
+  auto const root = create_empty_root("app-active-context-status");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions options;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
+  auto session = ava::app::open_runtime_session(options);
+  expect(session.has_value(), "active context status fixture opens a runtime session");
+  if (!session)
+    return;
+
+  auto const initial_status = ava::app::line_shell_internal::active_context_status_for_session(*session);
+  auto const appended_user = session->append_target()->append(ava::session::SessionEntry{.id = "active-context-user",
+                                                                                         .parent_id = "",
+                                                                                         .type = ava::session::EntryType::UserMessage,
+                                                                                         .timestamp = "2026-01-01T00:00:00Z",
+                                                                                         .data_json = "{\"text\":\"" + std::string(50'000, 'x') + "\"}"});
+  auto const grown_status = appended_user ? ava::app::line_shell_internal::active_context_status_for_session(*session) : std::nullopt;
+  auto compaction_request = ava::session::ManualCompactionRequest{};
+  compaction_request.summary = "condensed history";
+  compaction_request.config = ava::session::default_compaction_config();
+  compaction_request.estimated_tokens = 12'500;
+  auto compaction = ava::session::make_manual_compaction_entry(std::move(compaction_request));
+  auto const appended_compaction =
+      compaction ? session->append_target()->append(std::move(*compaction)) : ava::core::VoidResult(std::unexpected(compaction.error()));
+  auto const appended_recent = appended_compaction ? session->append_target()->append(ava::session::SessionEntry{.id = "active-context-recent",
+                                                                                                                 .parent_id = "",
+                                                                                                                 .type = ava::session::EntryType::UserMessage,
+                                                                                                                 .timestamp = "2026-01-01T00:00:01Z",
+                                                                                                                 .data_json = "{\"text\":\"recent\"}"})
+                                                   : ava::core::VoidResult(std::unexpected(appended_compaction.error()));
+  auto const compacted_status = appended_recent ? ava::app::line_shell_internal::active_context_status_for_session(*session) : std::nullopt;
+  auto authority = session->read_authority();
+  auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(authority.error()));
+  auto const active_tokens =
+      entries ? ava::session::estimate_active_context_tokens(*entries) : ava::core::Result<std::size_t>(std::unexpected(entries.error()));
+  auto const complete_tokens = entries ? ava::session::estimate_session_tokens(*entries) : ava::core::Result<std::size_t>(std::unexpected(entries.error()));
+  expect(initial_status && appended_user && grown_status && compaction && appended_compaction && appended_recent && compacted_status && active_tokens &&
+             complete_tokens && *grown_status != *initial_status && *compacted_status != *grown_status && *active_tokens < *complete_tokens,
+         "active context status grows with committed history and follows the compaction-active projection rather than cumulative session usage");
 }
 
 void test_app_runtime_no_session_mode()
@@ -603,7 +652,8 @@ void test_app_runtime_cli_prompt_overrides()
   expect(session->prompt_overrides().system_prompt && *session->prompt_overrides().system_prompt == "cli system prompt" &&
              session->prompt_overrides().append_system_prompts.size() == 2,
          "runtime session retains cli prompt overrides for reloads");
-  expect(session->system_prompt().find("cli system prompt") != std::string::npos && session->system_prompt().find("cli append prompt one") != std::string::npos &&
+  expect(session->system_prompt().find("cli system prompt") != std::string::npos &&
+             session->system_prompt().find("cli append prompt one") != std::string::npos &&
              session->system_prompt().find("cli append prompt two") != std::string::npos &&
              session->system_prompt().find("workspace context should remain") != std::string::npos &&
              session->system_prompt().find("provider prompt override should be replaced") == std::string::npos &&
@@ -613,8 +663,8 @@ void test_app_runtime_cli_prompt_overrides()
              session->system_prompt().find("project append prompt should be replaced") == std::string::npos,
          "cli prompt overrides replace selected system/append prompt resources while preserving context");
 
-  auto const system_source_count =
-      std::ranges::count_if(session->freshness_sources(), [](auto const& source) { return source.kind == ava::app::runtime::FreshnessSourceKind::SystemPrompt; });
+  auto const system_source_count = std::ranges::count_if(
+      session->freshness_sources(), [](auto const& source) { return source.kind == ava::app::runtime::FreshnessSourceKind::SystemPrompt; });
   auto const append_source_count = std::ranges::count_if(
       session->freshness_sources(), [](auto const& source) { return source.kind == ava::app::runtime::FreshnessSourceKind::AppendSystemPrompt; });
   expect(system_source_count == 1 && append_source_count == 2, "cli prompt overrides are tracked as system prompt freshness sources");

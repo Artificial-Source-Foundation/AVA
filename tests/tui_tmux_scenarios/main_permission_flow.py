@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from tui_smoke_helpers import (
+    ACTIVE_CONTEXT_STATUS_PATTERN,
     SmokeContext,
     capture,
     capture_styled,
@@ -52,15 +53,34 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
         raise RuntimeError(f"critical raw-shell prompt did not expose only truthful one-shot/deny choices\nscreen:\n{permission}")
     save_evidence(root, "frontend-f5-permission-prompt-roomy", permission)
     save_evidence(root, "permission-prompt-risk-reason", permission)
+    wheel_down = "\x1b[<65;4;6M"
+    wheel_up = "\x1b[<64;4;6M"
+    send_literal(tmux_exe, session, wheel_down * 12)
+    permission_burst = wait_for(
+        tmux_exe,
+        session,
+        r"(?s)! Permission required.*Reject.*› Allow once",
+        "permission same-direction wheel burst governed to one choice",
+    )
+    if "› Allow once" not in permission_burst:
+        raise RuntimeError(f"permission wheel burst did not settle on Allow once\nscreen:\n{permission_burst}")
+    send_literal(tmux_exe, session, "x")
+    send_literal(tmux_exe, session, wheel_up)
+    deliberate_wheel = wait_for(
+        tmux_exe,
+        session,
+        r"(?s)! Permission required.*› Reject.*Allow once",
+        "permission wheel accepted after the non-wheel reset boundary",
+    )
+    save_evidence(root, "permission-wheel-burst-governed", deliberate_wheel)
     send_keys(tmux_exe, session, "R", "Enter")
-    denied_prompt_closed = wait_for_absent(tmux_exe, session, r"Permission required", "permission prompt denied")
+    wait_for_absent(tmux_exe, session, r"Permission required", "permission prompt denied")
     tmux(tmux_exe, "resize-window", "-t", session, "-x", "100", "-y", "32")
-    wait_for_screen_change(tmux_exe, session, denied_prompt_closed, "denied compact tool card roomy resize")
     denied_card = wait_for(
         tmux_exe,
         session,
-        r"(?s)x bash · permission deny.*reason command permission denied",
-        "permission denial tool-card audit",
+        r"(?s)x bash · command permission denied.*\$ <redacted one-shot command>",
+        "permission denial Rich tool card",
     )
     denied_card = wait_for_absent(
         tmux_exe,
@@ -68,15 +88,16 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
         r"~ bash · <redacted one-shot command>",
         "stale running permission tool-card row",
     )
-    assert_f5_frame(denied_card, 100, 32, "denied compact tool card")
+    assert_f5_frame(denied_card, 100, 32, "denied Rich tool card")
     denied_primary_rows = [line for line in denied_card.splitlines() if re.search(r"[~+x] bash ·", line)]
     if (
         len(denied_primary_rows) != 1
-        or "x bash · permission deny" not in denied_primary_rows[0]
-        or "reason command permission denied" not in denied_primary_rows[0]
-        or "· error" in denied_primary_rows[0]
+        or "x bash · command permission denied" not in denied_primary_rows[0]
+        or "permission: deny" in denied_card
+        or "permreq_" in denied_card
+        or "resolver:" in denied_card
     ):
-        raise RuntimeError(f"permission denial did not render one truthful compact tool row\nscreen:\n{denied_card}")
+        raise RuntimeError(f"permission denial did not render one human-readable Rich card without routine audit receipts\nscreen:\n{denied_card}")
     save_evidence(root, "frontend-f5-denied-tool-card", denied_card)
     save_evidence(root, "permission-denied-tool-card", denied_card)
 
@@ -98,7 +119,7 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     repeated_denial = wait_for(
         tmux_exe,
         session,
-        r"(?s)/bash git push origin main.*x bash\s+·\s+permission deny.*reason command permission denied",
+        r"(?s)/bash git push origin main.*x bash\s+·\s+command permission denied.*\$ <redacted one-shot command>",
         "remembered denial result",
     )
     if "Permission required" in repeated_denial or "PERMISSION REQUIRED" in repeated_denial:
@@ -107,59 +128,27 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     expanded_tool_details = wait_for(
         tmux_exe,
         session,
-        r"(?s)(?=.*command: <redacted one-shot command>)(?=.*permission: deny)(?=.*risk: critical)(?=.*id: permreq_)(?=.*reason: command permission denied)(?=.*inspect: /permissions audit show)(?=.*diagnose: /permissions diagnose)",
-        "ctrl-o tool detail expansion",
+        r"(?s)x bash · command permission denied.*\$ <redacted one-shot command>",
+        "ctrl-o safe tool detail expansion",
     )
-    if (
-        "permission: deny" not in expanded_tool_details
-        or "risk: critical" not in expanded_tool_details
-        or "id: permreq_" not in expanded_tool_details
-        or "reason: command permission denied" not in expanded_tool_details
-        or "command: <redacted one-shot command>" not in expanded_tool_details
-        or "inspect: /permissions audit show" not in expanded_tool_details
-        or "diagnose: /permissions diagnose" not in expanded_tool_details
-        or "permission_denied" in expanded_tool_details
-        or "action: ask" in expanded_tool_details
-        or "request_id:" in expanded_tool_details
-    ):
-        raise RuntimeError(f"Ctrl+O did not render only curated permission tool-card details\nscreen:\n{expanded_tool_details}")
-    permission_request_match = re.search(r"id:?\s*(permreq_[A-Za-z0-9_]+)", expanded_tool_details)
-    if not permission_request_match:
-        raise RuntimeError(f"expanded permission details did not expose a reusable request id\nscreen:\n{expanded_tool_details}")
-    permission_request_prefix = permission_request_match.group(1)
+    if any(token in expanded_tool_details for token in ("permission: deny", "id: permreq_", "resolver:", "inspect: /permissions", "diagnose: /permissions")):
+        raise RuntimeError(f"Ctrl+O leaked routine permission audit receipts into tool details\nscreen:\n{expanded_tool_details}")
     save_evidence(root, "permission-denied-expanded-details", expanded_tool_details)
     tmux(tmux_exe, "resize-window", "-t", session, "-x", "56", "-y", "28")
     narrow_plain_permission = wait_for(
         tmux_exe,
         session,
-        r"(?s)permission: deny.*risk: critical.*id: permreq_.*reason: command permission denied.*command: <redacted one-shot command>.*inspect: /permissions audit show.*diagnose: /permissions diagnose",
+        r"(?s)command permission denied.*\$ <redacted one-shot command>",
         "narrow plain permission detail rows",
     )
-    if (
-        "permission: deny" not in narrow_plain_permission
-        or "risk: critical" not in narrow_plain_permission
-        or "id: permreq_" not in narrow_plain_permission
-        or "reason: command permission denied" not in narrow_plain_permission
-        or "command: <redacted one-shot command>" not in narrow_plain_permission
-        or "inspect: /permissions audit show" not in narrow_plain_permission
-        or "diagnose: /permissions diagnose" not in narrow_plain_permission
-        or "toggle: /tool" not in narrow_plain_permission
-        or "inspect: /tool" in narrow_plain_permission
-        or "permission_denied" in narrow_plain_permission
-        or "action: ask" in narrow_plain_permission
-        or "request_id:" in narrow_plain_permission
-    ):
-        raise RuntimeError(
-            f"narrow NO_COLOR permission details did not remain readable as text rows\nscreen:\n{narrow_plain_permission}"
-        )
+    if "permreq_" in narrow_plain_permission or "permission: deny" in narrow_plain_permission:
+        raise RuntimeError(f"narrow permission details leaked routine audit receipts\nscreen:\n{narrow_plain_permission}")
     save_evidence(root, "permission-denied-narrow-no-color", narrow_plain_permission)
     styled_narrow_permission = capture_styled(tmux_exe, session)
     if "\x1b[" in styled_narrow_permission:
-        raise RuntimeError(
-            f"narrow NO_COLOR permission details still captured ANSI style escapes\nscreen:\n{styled_narrow_permission}"
-        )
+        raise RuntimeError(f"narrow NO_COLOR permission details still captured ANSI style escapes\nscreen:\n{styled_narrow_permission}")
     tmux(tmux_exe, "resize-window", "-t", session, "-x", "120", "-y", "32")
-    wait_for(tmux_exe, session, r"command: <redacted one-shot command>", "permission detail rows after resize restore")
+    wait_for(tmux_exe, session, r"\$ <redacted one-shot command>", "permission detail rows after resize restore")
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/copy tool")
@@ -167,6 +156,15 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     copied_tool = wait_for(tmux_exe, session, r"copied latest tool details to clipboard", "copy latest tool details")
     if "copied latest tool details to clipboard" not in copied_tool:
         raise RuntimeError(f"/copy tool did not report a copied tool-detail payload\nscreen:\n{copied_tool}")
+
+    send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, "/permissions audit bash")
+    send_keys(tmux_exe, session, "Enter")
+    permission_audit_listing = wait_for(tmux_exe, session, r"(?s)Permission audit.*permreq_", "explicit permission audit listing")
+    permission_request_match = re.search(r"permreq_[A-Za-z0-9_]+", permission_audit_listing)
+    if not permission_request_match:
+        raise RuntimeError(f"explicit audit surface did not expose a reusable permission request id\nscreen:\n{permission_audit_listing}")
+    permission_request_prefix = permission_request_match.group(0)
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, f"/copy permission {permission_request_prefix}")
@@ -178,9 +176,7 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
         "copy matching permission details",
     )
     if "copied matching permission details to clipboard" not in copied_permission:
-        raise RuntimeError(
-            f"/copy permission <query> did not report copied matching permission details\nscreen:\n{copied_permission}"
-        )
+        raise RuntimeError(f"/copy permission did not report a copied audit payload\nscreen:\n{copied_permission}")
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/write src/main.cpp int changed() { return 1; }")
@@ -208,7 +204,9 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
             f"/write did not render the changed-file summary row in expanded tool details\nscreen:\n{write_changed_details}"
         )
 
-    send_keys(tmux_exe, session, "C-o")
+    send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, "/details compact")
+    send_keys(tmux_exe, session, "Enter")
     wait_for_absent(tmux_exe, session, r"changed:", "write detail rows cleared before mouse parity")
     collapsed_before_mouse = wait_for(
         tmux_exe,
@@ -228,7 +226,7 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     mouse_expanded = wait_for(
         tmux_exe,
         session,
-        r"(?s)\+ write.*changed:.*toggle: /tool .*copy: /copy tool",
+        r"(?s)\+ write.*changed:.*diff src/main.cpp:",
         "write card mouse expansion",
     )
     if (
@@ -236,8 +234,6 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
         or mouse_expanded.count("src/main.cpp · wrote 27 bytes") != 1
         or mouse_expanded.count("wrote 27 bytes") != 2
         or "result: wrote 27 bytes to " not in mouse_expanded
-        or "inspect: /tool" in mouse_expanded
-        or "toggle: /tool" not in mouse_expanded
     ):
         raise RuntimeError(f"mouse-expanded write card duplicated payloads or mislabeled actions\nscreen:\n{mouse_expanded}")
     save_evidence(root, "frontend-f5-tool-card-mouse-expanded", mouse_expanded)
@@ -302,10 +298,8 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
                 or "diff" not in screen
                 or "+int changed()" not in screen
                 or "result: wrote 27 bytes to " not in screen
-                or "toggle: /tool" not in screen
-                or "inspect: /tool" in screen
             ):
-                raise RuntimeError(f"{label} did not retain deduplicated expanded changed/diff/action detail\nscreen:\n{screen}")
+                raise RuntimeError(f"{label} did not retain deduplicated expanded changed/diff detail\nscreen:\n{screen}")
         elif "changed:" in screen or "+int changed()" in screen:
             raise RuntimeError(f"{label} retained expanded changed/diff detail after collapse\nscreen:\n{screen}")
         if any(len(line) > width for line in lines):
@@ -353,7 +347,7 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
         screen = wait_for(
             tmux_exe,
             session,
-            r"(?s)\+ write.*wrote 27 bytes.*Type a message.*GPT-5\.5 · ctx \d+[^\n]*\Z",
+            rf"(?s)\+ write.*wrote 27 bytes.*Type a message.*GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}[^\n]*\Z",
             f"{name} settled tool transcript",
         )
         assert_f2_tool_frame(
@@ -530,23 +524,19 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     seq_expanded = wait_for(
         tmux_exe,
         session,
-        r"(?s)truncation:.*full output:.*toggle: /tool.*copy: /copy tool",
+        r"(?s)truncation:.*full output:",
         "expanded bounded local bash spill details",
         timeout=10.0,
     )
     if (
-        "output: 8 shown/20000 lines · 19992 hidden" not in seq_expanded
+        "… 19800 lines hidden" not in seq_expanded
         or "20001 lines" in seq_expanded
-        or "19993 hidden" in seq_expanded
+        or "19801 lines hidden" in seq_expanded
         or "truncation:" not in seq_expanded
         or "bytes" not in seq_expanded
         or "full output:" not in seq_expanded
-        or "toggle: /tool" not in seq_expanded
-        or "copy: /copy tool" not in seq_expanded
-        or "inspect: /tool" in seq_expanded
-        or len([line for line in seq_expanded.splitlines() if re.search(r"[+x-] bash", line)]) != 1
     ):
-        raise RuntimeError(f"expanded local spill card lacked bounded truthful metadata or actions\nscreen:\n{seq_expanded}")
+        raise RuntimeError(f"expanded local spill card lacked bounded truthful metadata\nscreen:\n{seq_expanded}")
 
     def resize_and_capture_lifecycle(width: int, height: int, name: str, *, sidebar_expected: bool) -> None:
         previous = capture(tmux_exe, session)
@@ -556,7 +546,7 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
         lifecycle = wait_for(
             tmux_exe,
             session,
-            r"(?s)truncation:.*full output:.*toggle: /tool.*copy: /copy tool.*GPT-5\.5[^\n]*\n?\Z",
+            r"(?s)truncation:.*full output:.*GPT-5\.5[^\n]*\n?\Z",
             f"{name} lifecycle frame",
         )
         dimensions = tmux(
@@ -565,8 +555,8 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
         lines = lifecycle.splitlines()
         if dimensions != f"{width},{height}" or len(lines) != height or any(len(line) > width for line in lines):
             raise RuntimeError(f"{name} did not retain exact bounded dimensions\nscreen:\n{lifecycle}")
-        if "full output:" not in lifecycle or "truncation:" not in lifecycle or "toggle: /tool" not in lifecycle or "copy: /copy tool" not in lifecycle:
-            raise RuntimeError(f"{name} lost spill metadata or action rows\nscreen:\n{lifecycle}")
+        if "full output:" not in lifecycle or "truncation:" not in lifecycle:
+            raise RuntimeError(f"{name} lost spill or truncation metadata\nscreen:\n{lifecycle}")
         if "\x1b" in lifecycle or any(ord(character) < 32 and character != "\n" for character in lifecycle):
             raise RuntimeError(f"{name} contained ESC or unexpected C0 controls\nscreen:\n{lifecycle}")
         main_width = width - 39 if sidebar_expected else min(width, 120)

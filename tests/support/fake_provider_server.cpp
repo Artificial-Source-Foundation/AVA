@@ -5,8 +5,10 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -315,7 +317,7 @@ std::string multi_question_tool_body()
 {
   std::string const arguments =
       "{\"header\":\"Pick\",\"question\":\"Choose providers\",\"options\":[{\"value\":\"alpha\",\"label\":\"Alpha\"},"
-      "{\"value\":\"beta\",\"label\":\"Beta\"}],\"multiple\":true,\"allow_custom\":true}";
+      "{\"value\":\"beta\",\"label\":\"Beta\"},{\"value\":\"gamma\",\"label\":\"Gamma\"}],\"multiple\":true,\"allow_custom\":true}";
   return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_question\",\"type\":\"function\","
          "\"function\":{\"name\":\"question\",\"arguments\":\"" +
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
@@ -386,6 +388,127 @@ std::string e2e_tool_body(int request_index, std::string_view target_path)
     return tool_body("call_bash_e2e", "bash", arguments);
   }
   return text_body("E2E task complete: TODO fixed and verification command passed.");
+}
+
+bool write_streaming_marker(std::filesystem::path const& directory, std::string_view name)
+{
+  auto const path = directory / name;
+  std::ofstream marker(path, std::ios::binary | std::ios::trunc);
+  if (!marker)
+  {
+    std::cerr << "streaming-scroll failed to create marker " << path << '\n';
+    return false;
+  }
+  marker << name << '\n';
+  marker.close();
+  if (!marker)
+  {
+    std::cerr << "streaming-scroll failed to commit marker " << path << '\n';
+    return false;
+  }
+  return true;
+}
+
+bool wait_for_streaming_marker(std::filesystem::path const& marker_directory, std::string_view marker_name)
+{
+  auto const marker = marker_directory / marker_name;
+  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(12);
+  while (true)
+  {
+    std::error_code exists_error;
+    if (std::filesystem::exists(marker, exists_error))
+      return true;
+    if (exists_error)
+    {
+      std::cerr << "streaming-scroll failed to inspect " << marker_name << " marker " << marker << ": " << exists_error.message() << '\n';
+      return false;
+    }
+    if (std::chrono::steady_clock::now() >= deadline)
+    {
+      std::cerr << "streaming-scroll timed out waiting for the scenario-owned " << marker_name << " marker\n";
+      return false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+}
+
+bool send_streaming_scroll_response(int client_fd, std::string const& request, std::chrono::milliseconds delay, std::filesystem::path const& marker_directory)
+{
+  auto const first_line_end = request.find("\r\n");
+  auto const first_line = request.substr(0, first_line_end);
+  if (!first_line.starts_with("POST ") || first_line.find("/chat/completions ") == std::string::npos)
+  {
+    std::cerr << "streaming-scroll requires a normal chat-completions POST request\n";
+    return false;
+  }
+  if (request.find("\"stream\":true") == std::string::npos)
+  {
+    std::cerr << "streaming-scroll requires stream=true in the chat-completions request\n";
+    return false;
+  }
+  std::error_code marker_error;
+  if (marker_directory.empty() || !std::filesystem::is_directory(marker_directory, marker_error) || marker_error)
+  {
+    std::cerr << "streaming-scroll requires an existing scenario-owned marker directory\n";
+    return false;
+  }
+
+  if (!write_all(client_fd,
+                 "HTTP/1.1 200 OK\r\n"
+                 "Content-Type: text/event-stream\r\n"
+                 "Cache-Control: no-cache\r\n"
+                 "Connection: close\r\n\r\n"))
+  {
+    std::cerr << "streaming-scroll response header write failed: " << errno_text() << '\n';
+    return false;
+  }
+
+  for (int index = 0; index < 60; ++index)
+  {
+    if (index == 30 && (!write_streaming_marker(marker_directory, "paused") || !wait_for_streaming_marker(marker_directory, "continue")))
+      return false;
+
+    std::ostringstream content;
+    content << "stream line " << std::setw(3) << std::setfill('0') << index;
+    if (index != 29)
+      content << "\\n";
+    auto const event =
+        "data: {\"id\":\"chatcmpl-stream-scroll\",\"object\":\"chat.completion.chunk\",\"model\":\"ava-tui-fake\",\"choices\":[{\"index\":0,"
+        "\"delta\":{\"content\":\"" +
+        content.str() + "\"},\"finish_reason\":null}]}\n\n";
+    if (!write_all(client_fd, event))
+    {
+      std::cerr << "streaming-scroll delta " << index << " write failed: " << errno_text() << '\n';
+      return false;
+    }
+    std::this_thread::sleep_for(delay);
+    if (index == 29 &&
+        !write_all(client_fd,
+                   "data: {\"id\":\"chatcmpl-stream-scroll\",\"object\":\"chat.completion.chunk\",\"model\":\"ava-tui-fake\",\"choices\":[{\"index\":0,"
+                   "\"delta\":{\"content\":\"\\n\"},\"finish_reason\":null}]}\n\n"))
+    {
+      std::cerr << "streaming-scroll line terminator write failed: " << errno_text() << '\n';
+      return false;
+    }
+  }
+
+  if (!write_all(client_fd,
+                 "data: {\"id\":\"chatcmpl-stream-scroll\",\"object\":\"chat.completion.chunk\",\"model\":\"ava-tui-fake\",\"choices\":[{\"index\":0,"
+                 "\"delta\":{\"content\":\"STREAM COMPLETE\"},\"finish_reason\":null}]}\n\n"))
+  {
+    std::cerr << "streaming-scroll final marker write failed: " << errno_text() << '\n';
+    return false;
+  }
+  std::this_thread::sleep_for(delay);
+  if (!write_all(client_fd,
+                 "data: {\"id\":\"chatcmpl-stream-scroll\",\"object\":\"chat.completion.chunk\",\"model\":\"ava-tui-fake\",\"choices\":[{\"index\":0,"
+                 "\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":61,\"total_tokens\":62}}\n\n"
+                 "data: [DONE]\n\n"))
+  {
+    std::cerr << "streaming-scroll completion write failed: " << errno_text() << '\n';
+    return false;
+  }
+  return write_streaming_marker(marker_directory, "completed");
 }
 
 struct ProviderResponse
@@ -511,6 +634,7 @@ int main(int argc, char** argv)
   int const request_count =
       scenario == "http-error"            ? 3
       : scenario == "text-three"          ? 3
+      : scenario == "streaming-scroll"    ? 2
       : scenario == "end-to-end-workflow" ? 6
       : scenario == "read-tool-twice"     ? 4
       : scenario == "read-tool-thrice"    ? 6
@@ -575,6 +699,12 @@ int main(int argc, char** argv)
     {
       std::ofstream file(request_log, std::ios::binary | std::ios::app);
       file << "--- request " << (request_index + 1) << " ---\n" << request << '\n';
+    }
+    if (scenario == "streaming-scroll" && request_index == 0)
+    {
+      if (!send_streaming_scroll_response(client.get(), request, delay, target_path))
+        return 1;
+      continue;
     }
     if ((scenario == "compact-delayed" && request_index == 1) || (scenario != "compact-delayed" && request_index == 0))
       std::this_thread::sleep_for(delay);

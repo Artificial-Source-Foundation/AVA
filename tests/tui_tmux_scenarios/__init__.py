@@ -6,6 +6,7 @@ from .theme_env import scenario_theme_env
 from .theme_persisted import scenario_theme_persisted
 from .active_run import scenario_active_run
 from .restore_followup import scenario_restore_followup
+from .streaming_scroll import scenario_streaming_scroll
 from .main_startup_trust_keybinds import scenario_main_startup_trust_keybinds
 from .main_models_selectors import scenario_main_models_selectors
 from .main_editor_input import scenario_main_editor_input
@@ -23,6 +24,7 @@ SCENARIOS = (
     "theme_persisted",
     "active_run",
     "restore_followup",
+    "streaming_scroll",
     "main_startup_trust_keybinds",
     "main_models_selectors",
     "main_editor_input",
@@ -40,6 +42,7 @@ SCENARIO_HANDLERS = {
     "theme_persisted": scenario_theme_persisted,
     "active_run": scenario_active_run,
     "restore_followup": scenario_restore_followup,
+    "streaming_scroll": scenario_streaming_scroll,
     "main_startup_trust_keybinds": scenario_main_startup_trust_keybinds,
     "main_models_selectors": scenario_main_models_selectors,
     "main_editor_input": scenario_main_editor_input,

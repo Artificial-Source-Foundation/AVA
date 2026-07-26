@@ -31,7 +31,8 @@ void run_tui_tool_card_tests_part_1()
                                                                                  .result_summary = "read lines 1-12/12",
                                                                                  .lifecycle = ava::tui::ToolLifecycleState::Complete}}},
       .width = 80,
-      .height = 10});
+      .height = 10,
+      .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(tool_card,
                              [](std::string const& line) {
                                auto visible = strip_sgr(line);
@@ -47,7 +48,9 @@ void run_tui_tool_card_tests_part_1()
 
   auto plain_tool_row = [](ava::tui::ToolTimelineItem const& item) {
     auto const rows = ava::tui::detail::render_tool_card(item, 120, false);
-    return rows.empty() ? std::string{} : strip_sgr(rows.front());
+    auto row = rows.empty() ? std::string{} : strip_sgr(rows.front());
+    while (!row.empty() && row.back() == ' ') row.pop_back();
+    return row;
   };
   auto running_outcome = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Running,
                                                     .name = "read_file",
@@ -68,6 +71,11 @@ void run_tui_tool_card_tests_part_1()
   auto const successful_row = plain_tool_row(successful_outcome);
   auto const failed_row = plain_tool_row(failed_outcome);
   auto const canceled_row = plain_tool_row(canceled_outcome);
+  auto const painted_success = ava::tui::detail::render_tool_card(successful_outcome, 120, false);
+  expect(painted_success.size() == 1 && visible_columns(painted_success.front()) == 120 && painted_success.front().starts_with("  \x1b[48;2;18;23;34m") &&
+             painted_success.front().ends_with("\x1b[0m  ") && painted_success.front().find("\x1b[0m\x1b[48;2;18;23;34m") != std::string::npos &&
+             painted_success.front().find("\x1b[48;2;26;31;46m") == std::string::npos,
+         "tui tool cards paint an independently padded low-contrast surface inside exact two-cell screen margins and reapply it after resets");
   expect(running_row == "  │ ~ read_file · running · path=note.txt" && successful_row == "  │ + read_file · 12 lines · 1.2s" &&
              failed_row == "  │ x write_file · failed" && canceled_row == "  │ - task · canceled",
          "tui compact tool rows distinguish running, successful, failed, and canceled outcomes in plain text");
@@ -76,6 +84,24 @@ void run_tui_tool_card_tests_part_1()
          "tui compact tool rows omit low-level lifecycle words and raw call ids");
   expect(std::ranges::none_of(tool_card, [](std::string const& line) { return line.find("\x1b[31m") != std::string::npos; }),
          "tui tool card rendering removes untrusted raw sgr escape sequences");
+  {
+    ScopedEnvVar no_color_guard("NO_COLOR", "1");
+    auto const plain_tool_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                       .provider = "openai",
+                                                                                       .model = "gpt-5.5",
+                                                                                       .session_id = "session_plain_tool",
+                                                                                       .input = "",
+                                                                                       .status = "ready",
+                                                                                       .transcript = {ava::tui::TranscriptItem{.tool = successful_outcome}},
+                                                                                       .width = 40,
+                                                                                       .height = 10,
+                                                                                       .tool_presentation = ava::tui::ToolPresentation::Compact});
+    auto const plain_tool_line = std::ranges::find_if(plain_tool_frame, [](std::string const& line) { return line.find("+ read_file") != std::string::npos; });
+    expect(plain_tool_line != plain_tool_frame.end() && plain_tool_line->starts_with("  │ + read_file") &&
+               std::ranges::all_of(plain_tool_frame,
+                                   [](std::string const& line) { return line.find('\x1b') == std::string::npos && visible_columns(line) <= 40; }),
+           "tui plain-theme tool cards preserve spacing, prefixes, and labels without ANSI background sequences");
+  }
 
   auto permission_tool_item = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Error,
                                                          .name = "bash",
@@ -108,14 +134,15 @@ void run_tui_tool_card_tests_part_1()
   auto const pending_permission_expanded = ava::tui::detail::render_tool_card(pending_permission_item, 120, true);
   auto const pending_permission_expanded_text = tui_test_support::join_visible_lines(pending_permission_expanded);
   auto const pending_permission_copy = ava::tui::detail::tool_card_copy_text(pending_permission_item);
-  expect(pending_permission_rows.size() == 1 && pending_permission_text.find("permission required") != std::string::npos &&
-             pending_permission_text.find("permission checked") == std::string::npos && pending_permission_text.find("permreq_push") == std::string::npos &&
-             pending_permission_text.find("permission_1") == std::string::npos && pending_permission_text.find("executing") == std::string::npos,
-         "tui compact pending tool audit is permission required without lifecycle or raw ids");
-  expect(pending_permission_expanded_text.find("permission: required") != std::string::npos &&
-             pending_permission_expanded_text.find("id: permreq_push") != std::string::npos &&
-             pending_permission_copy.find("lifecycle: executing") != std::string::npos && pending_permission_copy.find("id permreq_push") != std::string::npos,
-         "tui expanded and copied pending tool diagnostics retain lifecycle and permission ids");
+  expect(pending_permission_rows.size() == 1 && pending_permission_text.find("permission") == std::string::npos &&
+             pending_permission_text.find("permreq_push") == std::string::npos && pending_permission_text.find("permission_1") == std::string::npos &&
+             pending_permission_text.find("executing") == std::string::npos,
+         "tui compact pending tools omit internal permission state and raw ids");
+  expect(pending_permission_expanded_text.find("permission") == std::string::npos &&
+             pending_permission_expanded_text.find("permreq_push") == std::string::npos &&
+             pending_permission_expanded_text.find("permission_1") == std::string::npos && pending_permission_copy.find("permission") == std::string::npos &&
+             pending_permission_copy.find("permreq_push") == std::string::npos && pending_permission_copy.find("permission_1") == std::string::npos,
+         "tui expanded and copied pending tools omit internal permission state and identities");
   auto running_id_only_permission_item = pending_permission_item;
   running_id_only_permission_item.permissions.clear();
   auto settled_id_only_permission_item = running_id_only_permission_item;
@@ -124,18 +151,18 @@ void run_tui_tool_card_tests_part_1()
   auto settled_empty_decision_permission_item = pending_permission_item;
   settled_empty_decision_permission_item.status = ava::tui::ToolTimelineStatus::Error;
   settled_empty_decision_permission_item.lifecycle = ava::tui::ToolLifecycleState::Error;
-  expect(plain_tool_row(running_id_only_permission_item).find("permission required") != std::string::npos &&
-             plain_tool_row(settled_id_only_permission_item).find("permission checked") != std::string::npos &&
-             plain_tool_row(pending_permission_item).find("permission required") != std::string::npos &&
-             plain_tool_row(settled_empty_decision_permission_item).find("permission checked") != std::string::npos,
-         "tui renders id-only and empty-decision permission audits as required only while tools are running");
+  expect(plain_tool_row(running_id_only_permission_item).find("permission") == std::string::npos &&
+             plain_tool_row(settled_id_only_permission_item).find("permission") == std::string::npos &&
+             plain_tool_row(pending_permission_item).find("permission") == std::string::npos &&
+             plain_tool_row(settled_empty_decision_permission_item).find("permreq_push") == std::string::npos,
+         "tui hides unresolved and settled internal permission receipts from tool cards");
   auto allowed_permission_item = pending_permission_item;
   allowed_permission_item.permissions.front().decision = "allow";
   auto denied_permission_item = pending_permission_item;
   denied_permission_item.permissions.front().decision = "deny";
-  expect(plain_tool_row(allowed_permission_item).find("permission allow") != std::string::npos &&
-             plain_tool_row(denied_permission_item).find("permission deny") != std::string::npos,
-         "tui compact permission state distinguishes unresolved, allowed, and denied audits");
+  expect(plain_tool_row(allowed_permission_item).find("permission allow") == std::string::npos &&
+             plain_tool_row(denied_permission_item).find("command permission denied") != std::string::npos,
+         "tui compact cards hide routine allows and retain a human-readable denial reason");
 
   auto const compact_permission_card =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -146,12 +173,12 @@ void run_tui_tool_card_tests_part_1()
                                                            .status = "ready",
                                                            .transcript = {ava::tui::TranscriptItem{.tool = permission_tool_item}},
                                                            .width = 72,
-                                                           .height = 12});
+                                                           .height = 12,
+                                                           .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(compact_permission_card,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("permission deny") != std::string::npos && visible.find("risk critical") != std::string::npos &&
-                                      visible.find("reason command permiss...") != std::string::npos;
+                               return visible.find("command permission denied") != std::string::npos;
                              }) &&
              std::ranges::none_of(compact_permission_card,
                                   [](std::string const& line) {
@@ -162,7 +189,7 @@ void run_tui_tool_card_tests_part_1()
                                   }) &&
              std::ranges::none_of(compact_permission_card, [](std::string const& line) { return line.find("\x1b[31m") != std::string::npos; }) &&
              std::ranges::all_of(compact_permission_card, [](std::string const& line) { return visible_columns(line) <= 72; }),
-         "tui compact tool cards preserve linked permission decision, risk, and reason while hiding audit ids and detail bodies");
+         "tui compact denied cards show a human reason while hiding internal audit ids and detail bodies");
 
   auto running_permission_item = permission_tool_item;
   running_permission_item.status = ava::tui::ToolTimelineStatus::Running;
@@ -170,12 +197,10 @@ void run_tui_tool_card_tests_part_1()
   running_permission_item.result_json = "{\"output\":\"SECRET OUTPUT PREVIEW\"}";
   auto const running_permission_card = ava::tui::detail::render_tool_card(running_permission_item, 88, false);
   auto const running_permission_text = tui_test_support::join_visible_lines(running_permission_card);
-  expect(running_permission_card.size() == 1 && running_permission_text.find("~ bash · permission deny") != std::string::npos &&
-             running_permission_text.find("risk critical") != std::string::npos &&
-             running_permission_text.find("reason command permission denied") != std::string::npos &&
+  expect(running_permission_card.size() == 1 && running_permission_text.find("command permission denied") != std::string::npos &&
              running_permission_text.find("permreq_push") == std::string::npos && running_permission_text.find("permission_1") == std::string::npos &&
              running_permission_text.find("SECRET OUTPUT PREVIEW") == std::string::npos && running_permission_text.find("executing") == std::string::npos,
-         "tui collapsed running permission card keeps decision, risk, and reason on one row without ids or output bodies");
+         "tui compact running denial keeps a human reason on one row without ids or output bodies");
 
   auto structured_permission_item = permission_tool_item;
   structured_permission_item.result_summary =
@@ -183,24 +208,17 @@ void run_tui_tool_card_tests_part_1()
   structured_permission_item.argument_summary = structured_permission_item.result_summary;
   auto const structured_permission_card = ava::tui::detail::render_tool_card(structured_permission_item, 88, false);
   auto const structured_permission_text = tui_test_support::join_visible_lines(structured_permission_card);
-  expect(structured_permission_text.find("permission deny") != std::string::npos && structured_permission_text.find("risk critical") != std::string::npos &&
+  expect(structured_permission_text.find("command permission denied") != std::string::npos &&
              structured_permission_text.find("permission_denied:") == std::string::npos &&
              structured_permission_text.find("permreq_push") == std::string::npos && structured_permission_text.find("/permissions audit") == std::string::npos,
-         "tui collapsed permission cards suppress raw structured result blocks while retaining the safety decision");
+         "tui compact permission cards suppress raw structured receipts while retaining a readable denial");
 
   structured_permission_item.arguments_json.clear();
   auto const& joined_tool_card_text = tui_test_support::join_visible_lines;
   auto const& count_text = tui_test_support::count_occurrences;
-  auto const structured_permission_expanded = joined_tool_card_text(ava::tui::detail::render_tool_card(structured_permission_item, 56, true));
+  auto const structured_permission_expanded = joined_tool_card_text(ava::tui::detail::render_tool_card(structured_permission_item, 57, true));
   auto const structured_permission_copy = ava::tui::detail::tool_card_copy_text(structured_permission_item);
   auto const structured_permission_only_copy = ava::tui::detail::tool_card_permission_copy_text(structured_permission_item);
-  auto const curated_expanded_permission_fields_once = [&](std::string_view text) {
-    return count_text(text, "permission: deny") == 1 && count_text(text, "risk: critical") == 1 && count_text(text, "id: permreq_push") == 1 &&
-           count_text(text, "resolver: permission_1") == 1 && count_text(text, "reason: command permission denied") == 1 &&
-           count_text(text, "resolution: selected deny") == 1 && count_text(text, "operation: bash") == 1 && count_text(text, "tool: bash") == 1 &&
-           count_text(text, "command: <redacted one-shot command>") == 1 && count_text(text, "inspect: /permissions audit show permreq_push") == 1 &&
-           count_text(text, "diagnose: /permissions diagnose permreq_push") == 1;
-  };
   auto const curated_copied_permission_fields_once = [&](std::string_view text) {
     return count_text(text, "permission: deny · risk critical · id permreq_push") == 1 && count_text(text, "resolver permission_1") == 1 &&
            count_text(text, "reason command permission denied") == 1 && count_text(text, "resolution selected deny") == 1 &&
@@ -211,11 +229,12 @@ void run_tui_tool_card_tests_part_1()
     return text.find("permission_denied") == std::string_view::npos && text.find("action: ask") == std::string_view::npos &&
            text.find("request_id:") == std::string_view::npos;
   };
-  expect(excludes_raw_permission_dump(structured_permission_expanded) && curated_expanded_permission_fields_once(structured_permission_expanded),
-         "tui expanded denied shell cards omit the raw permission status dump and render each curated audit field once");
-  expect(excludes_raw_permission_dump(structured_permission_copy) && curated_copied_permission_fields_once(structured_permission_copy) &&
-             structured_permission_copy.find("status: error") != std::string::npos && structured_permission_copy.find("lifecycle: error") != std::string::npos,
-         "tui general tool copy omits the raw permission status dump while preserving one curated audit and lifecycle status");
+  expect(excludes_raw_permission_dump(structured_permission_expanded) && structured_permission_expanded.find("permreq_push") == std::string::npos &&
+             structured_permission_expanded.find("permission_1") == std::string::npos,
+         "tui expanded denied shell cards omit raw and curated routine audit receipts");
+  expect(excludes_raw_permission_dump(structured_permission_copy) && structured_permission_copy.find("permreq_push") == std::string::npos &&
+             structured_permission_copy.find("permission_1") == std::string::npos && structured_permission_copy.find("status: error") != std::string::npos,
+         "tui general tool copy omits raw permission receipts and resolver identities");
   expect(curated_copied_permission_fields_once(structured_permission_only_copy),
          "tui standalone permission copy continues to expose one complete curated permission audit");
 
@@ -291,9 +310,9 @@ void run_tui_tool_card_tests_part_1()
                                                        .lifecycle = ava::tui::ToolLifecycleState::Complete,
                                                        .changed_paths = {"/home/user/workspace/src/main.cpp"}};
   auto const absolute_path_card = ava::tui::detail::render_tool_card(absolute_path_item, 88, false);
-  expect(std::ranges::none_of(absolute_path_card, [](std::string const& line) { return strip_sgr(line).find("/home/user/workspace") != std::string::npos; }) &&
-             std::ranges::any_of(absolute_path_card, [](std::string const& line) { return strip_sgr(line).find("wrote 27 bytes") != std::string::npos; }),
-         "tui collapsed tool cards omit absolute workspace paths rather than reducing them to ambiguous basenames");
+  expect(std::ranges::any_of(absolute_path_card, [](std::string const& line) { return strip_sgr(line).find("wrote 27 bytes") != std::string::npos; }) &&
+             std::ranges::none_of(absolute_path_card, [](std::string const& line) { return strip_sgr(line).find("raw-call") != std::string::npos; }),
+         "tui compact tool cards retain the useful outcome without raw identities");
 
   auto changed_path_priority = completed_write;
   changed_path_priority.argument_summary = "path=stale/input.cpp";
@@ -320,15 +339,13 @@ void run_tui_tool_card_tests_part_1()
   auto const action_query_card = ava::tui::detail::render_tool_card(action_query_item, 120, true);
   auto const action_query_text = tui_test_support::join_visible_lines(action_query_card);
 
-  expect(action_query_text.find("toggle: /tool src/main.cpp") != std::string::npos &&
-             action_query_text.find("copy: /copy tool src/main.cpp") != std::string::npos && action_query_text.find("inspect: /tool") == std::string::npos &&
+  expect(action_query_text.find("toggle: /tool") == std::string::npos && action_query_text.find("copy: /copy tool") == std::string::npos &&
              ava::tui::detail::tool_card_matches_copy_query(action_query_item, "src/main.cpp"),
-         "tool action rows reject sanitized call ids, fall back to a round-trippable changed path, and label /tool as toggle");
+         "expanded cards avoid noisy action command rows while preserving explicit query matching");
   action_query_item.call_id = "call-safe";
   auto const safe_call_action_text = tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(action_query_item, 120, true));
-  expect(safe_call_action_text.find("toggle: /tool call-safe") != std::string::npos &&
-             ava::tui::detail::tool_card_matches_copy_query(action_query_item, "call-safe"),
-         "tool action rows use an unchanged single-line call id that round-trips through query matching");
+  expect(safe_call_action_text.find("call-safe") == std::string::npos && ava::tui::detail::tool_card_matches_copy_query(action_query_item, "call-safe"),
+         "expanded cards keep supplied call identities out of ordinary presentation");
   auto parse_rendered_tool_action = [](std::string_view rendered) {
     constexpr std::string_view marker = "toggle: ";
     auto const start = rendered.find(marker);
@@ -345,27 +362,34 @@ void run_tui_tool_card_tests_part_1()
                                                        .call_id = "call-" + std::string(48, 'x'),
                                                        .lifecycle = ava::tui::ToolLifecycleState::Complete,
                                                        .diff = "--- a/src/main.cpp\n+++ b/src/main.cpp"};
-  auto const narrow_action_card = ava::tui::detail::render_tool_card(narrow_action_item, 36, true);
+  auto const narrow_action_card = ava::tui::detail::render_tool_card(narrow_action_item, 40, true);
   auto const narrow_action_text = tui_test_support::join_visible_lines(narrow_action_card);
   auto const parsed_narrow_action = parse_rendered_tool_action(narrow_action_text);
-  expect(narrow_action_text.find("toggle: /tool write") != std::string::npos && narrow_action_text.find("copy: /copy tool write") != std::string::npos &&
-             narrow_action_text.find("copy diff: /copy diff write") != std::string::npos &&
-             std::ranges::all_of(narrow_action_card,
-                                 [](std::string const& row) {
-                                   auto const visible = strip_sgr(row);
-                                   auto const action = visible.find("toggle:") != std::string::npos || visible.find("copy:") != std::string::npos ||
-                                                       visible.find("copy diff:") != std::string::npos;
-                                   return !action || visible.find("...") == std::string::npos;
-                                 }) &&
-             parsed_narrow_action == "write" && ava::tui::detail::tool_card_matches_copy_query(narrow_action_item, *parsed_narrow_action) &&
-             std::ranges::all_of(narrow_action_card, [](std::string const& row) { return visible_columns(row) <= 36; }),
-         "narrow tool action rows fall back from a long call id to a matching tool name and preserve every command exactly");
+  expect(narrow_action_text.find("toggle: /tool") == std::string::npos && narrow_action_text.find("copy: /copy tool") == std::string::npos &&
+             !parsed_narrow_action && std::ranges::all_of(narrow_action_card, [](std::string const& row) { return visible_columns(row) <= 40; }),
+         "narrow expanded cards remain bounded without action or identity rows");
+  auto near_threshold_action_item = narrow_action_item;
+  near_threshold_action_item.call_id = "call123";
+  near_threshold_action_item.diff.clear();
+  auto const near_threshold_action_card = ava::tui::detail::render_tool_card(near_threshold_action_item, 32, true);
+  auto const near_threshold_action_text = tui_test_support::join_visible_lines(near_threshold_action_card);
+  auto const parsed_near_threshold_action = parse_rendered_tool_action(near_threshold_action_text);
+  expect(near_threshold_action_text.find("toggle: /tool") == std::string::npos && !parsed_near_threshold_action &&
+             std::ranges::all_of(near_threshold_action_card, [](std::string const& row) { return visible_columns(row) == 32; }),
+         "near-threshold expanded cards remain exactly width-bounded without identities");
   auto no_fit_action_item = narrow_action_item;
   no_fit_action_item.name = "impossibly-long-tool-name";
   no_fit_action_item.diff.clear();
   auto const no_fit_action_text = tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(no_fit_action_item, 32, true));
-  expect(no_fit_action_text.find("toggle: /tool") == std::string::npos && no_fit_action_text.find("copy: /copy tool") == std::string::npos,
-         "tool action rows are omitted when no safe matching query fits every emitted command row");
+  bool narrow_widths_safe = true;
+  for (std::size_t width = 0; width <= 4; ++width)
+  {
+    auto const rows = ava::tui::detail::render_tool_card(no_fit_action_item, width, true);
+    narrow_widths_safe = narrow_widths_safe && std::ranges::all_of(rows, [width](std::string const& row) { return visible_columns(row) <= width; });
+  }
+  expect(
+      no_fit_action_text.find("toggle: /tool") == std::string::npos && no_fit_action_text.find("copy: /copy tool") == std::string::npos && narrow_widths_safe,
+      "tool action rows are omitted when no safe matching query fits every emitted command row and zero-to-four-column cards stay bounded");
   auto whitespace_id_item = action_query_item;
   whitespace_id_item.call_id = "   ";
   auto const whitespace_id_action_text = tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(whitespace_id_item, 120, true));
@@ -377,12 +401,9 @@ void run_tui_tool_card_tests_part_1()
 
   auto const parsed_whitespace_fallback = parse_rendered_tool_action(whitespace_id_action_text);
   auto const parsed_edge_fallback = parse_rendered_tool_action(edge_whitespace_action_text);
-  expect(parsed_whitespace_fallback == "src/main.cpp" && parsed_edge_fallback == "write_file" &&
-             ava::tui::detail::tool_card_matches_copy_query(whitespace_id_item, *parsed_whitespace_fallback) &&
-             ava::tui::detail::tool_card_matches_copy_query(edge_whitespace_item, *parsed_edge_fallback) &&
-             edge_whitespace_action_text.find("toggle: /tool call-edge") == std::string::npos &&
-             edge_whitespace_action_text.find("toggle: /tool\n") == std::string::npos,
-         "tool action queries reject whitespace-only and edge-whitespace values, then render/parse a matching fallback instead of bare latest /tool");
+  expect(!parsed_whitespace_fallback && !parsed_edge_fallback && whitespace_id_action_text.find("toggle: /tool") == std::string::npos &&
+             edge_whitespace_action_text.find("call-edge") == std::string::npos,
+         "expanded cards omit whitespace and edge-whitespace identities along with action command rows");
   action_query_item.call_id = "\x1b[31munsafe";
   action_query_item.changed_paths = {"/absolute/not-safe"};
   action_query_item.name = "write\nunsafe";
@@ -400,30 +421,19 @@ void run_tui_tool_card_tests_part_1()
                                                            .status = "ready",
                                                            .transcript = {ava::tui::TranscriptItem{.tool = permission_tool_item}},
                                                            .width = 88,
-                                                           .height = 28});
-  expect(
-      std::ranges::any_of(expanded_permission_card, [](std::string const& line) { return strip_sgr(line).find("permission: deny") != std::string::npos; }) &&
-          std::ranges::any_of(expanded_permission_card, [](std::string const& line) { return strip_sgr(line).find("risk: critical") != std::string::npos; }) &&
-          std::ranges::any_of(expanded_permission_card,
-                              [](std::string const& line) { return strip_sgr(line).find("id: permreq_push") != std::string::npos; }) &&
-          std::ranges::any_of(expanded_permission_card,
-                              [](std::string const& line) { return strip_sgr(line).find("resolver: permission_1") != std::string::npos; }) &&
-          std::ranges::any_of(expanded_permission_card,
-                              [](std::string const& line) { return strip_sgr(line).find("reason: command permission denied?") != std::string::npos; }) &&
-          std::ranges::any_of(expanded_permission_card,
-                              [](std::string const& line) { return strip_sgr(line).find("resolution: selected deny") != std::string::npos; }) &&
-          std::ranges::any_of(expanded_permission_card, [](std::string const& line) { return strip_sgr(line).find("operation: bash") != std::string::npos; }) &&
-          std::ranges::any_of(expanded_permission_card, [](std::string const& line) { return strip_sgr(line).find("tool: bash") != std::string::npos; }) &&
-          std::ranges::any_of(expanded_permission_card,
-                              [](std::string const& line) { return strip_sgr(line).find("command: <redacted one-shot command>") != std::string::npos; }) &&
-          std::ranges::any_of(
-              expanded_permission_card,
-              [](std::string const& line) { return strip_sgr(line).find("inspect: /permissions audit show permreq_push") != std::string::npos; }) &&
-          std::ranges::any_of(
-              expanded_permission_card,
-              [](std::string const& line) { return strip_sgr(line).find("diagnose: /permissions diagnose permreq_push") != std::string::npos; }) &&
-          std::ranges::all_of(expanded_permission_card, [](std::string const& line) { return visible_columns(line) <= 88; }),
-      "tui expanded tool cards expose permission audit ids, reviewed tool arguments, and follow-up commands on demand");
+                                                           .height = 28,
+                                                           .tool_presentation = ava::tui::ToolPresentation::Compact});
+  expect(std::ranges::any_of(expanded_permission_card,
+                             [](std::string const& line) { return strip_sgr(line).find("command permission denied") != std::string::npos; }) &&
+             std::ranges::none_of(expanded_permission_card,
+                                  [](std::string const& line) {
+                                    auto const visible = strip_sgr(line);
+                                    return visible.find("permreq_push") != std::string::npos || visible.find("permission_1") != std::string::npos ||
+                                           visible.find("/permissions audit") != std::string::npos ||
+                                           visible.find("/permissions diagnose") != std::string::npos;
+                                  }) &&
+             std::ranges::all_of(expanded_permission_card, [](std::string const& line) { return visible_columns(line) <= 88; }),
+         "tui expanded denied cards keep a human reason while omitting internal receipts and resolver identities");
 
   {
     ScopedEnvVar no_color_permission_guard("NO_COLOR", "1");
@@ -435,9 +445,9 @@ void run_tui_tool_card_tests_part_1()
                                                              .input = "",
                                                              .status = "ready",
                                                              .transcript = {ava::tui::TranscriptItem{.tool = permission_tool_item}},
-                                                             .width = 56,
+                                                             .width = 57,
                                                              .height = 24,
-                                                             .tool_details_visible = true});
+                                                             .tool_presentation = ava::tui::ToolPresentation::Expanded});
     auto plain_permission_text = std::string{};
     for (auto const& line : plain_narrow_permission_card)
     {
@@ -446,14 +456,10 @@ void run_tui_tool_card_tests_part_1()
     }
     auto const plain_permission_accessible =
         std::ranges::all_of(plain_narrow_permission_card,
-                            [](std::string const& line) { return line.find('\x1b') == std::string::npos && visible_columns(line) <= 56; }) &&
-        plain_permission_text.find("x bash") != std::string::npos && plain_permission_text.find("permission: deny") != std::string::npos &&
-        plain_permission_text.find("risk: critical") != std::string::npos && plain_permission_text.find("id: permreq_push") != std::string::npos &&
-        plain_permission_text.find("reason: command permission denied") != std::string::npos &&
-        plain_permission_text.find("command: <redacted one-shot command>") != std::string::npos &&
-        plain_permission_text.find("inspect: /permissions audit show permreq_push") != std::string::npos &&
-        plain_permission_text.find("diagnose: /permissions diagnose permreq_push") != std::string::npos;
-    expect(plain_permission_accessible, "tui plain narrow permission cards keep critical state readable without color");
+                            [](std::string const& line) { return line.find('\x1b') == std::string::npos && visible_columns(line) <= 57; }) &&
+        plain_permission_text.find("x bash") != std::string::npos && plain_permission_text.find("command permission denied") != std::string::npos &&
+        plain_permission_text.find("permreq_push") == std::string::npos && plain_permission_text.find("permission_1") == std::string::npos;
+    expect(plain_permission_accessible, "tui plain narrow denied cards keep the human reason readable without audit identities");
   }
 
   auto const grouped_context_tools = ava::tui::render_composer(
@@ -476,7 +482,8 @@ void run_tui_tool_card_tests_part_1()
                                                                                                             .argument_summary = "path=src/main.cpp",
                                                                                                             .result_summary = "read lines 1-40"}}},
                                  .width = 96,
-                                 .height = 16});
+                                 .height = 16,
+                                 .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::count_if(grouped_context_tools,
                                [](std::string const& line) { return strip_sgr(line).find("context gathering · 3 tools") != std::string::npos; }) == 1 &&
              std::ranges::any_of(grouped_context_tools, [](std::string const& line) { return strip_sgr(line).find("glob") != std::string::npos; }) &&
@@ -493,7 +500,8 @@ void run_tui_tool_card_tests_part_1()
       .transcript = {ava::tui::TranscriptItem{
           .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success, .name = "", .argument_summary = "", .result_summary = ""}}},
       .width = 40,
-      .height = 8});
+      .height = 8,
+      .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(empty_tool_card,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
@@ -566,8 +574,8 @@ void run_tui_tool_card_tests_part_1()
   expect(skill_permission_copy.empty(), "tui permission copy text stays empty when only unresolved permission ids are present");
   auto const expanded_skill_card = ava::tui::detail::render_tool_card(non_shell_cards[1], 48, true);
   auto const expanded_skill_text = visible_text(expanded_skill_card);
-  expect(expanded_skill_text.find("permission: checked") != std::string::npos && expanded_skill_text.find("id: permreq_skill") != std::string::npos,
-         "tui expanded settled non-shell tool cards keep unresolved permission ids visible as checked");
+  expect(expanded_skill_text.find("permission:") == std::string::npos && expanded_skill_text.find("permreq_skill") == std::string::npos,
+         "tui expanded settled non-shell cards omit unresolved internal permission identities");
 
   {
     ScopedEnvVar no_color_tool_guard("NO_COLOR", "1");
@@ -581,7 +589,7 @@ void run_tui_tool_card_tests_part_1()
                                    .transcript = {ava::tui::TranscriptItem{.tool = webfetch_item}, ava::tui::TranscriptItem{.tool = non_shell_cards[3]}},
                                    .width = 40,
                                    .height = 30,
-                                   .tool_details_visible = true});
+                                   .tool_presentation = ava::tui::ToolPresentation::Expanded});
     auto const plain_text = visible_text(plain_non_shell_card);
     expect(std::ranges::all_of(plain_non_shell_card,
                                [](std::string const& line) { return line.find('\x1b') == std::string::npos && visible_columns(line) <= 40; }) &&
@@ -606,7 +614,8 @@ void run_tui_tool_card_tests_part_1()
                                                                                  .argument_summary = std::string(120, 'a') + "\x1b[31m",
                                                                                  .result_summary = "error: denied\x1b[31m"}}},
       .width = 60,
-      .height = 14});
+      .height = 14,
+      .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(running_error_cards,
                              [](std::string const& line) {
                                auto visible = strip_sgr(line);
@@ -642,14 +651,15 @@ void run_tui_tool_card_tests_part_1()
                                                                                  .lifecycle = ava::tui::ToolLifecycleState::Canceled}}},
       .width = 64,
       .height = 16,
-      .tool_details_visible = true});
+      .tool_presentation = ava::tui::ToolPresentation::Expanded});
   expect(std::ranges::any_of(canceled_tool_card,
                              [](std::string const& line) {
                                auto visible = strip_sgr(line);
                                return visible.find("- bash") != std::string::npos && visible.find("bash") != std::string::npos &&
                                       visible.find("canceled") != std::string::npos;
                              }) &&
-             std::ranges::any_of(canceled_tool_card, [](std::string const& line) { return strip_sgr(line).find("cancel: stopped") != std::string::npos; }) &&
+             std::ranges::any_of(canceled_tool_card,
+                                 [](std::string const& line) { return strip_sgr(line).find("result: stopped by user") != std::string::npos; }) &&
              std::ranges::none_of(canceled_tool_card, [](std::string const& line) { return strip_sgr(line).find("x bash") != std::string::npos; }) &&
              std::ranges::all_of(canceled_tool_card, [](std::string const& line) { return visible_columns(line) <= 64; }),
          "tui renders canceled tool cards as a distinct non-error status");
@@ -660,9 +670,9 @@ void run_tui_tool_card_tests_part_1()
                                                                                                    .arguments_json = "{\"command\":\"sleep 30\"}",
                                                                                                    .result_json = "{\"tool\":\"bash\",\"canceled\":true}",
                                                                                                    .lifecycle = ava::tui::ToolLifecycleState::Canceled});
-  expect(canceled_copy_text.find("status: canceled") != std::string::npos && canceled_copy_text.find("lifecycle: canceled") != std::string::npos &&
-             canceled_copy_text.find("\x1b[") == std::string::npos,
-         "tui copy text preserves canceled tool state without ANSI styling");
+  expect(canceled_copy_text.find("status: canceled") != std::string::npos && canceled_copy_text.find("command: sleep 30") != std::string::npos &&
+             canceled_copy_text.find("lifecycle:") == std::string::npos && canceled_copy_text.find("\x1b[") == std::string::npos,
+         "tui copy text preserves canceled tool state and safe call text without internal lifecycle receipts");
 
   auto const detailed_tool_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -677,13 +687,12 @@ void run_tui_tool_card_tests_part_1()
                                                                                  .result_summary = "line one line two line three line four"}}},
       .width = 48,
       .height = 12,
-      .tool_details_visible = true});
-  expect(std::ranges::any_of(detailed_tool_card, [](std::string const& line) { return strip_sgr(line).find("args: command=cmake") != std::string::npos; }) &&
+      .tool_presentation = ava::tui::ToolPresentation::Expanded});
+  expect(std::ranges::any_of(detailed_tool_card, [](std::string const& line) { return strip_sgr(line).find("$ cmake --build build") != std::string::npos; }) &&
              std::ranges::any_of(detailed_tool_card, [](std::string const& line) { return strip_sgr(line).find("bash · line one") != std::string::npos; }) &&
-             std::ranges::any_of(detailed_tool_card, [](std::string const& line) { return strip_sgr(line).find("status: line one") != std::string::npos; }) &&
-             std::ranges::none_of(detailed_tool_card, [](std::string const& line) { return strip_sgr(line).find("result: line one") != std::string::npos; }) &&
+             std::ranges::none_of(detailed_tool_card, [](std::string const& line) { return strip_sgr(line).find("args:") != std::string::npos; }) &&
              std::ranges::all_of(detailed_tool_card, [](std::string const& line) { return visible_columns(line) <= 48; }),
-         "tui expands tool cards below a clipped primary shell without duplicating equivalent status and result payloads");
+         "tui expanded shell cards wrap a human call below a clipped primary without raw argument blocks");
 
   auto const copyable_tool_text = ava::tui::detail::tool_card_copy_text(
       ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Error,
@@ -708,17 +717,14 @@ void run_tui_tool_card_tests_part_1()
                                  .total_lines = 10,
                                  .spill_path = "/tmp/ava-spill/bash.txt"});
   expect(copyable_tool_text.find("tool: bash") != std::string::npos && copyable_tool_text.find("command: git push origin main") != std::string::npos &&
-             copyable_tool_text.find("shell status: exit 126") != std::string::npos && copyable_tool_text.find("permission: deny") != std::string::npos &&
-             copyable_tool_text.find("risk high") != std::string::npos &&
-             copyable_tool_text.find("reason command can change external state") != std::string::npos &&
-             copyable_tool_text.find("inspect: /permissions audit show permreq_push") != std::string::npos &&
-             copyable_tool_text.find("diagnose: /permissions diagnose permreq_push") != std::string::npos &&
+             copyable_tool_text.find("shell status: exit 126") != std::string::npos && copyable_tool_text.find("permission:") == std::string::npos &&
+             copyable_tool_text.find("permreq_push") == std::string::npos && copyable_tool_text.find("permission_1") == std::string::npos &&
              copyable_tool_text.find("output:\n  denied\n  try again") != std::string::npos &&
              copyable_tool_text.find("truncation: truncated 2/10 lines") != std::string::npos &&
              copyable_tool_text.find("changed: src/main.cpp, ?[31msecret.txt") != std::string::npos &&
              copyable_tool_text.find("full output: /tmp/ava-spill/bash.txt") != std::string::npos &&
              copyable_tool_text.find("diff:\n  --- a\n  +++ b") != std::string::npos && copyable_tool_text.find("\x1b[") == std::string::npos,
-         "tui exposes plain copy text for detailed tool cards without ANSI styling");
+         "tui exposes safe plain copy text without ANSI styling or internal audit receipts");
 
   auto const permission_copy_text = ava::tui::detail::tool_card_permission_copy_text(
       ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Error,
@@ -791,7 +797,7 @@ void run_tui_tool_card_tests_part_1()
                                                                                                             .details_visible = false}}},
                                  .width = 48,
                                  .height = 10,
-                                 .tool_details_visible = true});
+                                 .tool_presentation = ava::tui::ToolPresentation::Expanded});
   expect(
       std::ranges::none_of(collapsed_override_card, [](std::string const& line) { return strip_sgr(line).find("args: command=ctest") != std::string::npos; }),
       "tui supports per-tool detail collapse even when the global details toggle is enabled");
@@ -814,7 +820,8 @@ void run_tui_tool_card_tests_part_1()
                                                                                                             .spill_path = "/tmp/ava-spill/grep.txt",
                                                                                                             .spill_truncated = true}}},
                                  .width = 72,
-                                 .height = 12});
+                                 .height = 12,
+                                 .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(expanded_override_card,
                              [](std::string const& line) { return strip_sgr(line).find("truncation: truncated 2/10 matches") != std::string::npos; }) &&
              std::ranges::any_of(expanded_override_card,
@@ -837,7 +844,8 @@ void run_tui_tool_card_tests_part_1()
                                              .details_visible = true,
                                              .changed_paths = {"src/main.cpp", "tests/tui.cpp", "docs/mvp.md", "goals/ledger.md", "\x1b[31mhidden.txt"}}}},
       .width = 120,
-      .height = 16});
+      .height = 16,
+      .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(changed_paths_card,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
@@ -864,7 +872,8 @@ void run_tui_tool_card_tests_part_1()
                                                            .status = "ready",
                                                            .transcript = {ava::tui::TranscriptItem{.tool = inferred_changed_tool}},
                                                            .width = 88,
-                                                           .height = 14});
+                                                           .height = 14,
+                                                           .tool_presentation = ava::tui::ToolPresentation::Compact});
   auto const inferred_changed_copy = ava::tui::detail::tool_card_copy_text(inferred_changed_tool);
   expect(std::ranges::any_of(inferred_changed_card,
                              [](std::string const& line) { return strip_sgr(line).find("changed: notes/output.txt") != std::string::npos; }) &&
@@ -889,7 +898,8 @@ void run_tui_tool_card_tests_part_1()
                                                                                                             .diff = "--- note.txt\n+++ note.txt\n-old\n+new",
                                                                                                             .diff_truncated = true}}},
                                  .width = 88,
-                                 .height = 14});
+                                 .height = 14,
+                                 .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(wide_diff_card, [](std::string const& line) { return strip_sgr(line).find("diff:") != std::string::npos; }) &&
              std::ranges::any_of(wide_diff_card,
                                  [](std::string const& line) {
@@ -913,7 +923,8 @@ void run_tui_tool_card_tests_part_1()
                                                                                  .diff = "--- very/long/path/to/note.txt\n+++ very/long/path/to/"
                                                                                          "note.txt\n-old value\n+new value"}}},
       .width = 36,
-      .height = 14});
+      .height = 14,
+      .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(narrow_diff_card, [](std::string const& line) { return strip_sgr(line).find("diff:") != std::string::npos; }) &&
              std::ranges::all_of(narrow_diff_card, [](std::string const& line) { return visible_columns(line) <= 36; }),
          "tui keeps backend-provided diff previews width-safe on narrow terminals");
@@ -935,7 +946,8 @@ void run_tui_tool_card_tests_part_1()
                                                                                                 "\"output_lines\":4,\"output\":"
                                                                                                 "\"configure\\nbuild\\nfail\\nsummary\"}"}}},
       .width = 72,
-      .height = 16});
+      .height = 16,
+      .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(bash_ux_card,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
@@ -970,13 +982,13 @@ void run_tui_tool_card_tests_part_1()
                                                                                                 "\"[1/2] compile\\n[2/2] link\\nok\"}"}}},
       .width = 80,
       .height = 18,
-      .tool_details_visible = true});
-  expect(std::ranges::any_of(expanded_bash_ux_card,
-                             [](std::string const& line) { return strip_sgr(line).find("command: cmake --build build") != std::string::npos; }) &&
-             std::ranges::any_of(expanded_bash_ux_card, [](std::string const& line) { return strip_sgr(line).find("exit 0 · 250ms") != std::string::npos; }) &&
-             std::ranges::any_of(expanded_bash_ux_card,
-                                 [](std::string const& line) { return strip_sgr(line).find("output: 3 shown lines") != std::string::npos; }),
-         "tui expanded bash cards show command/status/duration and a wider output preview");
+      .tool_presentation = ava::tui::ToolPresentation::Expanded});
+  expect(
+      std::ranges::any_of(expanded_bash_ux_card, [](std::string const& line) { return strip_sgr(line).find("$ cmake --build build") != std::string::npos; }) &&
+          std::ranges::any_of(expanded_bash_ux_card, [](std::string const& line) { return strip_sgr(line).find("exit 0 · 250ms") != std::string::npos; }) &&
+          std::ranges::any_of(expanded_bash_ux_card, [](std::string const& line) { return strip_sgr(line).find("output:") != std::string::npos; }) &&
+          std::ranges::any_of(expanded_bash_ux_card, [](std::string const& line) { return strip_sgr(line).find("[2/2] link") != std::string::npos; }),
+      "tui expanded bash cards show an accented human call, status, duration, and retained output");
 
   auto const quoted_bash_summary_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -991,14 +1003,10 @@ void run_tui_tool_card_tests_part_1()
                                                                                  .result_summary = "exit 0",
                                                                                  .details_visible = true}}},
       .width = 80,
-      .height = 14});
-  expect(std::ranges::any_of(quoted_bash_summary_card,
-                             [](std::string const& line) { return strip_sgr(line).find("command: echo \"a, b\"") != std::string::npos; }) &&
-             std::ranges::none_of(quoted_bash_summary_card,
-                                  [](std::string const& line) {
-                                    return strip_sgr(line).find("command: echo \"a") != std::string::npos && strip_sgr(line).find("b\"") == std::string::npos;
-                                  }),
-         "tui bash cards do not split fallback command summaries at comma-space inside shell quotes");
+      .height = 14,
+      .tool_presentation = ava::tui::ToolPresentation::Compact});
+  expect(std::ranges::any_of(quoted_bash_summary_card, [](std::string const& line) { return strip_sgr(line).find("$ echo \"a, b\"") != std::string::npos; }),
+         "tui bash human calls do not split fallback summaries at comma-space inside shell quotes");
 
   auto const escaped_bash_summary_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -1013,10 +1021,11 @@ void run_tui_tool_card_tests_part_1()
                                                                                  .result_summary = "exit 0",
                                                                                  .details_visible = true}}},
       .width = 80,
-      .height = 14});
-  expect(std::ranges::any_of(escaped_bash_summary_card,
-                             [](std::string const& line) { return strip_sgr(line).find("command: printf foo\\, bar") != std::string::npos; }),
-         "tui bash cards do not split fallback command summaries at escaped comma-space");
+      .height = 14,
+      .tool_presentation = ava::tui::ToolPresentation::Compact});
+  expect(
+      std::ranges::any_of(escaped_bash_summary_card, [](std::string const& line) { return strip_sgr(line).find("$ printf foo\\, bar") != std::string::npos; }),
+      "tui bash human calls do not split fallback summaries at escaped comma-space");
 
   auto const running_bash_ux_card = ava::tui::render_composer(
       ava::tui::ComposerSnapshot{.mode = "build",
@@ -1030,7 +1039,8 @@ void run_tui_tool_card_tests_part_1()
                                                                                                             .argument_summary = "command=long-test",
                                                                                                             .arguments_json = "{\"command\":\"long-test\"}"}}},
                                  .width = 52,
-                                 .height = 10});
+                                 .height = 10,
+                                 .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(running_bash_ux_card,
                              [](std::string const& line) { return strip_sgr(line).find("~ bash · running · command=long-test") != std::string::npos; }) &&
              std::ranges::none_of(running_bash_ux_card, [](std::string const& line) { return strip_sgr(line).find("Esc/Ctrl+C stop") != std::string::npos; }) &&
@@ -1052,7 +1062,8 @@ void run_tui_tool_card_tests_part_1()
                                                                                  .diff = "--- note.txt\n+++ note.txt\n@@ -1,2 +1,2 @@\n-old\n+new\n context",
                                                                                  .changed_paths = {"note.txt"}}}},
       .width = 92,
-      .height = 18});
+      .height = 18,
+      .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(rich_diff_card, [](std::string const& line) { return strip_sgr(line).find("diff note.txt:") != std::string::npos; }) &&
              std::ranges::any_of(rich_diff_card, [](std::string const& line) { return strip_sgr(line).find("hunk @@ -1,2 +1,2 @@") != std::string::npos; }) &&
              std::ranges::any_of(rich_diff_card,
@@ -1078,7 +1089,47 @@ void test_tui_large_tool_output_preview_is_bounded()
                                                                     96, false);
   expect(small_output_card.size() == 1 &&
              std::ranges::none_of(small_output_card, [](std::string const& line) { return strip_sgr(line).find("output:") != std::string::npos; }),
-         "tui collapsed tool cards omit small output preview bodies");
+         "tui Compact tool cards omit output preview bodies");
+
+  auto const rich_output_card = ava::tui::detail::render_tool_card(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                                              .name = "grep",
+                                                                                              .argument_summary = "pattern=needle",
+                                                                                              .result_summary = "4 matches",
+                                                                                              .result_json = "{\"output\":\"one\\ntwo\\nthree\\nfour\"}",
+                                                                                              .lifecycle = ava::tui::ToolLifecycleState::Complete},
+                                                                   96, ava::tui::ToolPresentation::Rich);
+  auto const rich_output_text = tui_test_support::join_visible_lines(rich_output_card);
+  expect(ava::tui::ComposerSnapshot{}.tool_presentation == ava::tui::ToolPresentation::Rich && rich_output_text.find("pattern=needle") != std::string::npos &&
+             rich_output_text.find("output:") != std::string::npos && rich_output_text.find("four") != std::string::npos,
+         "tui defaults to Rich cards with human calls and useful bounded output");
+
+  std::string directory_entries = "{\"entries\":[";
+  for (std::size_t index = 1; index <= 205; ++index)
+  {
+    if (index > 1)
+      directory_entries += ',';
+    auto number = std::to_string(index);
+    auto const name = index == 3 ? std::string("unsafe\\u001b[31m") : "entry-" + std::string(3 - number.size(), '0') + number;
+    directory_entries += "{\"name\":\"" + name + "\",\"type\":\"" + (index == 2 ? "directory" : "file") + "\"}";
+  }
+  directory_entries += "],\"truncated\":true,\"total_entries\":205}";
+  auto const directory_item = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                         .name = "list_directory",
+                                                         .argument_summary = "path=.",
+                                                         .result_summary = "205 entries (truncated)",
+                                                         .result_json = std::move(directory_entries),
+                                                         .lifecycle = ava::tui::ToolLifecycleState::Complete};
+  auto const directory_compact = ava::tui::detail::render_tool_card(directory_item, 96, ava::tui::ToolPresentation::Compact);
+  auto const directory_rich = tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(directory_item, 96, ava::tui::ToolPresentation::Rich));
+  auto const directory_expanded =
+      tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(directory_item, 96, ava::tui::ToolPresentation::Expanded));
+  expect(directory_compact.size() == 1 && directory_rich.find("entry-001") != std::string::npos && directory_rich.find("entry-002/") != std::string::npos &&
+             directory_rich.find("entry-020") != std::string::npos && directory_rich.find("entry-021") == std::string::npos &&
+             directory_rich.find("185 lines hidden") != std::string::npos && directory_expanded.find("entry-200") != std::string::npos &&
+             directory_expanded.find("entry-201") == std::string::npos && directory_expanded.find("5 lines hidden") != std::string::npos &&
+             directory_rich.find("unsafe?[31m") != std::string::npos && directory_rich.find("arguments provided") == std::string::npos &&
+             directory_rich.find("result: ok") == std::string::npos,
+         "tui list_directory cards keep Compact to one row and render bounded structured directory entries without placeholders");
 
   auto output_preview_text = [](std::string result_json) {
     auto const lines = ava::tui::detail::render_tool_card(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
@@ -1093,11 +1144,94 @@ void test_tui_large_tool_output_preview_is_bounded()
   auto const unterminated_preview = output_preview_text("{\"output\":\"one\"}");
   auto const lf_preview = output_preview_text("{\"output\":\"one\\n\"}");
   auto const crlf_preview = output_preview_text("{\"output\":\"one\\r\\n\"}");
-  expect(empty_preview.find("output:") == std::string::npos && unterminated_preview.find("output: 1 shown line") != std::string::npos &&
-             lf_preview.find("output: 1 shown line") != std::string::npos && crlf_preview.find("output: 1 shown line") != std::string::npos &&
-             unterminated_preview.find("output: 2 shown") == std::string::npos && lf_preview.find("output: 2 shown") == std::string::npos &&
-             crlf_preview.find("output: 2 shown") == std::string::npos,
-         "tui output preview counts empty, unterminated, LF-terminated, and CRLF-terminated logical lines without a synthetic trailing line");
+  expect(empty_preview.find("output:") == std::string::npos && unterminated_preview.find("output:") != std::string::npos &&
+             lf_preview.find("output:") != std::string::npos && crlf_preview.find("output:") != std::string::npos &&
+             tui_test_support::count_occurrences(unterminated_preview, "one") == 1 && tui_test_support::count_occurrences(lf_preview, "one") == 1 &&
+             tui_test_support::count_occurrences(crlf_preview, "one") == 1,
+         "tui output previews handle empty, unterminated, LF-terminated, and CRLF-terminated logical lines without a synthetic trailing row");
+
+  std::string thousand_line_json = "{\"output\":\"";
+  for (std::size_t line = 1; line <= 1000; ++line)
+  {
+    auto number = std::to_string(line);
+    thousand_line_json += "shell line " + std::string(4 - number.size(), '0') + number;
+    if (line != 1000)
+      thousand_line_json += "\\n";
+  }
+  thousand_line_json += "\"}";
+  auto thousand_line_item = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                       .name = "bash",
+                                                       .result_summary = "exit 0",
+                                                       .result_json = thousand_line_json,
+                                                       .lifecycle = ava::tui::ToolLifecycleState::Complete};
+  auto const thousand_expanded =
+      tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(thousand_line_item, 96, ava::tui::ToolPresentation::Expanded));
+  auto const thousand_rich = tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(thousand_line_item, 96, ava::tui::ToolPresentation::Rich));
+  expect(thousand_expanded.find("shell line 0801") != std::string::npos && thousand_expanded.find("shell line 1000") != std::string::npos &&
+             thousand_expanded.find("shell line 0800") == std::string::npos && thousand_expanded.find("800 lines hidden") != std::string::npos,
+         "tui Expanded shell previews select the final 200 lines from the complete source and report the exact hidden count");
+  expect(thousand_rich.find("shell line 0996") != std::string::npos && thousand_rich.find("shell line 1000") != std::string::npos &&
+             thousand_rich.find("shell line 0995") == std::string::npos && thousand_rich.find("995 lines hidden") != std::string::npos,
+         "tui Rich shell previews select the final 5 lines from the complete source and report the exact hidden count");
+
+  auto rich_preview = [](std::string name, std::size_t count) {
+    std::string result_json = "{\"output\":\"";
+    for (std::size_t line = 1; line <= count; ++line)
+    {
+      auto number = std::to_string(line);
+      result_json += name + " cap line " + std::string(3 - number.size(), '0') + number;
+      if (line != count)
+        result_json += "\\n";
+    }
+    result_json += "\"}";
+    return tui_test_support::join_visible_lines(
+        ava::tui::detail::render_tool_card(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                      .name = std::move(name),
+                                                                      .result_json = std::move(result_json),
+                                                                      .lifecycle = ava::tui::ToolLifecycleState::Complete},
+                                           96, ava::tui::ToolPresentation::Rich));
+  };
+  auto const grep_rich = rich_preview("grep", 20);
+  auto const find_rich = rich_preview("find", 25);
+  auto const read_rich = rich_preview("read_file", 12);
+  expect(grep_rich.find("grep cap line 001") != std::string::npos && grep_rich.find("grep cap line 015") != std::string::npos &&
+             grep_rich.find("grep cap line 016") == std::string::npos && grep_rich.find("5 lines hidden") != std::string::npos &&
+             find_rich.find("find cap line 001") != std::string::npos && find_rich.find("find cap line 020") != std::string::npos &&
+             find_rich.find("find cap line 021") == std::string::npos && find_rich.find("5 lines hidden") != std::string::npos &&
+             read_rich.find("read_file cap line 001") != std::string::npos && read_rich.find("read_file cap line 010") != std::string::npos &&
+             read_rich.find("read_file cap line 011") == std::string::npos && read_rich.find("2 lines hidden") != std::string::npos,
+         "tui Rich output previews use Pi-aligned grep, listing, and file caps with exact hidden counts");
+
+  std::string retained_crlf_json = "{\"output\":\"";
+  for (std::size_t line = 901; line <= 1000; ++line) retained_crlf_json += "retained " + std::to_string(line) + "\\r\\n";
+  retained_crlf_json += "\"}";
+  auto const retained_crlf =
+      tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                                                         .name = "bash",
+                                                                                                         .result_summary = "exit 0",
+                                                                                                         .result_json = std::move(retained_crlf_json),
+                                                                                                         .lifecycle = ava::tui::ToolLifecycleState::Complete,
+                                                                                                         .total_lines = 1000,
+                                                                                                         .omitted_lines = 900},
+                                                                              96, ava::tui::ToolPresentation::Expanded));
+  expect(retained_crlf.find("retained 901") != std::string::npos && retained_crlf.find("retained 1000") != std::string::npos &&
+             retained_crlf.find("900 lines hidden") != std::string::npos && retained_crlf.find("1000 lines hidden") == std::string::npos,
+         "tui shell previews combine CRLF/trailing-newline sources with authoritative total/omitted counts without double counting");
+
+  auto huge_line = std::string(512 * 1024 - 28, 'x') + "FINAL-HUGE-LINE";
+  auto const huge_line_card = ava::tui::detail::render_tool_card(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                                            .name = "bash",
+                                                                                            .result_summary = "exit 0",
+                                                                                            .result_json = "{\"output\":\"" + huge_line + "\"}",
+                                                                                            .lifecycle = ava::tui::ToolLifecycleState::Complete},
+                                                                 40, ava::tui::ToolPresentation::Expanded);
+  auto const huge_line_text = tui_test_support::join_visible_lines(huge_line_card);
+  expect(huge_line_card.size() <= 203, "tui huge single-line shell previews cap materialized visual rows");
+  expect(huge_line_text.find("FINAL-HUGE-LINE") != std::string::npos, "tui huge single-line tail previews retain the exact final content");
+  expect(huge_line_text.find("more output hidden") != std::string::npos,
+         "tui huge single-line shell previews disclose conservative hidden output instead of a false exact count");
+  expect(std::ranges::all_of(huge_line_card, [](std::string const& line) { return visible_columns(line) <= 40; }),
+         "tui huge single-line shell preview rows remain width bounded");
 
   std::string seq_output_json = "{\"output\":\"";
   for (std::size_t line = 19801; line <= 20000; ++line) seq_output_json += std::to_string(line) + "\\n";
@@ -1114,9 +1248,9 @@ void test_tui_large_tool_output_preview_is_bounded()
                                                                     96, true);
   auto const seq_preview_text = tui_test_support::join_visible_lines(seq_preview_lines);
 
-  expect(seq_preview_text.find("output: 8 shown/20000 lines · 19992 hidden") != std::string::npos && seq_preview_text.find("20001") == std::string::npos &&
-             seq_preview_text.find("19993 hidden") == std::string::npos,
-         "tui truncated seq-like output keeps authoritative 20000-line totals and hidden-line math after a final LF");
+  expect(seq_preview_text.find("output:") != std::string::npos && seq_preview_text.find("19800 lines hidden") != std::string::npos &&
+             seq_preview_text.find("20000") != std::string::npos && seq_preview_text.find("20001") == std::string::npos,
+         "tui expanded seq-like output uses its defensive cap and authoritative hidden-line metadata after a final LF");
 
   constexpr auto total_lines = std::size_t{20000};
   std::string output_json = "{\"output\":\"";
@@ -1149,22 +1283,23 @@ void test_tui_large_tool_output_preview_is_bounded()
 
   expect(compact.size() == 1 && compact_text.find("output:") == std::string::npos && compact_text.find("large output line") == std::string::npos,
          "tui collapsed tool cards never render large output preview bodies");
-  expect(expanded_text.find("output: 8 shown/20000 lines · 19992 hidden") != std::string::npos &&
-             expanded_text.find("large output line 7") != std::string::npos && expanded_text.find("large output line 8") == std::string::npos &&
-             expanded_text.find("large output line 19999") == std::string::npos &&
+  expect(expanded_text.find("output:") != std::string::npos && expanded_text.find("large output line 0") != std::string::npos &&
+             expanded_text.find("large output line 199") != std::string::npos && expanded_text.find("large output line 200") == std::string::npos &&
+             expanded_text.find("large output line 19999") == std::string::npos && expanded.size() <= 205 &&
              std::ranges::all_of(expanded, [](std::string const& line) { return visible_columns(line) <= 96; }),
-         "tui expanded output preview remains bounded for large tool output");
+         "tui Expanded output remains defensively capped for large tool output");
   expect(elapsed < std::chrono::seconds(2), "tui large tool-output preview avoids pathological redraw cost");
 }
 
 void test_tui_f5_progressive_tool_details()
 {
   auto const& joined = tui_test_support::join_plain_lines;
-  auto const& occurrences = tui_test_support::count_occurrences;
   using tui_test_support::plain_lines;
   auto row_text = [](ava::tui::ToolTimelineItem item) {
     auto const lines = ava::tui::detail::render_tool_card(item, 120, false);
-    return lines.empty() ? std::string{} : strip_sgr(lines.front());
+    auto row = lines.empty() ? std::string{} : strip_sgr(lines.front());
+    while (!row.empty() && row.back() == ' ') row.pop_back();
+    return row;
   };
   for (auto const lifecycle :
        {ava::tui::ToolLifecycleState::ProviderAnnounced, ava::tui::ToolLifecycleState::ArgumentsStreaming, ava::tui::ToolLifecycleState::ArgumentsComplete})
@@ -1198,140 +1333,66 @@ void test_tui_f5_progressive_tool_details()
   expect(compact_identity_row.find("call_private") == std::string::npos,
          "tui F5 compact summaries suppress explicit tool identifiers even when echoed by a result");
 
-  auto arguments = std::string("{\"path\":\"src/detail.cpp\",\"replacement\":\"") + std::string(900, 'x') + "TAIL" +
-                   "\x1b"
-                   "[31m\"}";
-  auto detail_item = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Error,
-                                                .name = "edit_file",
-                                                .argument_summary = "path=src/detail.cpp",
-                                                .result_summary = " permission   denied ",
-                                                .arguments_json = arguments,
-                                                .result_json = "{\"output\":\"permission denied\\t\"}",
-                                                .call_id = "call_detail\x1b[31m",
-                                                .request_id = "request_detail",
-                                                .correlation_id = "correlation_detail",
-                                                .lifecycle = ava::tui::ToolLifecycleState::Error,
-                                                .permissions = {ava::tui::ToolPermissionAuditItem{.permission_request_id = "perm_detail", .decision = "deny"}},
-                                                .diff = "--- src/detail.cpp\n+++ src/detail.cpp\n-old\n+new",
-                                                .changed_paths = {"src/detail.cpp", "tests/hidden.cpp"},
-                                                .truncated = true,
-                                                .output_bytes = 40,
-                                                .total_bytes = 400,
-                                                .next_offset_line = 9,
-                                                .omitted_bytes = 360,
-                                                .spill_path = "/tmp/ava-spill/detail.txt",
-                                                .spill_truncated = true};
+  auto detail_item = ava::tui::ToolTimelineItem{
+      .status = ava::tui::ToolTimelineStatus::Error,
+      .name = "edit_file",
+      .argument_summary = "path=src/detail.cpp",
+      .result_summary = "permission denied",
+      .arguments_json = "{\"path\":\"src/detail.cpp\",\"edits\":[{}]}",
+      .result_json = "{\"output\":\"permission denied\\nretained diagnostic\"}",
+      .call_id = "call_detail",
+      .request_id = "request_detail",
+      .correlation_id = "correlation_detail",
+      .lifecycle = ava::tui::ToolLifecycleState::Error,
+      .permissions = {ava::tui::ToolPermissionAuditItem{
+          .permission_request_id = "perm_detail", .resolver_request_id = "resolver_detail", .decision = "deny", .reason = "write was rejected"}},
+      .diff = "--- src/detail.cpp\n+++ src/detail.cpp\n-old\n+new",
+      .changed_paths = {"src/detail.cpp", "tests/hidden.cpp"},
+      .truncated = true,
+      .output_bytes = 40,
+      .total_bytes = 400,
+      .next_offset_line = 9,
+      .omitted_bytes = 360,
+      .spill_path = "/tmp/ava-spill/detail.txt",
+      .spill_truncated = true};
   auto const collapsed = plain_lines(ava::tui::detail::render_tool_card(detail_item, 120, false));
-  auto const expanded = plain_lines(ava::tui::detail::render_tool_card(detail_item, 700, true));
+  auto const expanded = plain_lines(ava::tui::detail::render_tool_card(detail_item, 160, true));
   auto const expanded_text = joined(expanded);
   auto const copy = ava::tui::detail::tool_card_copy_text(detail_item);
-  expect(joined(collapsed).find("call_detail") == std::string::npos && joined(collapsed).find("request_detail") == std::string::npos &&
-             joined(collapsed).find("correlation_detail") == std::string::npos && joined(collapsed).find("tests/hidden.cpp") == std::string::npos &&
-             expanded_text.find("call id: call_detail?[31m") != std::string::npos && expanded_text.find("request id: request_detail") != std::string::npos &&
-             expanded_text.find("correlation id: correlation_detail") != std::string::npos,
-         "tui F5 supplied identifiers and changed-path lists are expanded-only while resting rows stay clean");
-  expect(expanded_text.find("\n  │     result:  permission   denied ") != std::string::npos &&
-             expanded_text.find("\n  │     output: 1 shown line") != std::string::npos && expanded_text.find("input: {") != std::string::npos &&
-             expanded_text.find("TAIL") == std::string::npos,
-         "tui F5 expanded truncated payloads preserve distinct result/output whitespace and bound generic input");
-  auto const redundant_input_text =
-      joined(plain_lines(ava::tui::detail::render_tool_card(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Running,
-                                                                                       .name = "bash",
-                                                                                       .argument_summary = "command=blocked",
-                                                                                       .arguments_json = "{\"command\":\"blocked\"}",
-                                                                                       .lifecycle = ava::tui::ToolLifecycleState::ExecutionStarted},
-                                                            120, true)));
-  auto const exact_input_text =
-      joined(plain_lines(ava::tui::detail::render_tool_card(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Running,
-                                                                                       .name = "custom_tool",
-                                                                                       .argument_summary = "blocked",
-                                                                                       .arguments_json = "blocked",
-                                                                                       .lifecycle = ava::tui::ToolLifecycleState::ExecutionStarted},
-                                                            120, true)));
-  expect(redundant_input_text.find("input: {\"command\":\"blocked\"}") != std::string::npos && exact_input_text.find("input:") == std::string::npos,
-         "tui F5 expanded cards omit structured input only for exact sanitized content, not punctuation-stripped resemblance");
-  expect(expanded_text.find("truncation: truncated 40/400 bytes; next offset 9; omitted 360 bytes") != std::string::npos,
-         "tui F5 expanded truncation retains exact counts and next-offset metadata");
-  auto const shell_byte_text =
-      joined(plain_lines(ava::tui::detail::render_tool_card(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
-                                                                                       .name = "bash",
-                                                                                       .result_summary = "exit 0",
-                                                                                       .result_json = "{\"output\":\"one\\ntwo\"}",
-                                                                                       .lifecycle = ava::tui::ToolLifecycleState::Complete,
-                                                                                       .truncated = true,
-                                                                                       .output_bytes = 40,
-                                                                                       .total_bytes = 400,
-                                                                                       .output_lines = 2,
-                                                                                       .total_lines = 20},
-                                                            160, true)));
-  expect(shell_byte_text.find("bytes: 40/400 bytes retained") != std::string::npos,
-         "tui F5 expanded shell lifecycle details retain explicit byte counts alongside line truncation");
-  expect(occurrences(expanded_text, "/tmp/ava-spill/detail.txt") == 1 && expanded_text.find("full output: /tmp/ava-spill/detail.txt") != std::string::npos &&
-             expanded_text.find("spill incomplete") != std::string::npos,
-         "tui F5 expanded spill metadata is separate, nonduplicated, and truthful");
-  expect(expanded_text.find("toggle: /tool request_detail") != std::string::npos &&
-             expanded_text.find("copy: /copy tool request_detail") != std::string::npos &&
-             expanded_text.find("diff: /diff request_detail") != std::string::npos &&
-             expanded_text.find("copy diff: /copy diff request_detail") != std::string::npos && expanded_text.find("/read") == std::string::npos &&
-             expanded_text.find("show more") == std::string::npos && expanded_text.find("open spill") == std::string::npos,
-         "tui F5 expanded cards advertise only existing stable-query toggle, copy, and diff command contracts");
-  auto request_query_item = detail_item;
-  request_query_item.call_id.clear();
-  auto const request_query_text = joined(plain_lines(ava::tui::detail::render_tool_card(request_query_item, 160, true)));
-  expect(request_query_text.find("toggle: /tool request_detail") != std::string::npos,
-         "tui F5 stable action queries fall back from call to request identity before path or name");
-  auto path_query_item = detail_item;
-  path_query_item.call_id.clear();
-  path_query_item.request_id.clear();
-  path_query_item.correlation_id.clear();
-  auto path_query_text = joined(plain_lines(ava::tui::detail::render_tool_card(path_query_item, 160, true)));
-  path_query_item.changed_paths = {"/tmp/private/detail.cpp"};
-  path_query_item.argument_summary = "path=/tmp/private/detail.cpp";
-  path_query_item.arguments_json = "{\"path\":\"/tmp/private/detail.cpp\"}";
-  auto name_query_text = joined(plain_lines(ava::tui::detail::render_tool_card(path_query_item, 160, true)));
-  expect(path_query_text.find("toggle: /tool src/detail.cpp") != std::string::npos && name_query_text.find("toggle: /tool edit_file") != std::string::npos &&
-             name_query_text.find("/tool /tmp/private") == std::string::npos,
-         "tui F5 stable action queries prefer a supplied relative changed path and never use an absolute path");
-  expect(copy.find("input: ") != std::string::npos && copy.find("TAIL") != std::string::npos && copy.find("call id: call_detail") != std::string::npos &&
-             copy.find("request id: request_detail") != std::string::npos && copy.find("correlation id: correlation_detail") != std::string::npos &&
-             copy.find("full output: /tmp/ava-spill/detail.txt") != std::string::npos && copy.find("spill incomplete: true") != std::string::npos &&
+  expect(joined(collapsed).find("call_detail") == std::string::npos && joined(collapsed).find("resolver_detail") == std::string::npos &&
+             joined(collapsed).find("write was rejected") != std::string::npos,
+         "tui F5 compact denied cards retain a human reason without internal identities");
+  expect(expanded_text.find("src/detail.cpp · 1 edit") != std::string::npos &&
+             expanded_text.find("changed: src/detail.cpp, tests/hidden.cpp") != std::string::npos &&
+             expanded_text.find("truncation: truncated 40/400 bytes; next offset 9; omitted 360 bytes") != std::string::npos &&
+             expanded_text.find("full output: /tmp/ava-spill/detail.txt") != std::string::npos &&
+             expanded_text.find("spill incomplete: true") != std::string::npos && expanded_text.find("-old") != std::string::npos &&
+             expanded_text.find("+new") != std::string::npos,
+         "tui F5 expanded cards retain human calls, changed paths, truncation, spill, and diff details");
+  expect(expanded_text.find("call_detail") == std::string::npos && expanded_text.find("request_detail") == std::string::npos &&
+             expanded_text.find("correlation_detail") == std::string::npos && expanded_text.find("perm_detail") == std::string::npos &&
+             expanded_text.find("resolver_detail") == std::string::npos && expanded_text.find("toggle: /tool") == std::string::npos,
+         "tui F5 expanded cards omit internal identities, routine audit receipts, and noisy action commands");
+  expect(copy.find("call_detail") == std::string::npos && copy.find("request_detail") == std::string::npos &&
+             copy.find("correlation_detail") == std::string::npos && copy.find("perm_detail") == std::string::npos &&
+             copy.find("resolver_detail") == std::string::npos && copy.find("full output: /tmp/ava-spill/detail.txt") != std::string::npos &&
              copy.find('\x1b') == std::string::npos,
-         "tui F5 copied tool diagnostics retain complete supplied input, identifiers, output metadata, and control hygiene");
-  auto const duplicate_shell_copy = ava::tui::detail::tool_card_copy_text(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Error,
-                                                                                                     .name = "bash",
-                                                                                                     .argument_summary = "command=blocked",
-                                                                                                     .result_summary = "permission denied",
-                                                                                                     .arguments_json = "{\"command\":\"blocked\"}",
-                                                                                                     .result_json = "{\"output\":\" permission   denied\\n\"}",
-                                                                                                     .lifecycle = ava::tui::ToolLifecycleState::Error});
-  expect(occurrences(duplicate_shell_copy, "permission denied") == 1 && duplicate_shell_copy.find("result: permission denied") == std::string::npos &&
-             duplicate_shell_copy.find("output:\n   permission   denied") != std::string::npos,
-         "tui F5 copied diagnostics deduplicate exact shell status/result while preserving output with distinct internal whitespace");
+         "tui F5 copied tool details retain useful output metadata without internal identities or control bytes");
 
-  auto render_payload_detail = [&](std::string result, std::string output, bool truncated) {
-    auto item = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
-                                           .name = "payload_tool",
-                                           .result_summary = std::move(result),
-                                           .result_json = "{\"output\":\"" + ava::core::json::escape(output) + "\"}",
-                                           .lifecycle = ava::tui::ToolLifecycleState::Complete,
-                                           .truncated = truncated};
-    return std::pair{joined(plain_lines(ava::tui::detail::render_tool_card(item, 160, true))), ava::tui::detail::tool_card_copy_text(item)};
-  };
-  auto const [newline_render, newline_copy] = render_payload_detail("a b", "a\nb", false);
-  auto const [punctuation_render, punctuation_copy] = render_payload_detail("{\"value\":1}", "{\"value\":\"1\"}", false);
-  auto const [exact_render, exact_copy] = render_payload_detail("exact payload", "exact payload", false);
-  auto const [truncated_render, truncated_copy] = render_payload_detail("exact payload", "exact payload", true);
-  auto const [trailing_lf_render, trailing_lf_copy] = render_payload_detail("exact payload", "exact payload\n", false);
-  expect(newline_render.find("output: 2 shown lines") != std::string::npos && newline_copy.find("result: a b") != std::string::npos &&
-             newline_copy.find("output:\n  a\n  b") != std::string::npos && punctuation_render.find("output: 1 shown line") != std::string::npos &&
-             punctuation_copy.find("result: {\"value\":1}") != std::string::npos && punctuation_copy.find("output: {\"value\":\"1\"}") != std::string::npos,
-         "tui F5 payload suppression preserves internal newlines and JSON punctuation in expanded and copied details");
-  expect(exact_render.find("\n  │     output:") == std::string::npos && exact_copy.find("output:") == std::string::npos &&
-             truncated_render.find("\n  │     result: exact payload") != std::string::npos &&
-             truncated_render.find("\n  │     output: 1 shown line") != std::string::npos &&
-             truncated_copy.find("result: exact payload") != std::string::npos && truncated_copy.find("output: exact payload") != std::string::npos &&
-             trailing_lf_render.find("\n  │     output:") == std::string::npos && trailing_lf_copy.find("output:") == std::string::npos,
-         "tui F5 payload suppression removes only exact complete duplicates, permits trailing LF equivalence, and retains exact truncated duplicates");
+  auto const exact_payload = ava::tui::detail::render_tool_card(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                                           .name = "payload_tool",
+                                                                                           .result_summary = "exact payload",
+                                                                                           .result_json = "{\"output\":\"exact payload\"}",
+                                                                                           .lifecycle = ava::tui::ToolLifecycleState::Complete},
+                                                                120, ava::tui::ToolPresentation::Rich);
+  auto const distinct_payload = ava::tui::detail::render_tool_card(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                                              .name = "payload_tool",
+                                                                                              .result_summary = "a b",
+                                                                                              .result_json = "{\"output\":\"a\\nb\"}",
+                                                                                              .lifecycle = ava::tui::ToolLifecycleState::Complete},
+                                                                   120, ava::tui::ToolPresentation::Rich);
+  expect(joined(plain_lines(exact_payload)).find("output:") == std::string::npos && joined(plain_lines(distinct_payload)).find("output:") != std::string::npos,
+         "tui F5 Rich cards suppress exact duplicate output while preserving structurally distinct output");
 
   std::vector<ava::tui::TranscriptItem> toggle_transcript{
       ava::tui::TranscriptItem{.tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
@@ -1377,14 +1438,14 @@ void test_tui_f5_progressive_tool_details()
   auto const heading_row = heading_line == hit_frame.end() ? 0 : static_cast<std::size_t>(heading_line - hit_frame.begin()) + 1;
   auto const hit_canvas = ava::tui::composer_canvas_layout(hit_snapshot);
   expect(hit_canvas.content_width == 120 && hit_canvas.left == 20 &&
-             ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, glob_row, 21) == 1 &&
-             ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, detail_row, 140) == 2 &&
+             ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, glob_row, 23) == 1 &&
+             ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, detail_row, 138) == 2 &&
              !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, intro_row, 24) &&
              !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, heading_row, 24) &&
-             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, detail_row, 20) &&
-             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, detail_row, 141) &&
+             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, detail_row, 22) &&
+             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, detail_row, 139) &&
              !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, hit_snapshot.height, 24),
-         "tui F5 tool header hit testing uses centered transcript geometry and rejects headings, both exact gutters, and composer rows");
+         "tui F5 tool header hit testing uses centered transcript geometry and rejects headings, both two-cell card margins, and composer rows");
 
   hit_snapshot.transcript[2].tool->details_visible = true;
   auto expanded_hit_frame = plain_lines(ava::tui::render_composer(hit_snapshot));
@@ -1395,7 +1456,7 @@ void test_tui_f5_progressive_tool_details()
   expect(ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, expanded_detail_row, 28) == 2 &&
              !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, expanded_detail_row + 1, 28),
          "tui F5 per-card expansion hit testing toggles only the original header and rejects payload rows");
-  hit_snapshot.tool_details_visible = true;
+  hit_snapshot.tool_presentation = ava::tui::ToolPresentation::Expanded;
   expect(ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, glob_row, 28) == 1,
          "tui F5 header hit testing shares global expansion geometry");
 
@@ -1415,7 +1476,7 @@ void test_tui_f5_progressive_tool_details()
   auto detached = hit_snapshot;
   detached.width = 80;
   detached.height = 24;
-  detached.tool_details_visible = false;
+  detached.tool_presentation = ava::tui::ToolPresentation::Compact;
   detached.sidebar.reset();
   detached.transcript.insert(detached.transcript.begin(), 30, ava::tui::TranscriptItem{.label = "you", .text = "older transcript line"});
   detached.transcript.insert(detached.transcript.end(), 30, ava::tui::TranscriptItem{.label = "ava", .text = "newer transcript line"});
@@ -1427,7 +1488,7 @@ void test_tui_f5_progressive_tool_details()
   detached.transcript_scroll_offset = max_scroll - std::min(max_scroll, desired_start);
   expect(!ava::tui::detail::transcript_tool_card_header_for_screen_position(detached, 1, 4) &&
              ava::tui::detail::transcript_tool_card_header_for_screen_position(detached, 2, 4) == 31,
-         "tui F5 detached transcript hit testing rejects the scroll indicator and maps the anchored visible tool header");
+         "tui F5 detached transcript hit testing rejects the prose-to-tool spacer and maps the anchored visible tool header without a banner row");
 
   for (auto const& [width, height] : {std::pair{std::size_t{160}, std::size_t{48}}, std::pair{std::size_t{120}, std::size_t{36}},
                                       std::pair{std::size_t{80}, std::size_t{24}}, std::pair{std::size_t{100}, std::size_t{12}}})

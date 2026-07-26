@@ -627,6 +627,14 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     add_completion(item, 2, "--force", "Replace the existing keybinds.json with the imported file", "General", {"import"}, false);
   }
 
+  if (auto index = find_item_index(items, "/details"))
+  {
+    auto& item = items[*index];
+    add_completion(item, 0, "compact", "Use one fitted summary row per tool", "General", {}, false);
+    add_completion(item, 0, "rich", "Use human calls with bounded useful output", "General", {}, false);
+    add_completion(item, 0, "expanded", "Show all retained output within the defensive display cap", "General", {}, false);
+  }
+
   if (auto index = find_item_index(items, "/theme"))
   {
     auto& item = items[*index];

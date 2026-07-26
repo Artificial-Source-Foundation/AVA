@@ -417,7 +417,7 @@ std::optional<std::string_view> copy_text_for_option(QuestionPromptOptionView co
 
 std::string modal_line(std::string content, std::size_t width)
 {
-  return composer_surface_line("  " + std::move(content), width);
+  return question_surface_line("  " + std::move(content), width);
 }
 
 std::vector<std::string> modal_wrapped_lines(std::string_view text, std::size_t width)
@@ -438,8 +438,8 @@ std::vector<std::string> modal_wrapped_lines(std::string_view text, std::size_t 
 
 std::string modal_title_line(QuestionPromptView const& prompt, std::size_t width)
 {
-  std::string line = std::string(kSgrAccent) + std::string(kSgrBold) + question_title(prompt) + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  std::string const esc = std::string(kSgrMuted) + "esc" + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  std::string line = std::string(kSgrAccent) + std::string(kSgrBold) + question_title(prompt) + std::string(kSgrReset) + std::string(kSgrQuestionBg);
+  std::string const esc = std::string(kSgrMuted) + "esc" + std::string(kSgrReset) + std::string(kSgrQuestionBg);
   auto const line_cols = terminal_text_columns(line);
   auto const esc_cols = terminal_text_columns(esc);
   if (line_cols + esc_cols + 3 < width)
@@ -451,8 +451,8 @@ std::string modal_search_line(QuestionPromptView const& prompt, std::size_t widt
 {
   std::string query = sanitize_terminal_text(prompt.custom_text);
   if (query.empty())
-    query = std::string(kSgrMuted) + "Search" + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  query += std::string(kSgrAccent) + "█" + std::string(kSgrReset) + std::string(kSgrComposerBg);
+    query = std::string(kSgrMuted) + "Search" + std::string(kSgrReset) + std::string(kSgrQuestionBg);
+  query += std::string(kSgrAccent) + "█" + std::string(kSgrReset) + std::string(kSgrQuestionBg);
   return modal_line("Search: " + std::move(query), width);
 }
 
@@ -582,19 +582,23 @@ QuestionRenderRows render_question_prompt_rows(QuestionPromptView const& prompt,
   append_question_row(rows, question_dock_header(prompt, width));
   if (rows.lines.size() >= max_lines)
     return rows;
-  append_question_row(rows, fit_line_preserving_sgr("  " + sanitize_terminal_text(prompt.question), width));
-  if (rows.lines.size() >= max_lines)
-    return rows;
 
-  auto const option_budget = prompt.allow_custom && max_lines > rows.lines.size() + 2 ? max_lines - rows.lines.size() - 2 : max_lines - rows.lines.size() - 1;
+  auto const content_width = width > 4 ? width - 4 : std::size_t{1};
+  auto question_lines = wrap_transcript_text(sanitize_terminal_text(prompt.question), content_width);
+  auto const has_option = !matching_option_indices(prompt).empty() || prompt.allow_custom;
+  auto const reserved = std::size_t{1} + (has_option ? std::size_t{1} : std::size_t{0});
+  auto const question_budget = max_lines > rows.lines.size() + reserved ? std::min<std::size_t>(4, max_lines - rows.lines.size() - reserved) : std::size_t{0};
+  for (std::size_t index = 0; index < std::min(question_lines.size(), question_budget); ++index)
+    append_question_row(rows, fit_line_preserving_sgr("  " + question_lines[index], width));
+
+  auto const custom_rows = prompt.allow_custom ? std::size_t{1} : std::size_t{0};
+  auto const option_budget = max_lines > rows.lines.size() + 1 + custom_rows ? max_lines - rows.lines.size() - 1 - custom_rows : std::size_t{0};
   auto const matches = matching_option_indices(prompt);
   auto const start = visible_option_window_start(matches, prompt.selected_option_index, option_budget);
   auto const end = std::min(matches.size(), start + option_budget);
   for (std::size_t visible = start; visible < end; ++visible)
-  {
     append_question_row(rows, question_option_line(prompt, matches[visible], width), matches[visible]);
-  }
-  if (prompt.allow_custom && rows.lines.size() < max_lines)
+  if (prompt.allow_custom && rows.lines.size() + 1 < max_lines)
     append_question_row(rows, question_custom_line(prompt, width));
   if (rows.lines.size() < max_lines)
     append_question_row(rows, question_dock_keys(prompt, width));
@@ -606,13 +610,13 @@ QuestionRenderRows render_question_modal_rows(QuestionPromptView const& prompt, 
   QuestionRenderRows rows;
   if (max_lines == 0)
     return rows;
-  append_question_row(rows, composer_surface_line("", width));
+  append_question_row(rows, question_surface_line("", width));
   if (rows.lines.size() >= max_lines)
     return rows;
   append_question_row(rows, modal_title_line(prompt, width));
   if (rows.lines.size() >= max_lines)
     return rows;
-  append_question_row(rows, composer_surface_line("", width));
+  append_question_row(rows, question_surface_line("", width));
   if (rows.lines.size() >= max_lines)
     return rows;
 
@@ -621,7 +625,7 @@ QuestionRenderRows render_question_modal_rows(QuestionPromptView const& prompt, 
     append_question_row(rows, modal_search_line(prompt, width));
     if (rows.lines.size() >= max_lines)
       return rows;
-    append_question_row(rows, composer_surface_line("", width));
+    append_question_row(rows, question_surface_line("", width));
     if (rows.lines.size() >= max_lines)
       return rows;
   }
@@ -641,7 +645,7 @@ QuestionRenderRows render_question_modal_rows(QuestionPromptView const& prompt, 
       append_question_row(rows, modal_line(std::string(kSgrMuted) + "..." + std::string(kSgrReset), width));
     if (rows.lines.size() >= max_lines)
       return rows;
-    append_question_row(rows, composer_surface_line("", width));
+    append_question_row(rows, question_surface_line("", width));
     if (rows.lines.size() >= max_lines)
       return rows;
   }
@@ -666,10 +670,10 @@ QuestionRenderRows render_question_modal_rows(QuestionPromptView const& prompt, 
   if (prompt.allow_custom && !prompt.searchable && rows.lines.size() < max_lines)
     append_question_row(rows, question_custom_line(prompt, width));
   if (rows.lines.size() < max_lines)
-    append_question_row(rows, composer_surface_line("", width));
+    append_question_row(rows, question_surface_line("", width));
   if (rows.lines.size() < max_lines)
     append_question_row(rows, modal_keys_line(prompt, width));
-  while (rows.lines.size() < max_lines) append_question_row(rows, composer_surface_line("", width));
+  while (rows.lines.size() < max_lines) append_question_row(rows, question_surface_line("", width));
   return rows;
 }
 
@@ -677,12 +681,16 @@ QuestionRenderRows render_question_modal_rows(QuestionPromptView const& prompt, 
 
 std::vector<std::string> render_question_prompt(QuestionPromptView const& prompt, std::size_t width, std::size_t max_lines)
 {
-  return render_question_prompt_rows(prompt, width, max_lines).lines;
+  auto lines = render_question_prompt_rows(prompt, width, max_lines).lines;
+  for (auto& line : lines) line = question_surface_line(std::move(line), width);
+  return lines;
 }
 
 std::vector<std::string> render_question_modal(QuestionPromptView const& prompt, std::size_t width, std::size_t max_lines)
 {
-  return render_question_modal_rows(prompt, width, max_lines).lines;
+  auto lines = render_question_modal_rows(prompt, width, max_lines).lines;
+  for (auto& line : lines) line = question_surface_line(std::move(line), width);
+  return lines;
 }
 
 std::optional<std::size_t> question_option_for_dock_row(QuestionPromptView const& prompt, std::size_t row, std::size_t width, std::size_t max_lines)

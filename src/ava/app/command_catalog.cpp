@@ -36,7 +36,10 @@ std::vector<CommandCatalogEntry> const& command_catalog()
       CommandCatalogEntry{
           .command = "/theme", .description = "Persist the TUI display theme", .hint = "[dark|light|plain|custom-name|reset]", .category = "General"},
       CommandCatalogEntry{.command = "/mode", .description = "Toggle build/plan mode", .category = "General"},
-      CommandCatalogEntry{.command = "/details", .description = "Toggle tool detail view", .category = "General"},
+      CommandCatalogEntry{.command = "/details",
+                          .description = "Set or toggle Compact, Rich, or Expanded tool cards",
+                          .hint = "[compact|rich|expanded]",
+                          .category = "General"},
       CommandCatalogEntry{.command = "/tool",
                           .aliases = {"/tools"},
                           .description = "Show the latest or matching tool details in the TUI",

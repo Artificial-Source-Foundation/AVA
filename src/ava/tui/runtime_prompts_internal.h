@@ -2,10 +2,12 @@
 
 #include "ava/app/events.h"
 #include "ava/agent/question.h"
+#include "ava/tui/terminal.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -16,6 +18,11 @@
 #include "debug.h"
 
 namespace ava::tui {
+
+namespace detail {
+[[nodiscard]] bool prompt_wheel_input_suppressed(Key key, std::optional<std::chrono::steady_clock::time_point> const& deadline,
+                                                 std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+}
 
 struct ComposerSnapshot;
 struct TuiRuntimeOptions;

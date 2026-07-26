@@ -32,6 +32,61 @@
 #include <curses.h>
 
 namespace ava::tui {
+namespace detail {
+namespace {
+
+std::size_t elapsed_intervals(std::chrono::steady_clock::time_point now, std::chrono::steady_clock::time_point next,
+                              std::chrono::steady_clock::duration interval)
+{
+  if (now < next)
+    return 0;
+  return 1 + static_cast<std::size_t>((now - next) / interval);
+}
+
+}  // namespace
+
+ActiveRunCadence::ActiveRunCadence(std::chrono::steady_clock::time_point started_at)
+    : next_frame_(started_at + kActiveRunFrameDelay), next_spinner_(started_at + kProcessingIndicatorFrameDelay)
+{
+}
+
+bool ActiveRunCadence::frame_due(std::chrono::steady_clock::time_point now) const
+{
+  return now >= next_frame_;
+}
+
+std::chrono::milliseconds ActiveRunCadence::wait_duration(std::chrono::steady_clock::time_point now) const
+{
+  if (frame_due(now))
+    return std::chrono::milliseconds::zero();
+  return std::chrono::ceil<std::chrono::milliseconds>(next_frame_ - now);
+}
+
+ActiveRunCadenceTick ActiveRunCadence::advance(std::chrono::steady_clock::time_point now)
+{
+  auto const frame_interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(kActiveRunFrameDelay);
+  auto const spinner_interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(kProcessingIndicatorFrameDelay);
+  auto const frames = elapsed_intervals(now, next_frame_, frame_interval);
+  auto const spinner_frames = elapsed_intervals(now, next_spinner_, spinner_interval);
+  next_frame_ += frame_interval * frames;
+  next_spinner_ += spinner_interval * spinner_frames;
+  return ActiveRunCadenceTick{.elapsed_frames = frames, .elapsed_spinner_frames = spinner_frames};
+}
+
+void ActiveRunCadence::frame_painted(std::chrono::steady_clock::time_point completed_at)
+{
+  next_frame_ = completed_at + kActiveRunFrameDelay;
+}
+
+ActiveRunInputReadDecision active_run_input_read_decision(bool input_buffered, bool frame_due)
+{
+  if (frame_due)
+    return ActiveRunInputReadDecision::ServiceFrame;
+  return input_buffered ? ActiveRunInputReadDecision::DrainBufferedInput : ActiveRunInputReadDecision::WaitForNextFrame;
+}
+
+}  // namespace detail
+
 using runtime_commands::is_compact_command;
 using runtime_commands::shell_helper_submission;
 using runtime_commands::should_echo_slash_command;
@@ -41,6 +96,7 @@ using runtime_transcript::apply_assistant_turn_meta;
 using runtime_transcript::assistant_meta_for_snapshot;
 using runtime_transcript::capture_tool_detail_visibility;
 using runtime_transcript::carry_tool_detail_visibility;
+using runtime_transcript::push_fallback_assistant_outputs;
 using runtime_transcript::push_history;
 using runtime_transcript::push_transcript;
 
@@ -111,7 +167,7 @@ bool RuntimeActiveRunController::request_stop(RuntimeActiveRunState& state)
     presentation_state_.snapshot.status = "stop requested";
     upsert_stopping_activity();
   }
-  return renderer_.render();
+  return renderer_.request_render();
 }
 
 void RuntimeActiveRunController::request_close_after_submit(RuntimeActiveRunState& state)
@@ -137,7 +193,6 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
   auto& transcript_layout_cache = renderer_.transcript_layout_cache;
   auto& detached_sidebar_snapshot = renderer_.detached_sidebar_snapshot;
   auto& ui_mutex = renderer_.ui_mutex;
-  auto render = [&]() -> bool { return renderer_.render(); };
   auto events = event_queue.drain();
   if (events.empty())
     return RuntimeEventDrainResult::NoEvents;
@@ -145,28 +200,26 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
   {
     apply_event_envelope(event_state, event);
   }
-  auto turn_transcript = event_state_transcript_snapshot(event_state);
-  auto detached_indicator_changed = false;
+  auto turn_transcript = event_state_transcript_snapshot(event_state, PendingTextProjection::Unparsed);
   {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     auto const preserve_viewport = transcript_scroll_offset > 0;
     auto old_anchor = detail::TranscriptViewportAnchor{};
-    std::size_t old_rendered_lines = 0;
-    if (preserve_viewport)
+    if (preserve_viewport && !renderer_.has_deferred_detached_transcript_update())
     {
       auto const old_max_scroll =
           detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache, snapshot.file_references_generation,
                                                                transcript_layout_cache, snapshot.transcript_generation);
       old_anchor = detail::capture_transcript_viewport_anchor(transcript_layout_cache.layout, old_max_scroll, transcript_scroll_offset);
-      old_rendered_lines = transcript_layout_cache.layout.lines.size();
     }
     if (preserve_viewport && !detached_sidebar_snapshot)
       detached_sidebar_snapshot = sidebar;
-    apply_assistant_turn_meta(turn_transcript, assistant_meta_for_snapshot(snapshot, std::chrono::steady_clock::now() - turn_started_at));
+    apply_assistant_turn_meta(turn_transcript, assistant_meta_for_snapshot(snapshot, std::chrono::steady_clock::now() - turn_started_at),
+                              snapshot.thinking_visible);
     auto const tool_detail_overrides = capture_tool_detail_visibility(snapshot.transcript);
-    auto const capped_update = apply_capped_transcript_snapshot(snapshot.transcript, submitted_transcript, turn_transcript, turn_snapshot_leading_evictions);
+    auto const capped_update =
+        apply_capped_transcript_snapshot(snapshot.transcript, submitted_transcript, std::move(turn_transcript), turn_snapshot_leading_evictions);
     carry_tool_detail_visibility(tool_detail_overrides, snapshot.transcript);
-    auto const item_index_shift = capped_update.item_index_shift;
     turn_snapshot_leading_evictions = capped_update.leading_evictions;
     ++snapshot.transcript_generation;
     snapshot.queued_messages = event_state.queued_messages;
@@ -189,36 +242,19 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
     }
     if (preserve_viewport)
     {
-      auto const new_max_scroll =
-          detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache, snapshot.file_references_generation,
-                                                               transcript_layout_cache, snapshot.transcript_generation);
-      transcript_scroll_offset = detail::restore_transcript_viewport_anchor(old_anchor, transcript_layout_cache.layout, new_max_scroll, item_index_shift);
-      auto const new_rendered_lines = transcript_layout_cache.layout.lines.size();
-      detached_new_output_count += new_rendered_lines > old_rendered_lines ? new_rendered_lines - old_rendered_lines : std::size_t{1};
-      detached_indicator_changed = true;
+      renderer_.defer_detached_transcript_update(old_anchor, capped_update.item_index_shift);
+      detached_new_output_count += events.size();
+      snapshot.transcript_scroll_offset = transcript_scroll_offset;
     }
     else
     {
+      renderer_.discard_deferred_detached_transcript_update();
       transcript_scroll_offset = 0;
-    }
-    if (transcript_scroll_offset > 0)
-    {
-      auto const [width, height] = terminal_size();
-      snapshot.width = width;
-      snapshot.height = height;
-      transcript_scroll_offset = std::min(transcript_scroll_offset, detail::composer_max_transcript_scroll_offset_cached(
-                                                                        snapshot, width, height, completion_cache, snapshot.file_references_generation,
-                                                                        transcript_layout_cache, snapshot.transcript_generation));
-      snapshot.transcript_scroll_offset = transcript_scroll_offset;
     }
   }
   if (transcript_scroll_offset > 0 && !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list)
-  {
-    if (!detached_indicator_changed)
-      return RuntimeEventDrainResult::UpdatedNoRender;
-    return render() ? RuntimeEventDrainResult::Rendered : RuntimeEventDrainResult::RenderFailed;
-  }
-  return render() ? RuntimeEventDrainResult::Rendered : RuntimeEventDrainResult::RenderFailed;
+    return RuntimeEventDrainResult::UpdatedNoRender;
+  return renderer_.request_render() ? RuntimeEventDrainResult::UpdatedNoRender : RuntimeEventDrainResult::RenderFailed;
 }
 
 RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_value)
@@ -241,6 +277,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     presentation_state_.apply_runtime_state_snapshot(options, std::move(runtime_state));
   };
   auto refresh_token_status = [&]() { presentation_state_.refresh_token_status(options); };
+  auto refresh_active_context_status = [&]() { presentation_state_.refresh_active_context_status(options); };
 
   auto const is_command_submission = submitted_value.starts_with('/') || shell_helper_submission(submitted_value);
   if (is_command_submission && runtime_commands::session_switching_command(submitted_value) && !pending_image_attachments.empty())
@@ -349,20 +386,9 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
                                                            .image_attachments = submit_image_attachments});
     });
     bool render_failed = false;
-    auto last_processing_indicator_tick = std::chrono::steady_clock::now();
-    while (submit_future.wait_for(detail::kProcessingIndicatorFrameDelay) != std::future_status::ready)
+    detail::ActiveRunCadence cadence(std::chrono::steady_clock::now());
+    while (submit_future.wait_for(std::chrono::milliseconds::zero()) != std::future_status::ready)
     {
-      auto const now = std::chrono::steady_clock::now();
-      auto const elapsed = now - last_processing_indicator_tick;
-      auto const elapsed_frames = detail::processing_indicator_elapsed_frames(elapsed);
-      if (elapsed_frames > 0)
-      {
-        std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-        if (snapshot.processing)
-          snapshot.spinner_frame += elapsed_frames;
-        last_processing_indicator_tick += detail::kProcessingIndicatorFrameDelay * elapsed_frames;
-      }
-
       if (terminal_signal_received())
       {
         if (terminal_signal_number() == SIGINT && !draft.text.empty())
@@ -394,7 +420,66 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
         }
         continue;
       }
-      if (auto active_input = poll_curses_input())
+      auto active_input = poll_curses_input();
+      auto const input_checked_at = std::chrono::steady_clock::now();
+      auto const pending_frame_due = renderer.has_pending_render() && renderer.time_until_pending_render() <= std::chrono::steady_clock::duration::zero();
+      auto const input_decision = detail::active_run_input_read_decision(active_input.has_value(), cadence.frame_due(input_checked_at) || pending_frame_due);
+      if (input_decision == detail::ActiveRunInputReadDecision::DrainBufferedInput)
+      {
+        if (!handle_input(state, *active_input))
+        {
+          terminal_write_failed = true;
+          render_failed = true;
+          prompt_coordinator.fail_pending_requests();
+          break;
+        }
+        if (close_after_submit)
+          break;
+        continue;
+      }
+      if (input_decision == detail::ActiveRunInputReadDecision::WaitForNextFrame)
+      {
+        auto wait_duration = cadence.wait_duration(input_checked_at);
+        if (renderer.has_pending_render())
+        {
+          wait_duration = std::min(wait_duration, std::chrono::ceil<std::chrono::milliseconds>(renderer.time_until_pending_render()));
+        }
+        if (submit_future.wait_for(wait_duration) == std::future_status::ready)
+          break;
+      }
+
+      auto const cadence_tick = cadence.advance(std::chrono::steady_clock::now());
+      auto const spinner_advanced = cadence_tick.elapsed_spinner_frames > 0;
+      if (spinner_advanced)
+      {
+        std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+        if (snapshot.processing)
+          snapshot.spinner_frame += cadence_tick.elapsed_spinner_frames;
+      }
+
+      auto const drain_result = drain_events(state);
+      if (drain_result == RuntimeEventDrainResult::RenderFailed)
+      {
+        terminal_write_failed = true;
+        render_failed = true;
+        prompt_coordinator.fail_pending_requests();
+        break;
+      }
+      if (transcript_scroll_offset == 0 && !maybe_reload_display_settings())
+      {
+        terminal_write_failed = true;
+        render_failed = true;
+        prompt_coordinator.fail_pending_requests();
+        break;
+      }
+      if (spinner_advanced && !renderer.request_render(FrameRenderKind::Footer))
+      {
+        terminal_write_failed = true;
+        render_failed = true;
+        prompt_coordinator.fail_pending_requests();
+        break;
+      }
+      if (active_input)
       {
         if (!handle_input(state, *active_input))
         {
@@ -406,31 +491,16 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
         if (close_after_submit)
           break;
       }
-      static_cast<void>(prompt_coordinator.service_pending_request(cancel_requested, request_stop));
-      auto const drain_result = drain_events(state);
-      if (drain_result == RuntimeEventDrainResult::RenderFailed)
+      auto const frame_was_pending = renderer.has_pending_render();
+      if (!renderer.flush_pending_render_if_due())
       {
         terminal_write_failed = true;
         render_failed = true;
         prompt_coordinator.fail_pending_requests();
         break;
       }
-      if (drain_result == RuntimeEventDrainResult::Rendered || transcript_scroll_offset > 0)
-        continue;
-      if (!maybe_reload_display_settings())
-      {
-        terminal_write_failed = true;
-        render_failed = true;
-        prompt_coordinator.fail_pending_requests();
-        break;
-      }
-      if (!renderer.render_processing_frame())
-      {
-        terminal_write_failed = true;
-        render_failed = true;
-        prompt_coordinator.fail_pending_requests();
-        break;
-      }
+      if (frame_was_pending && !renderer.has_pending_render())
+        cadence.frame_painted(std::chrono::steady_clock::now());
     }
     result = submit_future.get();
     if (result.state_snapshot)
@@ -479,7 +549,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     }
     if (run_cancel_requested.load())
     {
-      push_transcript(snapshot, TranscriptItem{.label = "ava", .text = "stopped by user", .meta = assistant_meta});
+      push_fallback_assistant_outputs(snapshot, {"stopped by user"}, assistant_meta);
     }
     else
     {
@@ -490,12 +560,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       auto const bounded_bash_output_is_in_card =
           std::ranges::any_of(result.tool_timeline, [](auto const& tool) { return tool.name == "bash" && tool.truncated && !tool.spill_path.empty(); });
       if (!should_show_slash_command_output_as_status(submitted) && !bounded_bash_output_is_in_card)
-      {
-        for (auto const& output : result.output)
-        {
-          push_transcript(snapshot, TranscriptItem{.label = "ava", .text = output, .meta = assistant_meta});
-        }
-      }
+        push_fallback_assistant_outputs(snapshot, result.output, assistant_meta);
     }
   }
   if (!events_received)
@@ -514,6 +579,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     sidebar.context_source_count = result.context_source_count;
   }
   refresh_token_status();
+  refresh_active_context_status();
   if (!render())
   {
     terminal_write_failed = true;

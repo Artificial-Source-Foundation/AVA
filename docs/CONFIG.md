@@ -68,7 +68,7 @@ The setting is stored in `$XDG_CONFIG_HOME/ava/display.json`:
 
 After editing `display.json` by hand, the interactive TUI automatically reloads the file without restarting. `/reload theme` is still available for an explicit retry or diagnostic. Invalid JSON or unsupported theme values are reported with the config path and supported values, and the previous active theme remains in use.
 
-Custom themes live under `$XDG_CONFIG_HOME/ava/themes/*.json`. AVA accepts a lean Pi-style file with `name`, optional `vars`, and an AVA-specific eight-role `colors` object:
+Custom themes live under `$XDG_CONFIG_HOME/ava/themes/*.json`. AVA accepts a lean Pi-style file with `name`, optional `vars`, eight required color roles, and optional surface backgrounds:
 
 ```json
 {
@@ -85,12 +85,14 @@ Custom themes live under `$XDG_CONFIG_HOME/ava/themes/*.json`. AVA accepts a lea
     "error": "#ff0000",
     "accent": "primary",
     "screenBg": "paper",
-    "composerBg": 236
+    "composerBg": 236,
+    "toolBg": 235,
+    "questionBg": 237
   }
 }
 ```
 
-Color values can be `""` for the terminal default, a 0-255 xterm color number, a 6-digit hex RGB string approximated to xterm-256, or a variable name from `vars`. Custom theme names must be unique, non-empty, and free of whitespace or path separators. `/settings` shows valid custom theme files as selectable theme rows; invalid custom files are ignored during discovery and reported when directly selected through `display.json` or `/theme`. An editor-facing schema for this AVA-native format lives at [`docs/schema/theme.schema.json`](schema/theme.schema.json); the runtime loader remains the authoritative validator.
+Color values can be `""` for the terminal default, a 0-255 xterm color number, a 6-digit hex RGB string approximated to xterm-256, or a variable name from `vars`. Optional `toolBg` and `questionBg` each fall back to `composerBg` when omitted. Custom theme names must be unique, non-empty, and free of whitespace or path separators. `/settings` shows valid custom theme files as selectable theme rows; invalid custom files are ignored during discovery and reported when directly selected through `display.json` or `/theme`. An editor-facing schema for this AVA-native format lives at [`docs/schema/theme.schema.json`](schema/theme.schema.json); the runtime loader remains the authoritative validator.
 
 You can also override the theme for the current process:
 
@@ -180,7 +182,7 @@ OAuth credentials refresh automatically before use when a refresh token is prese
 
 Persistent permission rules are stored owner-only outside model-writable workspace files. Global rules use `$XDG_CONFIG_HOME/ava/permission-rules.json`. Workspace-scoped rules are keyed by the normalized workspace path and written under `$XDG_CONFIG_HOME/ava/workspace-permission-rules/<workspace-hash>/permission-rules.json`; use `/permissions list` or RPC `permission_rules` as the authoritative way to inspect the exact path for a workspace. Legacy `$WORKSPACE/.ava/permission-rules.json` files are intentionally ignored for enforcement because normal file tools can edit workspace files. Storage walks absolute path components through descriptors, rejects symlinks and group/world-writable ancestors except root-owned sticky shared namespaces such as `/tmp` and current-user-owned directories whose group write is limited to a verified private primary group; world-writable non-root-sticky and non-private group-writable ancestors remain rejected. The final rules directory must be current-user-owned mode `0700` and its file mode `0600`. Writes create missing components with descriptor-relative `mkdirat`/`openat`, atomically replace through the validated parent descriptor, and fail closed on an unsafe replacement rather than silently dropping Denies. Rule storage also rejects malformed JSON, unsupported schema versions, broad path rules, and unsupported operations before prompting a fallback resolver.
 
-Use `/permissions list`, `/permissions explain <rule_id>`, `/permissions add ...`, `/permissions remove <rule_id>`, `/permissions audit ...`, and `/permissions diagnose ...` in interactive mode, or the matching RPC `permission_rules`, `permission_rule_add`, and `permission_rule_remove` requests for automation. Rules can match exact path-oriented operations such as `read`, `search`, `edit`, and `lsp.query`, or exact command-oriented operations such as `bash`, `network.fetch`, `network.search`, `lsp.server.launch`, `task`, MCP, and plugin prompts. Hard policy denies are never upgraded by persistent rules or headless flags.
+Use `/permissions list`, `/permissions explain <rule_id>`, `/permissions add ...`, `/permissions remove <rule_id>`, `/permissions audit ...`, and `/permissions diagnose ...` in interactive mode, or the matching RPC `permission_rules`, `permission_rule_add`, and `permission_rule_remove` requests for automation. Rules can match exact path-oriented operations such as `read`, `search`, `edit`, and `lsp.query`, or exact command-oriented operations such as `bash`, `network.fetch`, `network.search`, `lsp.server.launch`, MCP, and plugin prompts. Task launch is automatically allowed and audited rather than prompted; foreground child Ask actions still use normal permission UI and background child Ask actions fail closed. Hard policy denies are never upgraded by persistent rules or headless flags.
 
 Permission-rule files now write strict `schema_version: 2`. A `bash` Allow for a sealed command must contain the exact `command_recipe_key` shown by the permission prompt or audit: use the workspace key for workspace storage and the global key for global storage. Recipe keys bind the typed recipe, sealed executable identity/origin, environment profile schema, containment profile/network mode, and preserved logical workspace where applicable; they never use session IDs, timestamps, synthetic environment paths, or environment entries. Schema-v1 files are read for compatibility, but v1 command Allows are non-authoritative while exact v1 command Denies remain active. `/permissions add ... recipe_key=<key>` and RPC `permission_rule_add` accept audited keys. Critical and raw-shell command Allows are always one-shot: new `critical_acknowledged=true` rules are rejected, and old schema-v2 exact Critical acknowledgements remain parseable only so users can inspect/remove them; they never recover execution authority. Matching Denies always take precedence.
 

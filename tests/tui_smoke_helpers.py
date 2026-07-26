@@ -25,6 +25,10 @@ from typing import Callable
 
 
 SKIP = 77
+# Footer value emitted by AVA's active-context meter: a known model-window
+# percentage, a sub-0.1% sentinel, or an estimated compact token count when
+# the model has no context-window metadata.
+ACTIVE_CONTEXT_STATUS_PATTERN = r"(?:<0\.1%|\d+(?:\.\d+)?%|~\d+(?:\.\d+)?[km]?)"
 
 
 def enabled(value: str | None) -> bool:
@@ -180,6 +184,28 @@ def wait_for_screen_change(
             return last
         time.sleep(0.05)
     raise RuntimeError(f"timed out waiting for {label}; screen did not change\nlast screen:\n{last}")
+
+
+def wait_for_screen_state(
+    tmux_client: TmuxClient,
+    session: str,
+    predicate: Callable[[str], bool],
+    label: str,
+    timeout: float = 8.0,
+) -> str:
+    """Wait for a parsed behavioral screen state rather than presentation text."""
+
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        status = tmux(tmux_client, "has-session", "-t", session, check=False)
+        if status.returncode != 0:
+            raise RuntimeError(f"tmux session exited before {label}\nlast screen:\n{last}")
+        last = capture(tmux_client, session)
+        if predicate(last):
+            return last
+        time.sleep(0.05)
+    raise RuntimeError(f"timed out waiting for {label}\nlast screen:\n{last}")
 
 
 def assert_screen_absent_for(

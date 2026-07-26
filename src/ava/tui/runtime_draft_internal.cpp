@@ -13,7 +13,8 @@ std::size_t RuntimeDraftState::max_draft_scroll_offset(ComposerSnapshot const& s
   auto const main_width = composer_main_width(snapshot);
   auto const composer_lines = detail::composer_block_line_count(snapshot, height, main_width);
   auto const input_lines = detail::input_render_line_spans(draft.text, main_width).size();
-  auto const layout = detail::composer_input_layout(input_lines, composer_lines, 0);
+  auto const policy = detail::composer_layout_policy(snapshot, height);
+  auto const layout = detail::composer_input_layout(input_lines, composer_lines, 0, policy.composer_top_padding_lines);
   return input_lines > layout.visible_input_lines ? input_lines - layout.visible_input_lines : std::size_t{0};
 }
 

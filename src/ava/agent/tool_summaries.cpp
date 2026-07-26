@@ -144,6 +144,16 @@ std::string summarize_tool_arguments(ProviderToolCall const& call)
     }
     return summary;
   }
+  if (call.name == "list_directory")
+  {
+    auto const path = ava::core::json::string_field(arguments, "path");
+    summary = !path || path->empty() ? "path=." : "path=" + safe_summary_text(*path);
+    if (auto const max_entries = ava::core::json::integer_field(arguments, "max_entries"))
+    {
+      summary = append_summary_part(std::move(summary), "max_entries=" + std::to_string(*max_entries));
+    }
+    return summary;
+  }
   if (call.name == "grep")
   {
     summary = append_summary_part(std::move(summary), string_arg_summary(arguments, "pattern"));
@@ -237,6 +247,15 @@ std::string summarize_tool_result(ToolDispatchResult const& result)
   {
     auto const total = payload.total_matches.value_or(ava::core::json::integer_field(result.result_text, "total_matches").value_or(0));
     std::string summary = std::to_string(total) + " matches";
+    if (payload.truncated || bool_field_is_true(result.result_text, "truncated"))
+      summary += " (truncated)";
+    return summary;
+  }
+  if (result.name == "list_directory")
+  {
+    auto const entries = ava::core::json::objects_in_array_field(result.result_text, "entries");
+    auto const total = size_field(result.result_text, "total_entries").value_or(entries.size());
+    std::string summary = std::to_string(total) + " entries";
     if (payload.truncated || bool_field_is_true(result.result_text, "truncated"))
       summary += " (truncated)";
     return summary;

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from tui_smoke_helpers import (
+    ACTIVE_CONTEXT_STATUS_PATTERN,
     SmokeContext,
     assert_screen_absent_for,
     capture,
@@ -32,12 +33,12 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     if "! OpenAI not connected · /connect" not in initial or "auth.json" in initial or "OPENAI_API_KEY" in initial:
         raise RuntimeError(f"first-run onboarding advisory was not one actionable path-free row\nscreen:\n{initial}")
     footer_lines = [line for line in initial.splitlines() if "GPT-5.5" in line and "ctx " in line]
-    if not footer_lines or any(
-        marker in footer_lines[-1]
-        for marker in ("Build", "OpenAI", "cwd ", "git ", "entries ", "%")
+    footer_text = footer_lines[-1].removeprefix("│  ").strip() if footer_lines else ""
+    if not re.fullmatch(rf"GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", footer_text) or any(
+        marker in footer_text for marker in ("Build", "OpenAI", "cwd ", "git ", "entries ")
     ):
         raise RuntimeError(
-            "composer footer did not contain only the model name and context count\n"
+            "composer footer did not contain only the model name and active context usage\n"
             f"screen:\n{initial}"
         )
     save_evidence(root, "startup-ready-composer", initial)
@@ -53,7 +54,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         settled = wait_for(
             tmux_exe,
             session,
-            rf"(?m)\A(?:[^\n]*\n){{{input_row}}}{inset}│  Type a message\.\.\.[^\n]*\n{inset}│  GPT-5\.5 · ctx \d+[^\n]*(?:\n|\Z)",
+            rf"(?m)\A(?:[^\n]*\n){{{input_row}}}{inset}│  Type a message\.\.\.[^\n]*\n{inset}│  GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}[^\n]*(?:\n|\Z)",
             f"{label} target composer/footer rows {input_row}/{footer_row}",
         )
         settled_lines = settled.splitlines()
@@ -100,9 +101,9 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         canvas_width = width - 39 if sidebar_expected else min(width, 120)
         settled_footer = settled_lines[height - 1][canvas_left + 3 : canvas_left + canvas_width]
         settled_footer = settled_footer.strip()
-        if not re.fullmatch(r"GPT-5\.5 · ctx \d+", settled_footer):
+        if not re.fullmatch(rf"GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", settled_footer):
             raise RuntimeError(
-                f"{name} footer did not contain only the idle model name and context count\nscreen:\n{settled}"
+                f"{name} footer did not contain only the idle model name and active context usage\nscreen:\n{settled}"
             )
         if sidebar_expected:
             main_width = width - 39
@@ -507,10 +508,10 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     trust_project = wait_for(
         tmux_exe,
         session,
-        r"GPT-5\.5\s+·\s+ctx 2",
-        "composer footer context count after project trust reload",
+        rf"GPT-5\.5\s+·\s+ctx {ACTIVE_CONTEXT_STATUS_PATTERN}",
+        "composer footer active context meter after project trust reload",
     )
-    save_evidence(root, "footer-context-count-refreshed", trust_project)
+    save_evidence(root, "footer-active-context-meter-refreshed", trust_project)
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/context trust-smoke ")
@@ -522,8 +523,8 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         r"(?s)project_trust=trusted project_resources=enabled.*prompt_command\s+project\s+trust-smoke",
         "trusted project prompt command freshness",
     )
-    if "status=current" not in trusted_context:
-        raise RuntimeError(f"/context did not report trusted project prompt command freshness\nscreen:\n{trusted_context}")
+    if "status=current" not in trusted_context or "context_sources=2" not in trusted_context:
+        raise RuntimeError(f"/context did not retain trusted instruction-source diagnostics\nscreen:\n{trusted_context}")
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/context APPEND_SYSTEM ")

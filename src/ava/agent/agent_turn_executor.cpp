@@ -46,7 +46,7 @@ ava::core::VoidResult AgentTurnExecutor::initialize_tools()
       .spill_dir = store_.session_path().parent_path() / "spill",
       .mode = options_.mode,
       .permission_resolver = options_.permission_resolver,
-      .command_deny_preflight = options_.command_deny_preflight,
+      .auto_allow_deny_preflight = options_.auto_allow_deny_preflight,
       .permission_audit_sink = [session = &session_](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
         return session->append_permission_decision(event);
       },

@@ -53,6 +53,7 @@ void append_status_line(std::string& target, std::string line);
 
 [[nodiscard]] std::vector<ava::tui::ToolTimelineItem> tui_tool_timeline(std::vector<ava::agent::ToolTimelineEntry> const& entries);
 [[nodiscard]] std::optional<std::string> token_status_for_session(runtime::Session const& session);
+[[nodiscard]] std::optional<std::string> active_context_status_for_session(runtime::Session const& session);
 [[nodiscard]] std::string session_selector_footer_hint(SessionSelectorSort sort, bool named_only, bool show_paths, bool show_archived, bool show_label_time);
 [[nodiscard]] std::string scoped_model_selector_footer_hint();
 [[nodiscard]] ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(runtime::Session& session, ava::tui::SelectListView const& previous,

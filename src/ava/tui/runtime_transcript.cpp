@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -69,9 +70,9 @@ std::string turn_duration_label(std::chrono::steady_clock::duration duration)
   return std::to_string(minutes) + "m " + std::to_string(remaining_seconds) + "s";
 }
 
-bool transcript_item_has_content(TranscriptItem const& item)
+bool transcript_item_has_visible_content(TranscriptItem const& item, bool thinking_visible)
 {
-  return !item.text.empty() || !item.thinking.empty() || !text_empty(item.text_model) || !text_empty(item.thinking_model);
+  return !item.text.empty() || !text_empty(item.text_model) || (thinking_visible && (!item.thinking.empty() || !text_empty(item.thinking_model)));
 }
 
 bool write_all_to_stdout(std::string_view text)
@@ -128,15 +129,28 @@ std::string assistant_meta_for_snapshot(ComposerSnapshot const& snapshot, std::o
   return meta;
 }
 
-void apply_assistant_turn_meta(std::vector<TranscriptItem>& transcript, std::string const& meta)
+void apply_assistant_turn_meta(std::vector<TranscriptItem>& transcript, std::string const& meta, bool thinking_visible)
 {
-  if (meta.empty())
-    return;
+  TranscriptItem* final_visible_assistant = nullptr;
   for (auto& item : transcript)
   {
-    if (!item.tool && item.label == "ava" && transcript_item_has_content(item))
-      item.meta = meta;
+    if (item.tool || item.label != "ava")
+      continue;
+    item.meta.clear();
+    if (transcript_item_has_visible_content(item, thinking_visible))
+      final_visible_assistant = &item;
   }
+  if (final_visible_assistant && !meta.empty())
+    final_visible_assistant->meta = meta;
+}
+
+void push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::vector<std::string> const& outputs, std::string const& meta)
+{
+  std::vector<TranscriptItem> items;
+  items.reserve(outputs.size());
+  for (auto const& output : outputs) items.push_back(TranscriptItem{.label = "ava", .text = output});
+  apply_assistant_turn_meta(items, meta, snapshot.thinking_visible);
+  for (auto& item : items) push_transcript(snapshot, std::move(item));
 }
 
 std::string base64_encode(std::string_view text)
@@ -305,10 +319,10 @@ namespace ava::tui {
 
 CappedTranscriptSnapshotUpdate apply_capped_transcript_snapshot(std::vector<TranscriptItem>& destination,
                                                                 std::vector<TranscriptItem> const& submitted_transcript,
-                                                                std::vector<TranscriptItem> const& turn_transcript, std::size_t previous_leading_evictions)
+                                                                std::vector<TranscriptItem> turn_transcript, std::size_t previous_leading_evictions)
 {
   destination = submitted_transcript;
-  destination.insert(destination.end(), turn_transcript.begin(), turn_transcript.end());
+  destination.insert(destination.end(), std::make_move_iterator(turn_transcript.begin()), std::make_move_iterator(turn_transcript.end()));
   auto const leading_evictions = destination.size() > kMaxTranscriptItems ? destination.size() - kMaxTranscriptItems : std::size_t{0};
   if (leading_evictions > 0)
     destination.erase(destination.begin(), destination.begin() + static_cast<std::ptrdiff_t>(leading_evictions));
@@ -316,14 +330,14 @@ CappedTranscriptSnapshotUpdate apply_capped_transcript_snapshot(std::vector<Tran
   return CappedTranscriptSnapshotUpdate{.leading_evictions = leading_evictions, .item_index_shift = item_index_shift};
 }
 
-std::optional<std::size_t> toggle_latest_matching_tool_details(std::vector<TranscriptItem>& transcript, std::string_view query, bool global_details_visible)
+std::optional<std::size_t> toggle_latest_matching_tool_details(std::vector<TranscriptItem>& transcript, std::string_view query, ToolPresentation inherited)
 {
   for (std::size_t index = transcript.size(); index > 0; --index)
   {
     auto& item = transcript[index - 1];
     if (!item.tool || !detail::tool_card_matches_copy_query(*item.tool, query))
       continue;
-    item.tool->details_visible = !detail::tool_card_details_visible(*item.tool, global_details_visible);
+    item.tool->details_visible = detail::tool_card_presentation(*item.tool, inherited) != ToolPresentation::Expanded;
     return index - 1;
   }
   return std::nullopt;

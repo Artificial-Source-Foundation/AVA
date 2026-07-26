@@ -13,6 +13,7 @@ from tui_smoke_helpers import (
     wait_for,
     wait_for_absent,
     wait_for_screen_change,
+    wait_for_screen_state,
 )
 from .common import (
     _finish_main,
@@ -37,16 +38,24 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/name TUI smoke")
     send_keys(tmux_exe, session, "Enter")
-    wait_for(tmux_exe, session, r"session name set: \"TUI smoke\"", "session name command")
+    session_live_tail = wait_for(tmux_exe, session, r"session name set: \"TUI smoke\"", "session name command")
+    session_live_rows = tuple(session_live_tail.splitlines()[:-3])
     send_keys(tmux_exe, session, "Up")
-    arrow_scrollback = wait_for(tmux_exe, session, r"scrollback detached", "idle Up arrow transcript scrolling")
-    if "│  /name TUI smoke" in arrow_scrollback:
-        raise RuntimeError(
-            "idle Up arrow recalled composer input history instead of only scrolling transcript history\n"
-            f"screen:\n{arrow_scrollback}"
-        )
+    arrow_scrollback = wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: tuple(screen.splitlines()[:-3]) != session_live_rows and "│  /name TUI smoke" not in screen,
+        "idle Up arrow transcript movement without history recall",
+    )
+    if any(text in arrow_scrollback for text in ("scrollback detached", "updates below", "jump_to_bottom")):
+        raise RuntimeError(f"idle Up arrow surfaced deleted detached chrome\nscreen:\n{arrow_scrollback}")
     send_keys(tmux_exe, session, "Down")
-    wait_for_absent(tmux_exe, session, r"scrollback detached", "idle Down arrow return to live tail")
+    wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: tuple(screen.splitlines()[:-3]) == session_live_rows and "│  /name TUI smoke" not in screen,
+        "idle Down arrow return to live tail",
+    )
 
     for index in range(1, 7):
         send_keys(tmux_exe, session, "C-u")

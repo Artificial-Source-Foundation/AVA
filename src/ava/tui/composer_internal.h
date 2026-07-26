@@ -37,6 +37,8 @@ inline constexpr std::string_view kSgrError = "\x1b[38;2;248;113;113m";
 inline constexpr std::string_view kSgrAccent = "\x1b[38;2;77;158;246m";
 inline constexpr std::string_view kSgrScreenBg = "\x1b[48;2;11;14;20m";
 inline constexpr std::string_view kSgrComposerBg = "\x1b[48;2;26;31;46m";
+inline constexpr std::string_view kSgrToolBg = "\x1b[48;2;18;23;34m";
+inline constexpr std::string_view kSgrQuestionBg = "\x1b[48;2;32;38;56m";
 inline constexpr std::string_view kComposerBar = "│";
 inline constexpr std::array<std::string_view, 12> kProcessingIndicatorFrames = {"▁", "▂", "▃", "▄", "▅", "▆", "▇", "▆", "▅", "▄", "▃", "▂"};
 inline constexpr auto kProcessingIndicatorFrameDelay = std::chrono::milliseconds(120);
@@ -69,6 +71,17 @@ enum class NcursesColorRole
 {
   return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(kSgrComposerBg) + "  ";
 }
+
+struct ComposerLayoutPolicy
+{
+  bool compact_transcript_spacing = false;
+  std::size_t transcript_composer_gap_lines = 0;
+  std::size_t composer_top_padding_lines = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+[[nodiscard]] ComposerLayoutPolicy composer_layout_policy(ComposerSnapshot const& snapshot, std::size_t height);
 
 struct ComposerInputLayout
 {
@@ -199,7 +212,7 @@ struct TranscriptTailRenderCache
   bool blockquote_open = false;
   std::size_t width = 0;
   std::size_t max_tail_lines = 0;
-  bool tool_details_visible = false;
+  ToolPresentation tool_presentation = ToolPresentation::Rich;
   bool thinking_visible = true;
   bool compact_spacing = false;
   bool plain_output = false;
@@ -221,7 +234,7 @@ struct TranscriptLayoutCache
 {
   std::size_t transcript_generation = 0;
   std::size_t width = 0;
-  bool tool_details_visible = false;
+  ToolPresentation tool_presentation = ToolPresentation::Rich;
   bool thinking_visible = true;
   bool compact_spacing = false;
   bool valid = false;
@@ -232,6 +245,23 @@ struct TranscriptLayoutCache
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
+
+struct ScreenRowCache
+{
+  std::vector<std::string> surfaces = {};
+  std::vector<bool> dirty_rows = {};
+  std::vector<TerminalGraphicOverlay> graphics = {};
+  std::string style_key = {};
+  std::size_t width = 0;
+  std::size_t height = 0;
+  bool valid = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+void mark_screen_row_dirty(ScreenRowCache& screen_cache, std::size_t row);
+[[nodiscard]] std::vector<std::size_t> changed_screen_rows(std::vector<std::string> const& previous, std::vector<std::string> const& current,
+                                                           std::vector<bool> const& dirty_rows, bool invalidate);
 
 [[nodiscard]] bool is_utf8_continuation(unsigned char byte);
 [[nodiscard]] std::size_t utf8_sequence_length(unsigned char byte);
@@ -246,6 +276,8 @@ struct TranscriptLayoutCache
 [[nodiscard]] std::string surface_line(std::string_view background_sgr, std::string line, std::size_t width);
 [[nodiscard]] std::string screen_surface_line(std::string line, std::size_t width);
 [[nodiscard]] std::string composer_surface_line(std::string line, std::size_t width);
+[[nodiscard]] std::string tool_surface_line(std::string line, std::size_t width);
+[[nodiscard]] std::string question_surface_line(std::string line, std::size_t width);
 [[nodiscard]] std::vector<std::string> wrap_transcript_text(std::string_view text, std::size_t width);
 
 [[nodiscard]] std::string slash_command_prefix(std::string_view input);
@@ -279,37 +311,79 @@ void refresh_completion_match_cache(CompletionMatchCache& cache, ComposerSnapsho
                                                                 std::size_t max_lines);
 
 [[nodiscard]] std::string render_generic_line(std::string const& text, std::size_t width);
-[[nodiscard]] TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& transcript, std::size_t width, bool tool_details_visible = false,
-                                                        bool thinking_visible = true, bool compact_spacing = false);
+[[nodiscard]] TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& transcript, std::size_t width,
+                                                        ToolPresentation tool_presentation = ToolPresentation::Rich, bool thinking_visible = true,
+                                                        bool compact_spacing = false);
 [[nodiscard]] std::optional<std::size_t> transcript_tool_card_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> const& transcript, std::size_t width,
-                                                               bool tool_details_visible = false, bool thinking_visible = true, bool compact_spacing = false);
+                                                               ToolPresentation tool_presentation = ToolPresentation::Rich, bool thinking_visible = true,
+                                                               bool compact_spacing = false);
 [[nodiscard]] std::vector<std::string> render_transcript_tail_lines(std::vector<TranscriptItem> const& transcript, std::size_t width,
-                                                                    std::size_t max_tail_lines, bool tool_details_visible = false, bool thinking_visible = true,
-                                                                    bool compact_spacing = false);
+                                                                    std::size_t max_tail_lines, ToolPresentation tool_presentation = ToolPresentation::Rich,
+                                                                    bool thinking_visible = true, bool compact_spacing = false);
 [[nodiscard]] std::vector<std::string> render_transcript_tail_lines_cached(TranscriptTailRenderCache& cache, std::vector<TranscriptItem> const& transcript,
                                                                            std::size_t transcript_generation, std::size_t width, std::size_t max_tail_lines,
-                                                                           bool tool_details_visible = false, bool thinking_visible = true,
-                                                                           bool compact_spacing = false);
+                                                                           ToolPresentation tool_presentation = ToolPresentation::Rich,
+                                                                           bool thinking_visible = true, bool compact_spacing = false);
 [[nodiscard]] std::vector<std::size_t> transcript_message_start_lines(std::vector<TranscriptItem> const& transcript, std::size_t width,
-                                                                      bool tool_details_visible = false, bool thinking_visible = true,
+                                                                      ToolPresentation tool_presentation = ToolPresentation::Rich, bool thinking_visible = true,
                                                                       bool compact_spacing = false);
 [[nodiscard]] std::vector<std::string> visible_transcript_lines(std::vector<std::string> const& rendered_transcript, std::size_t width,
                                                                 std::size_t transcript_height, std::size_t transcript_scroll_offset);
 void refresh_transcript_layout_cache(TranscriptLayoutCache& cache, std::vector<TranscriptItem> const& transcript, std::size_t transcript_generation,
-                                     std::size_t width, bool tool_details_visible, bool thinking_visible, bool compact_spacing);
+                                     std::size_t width, ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing);
 [[nodiscard]] std::size_t cached_transcript_max_scroll_offset(TranscriptLayoutCache const& cache, std::size_t transcript_height);
 [[nodiscard]] std::vector<std::string> cached_visible_transcript_lines(TranscriptLayoutCache const& cache, std::size_t transcript_height,
                                                                        std::size_t transcript_scroll_offset);
 
+// Compatibility overloads for focused renderer callers that still express the former collapsed/expanded switch.
+inline ToolPresentation legacy_tool_presentation(bool expanded)
+{
+  return expanded ? ToolPresentation::Expanded : ToolPresentation::Compact;
+}
+inline TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& transcript, std::size_t width, bool expanded, bool thinking_visible = true,
+                                                 bool compact_spacing = false)
+{
+  return render_transcript_layout(transcript, width, legacy_tool_presentation(expanded), thinking_visible, compact_spacing);
+}
+inline std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> const& transcript, std::size_t width, bool expanded,
+                                                        bool thinking_visible = true, bool compact_spacing = false)
+{
+  return render_transcript_lines(transcript, width, legacy_tool_presentation(expanded), thinking_visible, compact_spacing);
+}
+inline std::vector<std::string> render_transcript_tail_lines(std::vector<TranscriptItem> const& transcript, std::size_t width, std::size_t max_tail_lines,
+                                                             bool expanded, bool thinking_visible = true, bool compact_spacing = false)
+{
+  return render_transcript_tail_lines(transcript, width, max_tail_lines, legacy_tool_presentation(expanded), thinking_visible, compact_spacing);
+}
+inline std::vector<std::string> render_transcript_tail_lines_cached(TranscriptTailRenderCache& cache, std::vector<TranscriptItem> const& transcript,
+                                                                    std::size_t generation, std::size_t width, std::size_t max_tail_lines, bool expanded,
+                                                                    bool thinking_visible = true, bool compact_spacing = false)
+{
+  return render_transcript_tail_lines_cached(cache, transcript, generation, width, max_tail_lines, legacy_tool_presentation(expanded), thinking_visible,
+                                             compact_spacing);
+}
+inline std::vector<std::size_t> transcript_message_start_lines(std::vector<TranscriptItem> const& transcript, std::size_t width, bool expanded,
+                                                               bool thinking_visible = true, bool compact_spacing = false)
+{
+  return transcript_message_start_lines(transcript, width, legacy_tool_presentation(expanded), thinking_visible, compact_spacing);
+}
+inline void refresh_transcript_layout_cache(TranscriptLayoutCache& cache, std::vector<TranscriptItem> const& transcript, std::size_t generation,
+                                            std::size_t width, bool expanded, bool thinking_visible, bool compact_spacing)
+{
+  refresh_transcript_layout_cache(cache, transcript, generation, width, legacy_tool_presentation(expanded), thinking_visible, compact_spacing);
+}
+
 [[nodiscard]] ComposerFrame render_composer_frame_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
-                                                         TranscriptLayoutCache* transcript_cache, std::size_t transcript_generation, bool center_canvas = true);
+                                                         TranscriptLayoutCache* transcript_cache, std::size_t transcript_generation, bool center_canvas = true,
+                                                         bool allow_transcript_gap = true, bool freeze_transcript_layout = false);
 [[nodiscard]] std::optional<ComposerPaletteScreenLayout> composer_palette_screen_layout_cached(ComposerSnapshot const& snapshot,
                                                                                                CompletionMatchCache& completion_cache,
                                                                                                std::size_t source_revision);
 [[nodiscard]] std::size_t composer_max_transcript_scroll_offset_cached(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height,
                                                                        CompletionMatchCache& completion_cache, std::size_t source_revision,
-                                                                       TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation);
+                                                                       TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation,
+                                                                       bool allow_transcript_gap = true);
 [[nodiscard]] std::optional<std::size_t> file_reference_palette_selection_for_screen_position_cached(ComposerSnapshot const& snapshot, std::size_t row,
                                                                                                      std::size_t column, CompletionMatchCache& cache,
                                                                                                      std::size_t source_revision);
@@ -317,9 +391,10 @@ void refresh_transcript_layout_cache(TranscriptLayoutCache& cache, std::vector<T
                                                                                                       std::size_t column, CompletionMatchCache& cache,
                                                                                                       std::size_t source_revision);
 [[nodiscard]] bool draw_screen_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
-                                      TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation);
+                                      TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation, ScreenRowCache& screen_cache,
+                                      bool freeze_transcript_layout = false);
 [[nodiscard]] bool draw_processing_footer_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
-                                                 TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation);
+                                                 TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation, ScreenRowCache& screen_cache);
 void clear_composer_terminal_graphics() noexcept;
 
 [[nodiscard]] std::size_t composer_input_prefix_columns(bool first_line);
@@ -328,7 +403,8 @@ void clear_composer_terminal_graphics() noexcept;
 [[nodiscard]] std::vector<ComposerInputRenderLine> input_render_line_spans(std::string_view input, std::size_t width);
 [[nodiscard]] std::size_t composer_block_line_count(ComposerSnapshot const& snapshot, std::size_t height);
 [[nodiscard]] std::size_t composer_block_line_count(ComposerSnapshot const& snapshot, std::size_t height, std::size_t width);
-[[nodiscard]] ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::size_t max_lines, std::size_t draft_scroll_offset);
+[[nodiscard]] ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::size_t max_lines, std::size_t draft_scroll_offset,
+                                                        std::size_t requested_top_padding_lines);
 [[nodiscard]] std::vector<std::string> render_composer_block(ComposerSnapshot const& snapshot, std::size_t width, std::size_t max_lines);
 [[nodiscard]] std::size_t input_cursor_column(ComposerSnapshot const& snapshot, std::size_t width);
 [[nodiscard]] std::size_t input_cursor_line(ComposerSnapshot const& snapshot, std::size_t width);

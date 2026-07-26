@@ -206,6 +206,7 @@ int run_tui(ShellState state)
       .project_trust = project_trust_snapshot(state.session.project_trust()),
       .key_bindings = key_bindings,
       .token_status_provider = [&state]() { return token_status_for_session(state.session); },
+      .active_context_status_provider = [&state]() { return active_context_status_for_session(state.session); },
       .reasoning_status_provider = [&state]() { return ava::app::reasoning_status_for_session(state.session); },
       .create_active_run_queues =
           [&state](ava::app::EventEnvelopeSink event_sink) {

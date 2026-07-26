@@ -761,7 +761,7 @@ PermissionDecision decide(PermissionRequest const& request)
 
   if (request.operation == Operation::TaskRun)
   {
-    return decision(PermissionAction::Ask, "subagent task execution requires explicit approval", PermissionRisk::Medium);
+    return decision(PermissionAction::Allow, "subagent task launch is allowed and audited", PermissionRisk::Medium);
   }
 
   if (request.operation == Operation::PluginExecute)

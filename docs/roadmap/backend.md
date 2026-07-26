@@ -245,7 +245,7 @@ Missing or incomplete:
 - Plugin-contributed operations cannot bypass AVA permissions when they request file, shell, network, external-directory, or session access through AVA.
 - MCP servers are launched or connected through explicit permissioned configuration; MCP tools, read-style resources, and prompts are exposed through bounded AVA registry paths; and advanced MCP resource behavior remains deferred unless it preserves explicit read-style permission boundaries.
 - The v1 plugin API has an explicit compatibility policy, deprecation path, and contract tests.
-- Native `task` subagents use child sessions, `TaskRun` permission, and the background job registry; MCP stays bounded to the explicit 1.0 host scope in `docs/plugin-system.md`, and plugin-contributed subagent packages remain future work.
+- Native `task` subagents use child sessions, automatically allowed/audited launch, foreground nested Ask UI, fail-closed background nested Ask actions, and the background job registry; MCP stays bounded to the explicit 1.0 host scope in `docs/plugin-system.md`, and plugin-contributed subagent packages remain future work.
 - Full untrusted-code sandboxing remains a separate hardening layer; arbitrary plugin executables must be treated as local code the user chose to run unless AVA later adds OS-level sandboxing.
 
 ## Roadmap Phases

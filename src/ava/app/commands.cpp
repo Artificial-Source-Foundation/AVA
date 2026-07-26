@@ -1134,13 +1134,6 @@ std::string dynamic_command_argument(std::string_view line)
   return std::string(rest);
 }
 
-ava::plugin::PluginDiscoveryOptions skill_plugin_discovery_options(runtime::Session const& session)
-{
-  return ava::plugin::PluginDiscoveryOptions{
-      .global_plugins_dir = session.paths().ava_config_dir / "plugins",
-      .project_plugins_dir = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "plugins" : std::filesystem::path{}};
-}
-
 std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(ava::plugin::PluginDiagnostics const& diagnostics)
 {
   std::vector<ava::context::DeclaredSkillFileOptions> files;
@@ -1157,7 +1150,7 @@ std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(
 
 ava::core::Result<std::string> skill_prompt_message(runtime::Session& session, CommandRequest const& request, CommandRegistryEntry const& entry)
 {
-  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(skill_plugin_discovery_options(session),
+  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(session.skill_plugin_discovery_options(),
                                                                     session.paths().ava_state_dir / "plugin-enablement.json", session.workspace_dir());
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = session.workspace_dir(),

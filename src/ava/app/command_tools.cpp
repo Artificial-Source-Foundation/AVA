@@ -210,7 +210,7 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
                                  .spill_dir = session.store.session_path().parent_path() / "spill",
                                  .mode = session.mode(),
                                  .permission_resolver = std::move(permission_resolver),
-                                 .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(permission_rule_store_for_session(session)),
+                                 .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(session.permission_rule_store()),
                                  .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
                                    auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                            .parent_id = "",

@@ -141,7 +141,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session
 {
   bool emitted_error = false;
   auto runtime_options = print_runtime_options(options.runtime_options);
-  runtime_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(session),
+  runtime_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(session.permission_rule_store(),
                                                                                                     std::move(runtime_options.permission_resolver));
   EventBus event_bus;
   if (options.output_format == PrintOutputFormat::Json)

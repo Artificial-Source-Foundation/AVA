@@ -447,7 +447,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     ava::permissions::PermissionRuleStore store;
     {
       std::lock_guard lock(context.session_mutex);
-      store = ava::app::permission_rule_store_for_session(context.session);
+      store = context.session.permission_rule_store();
     }
     auto rules = ava::permissions::load_persistent_permission_rules(store);
     if (!rules)
@@ -468,7 +468,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     std::string session_id;
     {
       std::lock_guard lock(context.session_mutex);
-      store = ava::app::permission_rule_store_for_session(context.session);
+      store = context.session.permission_rule_store();
       session_id = context.session.store.session_id();
     }
     auto added = ava::permissions::add_persistent_permission_rule(store, std::move(*draft));
@@ -497,7 +497,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     std::string session_id;
     {
       std::lock_guard lock(context.session_mutex);
-      store = ava::app::permission_rule_store_for_session(context.session);
+      store = context.session.permission_rule_store();
       session_id = context.session.store.session_id();
     }
     auto removed = ava::permissions::remove_persistent_permission_rule(store, *command.rule_id);

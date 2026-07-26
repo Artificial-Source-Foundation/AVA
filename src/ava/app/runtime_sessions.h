@@ -8,12 +8,6 @@
 
 namespace ava::app {
 
-// Single app-owned source for the persistent permission-rule store bound to a
-// runtime session. Every command permission path (direct app commands, model
-// tool calls, ACP hosts, RPC, print/line-shell) resolves the same global and
-// workspace rule files through this helper instead of duplicating path logic.
-[[nodiscard]] ava::permissions::PermissionRuleStore permission_rule_store_for_session(runtime::Session const& session);
-
 // Single app-owned authority boundary for local command planning. Keep this
 // short, stable list in sync for direct commands and model ToolContexts.
 [[nodiscard]] std::vector<std::filesystem::path> command_authority_roots_for_session(runtime::Session const& session);

@@ -666,7 +666,7 @@ void test_app_print_mode_model_command_persistent_deny_preflight()
     return;
 
   auto added = ava::permissions::add_persistent_permission_rule(
-      ava::app::permission_rule_store_for_session(*session),
+      session->permission_rule_store(),
       ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
                                             .action = ava::permissions::PermissionAction::Deny,
                                             .operation = ava::permissions::Operation::RunCommand,
@@ -739,7 +739,7 @@ void test_app_print_mode_uses_persistent_permission_rules()
   if (!session)
     return;
 
-  auto const store = ava::app::permission_rule_store_for_session(*session);
+  auto const store = session->permission_rule_store();
   auto added =
       ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
                                                                                                     .action = ava::permissions::PermissionAction::Allow,

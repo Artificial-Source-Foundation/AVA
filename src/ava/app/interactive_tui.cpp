@@ -254,7 +254,7 @@ int run_tui(ShellState state)
             // context, so an exact durable Deny never reaches the in-memory
             // session-grant registry.
             auto permission_resolver =
-                ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(state.session), context.permission_resolver);
+                ava::permissions::build_persistent_permission_rule_resolver(state.session.permission_rule_store(), context.permission_resolver);
             auto const session_id_before = state.session.store.session_id();
             bool workspace_catalog_reload = workspace_catalog_reload_requested(submitted);
             auto line_result = handle_line(state, submitted, permission_resolver, context.question_resolver, hotkeys, context.event_sink,

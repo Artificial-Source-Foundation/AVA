@@ -263,7 +263,7 @@ int run_line_shell(ShellState state)
       return 0;
     }
 
-    auto permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(state.session), nullptr);
+    auto permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(state.session.permission_rule_store(), nullptr);
     auto const result = handle_line(state, line, permission_resolver);
     for (auto const& output : result.output)
     {

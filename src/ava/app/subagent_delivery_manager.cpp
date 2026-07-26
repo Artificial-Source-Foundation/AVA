@@ -731,7 +731,7 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
   auto bundle = [&]() -> ava::core::Result<RuntimeProviderRunBundle> {
     runtime::session_ts::wat session_w(selected_capsule->session);
     run_options.permission_resolver =
-        ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(*session_w), build_headless_permission_resolver({}));
+        ava::permissions::build_persistent_permission_rule_resolver(session_w->permission_rule_store(), build_headless_permission_resolver({}));
     return options_.provider_bundle_factory(*session_w, std::move(run_options), "automatic subagent delivery");
   }();
   if (!bundle || !bundle->provider || !bundle->transport)

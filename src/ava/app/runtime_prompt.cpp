@@ -989,7 +989,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
     runtime_transport = &*retry_transport;
     runtime_options.enable_transport_retries = false;
   }
-  ava::permissions::register_enforceable_permission_rule_files(permission_rule_store_for_session(session));
+  ava::permissions::register_enforceable_permission_rule_files(session.permission_rule_store());
 
   auto expanded_user_message = runtime_options.expand_prompt_file_references ? expand_prompt_file_references(session, user_message, runtime_options)
                                                                              : ava::core::Result<std::string>(user_message);
@@ -1163,7 +1163,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
         return {};
       },
       .permission_resolver = runtime_options.permission_resolver,
-      .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(permission_rule_store_for_session(session)),
+      .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(session.permission_rule_store()),
       .question_resolver = runtime_options.question_resolver,
       .cancel_requested = [&runtime_options,
                            &sink_error] { return sink_error.has_value() || (runtime_options.cancel_requested && runtime_options.cancel_requested()); },

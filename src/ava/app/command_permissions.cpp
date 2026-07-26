@@ -1012,7 +1012,7 @@ ava::core::Result<CommandResult> run_permissions_command(runtime::Session& sessi
     tokens->push_back("list");
 
   auto const subcommand = lower_ascii((*tokens)[0]);
-  auto const store = permission_rule_store_for_session(session);
+  auto const store = session.permission_rule_store();
 
   if (subcommand == "list")
   {

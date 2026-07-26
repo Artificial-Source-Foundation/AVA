@@ -565,7 +565,7 @@ ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rul
     }
   }
   auto added = ava::permissions::add_persistent_permission_rule(
-      permission_rule_store_for_session(session),
+      session.permission_rule_store(),
       ava::permissions::PermissionRuleDraft{
           .scope = ava::permissions::PermissionRuleScope::Workspace,
           .action = action,

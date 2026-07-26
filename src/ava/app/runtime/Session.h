@@ -15,6 +15,7 @@
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/session/session_store.h"
+#include "ava/permissions/permission_rules.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/error.h"
 
@@ -180,8 +181,8 @@ struct Session_aggregate_base
 class Session : protected Session_aggregate_base
 {
  public:
-  using Session_aggregate_base::store;
   using Session_aggregate_base::created;
+  using Session_aggregate_base::store;
 
   // Move constructors.
   Session(Session&& session) = default;
@@ -270,8 +271,9 @@ class Session : protected Session_aggregate_base
   {
     if (resources_.bound_read_authority)
       return *resources_.bound_read_authority;
-    return invocation_inputs_.sessionless ? ava::session::SessionReadAuthority::create_ephemeral(store, invocation_inputs_.session_read_limits)
-                                           : ava::session::SessionReadAuthority::create_persistent(store, resources_.lease, invocation_inputs_.session_read_limits);
+    return invocation_inputs_.sessionless
+               ? ava::session::SessionReadAuthority::create_ephemeral(store, invocation_inputs_.session_read_limits)
+               : ava::session::SessionReadAuthority::create_persistent(store, resources_.lease, invocation_inputs_.session_read_limits);
   }
 
   // Append through the session owner so writes remain serialized with active runs.
@@ -292,6 +294,17 @@ class Session : protected Session_aggregate_base
   [[nodiscard]] ava::agent::SessionAppendBatchSink owner_append_batch_route()
   {
     return resources_.run_controller ? resources_.run_controller->owner_append_batch_route() : ava::agent::SessionAppendBatchSink{};
+  }
+
+  // Single app-owned source for the persistent permission-rule store bound to a runtime session.
+  // Every command permission path (direct app commands, model tool calls, ACP hosts, RPC, print/line-shell)
+  // resolves the same global and workspace rule files through this helper instead of duplicating path logic.
+  [[nodiscard]] ava::permissions::PermissionRuleStore permission_rule_store() const
+  {
+    return {.global_rules_file = paths().ava_config_dir / "permission-rules.json",
+            .workspace_rules_file = workspace_dir() / ".ava" / "permission-rules.json",
+            .workspace_dir = workspace_dir(),
+            .anchor_set = anchor_set()};
   }
 
   AVA_DEBUG_PRINT_MEMBERS_ON_BASE(Session_aggregate_base)

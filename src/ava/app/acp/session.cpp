@@ -309,7 +309,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> AcpSessionHost
     }
   }
 
-  auto const rule_store = permission_rule_store_for_session(session_);
+  auto const rule_store = session_.permission_rule_store();
   auto persistent = ava::permissions::match_persistent_permission_rule(rule_store, prompt);
   if (!persistent)
   {

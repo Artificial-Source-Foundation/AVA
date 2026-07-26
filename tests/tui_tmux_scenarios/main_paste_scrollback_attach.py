@@ -11,6 +11,7 @@ from tui_smoke_helpers import (
     wait_for,
     wait_for_absent,
     wait_for_session_exit,
+    wait_for_screen_state,
 )
 from .common import _main_session
 
@@ -155,22 +156,28 @@ def scenario_main_paste_scrollback_attach(ctx: SmokeContext) -> None:
         "multiline scrollback seed output",
     )
     send_literal(tmux_exe, session, "\x1b[200~first\nsecond\x1b[201~")
-    wait_for(tmux_exe, session, r"first.*second|first", "multiline draft before transcript scroll")
+    multiline_live = wait_for(tmux_exe, session, r"second", "multiline draft before transcript scroll")
+    multiline_transcript_rows = tuple(multiline_live.splitlines()[:-4])
     send_literal(tmux_exe, session, "\x1b[1;129A")
-    multiline_scrolled = wait_for(
-        tmux_exe, session, r"scrollback detached", "multiline draft physical Ghostty arrow transcript scroll"
+    multiline_scrolled = wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: tuple(screen.splitlines()[:-4]) != multiline_transcript_rows and "first" in screen and "second" in screen,
+        "multiline draft physical Ghostty arrow transcript movement",
     )
-    if "first" not in multiline_scrolled or "second" not in multiline_scrolled:
-        raise RuntimeError(
-            "arrow-up changed the multiline composer while scrolling the transcript\n"
-            f"screen:\n{multiline_scrolled}"
-        )
+    if any(text in multiline_scrolled for text in ("scrollback detached", "updates below", "jump_to_bottom")):
+        raise RuntimeError(f"multiline arrow scroll surfaced deleted detached chrome\nscreen:\n{multiline_scrolled}")
     send_literal(tmux_exe, session, "X")
     moved = wait_for(tmux_exe, session, r"secondX", "multiline draft cursor preserved by arrow scroll")
     if "firstX" in moved:
         raise RuntimeError(f"arrow-up moved the multiline composer cursor instead of scrolling only the transcript\nscreen:\n{moved}")
     send_literal(tmux_exe, session, "\x1b[1;129B")
-    wait_for_absent(tmux_exe, session, r"scrollback detached", "multiline draft return to live tail")
+    wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: tuple(screen.splitlines()[:-4]) == multiline_transcript_rows and "secondX" in screen,
+        "multiline draft return to live tail",
+    )
     send_keys(tmux_exe, session, "C-c")
     wait_for_absent(tmux_exe, session, r"secondX", "multiline transcript-scroll draft clear")
 
@@ -221,33 +228,42 @@ def scenario_main_paste_scrollback_attach(ctx: SmokeContext) -> None:
         "long help output before mouse wheel scroll",
     )
     send_literal(tmux_exe, session, "draft stays while scrolling")
-    wait_for(tmux_exe, session, r"draft stays while scrolling", "draft before transcript-only scrolling")
+    transcript_live = wait_for(tmux_exe, session, r"draft stays while scrolling", "draft before transcript-only scrolling")
+    transcript_live_rows = tuple(transcript_live.splitlines()[:-3])
     send_literal(tmux_exe, session, "\x1b[<64;4;6M")
-    wheel_scrolled = wait_for(tmux_exe, session, r"scrollback detached", "raw SGR mouse wheel scrollback")
-    if "scrollback detached" not in wheel_scrolled or "draft stays while scrolling" not in wheel_scrolled:
-        raise RuntimeError(
-            "raw SGR mouse wheel changed the composer instead of only scrolling transcript history\n"
-            f"screen:\n{wheel_scrolled}"
-        )
-    send_literal(tmux_exe, session, "\x1b[<65;4;6M")
-    wheel_tail = wait_for_absent(tmux_exe, session, r"scrollback detached", "raw SGR mouse wheel return to live tail")
-    if "draft stays while scrolling" not in wheel_tail:
-        raise RuntimeError(f"mouse wheel return to live tail changed the composer draft\nscreen:\n{wheel_tail}")
+    wheel_scrolled = wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: tuple(screen.splitlines()[:-3]) != transcript_live_rows and "draft stays while scrolling" in screen,
+        "raw SGR mouse wheel transcript movement",
+    )
+    if any(text in wheel_scrolled for text in ("scrollback detached", "updates below", "jump_to_bottom")):
+        raise RuntimeError(f"raw SGR mouse wheel surfaced deleted detached chrome\nscreen:\n{wheel_scrolled}")
+    # Reset the physical-wheel burst at a harmless non-wheel boundary before
+    # asserting the reverse gesture; Right at end-of-draft preserves content.
+    send_literal(tmux_exe, session, "\x1b[1;129C\x1b[<65;4;6M")
+    wheel_tail = wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: tuple(screen.splitlines()[:-3]) == transcript_live_rows and "draft stays while scrolling" in screen,
+        "raw SGR mouse wheel return to live tail",
+    )
     send_literal(tmux_exe, session, "\x1b[1;129A")
-    arrow_scrolled = wait_for(
-        tmux_exe, session, r"scrollback detached", "physical Ghostty Up arrow transcript scrollback with Num Lock"
+    arrow_scrolled = wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: tuple(screen.splitlines()[:-3]) != transcript_live_rows and "draft stays while scrolling" in screen,
+        "physical Ghostty Up arrow transcript movement with Num Lock",
     )
-    if "draft stays while scrolling" not in arrow_scrolled:
-        raise RuntimeError(
-            "physical Up arrow recalled composer history instead of only scrolling transcript history\n"
-            f"screen:\n{arrow_scrolled}"
-        )
+    if any(text in arrow_scrolled for text in ("scrollback detached", "updates below", "jump_to_bottom")):
+        raise RuntimeError(f"physical Up arrow surfaced deleted detached chrome\nscreen:\n{arrow_scrolled}")
     send_literal(tmux_exe, session, "\x1b[1;129B")
-    arrow_tail = wait_for_absent(
-        tmux_exe, session, r"scrollback detached", "physical Ghostty Down arrow return to live tail with Num Lock"
+    arrow_tail = wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: tuple(screen.splitlines()[:-3]) == transcript_live_rows and "draft stays while scrolling" in screen,
+        "physical Ghostty Down arrow return to live tail with Num Lock",
     )
-    if "draft stays while scrolling" not in arrow_tail:
-        raise RuntimeError(f"physical Down arrow changed the composer draft\nscreen:\n{arrow_tail}")
     send_keys(tmux_exe, session, "C-c")
     wait_for_absent(tmux_exe, session, r"draft stays while scrolling", "scrolling regression draft clear")
 

@@ -14,6 +14,7 @@ void test_command_classification();
 void test_repository_build_test_headless_decision_matrix();
 void test_app_event_serialization();
 void test_app_runtime_open_session_and_context_prompt();
+void test_app_active_context_status_tracks_compaction_projection();
 void test_app_runtime_no_session_mode();
 void test_app_runtime_session_startup_options();
 void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork();

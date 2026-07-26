@@ -65,9 +65,9 @@ well-bounded polish.
 | Application integration | `src/ava/app/line_shell.cpp`, `command_palette.*`, `display_settings.*`, `interactive_run_queue.*`, `events.*`, `onboarding.*`, `clipboard_image.*`, `reasoning_controls.*`, `runtime_sessions.*` | semantic boundaries, application state, settings, session integration |
 | Tests | `tests/tui_composer_tests.cpp`, `tests/tui_tmux_smoke.py`, `tests/tui_smoke_helpers.py`, `tests/tui_kitty_image_smoke.py` (shared parameterized Kitty/iTerm2 driver), `tests/tui_terminal_lifecycle_smoke.py`, `tests/tui_osc8_smoke.py`, `tests/CMakeLists.txt` | deterministic behavior and terminal evidence |
 
-Current CTest inventory has 14 tmux scenarios:
+Current CTest inventory has 15 tmux scenarios:
 `suspend_resume`, `keybind_conflict`, `theme_env`, `theme_persisted`,
-`active_run`, `restore_followup`, `main_startup_trust_keybinds`,
+`active_run`, `restore_followup`, `streaming_scroll`, `main_startup_trust_keybinds`,
 `main_models_selectors`, `main_editor_input`, `main_slash_completions`,
 `main_permission_flow`, `main_question_flow`, `main_session_mgmt`, and
 `main_paste_scrollback_attach`; plus four direct PTY CTests:
@@ -110,7 +110,7 @@ AVA already has a strong terminal frontend foundation:
 - light, dark, plain, and local custom theme support, plus terminal capability
   handling for resize, paste, keyboard protocols, mouse, OSC 8/52, and
   Kitty/iTerm2 image paths with textual fallbacks; and
-- deterministic renderer/editor tests, 14 opt-in tmux scenarios, and four
+- deterministic renderer/editor tests, 15 opt-in tmux scenarios, and four
   direct PTY CTests for Kitty image transmit/delete, iTerm2 OSC 1337 emission,
   terminal lifecycle/termios cleanup, and OSC 8 links plus OSC 52 decoding.
 
@@ -216,7 +216,7 @@ At idle, the composer has one quiet input surface and at most one visual
 boundary or gutter: no nested frame/card, duplicate composer title, persistent
 help row, empty attachment/queue/status row, or open menu. Only the
 draft/placeholder and settled one-line footer persist; that footer may show the
-active model, known `ctx N`, and the active spinner only. Contextual rows appear
+active model, active conversation-context usage (`ctx N%`, or estimated `ctx ~N` when model-window metadata is unavailable), and the active spinner only. Contextual rows appear
 only while populated or relevant and release their rows when empty. These are
 terminal-native layout rules, not a pixel-look requirement.
 
@@ -228,9 +228,9 @@ OpenCode-style convergence:
 1. Plain **Up/Down** scroll transcript history only. They never move or
    replace the composer draft. History and cursor-vertical actions remain
    configurable but are unbound by default.
-2. The composer footer remains minimal: active model, known `ctx N`, and the
+2. The composer footer remains minimal: active model, active conversation-context usage, and the
    active spinner while processing. Do not reintroduce cwd, git, AVA branding,
-   mode, provider, session metadata, token usage, or reasoning metadata there.
+   mode, provider, session metadata, cumulative session token usage, instruction-source counts, or reasoning metadata there.
 3. The frontend consumes semantic backend events. It does not create
    renderer-specific backend contracts or reconstruct path/session state.
 4. No broad reusable-component rewrite or heavy terminal dependency is in
@@ -284,7 +284,7 @@ unshipped-current claim.
 | Permissions/questions | Prompt risk, reason, choices, and outcome are easy to understand in narrow/plain layouts | Structured flows and remembered rules exist | Normalize geometry; treat `permission required / awaiting decision` as a safety-critical state distinct from queued/pending/running; narrow choices without hiding allow/deny meaning | Deterministic narrow/plain and Python tmux evidence cover the permission-required prompt/tool state, its human action, risk/reason, allow/reject follow-up, choices, denial, and result card; expanded/copy evidence retains request identity | Existing permission/question request and resolution events |
 | Sessions/navigation | Switching, tree navigation, and session context are discoverable without permanent density | Session/tree contracts and selectors are present | Responsive sidebar and session-overlay information hierarchy | Session selector captures with keyboard and mouse continuity | Existing session-tree/name/label state; no pathname reconstruction |
 | Status/attention | Existing completion, failure, queued, and attention states are visible without noisy persistent chrome | Startup, active-run, and auth diagnostics exist | Refine quiet in-TUI status treatment; keep every new notification surface behind F7 approval | Captures distinguish transient from persistent status | Event severity/terminal state if already exposed; otherwise backend work |
-| Mouse/clipboard/images/links | Capability-enhanced paths degrade to useful text and clean up terminal state | Mouse, OSC 8/52, Kitty transmit/delete, iTerm2 OSC 1337 emission, and text fallback exist; the fallback size is fixed | Verify fallback, selection, link, image-row, and cleanup behavior | 14 tmux scenarios; four direct PTY CTests for Kitty, iTerm2, lifecycle, and OSC8/OSC52; manual pixel supplement | Terminal capability data only; no backend presentation contract |
+| Mouse/clipboard/images/links | Capability-enhanced paths degrade to useful text and clean up terminal state | Mouse, OSC 8/52, Kitty transmit/delete, iTerm2 OSC 1337 emission, and text fallback exist; the fallback size is fixed | Verify fallback, selection, link, image-row, and cleanup behavior | 15 tmux scenarios; four direct PTY CTests for Kitty, iTerm2, lifecycle, and OSC8/OSC52; manual pixel supplement | Terminal capability data only; no backend presentation contract |
 | Themes/accessibility | Meaning survives plain mode and themes remain coherent | Light/dark/plain/local custom themes and keyboard paths exist | Audit contrast/text affordances, names, and narrow plain layout; defer screen-reader breadth | Deterministic plain/theme cases and documented manual audit | None |
 | Performance/testing | Layout behavior is repeatable and real terminals leave no state behind | Renderer budgets, terminal lifecycle, and tmux smokes are shipped MVP evidence | Retain deterministic budget and cleanup regressions; future-audit broader physical-terminal/external workloads | Focused C++ suite, isolated Python tmux scenarios, pane-capture inspection, control-sequence and cleanup checks | None |
 
@@ -424,7 +424,7 @@ change is claimed.
 - At every baseline width, renderer/capture assertions prove the idle composer
   has no duplicate/nested chrome or idle menu/status rows, while its draft and
   cursor remain stable.
-- Footer assertions prove only active model, known `ctx N`, and an active
+- Footer assertions prove only active model, active conversation-context usage, and an active
   spinner while processing appear.
 - Existing Up/Down draft behavior remains unchanged.
 
@@ -812,10 +812,15 @@ truthful pending state before invoking synchronous model/session authority.
 The reported latency paths were fixed at their synchronous sources rather than
 masked with input delays. A value-owned ranked completion cache is shared by
 navigation, Tab/Enter acceptance, rendering, and hit testing, formatting only
-the visible rows. Detached transcript scrolling reuses one layout keyed by
-transcript generation and geometry; live-tail rendering incrementally retains
-bounded viewport/current-line carry for growing append-only assistant and tool
-streams. One application-lifetime catalog coordinator serializes coherent
+the visible rows. Routine input and provider/footer updates share one 16ms
+completion-anchored frame scheduler, with full frames superseding footer-only
+work and frame-scoped wheel-run coalescing. Detached transcript scrolling keeps
+a generation-keyed layout frozen across draft redraws while provider output is
+deferred, then synchronizes once before navigation, hit testing, or geometry and
+presentation changes. Live-tail projection leaves cumulative pending text
+unparsed so the incremental renderer retains only bounded viewport/current-line
+carry for growing append-only assistant and tool streams. One
+application-lifetime catalog coordinator serializes coherent
 workspace/reference/slash/session snapshots. Workspace discovery runs once per
 catalog generation and refreshes only after successful visible-path mutations
 or explicit relevant reload. Session selectors reuse one tree index, update the
@@ -834,9 +839,11 @@ expanded detail, session, provider, permission, and tool semantics are
 unchanged.
 
 Deterministic regressions cover a 2,000-candidate completion source, repeated
-navigation with zero re-ranking, 900-item detached scroll reuse, the actual
-1,000-item eviction cap with synthetic headings and hidden entries, many small
-streaming appends from short sources, current and non-current asynchronous
+navigation with zero re-ranking, 900-item detached scroll reuse, frame-request
+coalescing and failure latching, frozen detached draft redraws with one-shot
+navigation/resize synchronization, the actual 1,000-item eviction cap with
+synthetic headings and hidden entries, many small streaming appends without
+cumulative pending-text preparse, current and non-current asynchronous
 session-title refresh, catalog concurrency, model/session acceptance repaint,
 and the real command-to-TUI `/write` timeline. Focused normal, ASan/UBSan, and
 TSan runs passed during implementation.
@@ -1418,11 +1425,11 @@ assertion/result:
 AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 1 -R '^ava_tui\.tmux_smoke_main_slash_completions$'
 ```
 
-Run the fourteen isolated tmux scenarios only when the change touches their
+Run the fifteen isolated tmux scenarios only when the change touches their
 behavior or required visual evidence:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 14 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 15 -R '^ava_tui\.tmux_smoke_'
 ```
 
 Run protocol-specific opt-ins when the implementation affects them:
@@ -1483,7 +1490,7 @@ The following are not implied by this roadmap:
 | OpenCode is a behavior/quality reference, not source or architecture | Preserved | Compare outcomes only; do not port implementation patterns wholesale |
 | Native C++23/ncursesw and narrow semantic seams | Preserved | Keep rendering out of backend contracts |
 | Plain Up/Down scroll transcript only | Preserved | Do not move or replace drafts; vertical/history actions stay configurable and unbound by default |
-| Minimal composer footer | Preserved | Show active model, known `ctx N`, and active spinner only |
+| Minimal composer footer | Preserved | Show active model, active conversation-context usage (`ctx N%` or estimated `ctx ~N`), and active spinner only |
 | Ordinary Space completion policy | Preserved | Ordinary Space never opens file/reference completion; explicit Tab may force empty-token path suggestions, while real `@` and path-like prefixes remain valid triggers |
 | Renderer tests plus PTY smokes as current evidence strategy | Preserved | Add a screen model only after demonstrated evidence failure or approval |
 | Responsive sidebar/shell policy | Refreshed by visual dogfood | Disclose actionable activity/modified files from `144x16`, idle metadata from `176x16`, suppress the rail for prompts/selectors, and keep complete `/sidebar` disclosure |
@@ -1503,3 +1510,39 @@ This historical cut line governed the staged F0–F6 implementation. F8 now
 closes the roadmap: completed work is recorded above, F7's optional surfaces
 remain accepted, deferred, or excluded as stated, and no further implementation
 is authorized by this document without a new product decision.
+
+## Approved post-roadmap rich-tool and responsiveness pass
+
+A later explicit product decision supersedes the historical compact-first tool
+checkpoints above. Tool cards now default to **Rich** presentation: the complete
+human-readable call wraps under the tool header, useful sanitized output follows
+on separate muted rows, shell previews favor the actual output tail, and hidden
+output is reported exactly when authoritative logical-line totals are available
+or conservatively otherwise. **Compact** remains an explicit low-noise mode and
+**Expanded** retains bounded diagnostic/output/diff/spill detail. `/details
+compact|rich|expanded`, bare `/details`, Ctrl+O, and per-card `/tool` work during
+idle and active runs. Routine permission/question receipts, resolver identities,
+and `permission checked/required` wording are absent from ordinary cards and
+`/copy tool`; the active approval prompt still says `Permission required`, denied
+cards retain an actionable human reason, and explicit `/permissions` plus `/copy
+permission` remain the audit surfaces.
+
+Active questions use a distinct configurable background and wrap their full text.
+Routine idle and active-run key, wheel, provider, and spinner repaint requests are
+coalesced into 16 ms frames; input state still mutates immediately, full-frame
+requests supersede footer-only requests, draw failures latch, and immediate
+lifecycle/terminal barriers remain synchronous. Same-direction wheel runs mutate
+once per completed frame, reversals remain immediate, detached transcript layouts
+stay frozen during draft-only repaint, and pending assistant/reasoning Markdown is
+not cumulatively parsed before the incremental tail renderer. Nested permission
+and question prompts drain same-direction wheel bursts without swallowing the
+following confirmation input.
+
+Deterministic tests cover scheduler deadlines/failure, 100-request coalescing,
+frame-scoped wheel runs, frozen detached layouts, streaming text projection,
+Rich/Compact/Expanded cards, 1,000-line shell tails, near-512-KiB single-line
+output, permission-audit omission, wrapped question surfaces, and cache identity.
+The credential-free fake-provider tmux matrix now has 15 isolated scenarios;
+`streaming_scroll` and `active_run` measure idle/streaming flood responsiveness,
+active presentation commands, draft preservation, detached stability, prompt
+wheel ordering, resize synchronization, terminal hygiene, and cleanup.

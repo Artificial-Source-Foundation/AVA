@@ -576,7 +576,7 @@ void test_sealed_local_bash_contract()
                                                                                                          .reason = "test operator deny",
                                                                                                          .actor = "test"});
   auto denied_context = context;
-  denied_context.command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(rule_store);
+  denied_context.auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(rule_store);
   auto denied_inspection = run_bash_for_test(denied_context, "ls", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   expect(deny_ls && !denied_inspection && prompts.empty(),
          "an explicit persistent deny remains authoritative before a standard inspection command can auto-run");

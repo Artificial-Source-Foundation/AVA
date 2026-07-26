@@ -422,6 +422,16 @@ void test_permission_defaults()
       .command = "",
   });
   expect(workspace_lsp.action == ava::permissions::PermissionAction::Allow, "workspace LSP diagnostics are allowed");
+  auto const task_launch = ava::permissions::decide(ava::permissions::PermissionRequest{
+      .operation = ava::permissions::Operation::TaskRun,
+      .mode = ava::agent::Mode::Build,
+      .workspace_dir = workspace,
+      .target_path = workspace,
+      .command = "general",
+  });
+  expect(task_launch.action == ava::permissions::PermissionAction::Allow && task_launch.risk == ava::permissions::PermissionRisk::Medium,
+         "task launch is automatically allowed with an auditable medium-risk policy decision");
+
   expect(ava::permissions::to_string(ava::permissions::Operation::LspQuery) == "lsp.query", "LSP query operation string is stable");
   expect(ava::permissions::to_string(ava::permissions::Operation::NetworkSearch) == "network.search", "network search operation string is stable");
   expect(ava::permissions::to_string(ava::permissions::Operation::SkillLoad) == "skill", "skill operation string is stable");

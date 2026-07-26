@@ -88,6 +88,7 @@ void RuntimeNavigationController::scroll_up(std::size_t amount)
   auto const [width, height] = terminal_size();
   snapshot_.width = width;
   snapshot_.height = height;
+  renderer_.synchronize_detached_transcript_layout();
   auto const max_scroll =
       detail::composer_max_transcript_scroll_offset_cached(snapshot_, width, height, renderer_.completion_cache, snapshot_.file_references_generation,
                                                            renderer_.transcript_layout_cache, snapshot_.transcript_generation);
@@ -103,6 +104,7 @@ void RuntimeNavigationController::scroll_down(std::size_t amount)
   auto const [width, height] = terminal_size();
   snapshot_.width = width;
   snapshot_.height = height;
+  renderer_.synchronize_detached_transcript_layout();
   auto const max_scroll =
       detail::composer_max_transcript_scroll_offset_cached(snapshot_, width, height, renderer_.completion_cache, snapshot_.file_references_generation,
                                                            renderer_.transcript_layout_cache, snapshot_.transcript_generation);
@@ -117,6 +119,7 @@ void RuntimeNavigationController::scroll_down(std::size_t amount)
 
 bool RuntimeNavigationController::toggle_tool_details_at(std::size_t item_index)
 {
+  renderer_.synchronize_detached_transcript_layout();
   if (item_index >= snapshot_.transcript.size() || !snapshot_.transcript[item_index].tool)
     return false;
   auto anchor = detail::TranscriptViewportAnchor{};
@@ -129,7 +132,7 @@ bool RuntimeNavigationController::toggle_tool_details_at(std::size_t item_index)
     anchor = detail::capture_transcript_viewport_anchor(renderer_.transcript_layout_cache.layout, old_max_scroll, renderer_.transcript_scroll_offset);
   }
   auto& tool = *snapshot_.transcript[item_index].tool;
-  tool.details_visible = !detail::tool_card_details_visible(tool, snapshot_.tool_details_visible);
+  tool.details_visible = detail::tool_card_presentation(tool, snapshot_.tool_presentation) != ToolPresentation::Expanded;
   ++snapshot_.transcript_generation;
   if (preserve_viewport)
   {
@@ -138,12 +141,13 @@ bool RuntimeNavigationController::toggle_tool_details_at(std::size_t item_index)
                                                                                      snapshot_.transcript_generation);
     renderer_.transcript_scroll_offset = detail::restore_transcript_viewport_anchor(anchor, renderer_.transcript_layout_cache.layout, new_max_scroll, 0);
   }
-  snapshot_.status = detail::tool_card_details_visible(tool, snapshot_.tool_details_visible) ? "tool details visible" : "tool details compact";
+  snapshot_.status = "tool details " + std::string(to_string(detail::tool_card_presentation(tool, snapshot_.tool_presentation)));
   return true;
 }
 
 std::optional<std::size_t> RuntimeNavigationController::toggle_matching_tool_details(std::string_view query)
 {
+  renderer_.synchronize_detached_transcript_layout();
   auto anchor = detail::TranscriptViewportAnchor{};
   auto const preserve_viewport = renderer_.transcript_scroll_offset > 0;
   if (preserve_viewport)
@@ -153,7 +157,7 @@ std::optional<std::size_t> RuntimeNavigationController::toggle_matching_tool_det
                                                                                      snapshot_.transcript_generation);
     anchor = detail::capture_transcript_viewport_anchor(renderer_.transcript_layout_cache.layout, old_max_scroll, renderer_.transcript_scroll_offset);
   }
-  auto const item_index = toggle_latest_matching_tool_details(snapshot_.transcript, query, snapshot_.tool_details_visible);
+  auto const item_index = toggle_latest_matching_tool_details(snapshot_.transcript, query, snapshot_.tool_presentation);
   if (!item_index)
     return std::nullopt;
   ++snapshot_.transcript_generation;
@@ -198,7 +202,7 @@ std::optional<bool> RuntimeNavigationController::handle_sidebar_drawer_input(Inp
   if (event.key == Key::Escape || key_matches_action(options_.key_bindings, TuiAction::Cancel, event.key))
   {
     close_sidebar_drawer();
-    return renderer_.render();
+    return renderer_.request_render();
   }
 
   auto const max_scroll = sidebar_drawer_max_scroll_offset(snapshot_);
@@ -206,33 +210,33 @@ std::optional<bool> RuntimeNavigationController::handle_sidebar_drawer_input(Inp
   {
     auto const page = sidebar_drawer_page_size();
     snapshot_.sidebar_drawer_scroll_offset = page >= snapshot_.sidebar_drawer_scroll_offset ? 0 : snapshot_.sidebar_drawer_scroll_offset - page;
-    return renderer_.render();
+    return renderer_.request_render();
   }
   if (key_matches_action(options_.key_bindings, TuiAction::PageDown, event.key))
   {
     snapshot_.sidebar_drawer_scroll_offset = std::min(max_scroll, snapshot_.sidebar_drawer_scroll_offset + sidebar_drawer_page_size());
-    return renderer_.render();
+    return renderer_.request_render();
   }
   if (event.key == Key::Home)
   {
     snapshot_.sidebar_drawer_scroll_offset = 0;
-    return renderer_.render();
+    return renderer_.request_render();
   }
   if (event.key == Key::End)
   {
     snapshot_.sidebar_drawer_scroll_offset = max_scroll;
-    return renderer_.render();
+    return renderer_.request_render();
   }
   if (event.key == Key::MouseWheelUp)
   {
     if (snapshot_.sidebar_drawer_scroll_offset > 0)
       --snapshot_.sidebar_drawer_scroll_offset;
-    return renderer_.render();
+    return renderer_.request_render();
   }
   if (event.key == Key::MouseWheelDown)
   {
     snapshot_.sidebar_drawer_scroll_offset = std::min(max_scroll, snapshot_.sidebar_drawer_scroll_offset + 1);
-    return renderer_.render();
+    return renderer_.request_render();
   }
   static_cast<void>(beep());
   return true;
@@ -242,6 +246,7 @@ void RuntimeNavigationController::jump_to_bottom(std::string status)
 {
   draft_state_.pending_escape_clear = false;
   renderer_.transcript_scroll_offset = 0;
+  renderer_.discard_deferred_detached_transcript_update();
   renderer_.detached_new_output_count = 0;
   renderer_.detached_sidebar_snapshot.reset();
   snapshot_.status = std::move(status);
@@ -253,6 +258,7 @@ void RuntimeNavigationController::scroll_to_message_boundary(bool previous)
   auto const [width, height] = terminal_size();
   snapshot_.width = width;
   snapshot_.height = height;
+  renderer_.synchronize_detached_transcript_layout();
   auto const max_scroll =
       detail::composer_max_transcript_scroll_offset_cached(snapshot_, width, height, renderer_.completion_cache, snapshot_.file_references_generation,
                                                            renderer_.transcript_layout_cache, snapshot_.transcript_generation);

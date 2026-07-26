@@ -21,8 +21,9 @@ namespace ava::permissions {
 // non-empty target fields (path, command, tool name) and, for workspace rules,
 // the normalized workspace directory. Persistent rules are consulted before
 // session grants and resolver prompts; matching denies also receive a dedicated
-// non-interactive preflight before backend command auto-Allow decisions. Built-in
-// hard Deny decisions are never upgraded by durable allow rules. Schema-v2
+// non-interactive preflight before backend auto-Allow decisions. Explicit
+// persistent denies still win over prompt-free task launches. Built-in hard
+// Deny decisions are never upgraded by durable allow rules. Schema-v2
 // RunCommand Allows are exact stable recipe-key grants; schema-v1 command
 // Allows remain inspectable but are non-authoritative, while exact v1 Denies
 // remain authoritative. An exact Critical Allow is an advanced manual-only
@@ -117,9 +118,10 @@ void register_enforceable_permission_rule_files(PermissionRuleStore const& store
                                                                                                           PermissionPrompt const& prompt);
 
 [[nodiscard]] PermissionResolver build_persistent_permission_rule_resolver(PermissionRuleStore store, PermissionResolver fallback);
-// Non-interactive deny-only preflight for backend auto-Allow decisions. A
-// matching deny or malformed store is authoritative; allows are deliberately
-// ignored and absence of a deny returns Allow without prompting.
+// Non-interactive deny-only preflight for backend auto-Allow decisions,
+// including prompt-free task launches. A matching deny or malformed store is
+// authoritative; allows are deliberately ignored and absence of a deny returns
+// Allow without prompting.
 [[nodiscard]] PermissionResolver build_persistent_permission_deny_preflight(PermissionRuleStore store);
 
 [[nodiscard]] std::string permission_rule_json(PersistentPermissionRule const& rule);

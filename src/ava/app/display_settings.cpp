@@ -1,12 +1,11 @@
 #include "sys.h"
 #include "ava/app/display_settings.h"
-
+#include "ava/tui/theme.h"
 #include "ava/core/atomic_file.h"
 #include "ava/core/json.h"
-#include "ava/tui/theme.h"
 
-#include <cctype>
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -25,8 +24,7 @@ std::string lower_ascii(std::string_view text)
 {
   std::string lowered;
   lowered.reserve(text.size());
-  for (char const ch : text)
-    lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  for (char const ch : text) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
   return lowered;
 }
 
@@ -149,11 +147,10 @@ std::string revision_for_text(std::string_view text)
   return out.str();
 }
 
-ava::core::Result<int> parse_theme_color_field(std::string_view object, std::string_view key, std::string_view vars,
-                                               std::filesystem::path const& path, int depth);
+ava::core::Result<int> parse_theme_color_field(std::string_view object, std::string_view key, std::string_view vars, std::filesystem::path const& path,
+                                               int depth);
 
-ava::core::Result<int> parse_theme_color_string(std::string_view value, std::string_view vars,
-                                                std::filesystem::path const& path, int depth)
+ava::core::Result<int> parse_theme_color_string(std::string_view value, std::string_view vars, std::filesystem::path const& path, int depth)
 {
   if (value.empty())
     return -1;
@@ -161,53 +158,46 @@ ava::core::Result<int> parse_theme_color_string(std::string_view value, std::str
     return *hex;
   if (depth > 8)
   {
-    return std::unexpected(invalid_theme_error("custom TUI theme color variable cycle", path)
-                               .with_context("variable", std::string(value)));
+    return std::unexpected(invalid_theme_error("custom TUI theme color variable cycle", path).with_context("variable", std::string(value)));
   }
   if (vars.empty())
   {
-    return std::unexpected(invalid_theme_error("custom TUI theme color variable is not defined", path)
-                               .with_context("variable", std::string(value)));
+    return std::unexpected(invalid_theme_error("custom TUI theme color variable is not defined", path).with_context("variable", std::string(value)));
   }
   auto resolved = parse_theme_color_field(vars, value, vars, path, depth + 1);
   if (!resolved)
   {
-    return std::unexpected(invalid_theme_error("custom TUI theme color variable is not defined", path)
-                               .with_context("variable", std::string(value)));
+    return std::unexpected(invalid_theme_error("custom TUI theme color variable is not defined", path).with_context("variable", std::string(value)));
   }
   return resolved;
 }
 
-ava::core::Result<int> parse_theme_color_field(std::string_view object, std::string_view key, std::string_view vars,
-                                               std::filesystem::path const& path, int depth)
+ava::core::Result<int> parse_theme_color_field(std::string_view object, std::string_view key, std::string_view vars, std::filesystem::path const& path,
+                                               int depth)
 {
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start)
   {
-    return std::unexpected(invalid_theme_error("custom TUI theme is missing a required color", path)
-                               .with_context("color", std::string(key)));
+    return std::unexpected(invalid_theme_error("custom TUI theme is missing a required color", path).with_context("color", std::string(key)));
   }
   if (*start < object.size() && object[*start] == '"')
   {
     auto value = ava::core::json::string_field(object, key);
     if (!value)
     {
-      return std::unexpected(invalid_theme_error("custom TUI theme color must be a string or 0-255 integer", path)
-                                 .with_context("color", std::string(key)));
+      return std::unexpected(invalid_theme_error("custom TUI theme color must be a string or 0-255 integer", path).with_context("color", std::string(key)));
     }
     return parse_theme_color_string(*value, vars, path, depth);
   }
   auto integer = ava::core::json::integer_field(object, key);
   if (!integer || *integer < 0 || *integer > 255)
   {
-    return std::unexpected(invalid_theme_error("custom TUI theme color must be a string or 0-255 integer", path)
-                               .with_context("color", std::string(key)));
+    return std::unexpected(invalid_theme_error("custom TUI theme color must be a string or 0-255 integer", path).with_context("color", std::string(key)));
   }
   return static_cast<int>(*integer);
 }
 
-ava::core::Result<int> parse_required_theme_color(std::string_view colors, std::string_view key, std::string_view vars,
-                                                  std::filesystem::path const& path)
+ava::core::Result<int> parse_required_theme_color(std::string_view colors, std::string_view key, std::string_view vars, std::filesystem::path const& path)
 {
   auto parsed = parse_theme_color_field(colors, key, vars, path, 0);
   if (!parsed)
@@ -215,8 +205,15 @@ ava::core::Result<int> parse_required_theme_color(std::string_view colors, std::
   return *parsed;
 }
 
-ava::core::Result<ava::tui::TuiThemePalette> parse_custom_theme_palette(std::string_view json,
-                                                                        std::filesystem::path const& path)
+ava::core::Result<int> parse_optional_theme_color(std::string_view colors, std::string_view key, std::string_view vars, std::filesystem::path const& path,
+                                                  int fallback)
+{
+  if (!ava::core::json::field_value_start(colors, key))
+    return fallback;
+  return parse_theme_color_field(colors, key, vars, path, 0);
+}
+
+ava::core::Result<ava::tui::TuiThemePalette> parse_custom_theme_palette(std::string_view json, std::filesystem::path const& path)
 {
   auto const colors = ava::core::json::object_field(json, "colors");
   if (!colors)
@@ -248,6 +245,12 @@ ava::core::Result<ava::tui::TuiThemePalette> parse_custom_theme_palette(std::str
     return std::unexpected(std::move(screen_bg.error()));
   if (!composer_bg)
     return std::unexpected(std::move(composer_bg.error()));
+  auto tool_bg = parse_optional_theme_color(*colors, "toolBg", vars, path, *composer_bg);
+  if (!tool_bg)
+    return std::unexpected(std::move(tool_bg.error()));
+  auto question_bg = parse_optional_theme_color(*colors, "questionBg", vars, path, *composer_bg);
+  if (!question_bg)
+    return std::unexpected(std::move(question_bg.error()));
   palette.text = *text;
   palette.muted = *muted;
   palette.success = *success;
@@ -256,12 +259,12 @@ ava::core::Result<ava::tui::TuiThemePalette> parse_custom_theme_palette(std::str
   palette.accent = *accent;
   palette.screen_bg = *screen_bg;
   palette.composer_bg = *composer_bg;
+  palette.tool_bg = *tool_bg;
+  palette.question_bg = *question_bg;
   return palette;
 }
 
-ava::core::Result<TuiDisplaySettings> resolve_tui_theme_setting(ava::config::XdgPaths const& paths,
-                                                                std::string_view theme,
-                                                                std::filesystem::path path)
+ava::core::Result<TuiDisplaySettings> resolve_tui_theme_setting(ava::config::XdgPaths const& paths, std::string_view theme, std::filesystem::path path)
 {
   if (auto normalized = normalize_tui_theme_setting(theme))
     return TuiDisplaySettings{.theme = std::move(normalized), .custom_theme = std::nullopt, .path = std::move(path)};
@@ -316,8 +319,7 @@ ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme_file(std::file
 {
   std::ifstream input(path, std::ios::binary);
   if (!input)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read TUI custom theme")
-                               .with_context("path", path.string()));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read TUI custom theme").with_context("path", path.string()));
   std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
   if (!ava::core::json::is_valid_object(json))
     return std::unexpected(invalid_theme_error("invalid TUI custom theme JSON", path));
@@ -325,31 +327,25 @@ ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme_file(std::file
   auto name = ava::core::json::string_field(json, "name");
   if (!name || !valid_custom_theme_name(*name))
   {
-    return std::unexpected(
-        invalid_theme_error("custom TUI theme name must be non-empty and cannot contain whitespace or path separators", path));
+    return std::unexpected(invalid_theme_error("custom TUI theme name must be non-empty and cannot contain whitespace or path separators", path));
   }
   if (normalize_tui_theme_setting(*name) || is_tui_theme_reset_value(*name))
   {
-    return std::unexpected(invalid_theme_error("custom TUI theme name conflicts with a built-in theme", path)
-                               .with_context("theme", *name));
+    return std::unexpected(invalid_theme_error("custom TUI theme name conflicts with a built-in theme", path).with_context("theme", *name));
   }
 
   auto palette = parse_custom_theme_palette(json, path);
   if (!palette)
     return std::unexpected(std::move(palette.error()));
-  return ava::tui::TuiCustomTheme{.name = std::move(*name),
-                                  .path = path,
-                                  .palette = std::move(*palette),
-                                  .revision = revision_for_text(json)};
+  return ava::tui::TuiCustomTheme{.name = std::move(*name), .path = path, .palette = std::move(*palette), .revision = revision_for_text(json)};
 }
 
-ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme(ava::config::XdgPaths const& paths,
-                                                                  std::string_view name)
+ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme(ava::config::XdgPaths const& paths, std::string_view name)
 {
   if (!valid_custom_theme_name(name))
   {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid TUI custom theme name")
-                               .with_context("theme", std::string(name)));
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid TUI custom theme name").with_context("theme", std::string(name)));
   }
 
   auto const dir = tui_theme_directory(paths);
@@ -425,12 +421,11 @@ ava::core::Result<TuiDisplaySettings> load_tui_display_settings(ava::config::Xdg
 
   std::ifstream input(path, std::ios::binary);
   if (!input)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read TUI display settings")
-                               .with_context("path", path.string()));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read TUI display settings").with_context("path", path.string()));
   std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
   if (!ava::core::json::is_valid_object(json))
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid TUI display settings JSON")
-                               .with_context("path", path.string()));
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid TUI display settings JSON").with_context("path", path.string()));
 
   auto theme = ava::core::json::string_field(json, "theme");
   if (!theme || theme->empty())
@@ -459,8 +454,7 @@ ava::core::Result<TuiDisplaySettingsWatchState> load_tui_display_settings_watch_
   {
     std::ifstream input(path, std::ios::binary);
     if (!input)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read TUI display settings")
-                                 .with_context("path", path.string()));
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read TUI display settings").with_context("path", path.string()));
     std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     display_revision = revision_for_text(json);
   }
@@ -480,11 +474,9 @@ ava::core::Result<TuiDisplaySettingsWatchState> load_tui_display_settings_watch_
   return state;
 }
 
-bool tui_display_settings_watch_state_changed(TuiDisplaySettingsWatchState const& previous,
-                                              TuiDisplaySettingsWatchState const& current)
+bool tui_display_settings_watch_state_changed(TuiDisplaySettingsWatchState const& previous, TuiDisplaySettingsWatchState const& current)
 {
-  return previous.display_revision != current.display_revision || previous.theme != current.theme ||
-         previous.custom_theme_path != current.custom_theme_path ||
+  return previous.display_revision != current.display_revision || previous.theme != current.theme || previous.custom_theme_path != current.custom_theme_path ||
          previous.custom_theme_revision != current.custom_theme_revision;
 }
 

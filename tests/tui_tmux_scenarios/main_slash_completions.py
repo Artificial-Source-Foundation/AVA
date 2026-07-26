@@ -6,6 +6,7 @@ import re
 import time
 
 from tui_smoke_helpers import (
+    ACTIVE_CONTEXT_STATUS_PATTERN,
     SmokeContext,
     assert_screen_absent_for,
     assert_screen_present_for,
@@ -60,7 +61,7 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
         footer = lines[height - 1][canvas_left : canvas_left + main_width]
         if not input_line.startswith("│  /") or not footer.startswith("│  "):
             raise RuntimeError(f"{label} did not place the slash input/footer on rows {height - 1}/{height}\nscreen:\n{screen}")
-        if not re.fullmatch(r"GPT-5\.5 · ctx \d+", footer[3:].strip()):
+        if not re.fullmatch(rf"GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", footer[3:].strip()):
             raise RuntimeError(f"{label} footer exposed text beyond model/context\nscreen:\n{screen}")
         candidate_lines = [
             line[canvas_left : canvas_left + main_width]
@@ -92,7 +93,7 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
             footer_ready = (
                 len(lines) == height
                 and lines[height - 1][canvas_left : canvas_left + main_width].startswith("│  ")
-                and re.fullmatch(r"GPT-5\.5 · ctx \d+", lines[height - 1][canvas_left : canvas_left + main_width][3:].strip()) is not None
+                and re.fullmatch(rf"GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", lines[height - 1][canvas_left : canvas_left + main_width][3:].strip()) is not None
             )
             palette_ready = any(
                 re.match(r"│  [› ]+ /", line[canvas_left : canvas_left + main_width])

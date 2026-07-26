@@ -12,6 +12,7 @@
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
+#include "ava/agent/tool_summaries.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/mutation_queue.h"
@@ -28,6 +29,7 @@
 #include "ava/session/export.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
+#include "ava/permissions/permission_rules.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/context/context_loader.h"
 #include "ava/lsp/lsp_client.h"
@@ -200,6 +202,16 @@ void test_tool_dispatcher()
              listed->result_text.find("\"type\":\"file\"") != std::string::npos,
          "tool dispatcher maps list_directory provider call to directory listing tool");
   expect(listed && listed_structured.find("\"changed_paths\"") == std::string::npos, "tool dispatcher keeps directory listings out of changed_paths");
+  auto const list_arguments = ava::agent::summarize_tool_arguments(
+      ava::agent::ProviderToolCall{.id = "call_list_directory", .name = "list_directory", .arguments_json = "{\"path\":\".\",\"max_entries\":20}"});
+  auto const default_list_arguments =
+      ava::agent::summarize_tool_arguments(ava::agent::ProviderToolCall{.id = "call_list_directory_default", .name = "list_directory", .arguments_json = "{}"});
+  auto const empty_list_arguments =
+      ava::agent::summarize_tool_arguments(ava::agent::ProviderToolCall{.id = "call_list_directory_empty", .name = "list_directory", .arguments_json = "{\"path\":\"\"}"});
+  auto const list_result = listed ? ava::agent::summarize_tool_result(*listed) : std::string{};
+  expect(list_arguments == "path=., max_entries=20" && default_list_arguments == "path=." && empty_list_arguments == "path=." && list_result.find("entries") != std::string::npos &&
+             list_arguments.find("arguments provided") == std::string::npos && list_result != "ok",
+         "tool dispatcher summarizes list_directory paths, bounds, and results without generic placeholders");
 
   auto grep_case_insensitive = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_grep_ci",
                                                                                 .name = "grep",
@@ -1259,6 +1271,71 @@ void test_tool_dispatcher()
   expect(question_has_allow_multiple, "question tool schema exposes the allow_multiple alias");
 }
 
+void test_task_persistent_deny_preflight_blocks_runner()
+{
+  auto const root = create_empty_root("dispatcher-task-persistent-deny");
+  auto const workspace = root / "workspace";
+  auto const config_dir = root / "config" / "ava";
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(config_dir);
+  expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0 &&
+             ::chmod(config_dir.c_str(), S_IRWXU) == 0,
+         "task persistent-deny fixture keeps rule storage and workspace owner-only");
+
+  auto anchors = ava::core::AnchorSet::open({workspace, config_dir});
+  expect(anchors.has_value(), "task persistent-deny fixture opens trusted rule-storage anchors");
+  if (!anchors)
+    return;
+  auto const rule_store = ava::permissions::PermissionRuleStore{.global_rules_file = config_dir / "permission-rules.json",
+                                                                .workspace_rules_file = workspace / ".ava" / "permission-rules.json",
+                                                                .workspace_dir = workspace,
+                                                                .anchor_set = *anchors};
+  auto denied_rule = ava::permissions::add_persistent_permission_rule(
+      rule_store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                        .action = ava::permissions::PermissionAction::Deny,
+                                                        .operation = ava::permissions::Operation::TaskRun,
+                                                        .mode = ava::permissions::PermissionRuleMode::Build,
+                                                        .tool_name = "task",
+                                                        .target_path = workspace,
+                                                        .command = "general",
+                                                        .command_recipe_key = {},
+                                                        .recipe_display = {},
+                                                        .critical_acknowledged = false,
+                                                        .reason = "test task deny",
+                                                        .actor = "test"});
+  expect(denied_rule.has_value(), "task persistent-deny fixture writes an exact TaskRun deny rule");
+  if (!denied_rule)
+    return;
+
+  int resolver_prompts = 0;
+  int runner_invocations = 0;
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  ava::agent::ToolDispatcher dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .permission_resolver =
+          [&resolver_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++resolver_prompts;
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(rule_store),
+      .permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+        audits.push_back(event);
+        return {};
+      },
+      .task_subagent_runner = [&runner_invocations](ava::tools::TaskSubagentRequest const&) -> ava::core::Result<ava::tools::TaskSubagentResult> {
+        ++runner_invocations;
+        return ava::tools::TaskSubagentResult{};
+      }});
+
+  auto result = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "task_persistent_deny", .name = "task", .arguments_json = R"({"description":"blocked","prompt":"do not run","subagent_type":"general"})"});
+  expect(result && !result->success && runner_invocations == 0 && resolver_prompts == 0 && audits.size() == 1 &&
+             audits.front().operation == ava::permissions::Operation::TaskRun && audits.front().target_path == workspace &&
+             audits.front().command == "general" && audits.front().resolution == "deny" && audits.front().resolution_source == "persistent_rule" &&
+             audits.front().rule_id == denied_rule->rule_id && audits.front().resolution_reason == "test task deny",
+         "an exact persistent TaskRun deny blocks prompt-free launch before runner invocation and retains rule audit evidence");
+}
+
 void test_task_mode_and_job_tool_controls()
 {
   auto const root = temp_root() / "dispatcher-job-controls";
@@ -1445,6 +1522,7 @@ void test_tool_dispatcher_plan_mode_denies_mutation()
 void run_agent_tool_dispatcher_tests()
 {
   test_tool_dispatcher();
+  test_task_persistent_deny_preflight_blocks_runner();
   test_task_mode_and_job_tool_controls();
   test_tool_dispatcher_plan_mode_denies_mutation();
 }

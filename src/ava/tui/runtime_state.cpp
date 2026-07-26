@@ -74,6 +74,11 @@ void RuntimePresentationState::refresh_token_status(TuiRuntimeOptions const& opt
   sidebar.token_status = snapshot.token_status;
 }
 
+void RuntimePresentationState::refresh_active_context_status(TuiRuntimeOptions const& options)
+{
+  snapshot.active_context_status = options.active_context_status_provider ? options.active_context_status_provider() : std::nullopt;
+}
+
 void RuntimePresentationState::refresh_reasoning_status(TuiRuntimeOptions const& options)
 {
   snapshot.reasoning_status = options.reasoning_status_provider ? options.reasoning_status_provider() : std::nullopt;
@@ -122,6 +127,7 @@ void RuntimePresentationState::apply_runtime_state_snapshot(TuiRuntimeOptions co
   sidebar.git_branch = std::move(state.git_branch);
   sidebar.context_source_count = state.context_source_count;
   refresh_token_status(options);
+  refresh_active_context_status(options);
   refresh_reasoning_status(options);
 }
 

@@ -323,7 +323,8 @@ SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, TuiKe
   auto const image_capabilities = active_terminal_image_capabilities();
   add_settings_row(view, "Display", "Image preview", terminal_image_settings_description(image_capabilities),
                    terminal_image_settings_detail(image_capabilities), image_capabilities.badge);
-  add_settings_row(view, "Display", "Tool details", snapshot.tool_details_visible ? "expanded" : "compact", "toggle with Ctrl+O or /details");
+  add_settings_row(view, "Display", "Tool details", std::string(to_string(snapshot.tool_presentation)),
+                   "Ctrl+O or /details toggles rich/expanded; /details compact opts in");
   add_settings_row(view, "Display", "Thinking blocks", snapshot.thinking_visible ? "visible" : "hidden", "toggle with /thinking");
 
   auto const binding_count = key_binding_help_items(bindings).size();

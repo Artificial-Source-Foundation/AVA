@@ -11,6 +11,7 @@
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/terminal.h"
 
+#include <chrono>
 #include <cstddef>
 #include <utility>
 #include <curses.h>
@@ -36,6 +37,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_mou
 
   if (active_event.key == Key::MouseLeftClick)
   {
+    renderer_.synchronize_detached_transcript_layout();
     if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
     {
       selected_slash_command_index = *clicked;
@@ -52,7 +54,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_mou
         selected_slash_command_index = 0;
         snapshot.status = "command selected - press Enter to queue";
       }
-      return to_input_handling(renderer_.render());
+      return to_input_handling(renderer_.request_render());
     }
     if (auto const clicked = detail::file_reference_palette_selection_for_screen_position_cached(snapshot, active_event.mouse_row, active_event.mouse_column,
                                                                                                  completion_cache, snapshot.file_references_generation))
@@ -71,7 +73,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_mou
         selected_slash_command_index = 0;
         snapshot.status = "file reference selected";
       }
-      return to_input_handling(renderer_.render());
+      return to_input_handling(renderer_.request_render());
     }
     if (auto const clicked = detail::path_completion_palette_selection_for_screen_position_cached(snapshot, active_event.mouse_row, active_event.mouse_column,
                                                                                                   completion_cache, snapshot.file_references_generation))
@@ -91,30 +93,30 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_mou
         path_completion_force_active = false;
         snapshot.status = "path selected";
       }
-      return to_input_handling(renderer_.render());
+      return to_input_handling(renderer_.request_render());
     }
     if (auto const tool_index = detail::transcript_tool_card_header_for_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
     {
       if (navigation_.toggle_tool_details_at(*tool_index))
-        return to_input_handling(renderer_.render());
+        return to_input_handling(renderer_.request_render());
     }
     if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
     {
       draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, *cursor);
       draft_state.clear_selection();
       snapshot.status = "cursor moved";
-      return to_input_handling(renderer_.render());
+      return to_input_handling(renderer_.request_render());
     }
   }
   if (active_event.key == Key::MouseWheelUp)
   {
     navigation_.scroll_up(kMouseWheelScrollRows);
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (active_event.key == Key::MouseWheelDown)
   {
     navigation_.scroll_down(kMouseWheelScrollRows);
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   return InputHandling::Unhandled;
 }
@@ -127,39 +129,40 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_res
 
   if (is_action(active_event, TuiAction::DetailsToggle))
   {
-    snapshot.tool_details_visible = !snapshot.tool_details_visible;
-    snapshot.status = snapshot.tool_details_visible ? "tool details visible" : "tool details compact";
-    return to_input_handling(renderer_.render());
+    renderer_.synchronize_detached_transcript_layout();
+    snapshot.tool_presentation = snapshot.tool_presentation == ToolPresentation::Expanded ? ToolPresentation::Rich : ToolPresentation::Expanded;
+    snapshot.status = "tool details " + std::string(to_string(snapshot.tool_presentation));
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::VariantCycle))
   {
     snapshot.status = "reasoning can be changed between turns";
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::ThinkingToggle))
   {
     action_controller_.toggle_thinking_visibility();
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::ModelSelect))
   {
     snapshot.status = "model selection is available between turns";
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::ModelCycleForward) || is_action(active_event, TuiAction::ModelCycleBackward))
   {
     snapshot.status = "model cycling is available between turns";
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::MessageDequeue))
   {
     snapshot.status = "queued-message restore is available during active runs";
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (active_event.key == Key::Space)
   {
     insert_active_text(active_input);
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   return InputHandling::Unhandled;
 }

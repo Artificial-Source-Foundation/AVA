@@ -27,6 +27,8 @@ struct TuiThemePalette
   int accent = 6;
   int screen_bg = -1;
   int composer_bg = -1;
+  int tool_bg = -1;
+  int question_bg = -1;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -53,8 +55,7 @@ struct TuiThemeInfo
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-void set_tui_config_theme(std::optional<std::string> theme,
-                          std::optional<TuiCustomTheme> custom_theme = std::nullopt);
+void set_tui_config_theme(std::optional<std::string> theme, std::optional<TuiCustomTheme> custom_theme = std::nullopt);
 [[nodiscard]] TuiThemeInfo active_tui_theme();
 [[nodiscard]] bool tui_plain_output();
 

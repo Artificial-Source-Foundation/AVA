@@ -171,9 +171,7 @@ void append_input_text(std::string& line, ComposerSnapshot const& snapshot, std:
 std::string render_composer_footer_line_impl(ComposerSnapshot const& snapshot, std::size_t width)
 {
   auto const model = model_label(snapshot.model);
-  auto context_source_count = snapshot.context_source_count;
-  if (!context_source_count && snapshot.sidebar)
-    context_source_count = snapshot.sidebar->context_source_count;
+  auto const active_context_status = snapshot.active_context_status;
 
   auto const build_left_status = [&](std::size_t budget) {
     if (budget == 0)
@@ -193,13 +191,13 @@ std::string render_composer_footer_line_impl(ComposerSnapshot const& snapshot, s
       line += std::string(kSgrComposerBg);
     };
 
-    if (!context_source_count)
+    if (!active_context_status || active_context_status->empty())
     {
       append_fitted_model(content_budget);
       return fit_line_preserving_sgr(std::move(line), budget);
     }
 
-    auto const context_label = "ctx " + std::to_string(*context_source_count);
+    auto const context_label = "ctx " + *active_context_status;
     auto const context_columns = terminal_text_columns(context_label);
     constexpr auto kSeparatorColumns = std::size_t{3};
     constexpr auto kCompactSeparatorColumns = std::size_t{1};
@@ -331,33 +329,28 @@ std::size_t composer_block_line_count(ComposerSnapshot const& snapshot, std::siz
 std::size_t composer_block_line_count(ComposerSnapshot const& snapshot, std::size_t height, std::size_t width)
 {
   auto const input_lines = snapshot.input.empty() ? std::size_t{1} : input_render_line_spans(snapshot.input, width).size();
-  auto const desired = std::clamp(input_lines + 1, kMinComposerBlockLines, kMaxComposerBlockLines);
+  auto const policy = composer_layout_policy(snapshot, height);
+  auto const desired = std::clamp(input_lines + 1 + policy.composer_top_padding_lines, kMinComposerBlockLines, kMaxComposerBlockLines);
   return std::min(height, desired);
 }
 
-ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::size_t max_lines, std::size_t draft_scroll_offset)
+ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::size_t max_lines, std::size_t draft_scroll_offset,
+                                          std::size_t requested_top_padding_lines)
 {
   auto const effective_input_lines = std::max<std::size_t>(input_line_count, 1);
-  if (max_lines <= 1)
+  if (max_lines == 0)
   {
-    auto const visible_input_lines = std::size_t{1};
-    auto const max_scroll = effective_input_lines > visible_input_lines ? effective_input_lines - visible_input_lines : 0;
-    auto const scroll = std::min(draft_scroll_offset, max_scroll);
-    auto const first_visible = effective_input_lines > visible_input_lines ? effective_input_lines - visible_input_lines - scroll : 0;
-    return {.top_padding = 0,
-            .first_visible = first_visible,
-            .visible_input_lines = visible_input_lines,
-            .hidden_above = first_visible,
-            .hidden_below = effective_input_lines - first_visible - visible_input_lines};
+    return {.top_padding = 0, .first_visible = effective_input_lines, .visible_input_lines = 0, .hidden_above = effective_input_lines, .hidden_below = 0};
   }
-  auto const input_budget = max_lines - 1;
+  auto const footer_lines = max_lines > 1 ? std::size_t{1} : std::size_t{0};
+  auto const max_top_padding = max_lines > footer_lines ? max_lines - footer_lines - 1 : std::size_t{0};
+  auto const reserved_top_padding = std::min(requested_top_padding_lines, max_top_padding);
+  auto const input_budget = std::max<std::size_t>(1, max_lines - footer_lines - reserved_top_padding);
   auto const visible_input_lines = std::min(effective_input_lines, input_budget);
   auto const max_scroll = effective_input_lines > visible_input_lines ? effective_input_lines - visible_input_lines : 0;
   auto const scroll = std::min(draft_scroll_offset, max_scroll);
   auto const first_visible = effective_input_lines > visible_input_lines ? effective_input_lines - visible_input_lines - scroll : 0;
-  auto const content_lines = visible_input_lines + 1;
-  auto const padding = max_lines > content_lines ? max_lines - content_lines : 0;
-  return {.top_padding = padding / 2,
+  return {.top_padding = max_lines - footer_lines - visible_input_lines,
           .first_visible = first_visible,
           .visible_input_lines = visible_input_lines,
           .hidden_above = first_visible,
@@ -368,46 +361,24 @@ std::vector<std::string> render_composer_block(ComposerSnapshot const& snapshot,
 {
   if (max_lines == 0)
     return {};
-  if (snapshot.input.empty())
-  {
-    if (max_lines == 1)
-      return {render_input_line(snapshot, width)};
-    if (max_lines == 2)
-      return {render_input_line(snapshot, width), render_composer_footer_line(snapshot, width)};
-    std::vector<std::string> lines;
-    auto const layout = composer_input_layout(1, max_lines, 0);
-    while (lines.size() < layout.top_padding)
-    {
-      lines.push_back(composer_surface_line("", width));
-    }
-    lines.push_back(render_input_line(snapshot, width));
-    lines.push_back(render_composer_footer_line(snapshot, width));
-    while (lines.size() < max_lines)
-    {
-      lines.push_back(composer_surface_line("", width));
-    }
-    return lines;
-  }
 
   std::vector<std::string> lines;
   auto const input_lines = input_render_line_spans(snapshot.input, width);
-  auto const layout = composer_input_layout(input_lines.size(), max_lines, snapshot.draft_scroll_offset);
+  auto const policy = composer_layout_policy(snapshot, snapshot.height);
+  auto const layout = composer_input_layout(input_lines.size(), max_lines, snapshot.draft_scroll_offset, policy.composer_top_padding_lines);
   while (lines.size() < layout.top_padding)
   {
-    lines.push_back(composer_surface_line("", width));
+    lines.push_back(composer_surface_line(composer_gutter(), width));
   }
   auto const last_visible = std::min(input_lines.size(), layout.first_visible + layout.visible_input_lines);
   for (std::size_t index = layout.first_visible; index < last_visible; ++index)
   {
     auto const& input_line = input_lines[index];
-    lines.push_back(render_input_fragment_line(snapshot, input_line.text, input_line.first_line, width, input_line.start));
+    lines.push_back(snapshot.input.empty() ? render_input_line(snapshot, width)
+                                           : render_input_fragment_line(snapshot, input_line.text, input_line.first_line, width, input_line.start));
   }
   if (max_lines > 1)
     lines.push_back(render_composer_footer_line(snapshot, width));
-  while (lines.size() < max_lines)
-  {
-    lines.push_back(composer_surface_line("", width));
-  }
   return lines;
 }
 

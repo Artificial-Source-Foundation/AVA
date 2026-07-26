@@ -59,8 +59,7 @@ void test_agent_loop_task_subagent_runs_child_session()
                                                     "data: [DONE]\n\n"),
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent saw task\"}\n\n"
                                                     "data: [DONE]\n\n")});
-  int prompts = 0;
-  std::optional<ava::permissions::PermissionPrompt> captured_prompt;
+  int resolver_prompts = 0;
   auto trace_collector = std::make_shared<TraceCollector>();
   auto observation = std::make_shared<ava::observability::RunObservation>(trace_collector);
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
@@ -69,10 +68,9 @@ void test_agent_loop_task_subagent_runs_child_session()
                                                           .model_id = "gpt-5.5",
                                                           .system_prompt = "system prompt",
                                                           .access_token = "token",
-                                                          .permission_resolver = [&prompts, &captured_prompt](ava::permissions::PermissionPrompt const& prompt)
+                                                          .permission_resolver = [&resolver_prompts](ava::permissions::PermissionPrompt const&)
                                                               -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-                                                            ++prompts;
-                                                            captured_prompt = prompt;
+                                                            ++resolver_prompts;
                                                             return ava::permissions::PermissionResolution::Allow;
                                                           },
                                                           .append_entry = append_route_for_test(store),
@@ -81,11 +79,8 @@ void test_agent_loop_task_subagent_runs_child_session()
                                                           .observation = observation});
 
   auto result = loop.run_turn("delegate", store, provider, transport);
-  expect(result && result->final_text == "parent saw task" && result->tool_calls == 1 && result->provider_iterations == 2 && prompts == 1,
-         "agent loop runs foreground task subagents and continues the parent turn");
-  expect(captured_prompt && captured_prompt->operation == ava::permissions::Operation::TaskRun && captured_prompt->tool_name == "task" &&
-             captured_prompt->command == "general" && captured_prompt->target_path == workspace,
-         "task subagent dispatch requests explicit task permission");
+  expect(result && result->final_text == "parent saw task" && result->tool_calls == 1 && result->provider_iterations == 2 && resolver_prompts == 0,
+         "agent loop launches foreground task subagents without a resolver prompt and continues the parent turn");
   expect(transport.requests().size() == 3, "task subagent uses parent-child-parent provider request order");
   if (transport.requests().size() == 3)
   {
@@ -121,11 +116,12 @@ void test_agent_loop_task_subagent_runs_child_session()
            entry.data_json.find("child result") != std::string::npos && entry.data_json.find("\"assistant_output_entry_id\":") != std::string::npos);
       saw_task_permission = saw_task_permission ||
                             (entry.type == ava::session::EntryType::PermissionDecision && entry.data_json.find("\"operation\":\"task\"") != std::string::npos &&
-                             entry.data_json.find("\"resolution\":\"allow\"") != std::string::npos);
+                             entry.data_json.find("\"resolution\":\"allow\"") != std::string::npos &&
+                             entry.data_json.find("\"resolution_source\":\"policy\"") != std::string::npos);
     }
   }
   expect(saw_task_call && saw_task_result && saw_task_permission,
-         "task parent session persists committed task function, bound result, and permission decision");
+         "prompt-free task launch persists committed task function, bound result, and audited policy Allow");
   auto const parent_validation = entries ? ava::session::validate_session_replay(*entries) : ava::session::SessionReplayValidation{};
   expect(entries && parent_validation.ok(), "task parent session passes strict replay validation");
   auto summaries = ava::session::SessionStore::list_sessions(workspace, session_root);
@@ -177,6 +173,50 @@ void test_agent_loop_task_subagent_runs_child_session()
   }
   expect(trace.valid && starts.size() == 2 && starts == terminals && child_parent_correlation,
          "observed foreground task has separate parent/child lifecycles, fresh child session IDs, and typed parent correlation");
+}
+
+void test_agent_loop_foreground_task_child_uses_parent_permission_resolver()
+{
+  auto const root = create_empty_root("agent-task-child-permission");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
+         "foreground child permission fixture keeps sealed planning roots owner-only");
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "parent-child-permission"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response(tool_call_sse(
+                                                "call_task", "task",
+                                                R"({"description":"check child permission","prompt":"Run the requested verification.","subagent_type":"general"})") +
+                                            "data: [DONE]\n\n"),
+                                       sse_response(tool_call_sse("call_child_bash", "bash", R"({"command":"true"})") + "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child handled permission\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent continued\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  std::vector<ava::permissions::PermissionPrompt> prompts;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .anchor_set = command_anchors_for_test(workspace, store.session_path().parent_path() / "spill"),
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        prompts.push_back(prompt);
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+  });
+
+  auto result = loop.run_turn("delegate with child permission", store, provider, transport);
+  expect(result && result->final_text == "parent continued" && transport.requests().size() == 4 && prompts.size() == 1 &&
+             prompts.front().operation == ava::permissions::Operation::RunCommand && prompts.front().tool_name == "bash" && prompts.front().command == "true",
+         "foreground child Ask operations use the inherited parent resolver while task launch itself remains auto-allowed");
 }
 
 void test_agent_loop_child_rejects_unadvertised_task_and_job_calls()
@@ -586,9 +626,8 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
         .access_token = "token",
         .ava_authority_roots = {workspace},
         .permission_resolver =
-            [&task_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            [&task_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
           ++task_prompts;
-          expect(prompt.operation == ava::permissions::Operation::TaskRun, "authority-root child only prompts to authorize its parent task");
           return ava::permissions::PermissionResolution::Allow;
         },
         .background_provider_factory = background ? []() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
@@ -633,9 +672,9 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
     auto const child_error_propagated =
         background ? child_requests.size() == 2 && child_requests[1].body.find("must not overlap with any AVA authority root") != std::string::npos
                    : transport.requests().size() == 4 && transport.requests()[2].body.find("must not overlap with any AVA authority root") != std::string::npos;
-    expect(result && task_prompts == 1 && child_completed && child_error_propagated && !process_started,
-           background ? "background child copies AVA authority roots before its AgentLoop starts and blocks overlapping model commands"
-                      : "foreground child copies AVA authority roots before its AgentLoop starts and blocks overlapping model commands");
+    expect(result && task_prompts == 0 && child_completed && child_error_propagated && !process_started,
+           background ? "background child copies AVA authority roots before its AgentLoop starts and blocks overlapping model commands without a launch prompt"
+                      : "foreground child copies AVA authority roots before its AgentLoop starts and blocks overlapping model commands without a launch prompt");
   };
 
   run_case(false);

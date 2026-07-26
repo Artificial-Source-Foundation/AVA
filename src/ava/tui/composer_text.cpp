@@ -463,6 +463,16 @@ std::string composer_surface_line(std::string line, std::size_t width)
   return surface_line(kSgrComposerBg, std::move(line), width);
 }
 
+std::string tool_surface_line(std::string line, std::size_t width)
+{
+  return surface_line(kSgrToolBg, std::move(line), width);
+}
+
+std::string question_surface_line(std::string line, std::size_t width)
+{
+  return surface_line(kSgrQuestionBg, std::move(line), width);
+}
+
 std::vector<std::string> wrap_transcript_text(std::string_view text, std::size_t width)
 {
   auto const sanitized = sanitize_terminal_text(text);

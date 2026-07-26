@@ -572,7 +572,7 @@ void run_tui_markdown_tests()
       .status = "ready",
       .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "| A | B | C | D | E |\n| --- | --- | --- | --- | --- |\n| 1 | 2 | 3 | 4 | 5 |"}},
       .width = 20,
-      .height = 16});
+      .height = 17});
   auto const too_narrow_text =
       std::accumulate(too_narrow_table_transcript.begin(), too_narrow_table_transcript.end(), std::string{}, [](std::string acc, std::string const& line) {
         acc += " ";
@@ -583,7 +583,8 @@ void run_tui_markdown_tests()
              std::ranges::none_of(too_narrow_table_transcript,
                                   [](std::string const& line) {
                                     auto const visible = strip_sgr(line);
-                                    auto const quiet_composer_row = visible.starts_with("│  Type a message...") || visible.starts_with("│  GPT-");
+                                    auto const quiet_composer_row = visible.starts_with("│  Type a message...") || visible.starts_with("│  GPT-") ||
+                                                                    (visible.starts_with("│") && visible.find_first_not_of("│ ") == std::string::npos);
                                     return !quiet_composer_row && (visible.find("┌") != std::string::npos || visible.find("│") != std::string::npos ||
                                                                    visible.find("└") != std::string::npos);
                                   }) &&
@@ -624,7 +625,7 @@ void run_tui_markdown_tests()
                                               .text = "| Header |\n| --- |\n| This is a very long cell content that should wrap |\n| "
                                                       "prefix https://example.com/this/is/a/very/long/url/that/should/wrap |"}},
       .width = 36,
-      .height = 24});
+      .height = 25});
   auto count_table_borders = [](std::string const& line) {
     auto const visible = strip_sgr(line);
     auto count = std::size_t{0};
@@ -660,7 +661,8 @@ void run_tui_markdown_tests()
                                  [&](std::string const& line) {
                                    auto const visible = strip_sgr(line);
                                    return visible.find("│") == std::string::npos || visible.starts_with("│  Type a message...") ||
-                                          visible.starts_with("│  GPT-") || count_table_borders(line) == 2;
+                                          visible.starts_with("│  GPT-") ||
+                                          (visible.starts_with("│") && visible.find_first_not_of("│ ") == std::string::npos) || count_table_borders(line) == 2;
                                  }),
          "tui assistant renderer supports one-column tables and wraps long unbroken table tokens without losing borders");
 
@@ -673,7 +675,7 @@ void run_tui_markdown_tests()
                                  .status = "ready",
                                  .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "| Code |\n| --- |\n| `averyveryveryverylongidentifier` |"}},
                                  .width = 36,
-                                 .height = 18});
+                                 .height = 19});
   auto styled_table_text = std::string{};
   for (auto const& line : styled_table_transcript)
   {
@@ -699,7 +701,8 @@ void run_tui_markdown_tests()
                                  [&](std::string const& line) {
                                    auto const visible = strip_sgr(line);
                                    return visible.find("│") == std::string::npos || visible.starts_with("│  Type a message...") ||
-                                          visible.starts_with("│  GPT-") || count_table_borders(line) == 2;
+                                          visible.starts_with("│  GPT-") ||
+                                          (visible.starts_with("│") && visible.find_first_not_of("│ ") == std::string::npos) || count_table_borders(line) == 2;
                                  }),
          "tui assistant renderer wraps styled inline code inside table cells without breaking borders");
 

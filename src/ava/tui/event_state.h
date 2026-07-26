@@ -69,6 +69,13 @@ struct TuiEventState
 void apply_runtime_event(TuiEventState& state, ava::app::runtime::Event const& event);
 void apply_event_envelope(TuiEventState& state, ava::app::EventEnvelope const& envelope);
 
-[[nodiscard]] std::vector<TranscriptItem> event_state_transcript_snapshot(TuiEventState const& state);
+enum class PendingTextProjection
+{
+  CompleteModels,
+  Unparsed,
+};
+
+[[nodiscard]] std::vector<TranscriptItem> event_state_transcript_snapshot(
+    TuiEventState const& state, PendingTextProjection pending_text_projection = PendingTextProjection::CompleteModels);
 
 }  // namespace ava::tui

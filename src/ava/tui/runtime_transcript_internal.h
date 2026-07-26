@@ -28,7 +28,8 @@ namespace runtime_transcript {
 
 [[nodiscard]] std::string assistant_meta_for_snapshot(ComposerSnapshot const& snapshot,
                                                       std::optional<std::chrono::steady_clock::duration> elapsed = std::nullopt);
-void apply_assistant_turn_meta(std::vector<TranscriptItem>& transcript, std::string const& meta);
+void apply_assistant_turn_meta(std::vector<TranscriptItem>& transcript, std::string const& meta, bool thinking_visible = true);
+void push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::vector<std::string> const& outputs, std::string const& meta);
 [[nodiscard]] std::string base64_encode(std::string_view text);
 [[nodiscard]] bool copy_text_to_terminal_clipboard(std::string_view text);
 [[nodiscard]] std::optional<std::string_view> copy_text_from_answer(ava::agent::QuestionAnswer const& answer);
@@ -47,12 +48,16 @@ void push_history(std::vector<std::string>& history, std::string input);
 
 [[nodiscard]] CappedTranscriptSnapshotUpdate apply_capped_transcript_snapshot(std::vector<TranscriptItem>& destination,
                                                                               std::vector<TranscriptItem> const& submitted_transcript,
-                                                                              std::vector<TranscriptItem> const& turn_transcript,
+                                                                              std::vector<TranscriptItem> turn_transcript,
                                                                               std::size_t previous_leading_evictions);
 
 // Toggles only the latest original card matching the established tool query.
 // The returned transcript index lets the runtime preserve viewport anchoring.
 [[nodiscard]] std::optional<std::size_t> toggle_latest_matching_tool_details(std::vector<TranscriptItem>& transcript, std::string_view query,
-                                                                             bool global_details_visible);
+                                                                             ToolPresentation inherited);
+inline std::optional<std::size_t> toggle_latest_matching_tool_details(std::vector<TranscriptItem>& transcript, std::string_view query, bool expanded)
+{
+  return toggle_latest_matching_tool_details(transcript, query, expanded ? ToolPresentation::Expanded : ToolPresentation::Compact);
+}
 
 }  // namespace ava::tui

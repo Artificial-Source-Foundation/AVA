@@ -489,7 +489,6 @@ void apply_prompt_request_envelope(TuiEventState& state, ava::app::EventEnvelope
   if (text.empty())
     return;
   auto const permission = envelope.name == "permission_requested";
-  state.transcript.push_back(transcript_text_item("audit", text));
   upsert_sidebar_activity(state, SidebarActivityItem{.id = first_non_empty({envelope.request_id.value_or(""), envelope.correlation_id.value_or(""),
                                                                             permission ? "permission" : "question"}),
                                                      .label = permission ? "permission" : "question",
@@ -1247,7 +1246,6 @@ void apply_provider_event(TuiEventState& state, ava::app::runtime::Event const& 
     remember_permission_provider_event(state, event);
     auto const text = event.text.empty() ? event.status : event.text;
     auto const prompt_status = event.status.substr(std::string_view{"tui:"}.size());
-    state.transcript.push_back(transcript_text_item("audit", text));
     upsert_sidebar_activity(
         state, SidebarActivityItem{
                    .id = "prompt:" + event.status,
@@ -1640,7 +1638,6 @@ void apply_event_envelope(TuiEventState& state, ava::app::EventEnvelope const& e
     if (envelope.name == "permission_replied")
       remember_permission_reply_envelope(state, envelope);
     auto const replied = envelope.name == "permission_replied" ? std::string("permission replied") : std::string("question replied");
-    state.transcript.push_back(transcript_text_item("audit", replied));
     upsert_sidebar_activity(state, SidebarActivityItem{.id = first_non_empty({envelope.request_id.value_or(""), envelope.correlation_id.value_or(""), replied}),
                                                        .label = envelope.name == "permission_replied" ? "permission" : "question",
                                                        .detail = replied,
@@ -1702,7 +1699,7 @@ void apply_event_envelope(TuiEventState& state, ava::app::EventEnvelope const& e
   annotate_tool_payload_metadata(state, *event, envelope);
 }
 
-std::vector<TranscriptItem> event_state_transcript_snapshot(TuiEventState const& state)
+std::vector<TranscriptItem> event_state_transcript_snapshot(TuiEventState const& state, PendingTextProjection pending_text_projection)
 {
   auto snapshot = state.transcript;
   snapshot.reserve(snapshot.size() + state.pending_tools.size() + (state.pending_assistant_text.empty() ? 0U : 1U) +
@@ -1710,12 +1707,19 @@ std::vector<TranscriptItem> event_state_transcript_snapshot(TuiEventState const&
   if (!state.pending_reasoning_text.empty() || !state.pending_assistant_text.empty())
   {
     auto const stream_id = first_non_empty({state.active_message_id.value_or(""), state.active_turn_id.value_or(""), state.active_run_id.value_or("")});
+    auto text_model = Text{};
+    auto thinking_model = Text{};
+    if (pending_text_projection == PendingTextProjection::CompleteModels)
+    {
+      text_model = text_from_markdown(state.pending_assistant_text);
+      thinking_model = text_from_plain(state.pending_reasoning_text);
+    }
     snapshot.push_back(TranscriptItem{.label = "ava",
                                       .text = state.pending_assistant_text,
-                                      .text_model = text_from_markdown(state.pending_assistant_text),
+                                      .text_model = std::move(text_model),
                                       .meta = state.pending_assistant_meta,
                                       .thinking = state.pending_reasoning_text,
-                                      .thinking_model = text_from_plain(state.pending_reasoning_text),
+                                      .thinking_model = std::move(thinking_model),
                                       .stream_id = stream_id,
                                       .append_only_stream = !stream_id.empty()});
   }

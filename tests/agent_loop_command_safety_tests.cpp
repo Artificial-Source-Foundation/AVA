@@ -29,7 +29,7 @@ using agent_loop_test::sse_response;
 using agent_loop_test::tool_call_sse;
 using agent_loop_test::TraceCollector;
 
-void test_agent_loop_model_command_deny_preflight_blocks_auto_allow_without_process()
+void test_agent_loop_model_auto_allow_deny_preflight_blocks_auto_allow_without_process()
 {
   auto const test_root = temp_root();
   expect(::chmod(test_root.c_str(), S_IRWXU) == 0, "model command deny preflight test secures its test-root ancestor");
@@ -64,7 +64,7 @@ void test_agent_loop_model_command_deny_preflight_blocks_auto_allow_without_proc
         ++interactive_prompts;
         return ava::permissions::PermissionResolution::Allow;
       },
-      .command_deny_preflight =
+      .auto_allow_deny_preflight =
           [&deny_preflights](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++deny_preflights;
         expect(prompt.operation == ava::permissions::Operation::RunCommand && prompt.command == "ls" && prompt.command_metadata &&
@@ -131,7 +131,8 @@ void test_agent_loop_model_command_rejects_authority_workspace_before_permission
         ++prompts;
         return ava::permissions::PermissionResolution::Allow;
       },
-      .command_deny_preflight = [&preflights](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+      .auto_allow_deny_preflight =
+          [&preflights](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++preflights;
         return ava::permissions::PermissionResolution::Allow;
       },

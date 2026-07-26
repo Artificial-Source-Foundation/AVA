@@ -240,27 +240,38 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
                         "    \"error\": \"#ff0000\",\n"
                         "    \"accent\": \"primary\",\n"
                         "    \"screenBg\": \"paper\",\n"
-                        "    \"composerBg\": 236\n"
+                        "    \"composerBg\": 236,\n"
+                        "    \"toolBg\": 235,\n"
+                        "    \"questionBg\": 234\n"
                         "  }\n"
                         "}\n");
+    write_app_test_file(
+        paths.ava_config_dir / "themes" / "legacy.json",
+        "{\n"
+        "  \"name\": \"legacy\",\n"
+        "  \"colors\": {\"text\":\"\",\"muted\":242,\"success\":34,\"warning\":220,\"error\":196,\"accent\":39,\"screenBg\":235,\"composerBg\":236}\n"
+        "}\n");
     write_app_test_file(paths.ava_config_dir / "themes" / "broken.json",
                         "{\n"
                         "  \"name\": \"broken\",\n"
                         "  \"colors\": {\"text\":\"\",\"muted\":242,\"success\":34,\"warning\":220,\"error\":196,\"accent\":39,\"screenBg\":235}\n"
                         "}\n");
     auto custom_theme = ava::app::load_tui_custom_theme(paths, "sunrise");
+    auto legacy_theme = ava::app::load_tui_custom_theme(paths, "legacy");
     auto invalid_custom_theme_file = ava::app::load_tui_custom_theme_file(paths.ava_config_dir / "themes" / "broken.json");
     expect(custom_theme && custom_theme->name == "sunrise" && custom_theme->palette.text == -1 && custom_theme->palette.screen_bg == 255 &&
-               custom_theme->palette.composer_bg == 236 && !invalid_custom_theme_file &&
-               invalid_custom_theme_file.error().format().find("composerBg") != std::string::npos,
-           "display settings load valid AVA custom themes and reject incomplete custom theme files with token context");
+               custom_theme->palette.composer_bg == 236 && custom_theme->palette.tool_bg == 235 && custom_theme->palette.question_bg == 234 && legacy_theme &&
+               legacy_theme->palette.tool_bg == legacy_theme->palette.composer_bg && legacy_theme->palette.question_bg == legacy_theme->palette.composer_bg &&
+               !invalid_custom_theme_file && invalid_custom_theme_file.error().format().find("composerBg") != std::string::npos,
+           "display settings load custom tool/question backgrounds, preserve composer fallbacks, and reject incomplete custom themes with token context");
     auto theme_custom = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/theme sunrise"});
     loaded_theme = ava::app::load_tui_display_settings(paths);
     active_theme = ava::tui::active_tui_theme();
     expect(theme_custom && theme_custom->handled && !theme_custom->output.empty() &&
                theme_custom->output[0].find("Stored TUI theme sunrise") != std::string::npos && loaded_theme && loaded_theme->theme &&
                *loaded_theme->theme == "sunrise" && loaded_theme->custom_theme && active_theme.kind == ava::tui::TuiThemeKind::Custom &&
-               active_theme.name == "sunrise" && active_theme.badge == "display.json" && active_theme.palette && active_theme.palette->composer_bg == 236,
+               active_theme.name == "sunrise" && active_theme.badge == "display.json" && active_theme.palette && active_theme.palette->composer_bg == 236 &&
+               active_theme.palette->tool_bg == 235 && active_theme.palette->question_bg == 234,
            "command dispatcher /theme <custom> persists display.json and applies a valid custom TUI theme");
     auto custom_watch = ava::app::load_tui_display_settings_watch_state(paths);
     expect(custom_watch && custom_watch->theme && *custom_watch->theme == "sunrise" && custom_watch->custom_theme_revision,
@@ -302,17 +313,18 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
            "command dispatcher /theme reset clears the persisted TUI theme and returns to the built-in default");
   }
   auto details = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/details"});
-  expect(details && details->handled && !details->output.empty() && details->output[0].find("TUI display toggle") != std::string::npos,
-         "command dispatcher recognizes /details without inventing backend tool metadata");
+  expect(details && details->handled && !details->output.empty() && details->output[0].find("default to Rich") != std::string::npos &&
+             details->output[0].find("/details compact") != std::string::npos,
+         "command dispatcher documents Rich default and explicit tool-card presentation modes");
   auto sidebar = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sidebar"});
   expect(sidebar && sidebar->handled && !sidebar->output.empty() && sidebar->output[0].find("interactive TUI") != std::string::npos &&
              sidebar->output[0].find("session overview") != std::string::npos && sidebar->output[0].find("session_id") == std::string::npos &&
              sidebar->output[0].find("workspace") == std::string::npos,
          "command dispatcher describes /sidebar as a TUI-only view without inventing sidebar data");
   auto tool = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/tools write"});
-  expect(tool && tool->handled && !tool->output.empty() &&
-             tool->output[0].find("/tool [query] to show the latest or matching expanded tool card") != std::string::npos &&
-             tool->output[0].find("/copy tool [query] to copy details") != std::string::npos,
+  expect(tool && tool->handled && !tool->output.empty() && tool->output[0].find("/tool [query] to toggle the latest or matching card") != std::string::npos &&
+             tool->output[0].find("inherited non-expanded view and Expanded") != std::string::npos &&
+             tool->output[0].find("/copy tool [query] to copy safe tool details") != std::string::npos,
          "command dispatcher recognizes /tool and /tools as TUI tool-card inspection commands");
   auto diff = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/diff src/main.cpp"});
   expect(diff && diff->handled && !diff->output.empty() &&

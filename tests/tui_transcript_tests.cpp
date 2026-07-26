@@ -28,7 +28,8 @@ void run_tui_transcript_tests_part_1()
                                                                                     .status = "ready",
                                                                                     .transcript = {},
                                                                                     .width = 50,
-                                                                                    .height = 8});
+                                                                                    .height = 8,
+                                                                                    .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(multiline_input.size() == 8 && strip_sgr(multiline_input[5]).starts_with("│  first") && strip_sgr(multiline_input[6]).starts_with("│  second") &&
              strip_sgr(multiline_input[7]).starts_with("│  GPT-5.5") && multiline_input[4].find("\x1b[48;2;26;31;46m") == std::string::npos &&
              std::ranges::none_of(multiline_input, [](std::string const& line) { return strip_sgr(line).find("❯") != std::string::npos; }),
@@ -41,7 +42,8 @@ void run_tui_transcript_tests_part_1()
                                                                                           .status = "ready",
                                                                                           .transcript = {},
                                                                                           .width = 50,
-                                                                                          .height = 12});
+                                                                                          .height = 12,
+                                                                                          .tool_presentation = ava::tui::ToolPresentation::Compact});
   auto const grown_composer_height = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                           .provider = "openai",
                                                                                           .model = "gpt-5.5",
@@ -50,7 +52,8 @@ void run_tui_transcript_tests_part_1()
                                                                                           .status = "ready",
                                                                                           .transcript = {},
                                                                                           .width = 50,
-                                                                                          .height = 12});
+                                                                                          .height = 12,
+                                                                                          .tool_presentation = ava::tui::ToolPresentation::Compact});
   auto const composer_bg_rows = [](std::vector<std::string> const& rendered) {
     return static_cast<std::size_t>(
         std::ranges::count_if(rendered, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }));
@@ -66,7 +69,8 @@ void run_tui_transcript_tests_part_1()
                                                                                .status = "ready",
                                                                                .transcript = {},
                                                                                .width = 70,
-                                                                               .height = 12});
+                                                                               .height = 12,
+                                                                               .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::none_of(tall_draft, [](std::string const& line) { return strip_sgr(line).find("draft +") != std::string::npos; }) &&
              std::ranges::any_of(tall_draft, [](std::string const& line) { return strip_sgr(line).find("│  nine") != std::string::npos; }) &&
              std::ranges::none_of(tall_draft, [](std::string const& line) { return strip_sgr(line).find("│  one") != std::string::npos; }),
@@ -101,7 +105,8 @@ void run_tui_transcript_tests_part_1()
                                                                              .status = "ready",
                                                                              .transcript = many_items,
                                                                              .width = 40,
-                                                                             .height = 12});
+                                                                             .height = 12,
+                                                                             .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(scrolled, [](std::string const& line) { return line.find("item 19") != std::string::npos; }) &&
              std::ranges::none_of(scrolled, [](std::string const& line) { return line.find("lines hidden") != std::string::npos; }) &&
              std::ranges::none_of(scrolled, [](std::string const& line) { return line.find("item 0") != std::string::npos; }),
@@ -144,7 +149,8 @@ void run_tui_transcript_tests_part_1()
                                                                                 .selected_slash_command_index = 0,
                                                                                 .transcript_scroll_offset = 4,
                                                                                 .width = 80,
-                                                                                .height = 12});
+                                                                                .height = 12,
+                                                                                .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::none_of(scrolled_up, [](std::string const& line) { return line.find("lines hidden") != std::string::npos; }) &&
              std::ranges::any_of(scrolled_up, [](std::string const& line) { return line.find("item 15") != std::string::npos; }) &&
              std::ranges::none_of(scrolled_up, [](std::string const& line) { return line.find("item 19") != std::string::npos; }),
@@ -160,14 +166,17 @@ void run_tui_transcript_tests_part_1()
                                                                                     .transcript_scroll_offset = 4,
                                                                                     .transcript_new_output_count = 3,
                                                                                     .width = 80,
-                                                                                    .height = 12});
-  expect(std::ranges::any_of(detached_scroll,
-                             [](std::string const& line) {
-                               auto const visible = strip_sgr(line);
-                               return visible.find("scrollback detached") != std::string::npos && visible.find("+3 updates below") != std::string::npos &&
-                                      visible.find("jump_to_bottom") != std::string::npos;
-                             }),
-         "tui transcript scrollback shows a detached/new-output indicator with the jump-to-bottom action name");
+                                                                                    .height = 12,
+                                                                                    .tool_presentation = ava::tui::ToolPresentation::Compact});
+  expect(std::ranges::none_of(detached_scroll,
+                              [](std::string const& line) {
+                                auto const visible = strip_sgr(line);
+                                return visible.find("scrollback detached") != std::string::npos || visible.find("updates below") != std::string::npos ||
+                                       visible.find("jump_to_bottom") != std::string::npos;
+                              }) &&
+             std::ranges::any_of(detached_scroll, [](std::string const& line) { return strip_sgr(line).find("item 15") != std::string::npos; }) &&
+             std::ranges::none_of(detached_scroll, [](std::string const& line) { return strip_sgr(line).find("item 19") != std::string::npos; }),
+         "tui detached transcript preserves its scroll position and output accounting without rendering a banner or consuming the first row");
 
   auto docked_scrollback_snapshot = ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -255,7 +264,8 @@ void run_tui_transcript_tests_part_1()
                                  .selected_slash_command_index = 0,
                                  .transcript_scroll_offset = 1,
                                  .width = 60,
-                                 .height = 8});
+                                 .height = 8,
+                                 .tool_presentation = ava::tui::ToolPresentation::Compact});
   auto const wrapped_latest = ava::tui::render_composer(
       ava::tui::ComposerSnapshot{.mode = "build",
                                  .provider = "openai",
@@ -272,10 +282,11 @@ void run_tui_transcript_tests_part_1()
                                  .selected_slash_command_index = 0,
                                  .transcript_scroll_offset = 0,
                                  .width = 60,
-                                 .height = 8});
+                                 .height = 8,
+                                 .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::none_of(wrapped_transcript, [](std::string const& line) { return strip_sgr(line).find("lines hidden") != std::string::npos; }) &&
-             wrapped_transcript != wrapped_latest,
-         "tui transcript viewport wraps long transcript text before applying scroll offset without hidden-line banners");
+             std::ranges::none_of(wrapped_latest, [](std::string const& line) { return strip_sgr(line).find("scrollback detached") != std::string::npos; }),
+         "tui transcript viewport wraps long transcript text without synthetic hidden-line or detached banners");
 
   std::vector<ava::tui::TranscriptItem> mixed_items;
   for (int index = 0; index < 12; ++index)
@@ -294,7 +305,8 @@ void run_tui_transcript_tests_part_1()
                                                                                    .status = "ready",
                                                                                    .transcript = mixed_items,
                                                                                    .width = 60,
-                                                                                   .height = 12});
+                                                                                   .height = 12,
+                                                                                   .tool_presentation = ava::tui::ToolPresentation::Compact});
   auto const mixed_visible = tui_test_support::join_visible_lines(mixed_scrolled);
   expect(mixed_visible.find("lines hidden") == std::string::npos && mixed_visible.find("+ grep") != std::string::npos &&
              mixed_visible.find("2 matches") != std::string::npos && mixed_visible.find("done") != std::string::npos &&
@@ -309,7 +321,8 @@ void run_tui_transcript_tests_part_1()
                                                                               .status = "ready",
                                                                               .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "one\ntwo"}},
                                                                               .width = 80,
-                                                                              .height = 14});
+                                                                              .height = 14,
+                                                                              .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(std::ranges::any_of(multiline,
                              [](std::string const& line) {
                                auto visible = strip_sgr(line);
@@ -361,7 +374,7 @@ void test_tui_large_render_performance_budget()
                                                                  .width = 120,
                                                                  .height = 36,
                                                                  .input_cursor = std::string::npos,
-                                                                 .tool_details_visible = true,
+                                                                 .tool_presentation = ava::tui::ToolPresentation::Expanded,
                                                                  .thinking_visible = true});
   }
   auto const elapsed = std::chrono::steady_clock::now() - start;
@@ -421,6 +434,8 @@ void test_tui_f2_transcript_hierarchy_and_tool_shell()
     return found == mixed.end() ? mixed.size() : static_cast<std::size_t>(found - mixed.begin());
   };
   auto const first_assistant = line_index("Thinking: checked the request");
+  auto const first_answer = line_index("first assistant answer");
+  auto const context_heading = line_index("context gathering");
   auto const first_tool = line_index("read_file");
   auto const second_tool = line_index("grep");
   auto const continuation = line_index("assistant continuation");
@@ -431,13 +446,15 @@ void test_tui_f2_transcript_hierarchy_and_tool_shell()
   auto const event_fallback = line_index("· event");
   auto const second_user = line_index("second user turn");
   auto const second_flow = line_index("second flow reasoning");
-  expect(blank_count == 5 && !mixed.empty() && !mixed.back().empty() && first_assistant > 0 && mixed[first_assistant - 1].empty() &&
-             first_tool > first_assistant && !mixed[first_tool - 1].empty() && second_tool > first_tool && !mixed[second_tool - 1].empty() &&
-             continuation > second_tool && !mixed[continuation - 1].empty() && error > 0 && mixed[error - 1].empty() && first_system > 0 &&
+  expect(blank_count == 10 && !mixed.empty() && !mixed.back().empty() && first_assistant > 0 && mixed[first_assistant - 1].empty() &&
+             first_answer > first_assistant && mixed[first_answer - 1].empty() && context_heading > first_answer && mixed[context_heading - 1].empty() &&
+             first_tool > context_heading && !mixed[first_tool - 1].empty() && second_tool > first_tool && !mixed[second_tool - 1].empty() &&
+             continuation > second_tool && mixed[continuation - 1].empty() && error > 0 && mixed[error - 1].empty() && first_system > 0 &&
              mixed[first_system - 1].empty() && queue_fallback > first_system && !mixed[queue_fallback - 1].empty() && audit_fallback > queue_fallback &&
              !mixed[audit_fallback - 1].empty() && event_fallback > audit_fallback && !mixed[event_fallback - 1].empty() && second_user > 0 &&
              mixed[second_user - 1].empty() && second_flow > 0 && mixed[second_flow - 1].empty(),
-         "tui F2 roomy transcript uses exactly one blank between semantic groups, none inside assistant/system flows, and no trailing blank");
+         "tui F2 roomy transcript uses one blank between prose, reasoning, tool runs, and ownership groups, keeps consecutive tools compact, and adds no "
+         "trailing blank");
   expect(mixed_text.find("Thinking: checked the request") != std::string::npos && mixed_text.find("!") != std::string::npos &&
              mixed_text.find("retry payload exactly") != std::string::npos && mixed_text.find("· queue") != std::string::npos &&
              mixed_text.find("· audit") != std::string::npos && mixed_text.find("· event") != std::string::npos &&
@@ -497,17 +514,16 @@ void test_tui_f2_transcript_hierarchy_and_tool_shell()
   auto const expanded_tool = plain_lines(ava::tui::detail::render_tool_card(generic_tool, 100, true));
   auto const expanded_tool_text = joined(expanded_tool);
   auto const generic_copy = ava::tui::detail::tool_card_copy_text(generic_tool);
-  expect(collapsed_tool.size() == 1 && collapsed_tool.front().find("+ write · permission allow") != std::string::npos &&
+  expect(collapsed_tool.size() == 1 && collapsed_tool.front().find("permission allow") == std::string::npos &&
              collapsed_tool.front().find("complete") == std::string::npos && collapsed_tool.front().find("src/main.cpp") != std::string::npos &&
-             occurrences(collapsed_tool_text, "wrote 27 bytes") == 1 && collapsed_tool.front().find("src/main.cpp · wrote 27 bytes") != std::string::npos &&
-             collapsed_tool.front().find("path=src/main.cpp") == std::string::npos,
-         "tui F5 collapsed mutation shell prefers the changed path and result on one row without lifecycle text");
+             occurrences(collapsed_tool_text, "wrote 27 bytes") == 1 && collapsed_tool.front().find("src/main.cpp · wrote 27 bytes") != std::string::npos,
+         "tui F5 compact mutation cards prefer the changed path and result without lifecycle or routine permission receipts");
   expect(expanded_tool.size() > 1 && !expanded_tool[1].empty() && expanded_tool.front().find("src/main.cpp · wrote 27 bytes") != std::string::npos &&
              occurrences(expanded_tool_text, "wrote 27 bytes") == 1 && expanded_tool_text.find("result: wrote 27 bytes") == std::string::npos &&
-             expanded_tool_text.find("args: path=src/main.cpp") != std::string::npos && expanded_tool_text.find("permission: allow") != std::string::npos &&
+             expanded_tool_text.find("src/main.cpp") != std::string::npos && expanded_tool_text.find("permission:") == std::string::npos &&
              expanded_tool_text.find("changed: src/main.cpp") != std::string::npos && expanded_tool_text.find("diff src/main.cpp:") != std::string::npos &&
              generic_copy.find("result: wrote 27 bytes") != std::string::npos && generic_copy.find("diff:") != std::string::npos,
-         "tui F5 expanded mutation content keeps its distinct argument, auxiliary, and copy payloads below the changed-path shell");
+         "tui F5 expanded mutation content keeps its human call, changed path, diff, and safe copy payload");
 
   auto aliased_write = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
                                                   .name = "write",
@@ -540,9 +556,7 @@ void test_tui_f2_transcript_hierarchy_and_tool_shell()
   {
     auto const duplicate_lines = plain_lines(ava::tui::detail::render_transcript_lines(duplicate_transcript, 100, details_visible, true));
     auto const duplicate_text = joined(duplicate_lines);
-    expect(occurrences(duplicate_text, "wrote 27 bytes") == 1 && duplicate_text.find("args: path=src/main.cpp") == std::string::npos &&
-               duplicate_text.find("changed: src/main.cpp") == std::string::npos &&
-               (duplicate_text.find("permission: allow") != std::string::npos) == details_visible &&
+    expect(occurrences(duplicate_text, "wrote 27 bytes") == 1 && duplicate_text.find("permission: allow") == std::string::npos &&
                ava::tui::detail::tool_card_copy_text(duplicate_tool).find("result: wrote 27 bytes") != std::string::npos,
            std::string("tui F2 exact adjacent tool-result suppression keeps one card result and the full copy payload when details are ") +
                (details_visible ? "expanded" : "collapsed"));
@@ -555,9 +569,9 @@ void test_tui_f2_transcript_hierarchy_and_tool_shell()
   permission_near_match.back().text += " after review";
   auto const permission_duplicate_text = joined(plain_lines(ava::tui::detail::render_transcript_lines(permission_duplicate, 100, false, true)));
   auto const permission_near_match_text = joined(plain_lines(ava::tui::detail::render_transcript_lines(permission_near_match, 100, false, true)));
-  expect(occurrences(permission_duplicate_text, "permission allow") == 1 && permission_duplicate_text.find("must not attach") == std::string::npos &&
-             occurrences(permission_near_match_text, "permission allow") == 2 && permission_near_match_text.find("after review") != std::string::npos,
-         "tui F2 structured permission duplicate suppression is exact and does not attach assistant metadata to the card");
+  expect(occurrences(permission_duplicate_text, "permission allow") == 1 && permission_duplicate_text.find("must not attach") != std::string::npos &&
+             occurrences(permission_near_match_text, "permission allow") == 1 && permission_near_match_text.find("after review") != std::string::npos,
+         "tui F2 routine permission receipts are not synthesized by cards and explicit assistant text remains intact");
 
   auto non_adjacent = duplicate_transcript;
   non_adjacent.insert(non_adjacent.begin() + 1, ava::tui::TranscriptItem{.label = "status", .text = "historical receipt"});
@@ -599,8 +613,9 @@ void test_tui_f2_transcript_hierarchy_and_tool_shell()
   expect(expanded_long_result.size() > 1 && expanded_long_result_text.find("result: ") != std::string::npos &&
              expanded_long_result_text.find("界") != std::string::npos &&
              ava::tui::detail::tool_card_copy_text(unicode_tool).find("result: ") != std::string::npos && expanded_long_argument.size() > 1 &&
-             expanded_long_argument_text.find("args: argument-with") != std::string::npos,
-         "tui F2 expanded details retain clipped result and omitted long-name argument primaries without changing copy payloads");
+             expanded_long_argument_text.find("argument-with-a-deliberately") != std::string::npos &&
+             expanded_long_argument_text.find("args:") == std::string::npos,
+         "tui F2 expanded details retain clipped results and wrapped human calls without raw argument labels");
 
   auto trailing_control_tool = generic_tool;
   trailing_control_tool.result_summary = "trailing receipt\r\n\f\v";
@@ -622,8 +637,10 @@ void test_tui_f2_transcript_hierarchy_and_tool_shell()
       "control";
   auto const middle_control_text = joined(plain_lines(ava::tui::detail::render_transcript_lines(middle_control, 100, false, true)));
   expect(
-      !trailing_control_text.empty() && trailing_control_text.starts_with("  │ + write · permission allow") && !text_assistant_text.empty() &&
-          text_assistant_text.starts_with("  │ + write · permission allow") && occurrences(middle_control_text, "middle?control") == 1,
+      !trailing_control_text.empty() && trailing_control_text.starts_with("  │ + write") &&
+          trailing_control_text.find("permission allow") == std::string::npos && !text_assistant_text.empty() &&
+          text_assistant_text.starts_with("  │ + write") && text_assistant_text.find("permission allow") == std::string::npos &&
+          occurrences(middle_control_text, "middle?control") == 1,
       "tui F5 adjacent suppression trims raw and sanitized trailing ASCII whitespace while matching sanitized display identity and preserving structured Text");
 }
 
@@ -719,6 +736,53 @@ void test_tui_detached_transcript_anchor_survives_capped_eviction()
     expect(update.item_index_shift == -1 && visible_start == 0,
            "repeated production-cap leading evictions use runtime shift arithmetic and retain oldest-row fallback after anchor eviction");
   }
+}
+
+void test_tui_detached_append_defers_layout_until_anchor_recovery()
+{
+  constexpr auto width = std::size_t{48};
+  constexpr auto viewport_height = std::size_t{5};
+  std::vector<ava::tui::TranscriptItem> submitted;
+  submitted.reserve(ava::tui::kMaxTranscriptItems);
+  for (std::size_t index = 0; index < ava::tui::kMaxTranscriptItems; ++index)
+    submitted.push_back(ava::tui::TranscriptItem{.label = "ava", .text = "stable detached row " + std::to_string(index)});
+
+  ava::tui::detail::TranscriptLayoutCache cache;
+  ava::tui::detail::refresh_transcript_layout_cache(cache, submitted, 1, width, false, true, false);
+  auto const initial_builds = cache.layout_build_count;
+  auto const anchor_item_index = std::size_t{12};
+  auto const anchor_position = std::ranges::find(cache.layout.message_item_indices, anchor_item_index);
+  expect(anchor_position != cache.layout.message_item_indices.end(), "detached deferred-layout fixture exposes the selected transcript anchor");
+  if (anchor_position == cache.layout.message_item_indices.end())
+    return;
+  auto const content_position = static_cast<std::size_t>(std::distance(cache.layout.message_item_indices.begin(), anchor_position));
+  auto const anchor_line_index = cache.layout.content_starts[content_position];
+  auto const anchor_line = cache.layout.lines[anchor_line_index];
+  auto const old_max_scroll = ava::tui::detail::cached_transcript_max_scroll_offset(cache, viewport_height);
+  auto const old_scroll_offset = old_max_scroll - std::min(old_max_scroll, anchor_line_index);
+  auto const anchor = ava::tui::detail::capture_transcript_viewport_anchor(cache.layout, old_max_scroll, old_scroll_offset);
+
+  std::vector<ava::tui::TranscriptItem> turn;
+  std::vector<ava::tui::TranscriptItem> projected = submitted;
+  std::size_t prior_evictions = 0;
+  std::ptrdiff_t cumulative_shift = 0;
+  for (std::size_t update_index = 0; update_index < 5; ++update_index)
+  {
+    turn.push_back(ava::tui::TranscriptItem{.label = "ava", .text = "append below frozen viewport " + std::to_string(update_index)});
+    auto update = ava::tui::apply_capped_transcript_snapshot(projected, submitted, turn, prior_evictions);
+    prior_evictions = update.leading_evictions;
+    cumulative_shift += update.item_index_shift;
+    expect(cache.layout_build_count == initial_builds && cache.transcript_generation == 1,
+           "detached append-only updates leave the frozen transcript layout untouched until navigation");
+  }
+
+  ava::tui::detail::refresh_transcript_layout_cache(cache, projected, 6, width, false, true, false);
+  auto const new_max_scroll = ava::tui::detail::cached_transcript_max_scroll_offset(cache, viewport_height);
+  auto const recovered_scroll = ava::tui::detail::restore_transcript_viewport_anchor(anchor, cache.layout, new_max_scroll, cumulative_shift);
+  auto const recovered_start = new_max_scroll - std::min(new_max_scroll, recovered_scroll);
+  expect(prior_evictions == 5 && cumulative_shift == -5 && cache.layout_build_count == initial_builds + 1 && recovered_start < cache.layout.lines.size() &&
+             cache.layout.lines[recovered_start] == anchor_line,
+         "detached navigation performs one deferred rebuild and exactly recovers its anchor after repeated leading cap evictions");
 }
 
 void test_tui_streaming_tail_cache_is_bounded_and_matches_full_renderer()
@@ -1048,8 +1112,10 @@ void test_tui_completion_and_transcript_layout_caches()
   ava::tui::detail::refresh_transcript_layout_cache(transcript_cache, transcript, 2, 79, false, true, false);
   expect(transcript_cache.layout_build_count == ++expected_layout_builds, "transcript width mutation rebuilds detached layout exactly once");
   ava::tui::detail::refresh_transcript_layout_cache(transcript_cache, transcript, 2, 79, true, true, false);
-  expect(transcript_cache.layout_build_count == ++expected_layout_builds, "transcript detail mutation rebuilds detached layout exactly once");
-  ava::tui::detail::refresh_transcript_layout_cache(transcript_cache, transcript, 2, 79, true, false, false);
+  expect(transcript_cache.layout_build_count == ++expected_layout_builds, "transcript presentation mutation rebuilds detached layout exactly once");
+  ava::tui::detail::refresh_transcript_layout_cache(transcript_cache, transcript, 2, 79, ava::tui::ToolPresentation::Rich, true, false);
+  expect(transcript_cache.layout_build_count == ++expected_layout_builds, "transcript cache keys distinguish Rich from both Compact and Expanded presentation");
+  ava::tui::detail::refresh_transcript_layout_cache(transcript_cache, transcript, 2, 79, ava::tui::ToolPresentation::Rich, false, false);
   expect(transcript_cache.layout_build_count == ++expected_layout_builds, "transcript thinking mutation rebuilds detached layout exactly once");
 }
 
@@ -1100,7 +1166,7 @@ void test_tui_very_long_transcript_performance_budget()
                                                                  .width = 96,
                                                                  .height = 30,
                                                                  .input_cursor = std::string::npos,
-                                                                 .tool_details_visible = true,
+                                                                 .tool_presentation = ava::tui::ToolPresentation::Expanded,
                                                                  .thinking_visible = true});
     visible_frames.push_back(tui_test_support::join_visible_lines(frame));
   }
@@ -1123,6 +1189,7 @@ void run_tui_transcript_hierarchy_tests()
 {
   test_tui_f2_transcript_hierarchy_and_tool_shell();
   test_tui_detached_transcript_anchor_survives_capped_eviction();
+  test_tui_detached_append_defers_layout_until_anchor_recovery();
   test_tui_streaming_tail_cache_is_bounded_and_matches_full_renderer();
   test_tui_transcript_tail_renderer_matches_full_visible_window();
 }

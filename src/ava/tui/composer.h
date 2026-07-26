@@ -440,6 +440,15 @@ struct ActiveRunHint
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+enum class ToolPresentation
+{
+  Compact,
+  Rich,
+  Expanded,
+};
+
+[[nodiscard]] std::string_view to_string(ToolPresentation presentation) noexcept;
+
 struct ComposerSnapshot
 {
   std::string mode;
@@ -455,6 +464,7 @@ struct ComposerSnapshot
   ActiveRunHint active_run_hint = {};
   std::size_t spinner_frame = 0;
   std::optional<std::string> token_status = std::nullopt;
+  std::optional<std::string> active_context_status = std::nullopt;
   std::optional<std::string> reasoning_status = std::nullopt;
   std::optional<std::size_t> context_source_count = std::nullopt;
   std::vector<TranscriptItem> transcript;
@@ -482,7 +492,7 @@ struct ComposerSnapshot
   std::vector<QueuedMessageItem> queued_messages = {};
   std::vector<PendingAttachmentItem> pending_attachments = {};
   std::size_t draft_scroll_offset = 0;
-  bool tool_details_visible = false;
+  ToolPresentation tool_presentation = ToolPresentation::Rich;
   bool thinking_visible = true;
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
 

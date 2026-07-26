@@ -862,7 +862,7 @@ ToolDispatchResult task_result(ava::tools::ToolContext const& context, ProviderT
 
   auto tool_context = context_for_provider_tool(context, call);
   if (auto permission = ava::tools::ensure_permission(tool_context, ava::permissions::Operation::TaskRun, context.workspace_dir, *subagent_type, "task",
-                                                      "subagent task execution requires permission");
+                                                      "task launch permission check failed");
       !permission)
   {
     return tool_error_result(call, permission.error());

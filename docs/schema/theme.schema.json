@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "AVA custom TUI theme",
   "description": "Editor-facing schema for files under $XDG_CONFIG_HOME/ava/themes/*.json. The AVA runtime loader remains authoritative.",
-  "$comment": "This intentionally documents AVA's current minimal custom theme shape: name, optional vars, and eight ncurses color roles. It is not Pi's broader 51-token theme schema.",
+  "$comment": "This intentionally documents AVA's minimal custom theme shape: name, optional vars, eight required ncurses color roles, and optional surface backgrounds. It is not Pi's broader 51-token theme schema.",
   "type": "object",
   "required": ["name", "colors"],
   "properties": {
@@ -25,7 +25,7 @@
     },
     "colors": {
       "type": "object",
-      "description": "AVA's current eight ncurses palette roles.",
+      "description": "AVA's eight required ncurses palette roles plus optional surface backgrounds.",
       "required": [
         "text",
         "muted",
@@ -59,6 +59,12 @@
           "$ref": "#/$defs/colorValue"
         },
         "composerBg": {
+          "$ref": "#/$defs/colorValue"
+        },
+        "toolBg": {
+          "$ref": "#/$defs/colorValue"
+        },
+        "questionBg": {
           "$ref": "#/$defs/colorValue"
         }
       },

@@ -3,7 +3,10 @@
 #include "tests/support/tui_test_support.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
+#include "ava/tui/runtime_active_run_internal.h"
 #include "ava/tui/runtime_internal.h"
+#include "ava/tui/runtime_prompts_internal.h"
+#include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 
@@ -21,6 +24,150 @@
 
 void run_tui_composer_rendering_tests_part_1()
 {
+  {
+    auto const started_at = std::chrono::steady_clock::time_point{};
+    ava::tui::detail::ActiveRunCadence cadence(started_at);
+    auto const input_before_frame = ava::tui::detail::active_run_input_read_decision(true, cadence.frame_due(started_at + std::chrono::milliseconds(15)));
+    auto const input_at_frame = ava::tui::detail::active_run_input_read_decision(true, cadence.frame_due(started_at + std::chrono::milliseconds(16)));
+    auto const no_input_before_frame = ava::tui::detail::active_run_input_read_decision(false, cadence.frame_due(started_at + std::chrono::milliseconds(15)));
+    auto const early = cadence.advance(started_at + std::chrono::milliseconds(15));
+    auto const first_frame = cadence.advance(started_at + std::chrono::milliseconds(16));
+    auto const before_spinner = cadence.advance(started_at + std::chrono::milliseconds(119));
+    auto const first_spinner = cadence.advance(started_at + std::chrono::milliseconds(120));
+    auto const delayed = cadence.advance(started_at + std::chrono::milliseconds(257));
+    expect(ava::tui::detail::kActiveRunFrameDelay == std::chrono::milliseconds(16) &&
+               ava::tui::detail::kProcessingIndicatorFrameDelay == std::chrono::milliseconds(120) &&
+               cadence.wait_duration(started_at + std::chrono::milliseconds(257)) == std::chrono::milliseconds(15) && early.elapsed_frames == 0 &&
+               early.elapsed_spinner_frames == 0 && first_frame.elapsed_frames == 1 && first_frame.elapsed_spinner_frames == 0 &&
+               before_spinner.elapsed_frames == 6 && before_spinner.elapsed_spinner_frames == 0 && first_spinner.elapsed_frames == 0 &&
+               first_spinner.elapsed_spinner_frames == 1 && delayed.elapsed_frames == 9 && delayed.elapsed_spinner_frames == 1 &&
+               input_before_frame == ava::tui::detail::ActiveRunInputReadDecision::DrainBufferedInput &&
+               input_at_frame == ava::tui::detail::ActiveRunInputReadDecision::ServiceFrame &&
+               no_input_before_frame == ava::tui::detail::ActiveRunInputReadDecision::WaitForNextFrame,
+           "active-run cadence drains buffered input before 16ms, but a buffered input at the frame deadline services provider updates before input drainage "
+           "while the spinner advances at 120ms boundaries");
+  }
+  {
+    auto const unchanged =
+        ava::tui::detail::changed_screen_rows({"row 0", "\x1b[1mrow 1\x1b[0m", "row 2"}, {"row 0", "\x1b[1mrow 1\x1b[0m", "row 2"}, {}, false);
+    auto const styled_change =
+        ava::tui::detail::changed_screen_rows({"row 0", "\x1b[1mrow 1\x1b[0m", "row 2"}, {"row 0", "\x1b[4mrow 1\x1b[0m", "row 2"}, {}, false);
+    auto const disappeared = ava::tui::detail::changed_screen_rows({"row 0", "row 1", "row 2"}, {"row 0", "row 1"}, {}, false);
+    auto const invalidated = ava::tui::detail::changed_screen_rows({"same", "same"}, {"same", "same"}, {}, true);
+    ava::tui::detail::ScreenRowCache footer_cache{.surfaces = {"header", "body", "footer"}, .valid = true};
+    ava::tui::detail::mark_screen_row_dirty(footer_cache, 2);
+    auto const footer_repaint = ava::tui::detail::changed_screen_rows(footer_cache.surfaces, {"header", "body", "footer"}, footer_cache.dirty_rows, false);
+    expect(unchanged.empty() && styled_change == std::vector<std::size_t>{1} && disappeared == std::vector<std::size_t>{2} &&
+               invalidated == std::vector<std::size_t>({0, 1}) && footer_repaint == std::vector<std::size_t>{2},
+           "screen-row diff skips unchanged complete surfaces, notices styling-only changes, clears disappeared rows, supports full invalidation, and repaints "
+           "only a directly drawn footer");
+  }
+  {
+    using Clock = ava::tui::WheelBurstGovernor::Clock;
+    auto const started_at = Clock::time_point{};
+    ava::tui::WheelBurstGovernor governor;
+    auto const first_up = ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelUp, started_at);
+    auto const same_direction_after_paint =
+        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelUp, started_at + std::chrono::milliseconds(16));
+    auto const reversed_within_interval =
+        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelDown, started_at + std::chrono::milliseconds(39));
+    auto const accepted_at_interval =
+        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelDown, started_at + std::chrono::milliseconds(40));
+    auto const keyboard = ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::ArrowDown, started_at + std::chrono::milliseconds(41));
+    auto const accepted_after_non_wheel =
+        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelUp, started_at + std::chrono::milliseconds(41));
+    governor.reset();
+    auto const accepted_after_explicit_reset =
+        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelDown, started_at + std::chrono::milliseconds(41));
+    expect(first_up && !same_direction_after_paint && !reversed_within_interval && accepted_at_interval && keyboard && accepted_after_non_wheel &&
+               accepted_after_explicit_reset,
+           "runtime wheel wiring throttles all directions for 40ms across paints and resets at explicit non-wheel or reset boundaries");
+  }
+  {
+    using Clock = std::chrono::steady_clock;
+    auto const paint_completed_at = Clock::time_point{} + std::chrono::milliseconds(60);
+    auto const deadline = paint_completed_at + ava::tui::WheelBurstGovernor::kAcceptedEventInterval;
+    auto const queued_wheel =
+        ava::tui::detail::prompt_wheel_input_suppressed(ava::tui::Key::MouseWheelDown, deadline, paint_completed_at + std::chrono::milliseconds(1));
+    auto const confirmation =
+        ava::tui::detail::prompt_wheel_input_suppressed(ava::tui::Key::Enter, deadline, paint_completed_at + std::chrono::milliseconds(1));
+    auto const wheel_at_deadline = ava::tui::detail::prompt_wheel_input_suppressed(ava::tui::Key::MouseWheelUp, deadline, deadline);
+    expect(queued_wheel && !confirmation && !wheel_at_deadline,
+           "prompt wheel suppression discards queued wheels after a slow paint while confirmation bypasses the deadline");
+  }
+  {
+    using Clock = ava::tui::FrameScheduler::Clock;
+    auto const started_at = Clock::time_point{};
+    ava::tui::FrameScheduler scheduler;
+    scheduler.paint_completed(started_at, true);
+    for (std::size_t index = 0; index < 100; ++index) scheduler.request(ava::tui::FrameRenderKind::Full, started_at + std::chrono::milliseconds(1));
+    auto const before_deadline = scheduler.take_due(started_at + std::chrono::milliseconds(15));
+    auto const at_deadline = scheduler.take_due(started_at + std::chrono::milliseconds(16));
+    auto paint_count = at_deadline ? std::size_t{1} : std::size_t{0};
+    if (scheduler.take_due(started_at + std::chrono::milliseconds(16)))
+      ++paint_count;
+    scheduler.paint_completed(started_at + std::chrono::milliseconds(40), true);
+    scheduler.request(ava::tui::FrameRenderKind::Footer, started_at + std::chrono::milliseconds(41));
+    scheduler.request(ava::tui::FrameRenderKind::Full, started_at + std::chrono::milliseconds(42));
+    auto const slow_paint_did_not_make_due = scheduler.take_due(started_at + std::chrono::milliseconds(55));
+    auto const merged_after_slow_paint = scheduler.take_due(started_at + std::chrono::milliseconds(56));
+    expect(!before_deadline && at_deadline == ava::tui::FrameRenderKind::Full && paint_count == 1 && !slow_paint_did_not_make_due &&
+               merged_after_slow_paint == ava::tui::FrameRenderKind::Full,
+           "frame scheduler coalesces 100 requests, lets full supersede footer, and bases the next deadline on slow paint completion");
+  }
+  {
+    using Clock = ava::tui::FrameScheduler::Clock;
+    auto const started_at = Clock::time_point{};
+    ava::tui::FrameScheduler scheduler;
+    scheduler.paint_completed(started_at, true);
+    scheduler.request(ava::tui::FrameRenderKind::Footer, started_at + std::chrono::milliseconds(1));
+    auto const lone_wait = scheduler.time_until_due(started_at + std::chrono::milliseconds(1));
+    scheduler.request(ava::tui::FrameRenderKind::Full, started_at + std::chrono::milliseconds(2));
+    auto const provider_and_input = scheduler.take_due(started_at + std::chrono::milliseconds(16));
+    scheduler.paint_completed(started_at + std::chrono::milliseconds(17), false);
+    scheduler.request(ava::tui::FrameRenderKind::Full, started_at + std::chrono::milliseconds(18));
+    expect(lone_wait > Clock::duration::zero() && lone_wait <= ava::tui::FrameScheduler::kFrameInterval &&
+               provider_and_input == ava::tui::FrameRenderKind::Full && scheduler.failed() && !scheduler.pending(),
+           "frame scheduler gives lone input a deadline within 16ms, merges provider/footer and input into one full paint, and latches draw failure");
+  }
+
+  {
+    ava::tui::ComposerSnapshot detached{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_detached_cache",
+        .input = "",
+        .status = "",
+        .transcript = {ava::tui::TranscriptItem{
+            .label = "ava", .text = std::string(40, 'a') + "\n" + std::string(40, 'b') + "\n" + std::string(40, 'c') + "\n" + std::string(40, 'd')}},
+        .transcript_scroll_offset = 1,
+        .width = 50,
+        .height = 8};
+    ava::tui::detail::CompletionMatchCache completion_cache;
+    ava::tui::detail::TranscriptLayoutCache transcript_cache;
+    static_cast<void>(ava::tui::detail::render_composer_frame_cached(detached, completion_cache, detached.file_references_generation, &transcript_cache,
+                                                                     detached.transcript_generation));
+    auto const initial_builds = transcript_cache.layout_build_count;
+    detached.transcript.back().text += "\nprovider output deferred below";
+    ++detached.transcript_generation;
+    detached.input = "typed while detached";
+    static_cast<void>(ava::tui::detail::render_composer_frame_cached(detached, completion_cache, detached.file_references_generation, &transcript_cache,
+                                                                     detached.transcript_generation, true, true, true));
+    auto const frozen_builds = transcript_cache.layout_build_count;
+    static_cast<void>(ava::tui::detail::composer_max_transcript_scroll_offset_cached(
+        detached, detached.width, detached.height, completion_cache, detached.file_references_generation, transcript_cache, detached.transcript_generation));
+    auto const navigation_builds = transcript_cache.layout_build_count;
+    detached.transcript.back().text += "\nmore deferred output";
+    ++detached.transcript_generation;
+    detached.width = 62;
+    static_cast<void>(ava::tui::detail::render_composer_frame_cached(detached, completion_cache, detached.file_references_generation, &transcript_cache,
+                                                                     detached.transcript_generation, true, true, true));
+    expect(initial_builds == 1 && frozen_builds == initial_builds && navigation_builds == initial_builds + 1 &&
+               transcript_cache.layout_build_count == navigation_builds + 1,
+           "detached draft redraws reuse the frozen transcript layout while first navigation and incompatible resize each rebuild exactly once");
+  }
+
   auto const lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
       .provider = "openai",
@@ -69,9 +216,9 @@ void run_tui_composer_rendering_tests_part_1()
   expect(lines.size() == 14, "tui fills the viewport with transcript, spacer, and composer lines");
   expect(!lines.empty() && strip_sgr(lines.front()).find("hello") != std::string::npos, "tui starts short chats at the top of the transcript area");
   expect(lines.size() == 14 && strip_sgr(lines[12]).starts_with("│  /help") && strip_sgr(lines[13]).starts_with("│  GPT-5.5") &&
-             lines[11].find("\x1b[48;2;26;31;46m") == std::string::npos &&
+             strip_sgr(lines[11]).starts_with("│  ") && lines[11].find("\x1b[48;2;26;31;46m") != std::string::npos &&
              std::ranges::none_of(lines, [](std::string const& line) { return line.find("/ commands") != std::string::npos; }),
-         "tui keeps a one-line draft in exactly the bottom input and footer rows without composer-surface padding");
+         "tui keeps a one-line draft in the bottom input/footer rows below the elevated composer padding row");
   expect(std::ranges::any_of(lines, [](std::string const& line) { return strip_sgr(line).find("│  /help") != std::string::npos; }),
          "tui renders the quiet composer input without a prompt glyph");
   expect(std::ranges::none_of(lines, [](std::string const& line) { return strip_sgr(line).find("slash palette dismissed") != std::string::npos; }),
@@ -134,6 +281,7 @@ void run_tui_composer_rendering_tests_part_1()
                                                                 .session_id = "session_test",
                                                                 .input = "",
                                                                 .status = "ready",
+                                                                .active_context_status = "3.2%",
                                                                 .context_source_count = 2,
                                                                 .transcript = {},
                                                                 .width = 80,
@@ -143,20 +291,77 @@ void run_tui_composer_rendering_tests_part_1()
   auto idle_footer = strip_sgr(idle_two_row_lines[9]);
   while (!idle_input.empty() && idle_input.back() == ' ') idle_input.pop_back();
   while (!idle_footer.empty() && idle_footer.back() == ' ') idle_footer.pop_back();
-  expect(idle_two_row_lines.size() == 10 && idle_input == "│  Type a message..." && idle_footer == "│  GPT-5.5 · ctx 2" &&
+  expect(idle_two_row_lines.size() == 10 && idle_input == "│  Type a message..." && idle_footer == "│  GPT-5.5 · ctx 3.2%" &&
              idle_two_row_lines[7].find("\x1b[48;2;26;31;46m") == std::string::npos &&
              std::ranges::count_if(idle_two_row_lines, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }) == 2 &&
              std::ranges::none_of(idle_two_row_lines, [](std::string const& line) { return strip_sgr(line).find("❯") != std::string::npos; }),
          "tui empty composer is exactly two bottom rows with one boundary, quiet gutter, pure footer, and no prompt glyph");
+  {
+    std::vector<ava::tui::TranscriptItem> filled_transcript;
+    for (int index = 0; index < 20; ++index)
+      filled_transcript.push_back(ava::tui::TranscriptItem{.label = "status", .text = "gap item " + std::to_string(index)});
+    auto roomy_gap_snapshot = idle_two_row_snapshot;
+    roomy_gap_snapshot.transcript = filled_transcript;
+    roomy_gap_snapshot.height = 13;
+    auto compact_gap_snapshot = roomy_gap_snapshot;
+    compact_gap_snapshot.height = 12;
+    auto modal_policy_snapshot = roomy_gap_snapshot;
+    modal_policy_snapshot.select_list = ava::tui::SelectListView{};
+    auto crowded_gap_snapshot = roomy_gap_snapshot;
+    crowded_gap_snapshot.input = "draft 1\ndraft 2\ndraft 3\ndraft 4\ndraft 5\ndraft 6\ndraft 7";
+    crowded_gap_snapshot.status = "invalid_argument: alert 1\nalert 2\nalert 3";
+    crowded_gap_snapshot.reasoning_feedback = "reasoning feedback";
+    auto const roomy_gap_frame = ava::tui::render_composer(roomy_gap_snapshot);
+    auto const compact_gap_frame = ava::tui::render_composer(compact_gap_snapshot);
+    auto const crowded_gap_frame = ava::tui::render_composer(crowded_gap_snapshot);
+    auto const roomy_max = ava::tui::composer_max_transcript_scroll_offset(roomy_gap_snapshot, 80, 13);
+    auto const compact_max = ava::tui::composer_max_transcript_scroll_offset(compact_gap_snapshot, 80, 12);
+    auto permission_policy_snapshot = roomy_gap_snapshot;
+    permission_policy_snapshot.permission_prompt =
+        ava::tui::PermissionPromptView{.tool_name = "bash", .operation = "run command", .target = "tests", .reason = "test"};
+    auto const permission_policy_frame = ava::tui::render_composer(permission_policy_snapshot);
+    expect(roomy_gap_frame.size() == 13 && strip_sgr(roomy_gap_frame[8]).find("gap item 19") != std::string::npos &&
+               strip_sgr(roomy_gap_frame[9]).find_first_not_of(' ') == std::string::npos &&
+               roomy_gap_frame[9].find("\x1b[48;2;26;31;46m") == std::string::npos && strip_sgr(roomy_gap_frame[10]).starts_with("│  ") &&
+               roomy_gap_frame[10].find("\x1b[48;2;26;31;46m") != std::string::npos && strip_sgr(roomy_gap_frame[11]).starts_with("│  Type a message...") &&
+               strip_sgr(roomy_gap_frame[12]).starts_with("│  GPT-5.5") && compact_gap_frame.size() == 12 &&
+               strip_sgr(compact_gap_frame[9]).find("gap item 19") != std::string::npos && strip_sgr(compact_gap_frame[10]).starts_with("│  ") &&
+               strip_sgr(crowded_gap_frame.front()).find("gap item 19") != std::string::npos && roomy_max == compact_max + 1 &&
+               ava::tui::detail::composer_layout_policy(roomy_gap_snapshot, 13).transcript_composer_gap_lines == 1 &&
+               ava::tui::detail::composer_layout_policy(roomy_gap_snapshot, 13).composer_top_padding_lines == 1 &&
+               ava::tui::detail::composer_layout_policy(compact_gap_snapshot, 12).transcript_composer_gap_lines == 0 &&
+               ava::tui::detail::composer_layout_policy(compact_gap_snapshot, 12).composer_top_padding_lines == 0 &&
+               ava::tui::detail::composer_layout_policy(modal_policy_snapshot, 24).composer_top_padding_lines == 0 &&
+               ava::tui::detail::composer_block_line_count(permission_policy_snapshot, 13, 80) == 2 &&
+               strip_sgr(permission_policy_frame[11]).starts_with("│  Type a message...") && strip_sgr(permission_policy_frame[12]).starts_with("│  GPT-5.5"),
+           "tui roomy ordinary layouts reserve a screen-background breathing gap and one elevated guttered composer row above the unchanged input/footer rows, "
+           "while compact and authoritative layouts reclaim that elevated row");
+  }
   auto const composer_lines_for = [&](std::string input, std::size_t width = 80) {
     auto snapshot = idle_two_row_snapshot;
     snapshot.input = std::move(input);
     return ava::tui::detail::composer_block_line_count(snapshot, 100, width);
   };
-  expect(composer_lines_for("") == 2 && composer_lines_for("one") == 2 && composer_lines_for("one\ntwo") == 3 &&
-             composer_lines_for("abcdefghijklmnopqr", 20) == 3 && composer_lines_for("1\n2\n3\n4\n5\n6\n7") == 8 &&
-             composer_lines_for("1\n2\n3\n4\n5\n6\n7\n8\n9") == 8,
-         "tui composer desired height is visible input lines plus one footer bounded to two through eight rows");
+  expect(composer_lines_for("") == 3 && composer_lines_for("one") == 3 && composer_lines_for("one\ntwo") == 4 &&
+             composer_lines_for("abcdefghijklmnopqr", 20) == 4 && composer_lines_for("1\n2\n3\n4\n5\n6\n7") == 8 &&
+             composer_lines_for("1\n2\n3\n4\n5\n6\n7\n8\n9") == 8 && ava::tui::detail::composer_block_line_count(idle_two_row_snapshot, 12, 80) == 2,
+         "tui composer desired height includes the roomy top-padding row while preserving the two-through-eight-row cap and compact two-row empty dock");
+  {
+    auto roomy_multiline_snapshot = idle_two_row_snapshot;
+    roomy_multiline_snapshot.height = 14;
+    roomy_multiline_snapshot.input = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine";
+    auto const policy = ava::tui::detail::composer_layout_policy(roomy_multiline_snapshot, roomy_multiline_snapshot.height);
+    auto const layout = ava::tui::detail::composer_input_layout(9, 8, 0, policy.composer_top_padding_lines);
+    auto const scrolled_layout = ava::tui::detail::composer_input_layout(9, 8, 2, policy.composer_top_padding_lines);
+    auto const elevated_draft = ava::tui::render_composer(roomy_multiline_snapshot);
+    auto const first_visible_draft_cursor = ava::tui::composer_input_cursor_for_screen_position(roomy_multiline_snapshot, 8, 4);
+    expect(layout.top_padding == 1 && layout.first_visible == 3 && layout.visible_input_lines == 6 && layout.hidden_above == 3 &&
+               scrolled_layout.first_visible == 1 && elevated_draft.size() == 14 && strip_sgr(elevated_draft[6]).starts_with("│  ") &&
+               strip_sgr(elevated_draft[7]).starts_with("│  four") && strip_sgr(elevated_draft[13]).starts_with("│  GPT-5.5") &&
+               !ava::tui::composer_input_cursor_for_screen_position(roomy_multiline_snapshot, 7, 4) && first_visible_draft_cursor &&
+               *first_visible_draft_cursor == std::string("one\ntwo\nthree\n").size(),
+           "tui roomy multiline drafts reserve the elevated row before deriving their viewport, scrolling, cursor, and hit-test rows");
+  }
 
   auto const processing_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                      .provider = "openai",
@@ -199,6 +404,7 @@ void run_tui_composer_rendering_tests_part_1()
                                                            .session_id = "session_test",
                                                            .input = "",
                                                            .status = "ready",
+                                                           .active_context_status = "~12k",
                                                            .context_source_count = 12,
                                                            .transcript = {},
                                                            .width = 20,
@@ -207,7 +413,7 @@ void run_tui_composer_rendering_tests_part_1()
   expect(std::ranges::any_of(narrow_footer_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("GPT-") != std::string::npos && visible.find("ctx 12") != std::string::npos && visible_columns(line) == 20;
+                               return visible.find("GPT-") != std::string::npos && visible.find("ctx ~12k") != std::string::npos && visible_columns(line) == 20;
                              }),
          "tui shortens a long model label before dropping multi-digit context metadata at the supported minimum width");
 
@@ -218,7 +424,7 @@ void run_tui_composer_rendering_tests_part_1()
   expect(std::ranges::any_of(narrow_processing_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("GPT-") != std::string::npos && visible.find("ctx 12") != std::string::npos &&
+                               return visible.find("GPT") != std::string::npos && visible.find("ctx ~12k") != std::string::npos &&
                                       visible.find("▂") != std::string::npos && line.find("\x1b[38;2;77;158;246m▂") != std::string::npos &&
                                       visible_columns(line) == 20;
                              }),
@@ -414,6 +620,7 @@ void run_tui_composer_rendering_tests_part_1()
                                                                                          .input = "",
                                                                                          .status = "ready",
                                                                                          .token_status = "1.3k (0.7%)",
+                                                                                         .active_context_status = "3.2%",
                                                                                          .transcript = {},
                                                                                          .width = 110,
                                                                                          .height = 10,
@@ -429,12 +636,12 @@ void run_tui_composer_rendering_tests_part_1()
   expect(std::ranges::any_of(compact_footer_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("GPT-5.5 · ctx 2") != std::string::npos && visible.find("Build") == std::string::npos &&
-                                      visible.find("OpenAI") == std::string::npos && visible.find("cwd") == std::string::npos &&
-                                      visible.find("git") == std::string::npos && visible.find("entries") == std::string::npos &&
-                                      visible.find("1.3k (0.7%)") == std::string::npos;
+                               return visible.find("GPT-5.5 · ctx 3.2%") != std::string::npos && visible.find("ctx 2") == std::string::npos &&
+                                      visible.find("Build") == std::string::npos && visible.find("OpenAI") == std::string::npos &&
+                                      visible.find("cwd") == std::string::npos && visible.find("git") == std::string::npos &&
+                                      visible.find("entries") == std::string::npos && visible.find("1.3k (0.7%)") == std::string::npos;
                              }),
-         "tui compact footer shows only the model name and context source count");
+         "tui compact footer shows only the model name and active context usage");
 
   auto const refreshed_context_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                             .provider = "openai",
@@ -442,6 +649,7 @@ void run_tui_composer_rendering_tests_part_1()
                                                                                             .session_id = "session_test",
                                                                                             .input = "",
                                                                                             .status = "ready",
+                                                                                            .active_context_status = "~1.2k",
                                                                                             .context_source_count = 3,
                                                                                             .transcript = {},
                                                                                             .width = 110,
@@ -450,9 +658,28 @@ void run_tui_composer_rendering_tests_part_1()
   expect(std::ranges::any_of(refreshed_context_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("GPT-5.5 · ctx 3") != std::string::npos && visible.find("ctx 2") == std::string::npos;
+                               return visible.find("GPT-5.5 · ctx ~1.2k") != std::string::npos && visible.find("ctx 2") == std::string::npos &&
+                                      visible.find("ctx 3") == std::string::npos;
                              }),
-         "tui composer footer prefers refreshed runtime context count over stale sidebar metadata");
+         "tui composer footer uses refreshed active context usage rather than sidebar source metadata");
+
+  auto const source_only_footer_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                             .provider = "openai",
+                                                                                             .model = "gpt-5.5",
+                                                                                             .session_id = "session_test",
+                                                                                             .input = "",
+                                                                                             .status = "ready",
+                                                                                             .context_source_count = 3,
+                                                                                             .transcript = {},
+                                                                                             .width = 80,
+                                                                                             .height = 10,
+                                                                                             .sidebar = ava::tui::SidebarSnapshot{.context_source_count = 2}});
+  expect(std::ranges::any_of(source_only_footer_lines,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("GPT-5.5") != std::string::npos && visible.find("ctx ") == std::string::npos;
+                             }),
+         "tui composer footer omits context usage when only instruction-source counts are known");
 }
 void run_tui_composer_rendering_tests_part_2()
 {
@@ -1566,7 +1793,7 @@ void run_tui_composer_rendering_tests_part_4()
                                                                         .height = height,
                                                                         .input_cursor = std::string::npos,
                                                                         .sidebar = stress_sidebar,
-                                                                        .tool_details_visible = true,
+                                                                        .tool_presentation = ava::tui::ToolPresentation::Expanded,
                                                                         .thinking_visible = true});
       auto const effective_width = std::max<std::size_t>(ava::tui::detail::kMinWidth, width);
       auto const effective_height = std::max<std::size_t>(ava::tui::detail::kMinHeight, height);

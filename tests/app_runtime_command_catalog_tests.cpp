@@ -47,11 +47,14 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const* models_item = tui_test_support::find_slash_command_item(slash_items, "/models");
   auto const* providers_item = tui_test_support::find_slash_command_item(slash_items, "/providers");
   auto const* scoped_models_item = tui_test_support::find_slash_command_item(slash_items, "/scoped-models");
+  auto const* details_item = tui_test_support::find_slash_command_item(slash_items, "/details");
   auto const* tool_item = tui_test_support::find_slash_command_item(slash_items, "/tool");
   auto const* diff_item = tui_test_support::find_slash_command_item(slash_items, "/diff");
   auto const* copy_item = tui_test_support::find_slash_command_item(slash_items, "/copy");
   auto const* export_item = tui_test_support::find_slash_command_item(slash_items, "/export");
   auto const* import_item = tui_test_support::find_slash_command_item(slash_items, "/import");
+  expect(details_item != nullptr && details_item->hint == "[compact|rich|expanded]" && details_item->description.find("Rich") != std::string::npos,
+         "slash catalog exposes explicit Compact, Rich, and Expanded tool-card modes");
   expect(tool_item != nullptr && tool_item->hint == "[query]" && has_alias(*tool_item, "/tools") &&
              tool_item->description.find("latest or matching tool details") != std::string::npos,
          "slash catalog exposes /tool for visible TUI tool-card inspection");

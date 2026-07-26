@@ -2,6 +2,7 @@
 
 #include "ava/tui/runtime_state_internal.h"
 
+#include <chrono>
 #include <optional>
 #include <string>
 #include "debug.h"
@@ -21,6 +22,46 @@ class RuntimePromptCoordinator;
 class RuntimeRenderer;
 enum class TuiAction;
 struct InputEvent;
+
+namespace detail {
+
+inline constexpr auto kActiveRunFrameDelay = std::chrono::milliseconds(16);
+
+struct ActiveRunCadenceTick
+{
+  std::size_t elapsed_frames = 0;
+  std::size_t elapsed_spinner_frames = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+class ActiveRunCadence final
+{
+ public:
+  explicit ActiveRunCadence(std::chrono::steady_clock::time_point started_at);
+
+  [[nodiscard]] bool frame_due(std::chrono::steady_clock::time_point now) const;
+  [[nodiscard]] std::chrono::milliseconds wait_duration(std::chrono::steady_clock::time_point now) const;
+  [[nodiscard]] ActiveRunCadenceTick advance(std::chrono::steady_clock::time_point now);
+  void frame_painted(std::chrono::steady_clock::time_point completed_at);
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
+ private:
+  std::chrono::steady_clock::time_point next_frame_;
+  std::chrono::steady_clock::time_point next_spinner_;
+};
+
+enum class ActiveRunInputReadDecision
+{
+  DrainBufferedInput,
+  WaitForNextFrame,
+  ServiceFrame,
+};
+
+[[nodiscard]] ActiveRunInputReadDecision active_run_input_read_decision(bool input_buffered, bool frame_due);
+
+}  // namespace detail
 
 struct RuntimeActiveRunOutcome
 {

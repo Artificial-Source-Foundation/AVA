@@ -110,12 +110,16 @@ Example:
     "error": "#ff0000",
     "accent": "primary",
     "screenBg": "paper",
-    "composerBg": 236
+    "composerBg": 236,
+    "toolBg": 235,
+    "questionBg": 237
   }
 }
 ```
 
-`colors` must provide all eight AVA roles:
+`colors` must provide the eight required AVA roles below. It may also provide
+`toolBg` and `questionBg`; each falls back to `composerBg` when omitted for
+compatibility with existing custom themes.
 
 | Role | Typical use |
 | --- | --- |
@@ -127,6 +131,8 @@ Example:
 | `accent` | Focus, selection, and brand accents. |
 | `screenBg` | Main screen background. |
 | `composerBg` | Composer/input background. |
+| `toolBg` | Optional low-contrast tool-card background. |
+| `questionBg` | Optional distinct question dock/modal background. |
 
 Each color value can be:
 
@@ -137,7 +143,7 @@ Each color value can be:
   `""`, or other variables.
 
 AVA's theme schema is intentionally small. A custom theme controls these eight
-ncurses color roles only; it does not change typography, glyphs, layout, spacing,
+required ncurses color roles plus optional tool-card and question backgrounds; it does not change typography, glyphs, layout, spacing,
 individual markdown/syntax tokens, every permission/tool-card state, or package
 resource behavior. `NO_COLOR` and `plain` mode override custom color output.
 
@@ -148,7 +154,7 @@ but the theme system is not a full Pi clone.
 
 | Pi capability | AVA status |
 | --- | --- |
-| Large 51-token theme schema | Not implemented. AVA accepts only the eight-role `colors` object above. |
+| Large 51-token theme schema | Not implemented. AVA accepts the eight required roles and optional surface backgrounds above. |
 | Project-local themes | Not implemented. Themes are loaded only from the user's global XDG config directory. |
 | Package-delivered themes and package theme filters | Deferred with package/resource management. AVA does not install or activate theme packages. |
 | Remote package/theme marketplace | Deferred pending provenance, trust, compatibility, rollback, and update policy. |

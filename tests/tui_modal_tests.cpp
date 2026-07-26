@@ -360,8 +360,33 @@ void run_tui_modal_tests_part_3()
           std::ranges::any_of(question_frame, [](std::string const& line) { return strip_sgr(line).find("? Choose tools") != std::string::npos; }) &&
           std::ranges::any_of(question_frame, [](std::string const& line) { return strip_sgr(line).find("› 2. ✓ Search text") != std::string::npos; }) &&
           std::ranges::any_of(question_frame, [](std::string const& line) { return strip_sgr(line).find("Custom: explain") != std::string::npos; }) &&
+          std::ranges::any_of(question_frame, [](std::string const& line) { return line.find(ava::tui::detail::kSgrQuestionBg) != std::string::npos; }) &&
           std::ranges::none_of(question_frame, [](std::string const& line) { return line.find("\x1b[7m") != std::string::npos; }),
-      "tui composer frame renders polished multi-select question choices without reverse video");
+      "tui composer frame renders multi-select questions on a distinct surface without reverse video");
+
+  auto wrapped_question_snapshot = ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "question required",
+      .transcript = {},
+      .question_prompt = ava::tui::QuestionPromptView{.header = "Decision",
+                                                      .question = "Choose whether this intentionally long question should wrap across multiple bounded rows",
+                                                      .options = {ava::tui::QuestionPromptOptionView{.value = "yes", .label = "Yes"},
+                                                                  ava::tui::QuestionPromptOptionView{.value = "no", .label = "No"}},
+                                                      .selected_option_index = 1,
+                                                      .custom_text = {}},
+      .width = 40,
+      .height = 10};
+  auto const wrapped_question_frame = ava::tui::render_composer(wrapped_question_snapshot);
+  expect(std::ranges::any_of(wrapped_question_frame, [](std::string const& line) { return strip_sgr(line).find("intentionall") != std::string::npos; }) &&
+             std::ranges::any_of(wrapped_question_frame,
+                                 [](std::string const& line) { return strip_sgr(line).find("question should wrap acro") != std::string::npos; }) &&
+             std::ranges::any_of(wrapped_question_frame, [](std::string const& line) { return strip_sgr(line).find("› 2. No") != std::string::npos; }) &&
+             std::ranges::any_of(wrapped_question_frame, [](std::string const& line) { return strip_sgr(line).find("Esc") != std::string::npos; }),
+         "tui docked questions wrap within a bounded budget while preserving the selected option and cancel action");
 
   auto single_click_snapshot = ava::tui::ComposerSnapshot{
       .mode = "build",

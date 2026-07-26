@@ -14,8 +14,8 @@
 #include "ava/app/display_settings.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/project_trust.h"
-#include "ava/app/runtime_prompt.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_prompt.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/theme.h"
@@ -1331,12 +1331,12 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   {
     auto const token = command_token(request.command);
     auto registry = session.load_command_registry(CommandRegistryOptions{.include_builtins = false,
-                                                                          .include_prompt_commands = true,
-                                                                          .include_skills = true,
-                                                                          .include_plugin_commands = true,
-                                                                          .include_mcp_prompts = token.starts_with("/mcp:"),
-                                                                          .permission_resolver = request.permission_resolver,
-                                                                          .cancel_requested = request.cancel_requested});
+                                                                         .include_prompt_commands = true,
+                                                                         .include_skills = true,
+                                                                         .include_plugin_commands = true,
+                                                                         .include_mcp_prompts = token.starts_with("/mcp:"),
+                                                                         .permission_resolver = request.permission_resolver,
+                                                                         .cancel_requested = request.cancel_requested});
     if (auto const* registry_entry = find_command_registry_entry(registry, request.command))
     {
       return run_registry_command(session, std::move(request), *registry_entry);
@@ -1344,12 +1344,12 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
     if (!token.starts_with("/skill:") && !token.starts_with("/mcp:") && !token.starts_with("/plugin:"))
     {
       registry = session.load_command_registry(CommandRegistryOptions{.include_builtins = false,
-                                                                       .include_prompt_commands = false,
-                                                                       .include_skills = false,
-                                                                       .include_plugin_commands = false,
-                                                                       .include_mcp_prompts = true,
-                                                                       .permission_resolver = request.permission_resolver,
-                                                                       .cancel_requested = request.cancel_requested});
+                                                                      .include_prompt_commands = false,
+                                                                      .include_skills = false,
+                                                                      .include_plugin_commands = false,
+                                                                      .include_mcp_prompts = true,
+                                                                      .permission_resolver = request.permission_resolver,
+                                                                      .cancel_requested = request.cancel_requested});
       if (auto const* registry_entry = find_command_registry_entry(registry, request.command))
       {
         return run_registry_command(session, std::move(request), *registry_entry);
@@ -1398,9 +1398,11 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   {
     return handled_text("Settings are shown as a TUI view. Use /theme dark|light|plain|custom-name|reset to persist the display theme.");
   }
-  if (request.command == "/details")
+  if (starts_with_command(request.command, "/details"))
   {
-    return handled_text("Tool details are a TUI display toggle. Use /details inside the TUI to switch views.");
+    return handled_text(
+        "Tool cards default to Rich. In the TUI, exact /details or Ctrl+O toggles Rich and Expanded; use /details compact, /details rich, or "
+        "/details expanded to select a view explicitly.");
   }
   if (request.command == "/sidebar")
   {
@@ -1409,8 +1411,8 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   if (starts_with_command(request.command, "/tool"))
   {
     return handled_text(
-        "Tool detail inspection is available inside the interactive TUI. Use /tool [query] to show the latest or matching expanded tool card, /details to "
-        "toggle all tool cards, or /copy tool [query] to copy details.");
+        "Tool detail inspection is available inside the interactive TUI. Use /tool [query] to toggle the latest or matching card between its inherited "
+        "non-expanded view and Expanded, /details to toggle Rich and Expanded globally, or /copy tool [query] to copy safe tool details.");
   }
   if (starts_with_command(request.command, "/diff"))
   {

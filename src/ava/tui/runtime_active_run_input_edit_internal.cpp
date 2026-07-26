@@ -136,7 +136,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_com
       draft_state.clear_selection();
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::YankPop));
     }
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   return InputHandling::Unhandled;
 }
@@ -161,28 +161,28 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
   {
     auto const [_, height] = terminal_size();
     navigation_.scroll_up(std::max<std::size_t>(1, height / 2));
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::PageDown))
   {
     auto const [_, height] = terminal_size();
     navigation_.scroll_down(std::max<std::size_t>(1, height / 2));
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::MessagePrev))
   {
     navigation_.scroll_to_message_boundary(true);
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::MessageNext))
   {
     navigation_.scroll_to_message_boundary(false);
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::JumpToBottom))
   {
     navigation_.jump_to_bottom("live tail");
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::PalettePrev) && navigation_.slash_palette_active())
   {
@@ -197,7 +197,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
       selected_slash_command_index = previous_slash_palette_selection(draft.text, draft.cursor, snapshot.slash_commands, selected_slash_command_index);
       snapshot.status = "command " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
     }
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::PalettePrev) && navigation_.file_reference_palette_active())
   {
@@ -212,7 +212,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
       selected_slash_command_index = navigation_.previous_completion(selected_slash_command_index);
       snapshot.status = "reference " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
     }
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::PalettePrev) && navigation_.path_completion_palette_active())
   {
@@ -227,7 +227,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
       selected_slash_command_index = navigation_.previous_completion(selected_slash_command_index);
       snapshot.status = "path " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
     }
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::HistoryPrev))
   {
@@ -245,12 +245,12 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
     {
       navigation_.scroll_up(kKeyboardScrollRows);
     }
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (active_event.key == Key::ArrowUp)
   {
     navigation_.scroll_up(kKeyboardScrollRows);
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::CursorUp) && apply_composer_draft_action(draft, TuiAction::CursorUp))
   {
@@ -260,7 +260,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
     draft_input.clear();
     selected_slash_command_index = 0;
     slash_palette_suppressed = false;
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   return InputHandling::Unhandled;
 }
@@ -294,7 +294,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
       selected_slash_command_index = next_slash_palette_selection(draft.text, draft.cursor, snapshot.slash_commands, selected_slash_command_index);
       snapshot.status = "command " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
     }
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::PaletteNext) && navigation_.file_reference_palette_active())
   {
@@ -309,7 +309,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
       selected_slash_command_index = navigation_.next_completion(selected_slash_command_index);
       snapshot.status = "reference " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
     }
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::PaletteNext) && navigation_.path_completion_palette_active())
   {
@@ -324,7 +324,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
       selected_slash_command_index = navigation_.next_completion(selected_slash_command_index);
       snapshot.status = "path " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(match_count);
     }
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::HistoryNext))
   {
@@ -342,12 +342,12 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
     {
       navigation_.scroll_down(kKeyboardScrollRows);
     }
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (active_event.key == Key::ArrowDown)
   {
     navigation_.scroll_down(kKeyboardScrollRows);
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::CursorDown) && apply_composer_draft_action(draft, TuiAction::CursorDown))
   {
@@ -357,7 +357,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
     draft_input.clear();
     selected_slash_command_index = 0;
     slash_palette_suppressed = false;
-    return to_input_handling(renderer_.render());
+    return to_input_handling(renderer_.request_render());
   }
   return InputHandling::Unhandled;
 }

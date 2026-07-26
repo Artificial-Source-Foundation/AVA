@@ -17,6 +17,7 @@ from tui_smoke_helpers import (
     wait_for_absent,
     wait_for_json_file,
     wait_for_screen_change,
+    wait_for_screen_state,
     wait_for_selected_modal_change,
     wait_for_session_exit,
 )
@@ -46,8 +47,43 @@ def scenario_main_models_selectors(ctx: SmokeContext) -> None:
     selected_row = selected_modal_row(command_model_selector)
     if not selected_row:
         raise RuntimeError(f"Model selector did not expose a selected row before navigation\nscreen:\n{command_model_selector}")
-    selected_rows = {selected_modal_identity(selected_row)}
+    initial_selected_identity = selected_modal_identity(selected_row)
+    selected_rows = {initial_selected_identity}
     initial_model_selector = command_model_selector
+    wheel_down = "\x1b[<65;4;6M"
+    send_literal(tmux_exe, session, wheel_down * 12 + "/")
+    wheel_burst_selector = wait_for(
+        tmux_exe,
+        session,
+        r"filter\s+/",
+        "model selector wheel burst queue synchronization",
+    )
+    wheel_burst_row = selected_modal_row(wheel_burst_selector)
+    if not wheel_burst_row or selected_modal_identity(wheel_burst_row) == initial_selected_identity:
+        raise RuntimeError(
+            "raw same-direction wheel burst did not advance the model selector\n"
+            f"before:\n{command_model_selector}\nafter:\n{wheel_burst_selector}"
+        )
+    send_keys(tmux_exe, session, "BSpace")
+    wheel_burst_cleared = wait_for(
+        tmux_exe, session, r"filter\s+Search models", "model selector wheel burst filter cleared"
+    )
+    cleared_burst_row = selected_modal_row(wheel_burst_cleared)
+    if not cleared_burst_row or selected_modal_identity(cleared_burst_row) != selected_modal_identity(wheel_burst_row):
+        raise RuntimeError(
+            "clearing the model-selector synchronization query changed the wheel selection\n"
+            f"before:\n{wheel_burst_selector}\nafter:\n{wheel_burst_cleared}"
+        )
+    send_keys(tmux_exe, session, "Up")
+    selected_row, wheel_burst_restored = wait_for_selected_modal_change(
+        tmux_exe, session, cleared_burst_row, "model selector wheel burst inverse step"
+    )
+    if selected_modal_identity(selected_row) != initial_selected_identity:
+        raise RuntimeError(
+            "a raw burst of twelve same-direction wheel events advanced the model selector by more than exactly one option\n"
+            f"initial:\n{command_model_selector}\nburst:\n{wheel_burst_selector}\nrestored:\n{wheel_burst_restored}"
+        )
+    save_evidence(root, "model-selector-wheel-burst-governed", wheel_burst_selector)
     tmux(tmux_exe, "resize-window", "-t", session, "-x", "82", "-y", "11")
     resized_model_selector = wait_for(tmux_exe, session, r"Select model|Search models", "resized compact model selector")
     resized_selected_row = selected_modal_row(resized_model_selector)
@@ -135,8 +171,22 @@ def scenario_main_models_selectors(ctx: SmokeContext) -> None:
     if "diagnostics" in diagnostic_model_short or "openai/diagnostic-local" in diagnostic_model_short:
         raise RuntimeError(f"100x12 model selector exposed backend metadata\nscreen:\n{diagnostic_model_short}")
     save_evidence(root, "model-selector-quiet-100x12", diagnostic_model_short)
+    model_before_restore = capture(tmux_exe, session)
     tmux(tmux_exe, "resize-window", "-t", session, "-x", "120", "-y", "32")
-    wait_for(tmux_exe, session, r"(?s)filter\s+Diagnostic█.*›\s+Diagnostic Local", "restored quiet model selector")
+    wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: screen != model_before_restore
+        and tmux(
+            tmux_exe, "display-message", "-p", "-t", session, "#{window_width},#{window_height}"
+        ).stdout.strip()
+        == "120,32"
+        and len(screen.splitlines()) == 32
+        and any(line.strip() for line in screen.splitlines()[12:])
+        and "Diagnostic Local" in screen
+        and "filter" in screen,
+        "restored and settled 120x32 quiet model selector",
+    )
     send_keys(tmux_exe, session, "Escape")
     wait_for_absent(tmux_exe, session, r"Select model|Search models", "model selector canceled")
     send_literal(tmux_exe, session, "/scoped-models")

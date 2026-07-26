@@ -124,7 +124,7 @@ No full `ava` binary smoke currently exercises this path because there is no pub
 The current `task` background path is not ordinary tool parallelism:
 
 - It starts a child agent loop in a child session, not a second ordinary tool worker in the parent turn.
-- It requires explicit `TaskRun` permission and returns `task_id`/`job_id` immediately; the child session is the source of truth for the full transcript.
+- Its launch is automatically allowed and audited, returns `task_id`/`job_id` immediately, and leaves the child session as the source of truth for the full transcript. Foreground nested Ask actions use normal permission UI; background nested Ask actions fail closed.
 - It uses a runtime-owned `BackgroundJobRegistry` with bounded job count, retained snapshots, cancellation, and join/shutdown ownership.
 - Background children receive fresh provider and transport instances and intentionally do not inherit parent UI callbacks, LSP providers, or nested background factories.
 - Parent session replay only sees the `task` tool result that queued or completed the subagent; it does not interleave the child tool timeline into the parent turn.

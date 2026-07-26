@@ -261,7 +261,7 @@ Inputs:
 
 Rules:
 
-- Request `task`/`TaskRun` permission before starting the child session. Headless `--allow read-only` does not imply task delegation; use `--allow-tool task` for exact task prompts.
+- Automatically allow and audit task launch before starting the child session. `--allow-tool task` remains accepted for compatibility but is not needed for launch. Foreground child operations that independently Ask use the normal parent permission UI; background child operations that Ask fail closed.
 - Create or reopen a child session under the same session root and link it to the parent through session metadata.
 - Hide recursive `task` from child tool schemas. The built-in `explore` and any `tools: read-only` custom subagent expose only read/search/list tools.
 - Background children require a runtime-owned background job registry plus fresh provider and transport instances. They do not inherit parent UI callbacks, LSP providers, or nested background factories.

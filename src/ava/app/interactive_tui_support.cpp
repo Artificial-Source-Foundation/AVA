@@ -8,6 +8,7 @@
 #include "ava/tui/keybindings.h"
 #include "ava/tui/theme.h"
 #include "ava/config/model_config.h"
+#include "ava/session/compaction.h"
 #include "ava/session/stats.h"
 #include "ava/permissions/permission.h"
 #include "ava/permissions/permission_rules.h"
@@ -283,6 +284,36 @@ std::optional<std::string> token_status_for_session(ava::app::runtime::Session c
   if (!stats)
     return std::nullopt;
   return compact_token_status(*stats, session.model().context_window_tokens);
+}
+
+ava::core::Result<std::string> formatted_active_context_status(ava::app::runtime::Session const& session)
+{
+  auto read_authority = session.read_authority();
+  if (!read_authority)
+    return std::unexpected(std::move(read_authority.error()));
+  auto entries = read_authority->load();
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  auto active_tokens = ava::session::estimate_active_context_tokens(*entries);
+  if (!active_tokens)
+    return std::unexpected(std::move(active_tokens.error()));
+
+  auto const system_prompt_tokens = ava::session::estimate_tokens(session.system_prompt());
+  auto const maximum = std::numeric_limits<std::size_t>::max();
+  auto const total_tokens = *active_tokens > maximum - system_prompt_tokens ? maximum : *active_tokens + system_prompt_tokens;
+  auto const display_tokens = total_tokens > static_cast<std::size_t>(std::numeric_limits<long long>::max()) ? std::numeric_limits<long long>::max()
+                                                                                                             : static_cast<long long>(total_tokens);
+  if (auto const percent = format_context_window_percent(display_tokens, session.model().context_window_tokens))
+    return *percent;
+  return "~" + format_compact_token_count(display_tokens);
+}
+
+std::optional<std::string> active_context_status_for_session(ava::app::runtime::Session const& session)
+{
+  auto status = formatted_active_context_status(session);
+  if (!status)
+    return std::nullopt;
+  return std::move(*status);
 }
 
 std::string session_selector_footer_hint(ava::app::SessionSelectorSort sort, bool named_only, bool show_paths, bool show_archived, bool show_label_time)

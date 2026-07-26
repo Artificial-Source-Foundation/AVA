@@ -140,12 +140,12 @@ The built-in default is `openai/gpt-5.5`; `/model` can also select `openai/gpt-5
 - `/theme [dark|light|plain|custom-name|reset]`: show or persist the TUI display theme
 - `/reload [all|theme|models|prompts|trust|compaction|keybindings|auth|permissions|lsp|mcp|plugins]`: reload supported runtime config domains in the running TUI and report restart-required domains
 - `/mode`: toggle build/plan mode
-- `/details` or Ctrl+O: toggle TUI tool detail expansion
+- `/details [compact|rich|expanded]` or Ctrl+O: select tool-card presentation; Rich is the default and bare `/details`/Ctrl+O toggles Rich and Expanded
 - Ctrl+G: open the current composer draft in `$VISUAL` or `$EDITOR`
 - Ctrl+V: import a PNG/JPEG/WebP/GIF image from the clipboard as a pending attachment when a supported clipboard helper is available
-- `/tool [query]`: show the latest or matching expanded tool card in the TUI; `/tools` is an alias
+- `/tool [query]`: toggle Expanded presentation for the latest or matching tool card in the TUI; `/tools` is an alias
 - `/diff [query]`: show the latest or matching unified tool diff in the TUI
-- `/copy [tool|diff|permission] [query]`: copy the latest AVA message, latest or matching tool-card details, latest or matching unified diff, or latest or matching permission audit details in the TUI
+- `/copy [tool|diff|permission] [query]`: copy the latest AVA message, safe latest or matching tool-card details, latest or matching unified diff, or explicit permission audit details in the TUI
 - `/thinking`: toggle inline thinking block visibility without changing provider reasoning mode
 - `/attach <path>`: import a local PNG/JPEG/WebP/GIF image into session-owned attachment storage and send it with the next normal TUI prompt; `/image` is an alias
 

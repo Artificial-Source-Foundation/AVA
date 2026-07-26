@@ -682,6 +682,7 @@ if(Python3_Interpreter_FOUND)
     theme_persisted
     active_run
     restore_followup
+    streaming_scroll
     main_startup_trust_keybinds
     main_models_selectors
     main_editor_input

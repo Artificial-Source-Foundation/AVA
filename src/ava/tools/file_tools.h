@@ -115,9 +115,10 @@ struct ToolContext
   // PromptOnly contexts remain explicit non-executing compatibility modes.
   ava::command::CommandRuntimeOptions command_runtime{.mode = ava::command::CommandRuntimeMode::Enabled};
   ava::permissions::PermissionResolver permission_resolver = nullptr;
-  // Deny-only, non-interactive policy check used before a command's backend
-  // auto-Allow. It must never prompt or return reusable authority.
-  ava::permissions::PermissionResolver command_deny_preflight = nullptr;
+  // Deny-only, non-interactive policy check used before backend auto-Allow
+  // decisions. Explicit persistent denies still win over prompt-free task
+  // launches; this check must never prompt or return reusable authority.
+  ava::permissions::PermissionResolver auto_allow_deny_preflight = nullptr;
   PermissionAuditSink permission_audit_sink = nullptr;
   ToolProgressSink progress_sink = nullptr;
   // Strict adapters may expose a distinct pending -> in_progress boundary.

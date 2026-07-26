@@ -11,6 +11,7 @@ from tui_smoke_helpers import (
     wait_for,
     wait_for_absent,
     wait_for_session_exit,
+    wait_for_screen_state,
 )
 from .common import (
     _assert_normal_turn_request_count_stays,
@@ -22,6 +23,9 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     tmux_exe = ctx.tmux
     root = ctx.root
     active_workspace = ctx.active_workspace
+    active_workspace.joinpath("active-card.txt").write_text(
+        "".join(f"ACTIVE-OLD-LINE-{line:02d}\n" for line in range(1, 31)), encoding="utf-8"
+    )
     active_session = ctx.session_name("active")
     active_provider = ctx.start_fake_provider("active", delay_ms=12000)
     active_request_log = active_provider.request_log
@@ -56,6 +60,20 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         r"page_up PageUp|model_cycle_forward|details_toggle|tree_fold_or_up|tree_unfold_or_down",
         "active-run scrollback seed output",
     )
+    send_literal(tmux_exe, active_session, "/write active-card.txt active card detail")
+    send_keys(tmux_exe, active_session, "Enter")
+    active_card_seed = wait_for(
+        tmux_exe,
+        active_session,
+        r"wrote 18 bytes|Permission required",
+        "active-run tool-card seed",
+    )
+    if "Permission required" in active_card_seed:
+        send_keys(tmux_exe, active_session, "Tab", "Enter")
+        active_card_seed = wait_for(tmux_exe, active_session, r"wrote 18 bytes", "allowed active-run tool-card seed")
+    if "wrote 18 bytes" not in active_card_seed:
+        raise RuntimeError(f"active-run tool-card seed did not complete\nscreen:\n{active_card_seed}")
+    wait_for(tmux_exe, active_session, r"changed:.*active-card\.txt", "active-run Rich tool-card seed details")
     send_literal(tmux_exe, active_session, "tmux active first prompt")
     wait_for(tmux_exe, active_session, r"tmux active first prompt", "active-run first prompt draft")
     send_keys(tmux_exe, active_session, "Enter")
@@ -70,6 +88,70 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     if "\x1b" in active_empty_hint or any(ord(character) < 32 and character != "\n" for character in active_empty_hint):
         raise RuntimeError(f"F3 active contextual hint contained ESC or unexpected C0 controls\nscreen:\n{active_empty_hint}")
     save_evidence(root, "frontend-f3-active-empty-hint", active_empty_hint)
+
+    send_literal(tmux_exe, active_session, "/details compact")
+    wait_for(tmux_exe, active_session, r"/details compact", "active /details compact draft before submit")
+    send_keys(tmux_exe, active_session, "Enter")
+    compact_active_card = wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: "changed:" not in screen and "/details compact" not in screen,
+        "active /details compact local mutation",
+    )
+
+    send_literal(tmux_exe, active_session, "/details rich")
+    send_keys(tmux_exe, active_session, "Enter")
+    rich_active_card = wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: "changed:" in screen and "ACTIVE-OLD-LINE-25" not in screen and "/details rich" not in screen,
+        "active /details rich local mutation",
+    )
+
+    send_literal(tmux_exe, active_session, "/details expanded")
+    send_keys(tmux_exe, active_session, "Enter")
+    expanded_active_card = wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: "ACTIVE-OLD-LINE-25" in screen and "/details expanded" not in screen,
+        "active /details expanded local mutation",
+    )
+
+    send_literal(tmux_exe, active_session, "/details compact")
+    send_keys(tmux_exe, active_session, "Enter")
+    wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: "changed:" not in screen and "/details compact" not in screen,
+        "active tool-card compact reset before per-card toggle",
+    )
+    send_literal(tmux_exe, active_session, "/tools write")
+    send_keys(tmux_exe, active_session, "Enter")
+    per_card_expanded = wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: "ACTIVE-OLD-LINE-25" in screen and "/tools write" not in screen,
+        "active /tools per-card expansion",
+    )
+    send_literal(tmux_exe, active_session, "/tool write")
+    send_keys(tmux_exe, active_session, "Enter")
+    per_card_collapsed = wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: "changed:" not in screen and "/tool write" not in screen,
+        "active /tool per-card collapse",
+    )
+    send_literal(tmux_exe, active_session, "/details rich")
+    send_keys(tmux_exe, active_session, "Enter")
+    wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: "changed:" in screen and "ACTIVE-OLD-LINE-25" not in screen and "/details rich" not in screen,
+        "active tool-card Rich restore",
+    )
+    _assert_normal_turn_request_count_stays(active_request_log, 1, "active local details commands must not reach the provider")
+    save_evidence(root, "active-run-local-tool-card-controls", per_card_expanded)
+
     send_literal(tmux_exe, active_session, "AGENTS")
     active_draft_hint = wait_for(tmux_exe, active_session, r"Esc stop|queue", "F3 active draft contextual hint")
     send_keys(tmux_exe, active_session, "Tab")
@@ -118,13 +200,13 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     active_disabled_tab = wait_for(
         tmux_exe, active_session, disabled_share_status, "active disabled slash Tab rejection status"
     )
-    if "│  /share" not in active_disabled_tab:
+    if "/share" not in active_disabled_tab:
         raise RuntimeError(f"disabled slash Tab mutated the active draft\nscreen:\n{active_disabled_tab}")
     send_keys(tmux_exe, active_session, "Enter")
     active_disabled_enter = wait_for(
         tmux_exe, active_session, disabled_share_status, "active disabled slash Enter rejection status"
     )
-    if "│  /share" not in active_disabled_enter or any(
+    if "/share" not in active_disabled_enter or any(
         status in active_disabled_enter for status in ("job command complete", "follow-up queued", "steering queued", "commands run between turns")
     ):
         raise RuntimeError(f"disabled slash Enter dispatched command/queue output or mutated the active draft\nscreen:\n{active_disabled_enter}")
@@ -132,7 +214,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     active_disabled_mouse = wait_for(
         tmux_exe, active_session, disabled_share_status, "active disabled slash mouse rejection status"
     )
-    if "│  /share" not in active_disabled_mouse or "commands run between turns" in active_disabled_mouse:
+    if "/share" not in active_disabled_mouse or "commands run between turns" in active_disabled_mouse:
         raise RuntimeError(f"disabled slash mouse click mutated or queued the active draft\nscreen:\n{active_disabled_mouse}")
     _assert_normal_turn_request_count_stays(active_request_log, 1, "disabled active slash acceptance must not queue")
     send_keys(tmux_exe, active_session, "C-u")
@@ -144,16 +226,20 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, active_session, "C-u")
     wait_for_absent(tmux_exe, active_session, r"› /hotkeys|> /hotkeys", "active-run slash palette cleared")
     send_literal(tmux_exe, active_session, "\x1b[200~tmux active follow-up\nsecond line\x1b[201~")
-    wait_for(tmux_exe, active_session, r"tmux active follow-up.*second line|second line", "active-run multiline follow-up draft")
-    send_literal(tmux_exe, active_session, "\x1b[1;129A")
-    active_arrow_scrolled = wait_for(
-        tmux_exe, active_session, r"scrollback detached", "active-run physical Ghostty arrow scrollback"
+    active_live_tail = wait_for(
+        tmux_exe, active_session, r"tmux active follow-up.*second line|second line", "active-run multiline follow-up draft"
     )
-    if "tmux active follow-up" not in active_arrow_scrolled or "second line" not in active_arrow_scrolled:
-        raise RuntimeError(
-            "active-run physical arrow changed the composer draft instead of scrolling only the transcript\n"
-            f"screen:\n{active_arrow_scrolled}"
-        )
+    transcript_rows = lambda screen: tuple(screen.splitlines()[:-4])
+    active_live_rows = transcript_rows(active_live_tail)
+    send_literal(tmux_exe, active_session, "\x1b[1;129A")
+    active_arrow_scrolled = wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: transcript_rows(screen) != active_live_rows and "tmux active follow-up" in screen and "second line" in screen,
+        "active-run physical Ghostty arrow transcript movement",
+    )
+    if any(text in active_arrow_scrolled for text in ("scrollback detached", "updates below", "jump_to_bottom")):
+        raise RuntimeError(f"active-run arrow scroll surfaced deleted detached chrome\nscreen:\n{active_arrow_scrolled}")
     send_literal(tmux_exe, active_session, "X")
     active_multiline_cursor = wait_for(
         tmux_exe, active_session, r"second lineX", "active-run multiline cursor preserved by arrow scroll"
@@ -164,32 +250,31 @@ def scenario_active_run(ctx: SmokeContext) -> None:
             f"screen:\n{active_multiline_cursor}"
         )
     send_literal(tmux_exe, active_session, "\x1b[1;129B")
-    active_arrow_tail = wait_for_absent(
-        tmux_exe, active_session, r"scrollback detached", "active-run physical Ghostty arrow return to live tail"
+    active_arrow_tail = wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: transcript_rows(screen) == active_live_rows and "tmux active follow-up" in screen and "second lineX" in screen,
+        "active-run physical Ghostty arrow return to live tail",
     )
-    if "tmux active follow-up" not in active_arrow_tail or "second lineX" not in active_arrow_tail:
-        raise RuntimeError(
-            "active-run down arrow changed the composer draft while returning to the live tail\n"
-            f"screen:\n{active_arrow_tail}"
-        )
+    active_wheel_live_rows = transcript_rows(active_arrow_tail)
     send_literal(tmux_exe, active_session, "\x1b[<64;4;6M")
-    active_wheel_scrolled = wait_for(
-        tmux_exe, active_session, r"scrollback detached", "active-run mouse wheel scrollback"
+    active_wheel_scrolled = wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: transcript_rows(screen) != active_wheel_live_rows and "tmux active follow-up" in screen and "second lineX" in screen,
+        "active-run mouse wheel transcript movement",
     )
-    if "tmux active follow-up" not in active_wheel_scrolled or "second lineX" not in active_wheel_scrolled:
-        raise RuntimeError(
-            "active-run mouse wheel changed the composer draft instead of scrolling only the transcript\n"
-            f"screen:\n{active_wheel_scrolled}"
-        )
-    send_literal(tmux_exe, active_session, "\x1b[<65;4;6M")
-    active_wheel_tail = wait_for_absent(
-        tmux_exe, active_session, r"scrollback detached", "active-run mouse wheel return to live tail"
+    if any(text in active_wheel_scrolled for text in ("scrollback detached", "updates below", "jump_to_bottom")):
+        raise RuntimeError(f"active-run wheel scroll surfaced deleted detached chrome\nscreen:\n{active_wheel_scrolled}")
+    # A harmless non-wheel ordering boundary at the end of the draft resets the
+    # physical-wheel burst governor without changing the draft or cursor.
+    send_literal(tmux_exe, active_session, "\x1b[1;129C\x1b[<65;4;6M")
+    active_wheel_tail = wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: transcript_rows(screen) == active_wheel_live_rows and "tmux active follow-up" in screen and "second lineX" in screen,
+        "active-run mouse wheel return to live tail",
     )
-    if "tmux active follow-up" not in active_wheel_tail or "second lineX" not in active_wheel_tail:
-        raise RuntimeError(
-            "active-run mouse wheel changed the composer draft while returning to the live tail\n"
-            f"screen:\n{active_wheel_tail}"
-        )
     send_literal(tmux_exe, active_session, "\x1b\r")
     queued_follow_up = wait_for(tmux_exe, active_session, r"follow-up queued", "active-run Alt+Enter follow-up queued")
     if "tmux active follow-up" not in queued_follow_up:

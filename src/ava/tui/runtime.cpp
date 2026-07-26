@@ -98,9 +98,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto& command_session_grants = presentation_state.command_session_grants;
 
   auto refresh_token_status = [&]() { presentation_state.refresh_token_status(options); };
+  auto refresh_active_context_status = [&]() { presentation_state.refresh_active_context_status(options); };
   auto refresh_reasoning_status = [&]() { presentation_state.refresh_reasoning_status(options); };
   auto apply_runtime_state_snapshot = [&](TuiRuntimeStateSnapshot state) { presentation_state.apply_runtime_state_snapshot(options, std::move(state)); };
   refresh_token_status();
+  refresh_active_context_status();
   refresh_reasoning_status();
 
   bool terminal_write_failed = false;
@@ -176,10 +178,20 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
   while (true)
   {
-    auto const maybe_input = read_curses_input_with_timeout(kIdleInputPollDelay);
+    if (!renderer.flush_pending_render_if_due())
+    {
+      terminal_write_failed = true;
+      break;
+    }
+    auto input_poll_delay = kIdleInputPollDelay;
+    if (renderer.has_pending_render())
+    {
+      input_poll_delay = std::min(input_poll_delay, std::chrono::ceil<std::chrono::milliseconds>(renderer.time_until_pending_render()));
+    }
+    auto const maybe_input = read_curses_input_with_timeout(input_poll_delay);
     if (!maybe_input)
     {
-      if (!maybe_reload_display_settings())
+      if (!renderer.flush_pending_render_if_due() || !maybe_reload_display_settings())
       {
         terminal_write_failed = true;
         break;
@@ -205,6 +217,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     if (input.resize)
     {
+      renderer.wheel_governor.reset();
       if (!render())
       {
         terminal_write_failed = true;
@@ -212,6 +225,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
       }
       continue;
     }
+    if (!runtime_wheel_input_accepted(renderer.wheel_governor, input.event.key))
+      continue;
     clear_reasoning_feedback_for_user_input(snapshot);
     if (snapshot.select_list)
     {
@@ -796,7 +811,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           snapshot.status = "view closed";
         }
       }
-      if (!render())
+      if (!renderer.request_render())
       {
         terminal_write_failed = true;
         break;
@@ -933,7 +948,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       if (event.key == Key::Character || event.key == Key::Space || is_action(TuiAction::JumpForward) || is_action(TuiAction::JumpBackward))
       {
         snapshot.selected_slash_command_index = selected_slash_command_index;
-        if (!render())
+        if (!renderer.request_render())
         {
           terminal_write_failed = true;
           break;
@@ -1239,6 +1254,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     else if (event.key == Key::MouseLeftClick)
     {
+      renderer.synchronize_detached_transcript_layout();
       pending_escape_clear = false;
       if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
       {
@@ -1528,8 +1544,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
     else if (is_action(TuiAction::DetailsToggle))
     {
       pending_escape_clear = false;
-      snapshot.tool_details_visible = !snapshot.tool_details_visible;
-      snapshot.status = snapshot.tool_details_visible ? "tool details visible" : "tool details compact";
+      renderer.synchronize_detached_transcript_layout();
+      snapshot.tool_presentation = snapshot.tool_presentation == ToolPresentation::Expanded ? ToolPresentation::Rich : ToolPresentation::Expanded;
+      snapshot.status = "tool details " + std::string(to_string(snapshot.tool_presentation));
     }
     else if (is_action(TuiAction::PromptAllow) || is_action(TuiAction::PromptDeny))
     {
@@ -1583,7 +1600,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     {
       if (event.key == Key::Enter && draft_state.convert_backslash_enter_to_newline(snapshot))
       {
-        if (!render())
+        if (!renderer.request_render())
         {
           terminal_write_failed = true;
           break;
@@ -1601,7 +1618,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       insert_input_text();
     }
     snapshot.selected_slash_command_index = selected_slash_command_index;
-    if (!render())
+    if (!renderer.request_render())
     {
       terminal_write_failed = true;
       break;

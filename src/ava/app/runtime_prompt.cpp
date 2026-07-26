@@ -1163,7 +1163,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
         return {};
       },
       .permission_resolver = runtime_options.permission_resolver,
-      .command_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(permission_rule_store_for_session(session)),
+      .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(permission_rule_store_for_session(session)),
       .question_resolver = runtime_options.question_resolver,
       .cancel_requested = [&runtime_options,
                            &sink_error] { return sink_error.has_value() || (runtime_options.cancel_requested && runtime_options.cancel_requested()); },

@@ -349,6 +349,8 @@ void load_skill_commands(RegistryBuilder& builder, runtime::Session const& sessi
   auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(policy.plugin_discovery, policy.plugin_enablement_file, session.workspace_dir());
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = session.workspace_dir(),
+      .global_skill_dirs = policy.global_skill_dirs,
+      .project_skill_dirs = policy.project_skill_dirs,
       .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
       .include_project_skills = policy.include_project_resources,
   });

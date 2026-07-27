@@ -6,6 +6,7 @@
 #include "ava/config/xdg_paths.h"
 
 #include <filesystem>
+#include <vector>
 
 namespace ava::app::runtime {
 
@@ -19,6 +20,8 @@ struct ExtensionResourcePolicy
   ava::mcp::McpConfigLoadOptions const mcp_config;
   std::filesystem::path const global_lsp_config_file;
   std::filesystem::path const project_lsp_config_file;
+  std::vector<std::filesystem::path> const global_skill_dirs;
+  std::vector<std::filesystem::path> const project_skill_dirs;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

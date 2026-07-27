@@ -415,13 +415,20 @@ void test_skill_loader()
   auto const workspace = root / "workspace";
   auto const global = root / "global" / "skills";
   auto const project = root / "workspace" / ".ava" / "skills";
+  auto const declared = root / "declared" / "plugin-skill.md";
   std::filesystem::create_directories(global / "release");
+  std::filesystem::create_directories(global / "global-only");
   std::filesystem::create_directories(project / "release");
   std::filesystem::create_directories(project / "debugging" / "scripts");
+  std::filesystem::create_directories(declared.parent_path());
 
   {
     std::ofstream file(global / "release" / "SKILL.md", std::ios::binary | std::ios::trunc);
     file << "---\nname: release\ndescription: Global release workflow\n---\nGlobal body\n";
+  }
+  {
+    std::ofstream file(global / "global-only" / "SKILL.md", std::ios::binary | std::ios::trunc);
+    file << "---\nname: global-only\ndescription: Global-only workflow\n---\nGlobal-only body\n";
   }
   {
     std::ofstream file(project / "release" / "SKILL.md", std::ios::binary | std::ios::trunc);
@@ -435,10 +442,14 @@ void test_skill_loader()
     std::ofstream file(project / "debugging" / "scripts" / "triage.sh", std::ios::binary | std::ios::trunc);
     file << "echo triage\n";
   }
+  {
+    std::ofstream file(declared, std::ios::binary | std::ios::trunc);
+    file << "Declared plugin body\n";
+  }
 
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = root / "workspace", .global_skill_dirs = {global}, .project_skill_dirs = {project}, .max_file_bytes = 1024});
-  expect(loaded.skills.size() == 2, "skill loader discovers global and project SKILL.md files");
+  expect(loaded.skills.size() == 3, "skill loader discovers global and project SKILL.md files");
   auto const release = std::ranges::find_if(loaded.skills, [](ava::context::LoadedSkill const& skill) { return skill.name == "release"; });
   expect(release != loaded.skills.end() && release->description == "Project release workflow" && release->content.find("Project body") != std::string::npos &&
              release->source_type == ava::context::SkillSourceType::Project,
@@ -457,6 +468,25 @@ void test_skill_loader()
                tool_content.find("triage.sh") != std::string::npos,
            "loaded skill tool content includes body, base-dir guidance, and sampled files");
   }
+
+  auto global_disabled = ava::context::load_skills(
+      ava::context::SkillLoadOptions{.workspace_root = workspace,
+                                     .global_skill_dirs = {global},
+                                     .project_skill_dirs = {project},
+                                     .declared_skill_files = {ava::context::DeclaredSkillFileOptions{.path = declared,
+                                                                                                     .name = "declared-plugin-skill",
+                                                                                                     .description = "Declared plugin workflow",
+                                                                                                     .source_type = ava::context::SkillSourceType::Plugin,
+                                                                                                     .preloaded_content = std::nullopt,
+                                                                                                     .max_file_bytes = 1024}},
+                                     .max_file_bytes = 1024,
+                                     .include_global_skills = false,
+                                     .include_project_skills = true});
+  expect(std::ranges::none_of(global_disabled.skills,
+                              [](ava::context::LoadedSkill const& skill) { return skill.source_type == ava::context::SkillSourceType::Global; }) &&
+             std::ranges::any_of(global_disabled.skills, [](ava::context::LoadedSkill const& skill) { return skill.name == "debugging"; }) &&
+             std::ranges::any_of(global_disabled.skills, [](ava::context::LoadedSkill const& skill) { return skill.name == "declared-plugin-skill"; }),
+         "skill loader suppresses explicit global directories while retaining independent project and declared skill sources");
 
   std::filesystem::create_directories(project / "invalid");
   {

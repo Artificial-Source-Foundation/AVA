@@ -29,10 +29,16 @@ struct ToolResourceOptions
   std::filesystem::path plugin_project_plugins_dir = {};
   std::filesystem::path plugin_enablement_file = {};
   bool include_plugin_tools = true;
+  std::filesystem::path mcp_global_config_file = {};
+  std::filesystem::path mcp_project_config_file = {};
+  bool include_global_mcp_config = true;
   std::shared_ptr<ava::mcp::McpConfig const> session_mcp_config = nullptr;
+  std::vector<std::filesystem::path> skill_global_dirs = {};
+  std::vector<std::filesystem::path> skill_project_dirs = {};
+  bool include_global_skills = true;
   std::optional<std::vector<std::string>> exact_builtin_tool_names = std::nullopt;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 }  // namespace ava::agent

@@ -781,12 +781,18 @@ ToolDispatchResult skill_result(ava::tools::ToolContext const& context, Provider
   auto name = required_safe_string_arg(call.arguments_json, "name", call.name);
   if (!name)
     return tool_error_result(call, name.error());
-  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options_for_context(context), plugin_enablement_file_for_context(context),
-                                                                    context.workspace_dir);
+  std::vector<ava::context::DeclaredSkillFileOptions> plugin_skill_files;
+  if (context.include_plugin_tools)
+  {
+    auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options_for_context(context),
+                                                                      plugin_enablement_file_for_context(context), context.workspace_dir);
+    plugin_skill_files = declared_plugin_skill_files(plugin_diagnostics);
+  }
   auto skills = ava::context::load_skills(ava::context::SkillLoadOptions{.workspace_root = context.workspace_dir,
                                                                          .global_skill_dirs = context.skill_global_dirs,
                                                                          .project_skill_dirs = context.skill_project_dirs,
-                                                                         .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
+                                                                         .declared_skill_files = std::move(plugin_skill_files),
+                                                                         .include_global_skills = context.include_global_skills,
                                                                          .include_project_skills = context.include_project_skills});
   auto const match = std::ranges::find_if(skills.skills, [&](ava::context::LoadedSkill const& skill) { return skill.name == *name; });
   if (match == skills.skills.end())

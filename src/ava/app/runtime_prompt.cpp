@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "command_registry.h"
 #include "plugin_event_hooks.h"
+#include "runtime/ExtensionResourcePolicy.h"
 #include "runtime/Session.h"
 #include "runtime/command_names.h"
 #include "runtime/markdown_files.h"
@@ -257,14 +258,10 @@ ava::core::Result<LoadedPluginSkillResource> load_plugin_skill_resource(ava::plu
                                    .skill = std::move(*skill)};
 }
 
-PluginRuntimeResources load_plugin_runtime_resources(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir,
-                                                     bool include_project_resources)
+PluginRuntimeResources load_plugin_runtime_resources(ExtensionResourcePolicy const& policy, std::filesystem::path const& workspace_dir)
 {
   PluginRuntimeResources resources;
-  resources.diagnostics = ava::plugin::collect_plugin_diagnostics(
-      ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = paths.ava_config_dir / "plugins",
-                                          .project_plugins_dir = include_project_resources ? workspace_dir / ".ava" / "plugins" : std::filesystem::path{}},
-      paths.ava_state_dir / "plugin-enablement.json", workspace_dir);
+  resources.diagnostics = ava::plugin::collect_plugin_diagnostics(policy.plugin_discovery, policy.plugin_enablement_file, workspace_dir);
   for (auto const& status : resources.diagnostics.plugins)
   {
     if (!status.enabled)
@@ -399,6 +396,7 @@ ava::core::Result<PromptState> load_runtime_prompt_state(ava::config::XdgPaths c
                                                          std::filesystem::path const& workspace_dir, std::filesystem::path const& current_dir,
                                                          bool include_project_resources, PromptOverrides const& prompt_overrides)
 {
+  auto const resource_policy = make_extension_resource_policy(paths, workspace_dir, include_project_resources);
   auto prompt = ava::config::select_prompt(paths, model, mode);
   if (!prompt)
     return std::unexpected(prompt.error());
@@ -412,7 +410,7 @@ ava::core::Result<PromptState> load_runtime_prompt_state(ava::config::XdgPaths c
     return std::unexpected(loaded_context.error());
   auto ordinary_context_prompt = ava::context::format_context_for_prompt(*loaded_context);
 
-  auto plugin_resources = load_plugin_runtime_resources(paths, workspace_dir, include_project_resources);
+  auto plugin_resources = load_plugin_runtime_resources(resource_policy, workspace_dir);
   add_plugin_prompt_context_files(*loaded_context, plugin_resources.prompts);
 
   std::vector<ContextSourceMetadata> context_sources;
@@ -427,11 +425,13 @@ ava::core::Result<PromptState> load_runtime_prompt_state(ava::config::XdgPaths c
 
   auto loaded_skills = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = workspace_dir,
-      .include_project_skills = include_project_resources,
+      .global_skill_dirs = resource_policy.global_skill_dirs,
+      .project_skill_dirs = resource_policy.project_skill_dirs,
+      .include_project_skills = resource_policy.include_project_resources,
   });
   add_plugin_skills(loaded_skills.skills, plugin_resources.skills);
-  auto loaded_subagents =
-      ava::agent::load_subagents(ava::agent::SubagentLoadOptions{.workspace_root = workspace_dir, .include_project_agents = include_project_resources});
+  auto loaded_subagents = ava::agent::load_subagents(
+      ava::agent::SubagentLoadOptions{.workspace_root = workspace_dir, .include_project_agents = resource_policy.include_project_resources});
   std::vector<FreshnessSourceMetadata> freshness_sources;
   auto selected_prompt = std::move(*prompt);
   auto system_prompt = selected_prompt.text;
@@ -960,13 +960,17 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
     return fail_run(std::move(emitted.error()));
   }
 
+  auto const resource_policy = make_extension_resource_policy(session);
+  bool const include_ambient = !runtime_options.isolate_ambient_extensions;
+  bool const include_project_resources = include_ambient && resource_policy.include_project_resources;
+
   std::shared_ptr<ava::lsp::DiagnosticsProvider> configured_lsp_provider;
   std::vector<ava::agent::SubagentDefinition> subagents;
-  if (!runtime_options.isolate_ambient_extensions)
+  if (include_ambient)
   {
     auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
-        .global_config_file = session.paths().ava_config_dir / "lsp.json",
-        .project_config_file = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "lsp.json" : std::filesystem::path{},
+        .global_config_file = resource_policy.global_lsp_config_file,
+        .project_config_file = resource_policy.project_lsp_config_file,
         .workspace_root = session.workspace_dir(),
         .anchor_set = session.anchor_set(),
         .mode = session.mode(),
@@ -974,8 +978,15 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
     });
     configured_lsp_provider = lsp_provider ? *lsp_provider : nullptr;
     subagents = ava::agent::load_subagents(ava::agent::SubagentLoadOptions{.workspace_root = session.workspace_dir(),
-                                                                           .include_project_agents = project_resources_trusted(session.project_trust())})
+                                                                           .include_project_agents = resource_policy.include_project_resources})
                     .subagents;
+  }
+
+  auto effective_session_mcp_config = session.mcp_config();
+  if (runtime_options.disable_session_mcp ||
+      (!effective_session_mcp_config && (runtime_options.isolate_ambient_extensions || runtime_options.exact_builtin_tool_names.has_value())))
+  {
+    effective_session_mcp_config = std::make_shared<ava::mcp::McpConfig const>();
   }
 
   std::optional<ava::core::Error> sink_error;
@@ -1006,16 +1017,19 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .openai_account_id = options.openai_account_id,
       .tool_resources =
           ava::agent::ToolResourceOptions{
-              .include_project_resources = !runtime_options.isolate_ambient_extensions && project_resources_trusted(session.project_trust()),
+              .include_project_resources = include_project_resources,
               .lsp_diagnostics_provider = configured_lsp_provider,
-              .plugin_global_plugins_dir = runtime_options.isolate_ambient_extensions ? std::filesystem::path{} : session.paths().ava_config_dir / "plugins",
-              .plugin_project_plugins_dir = !runtime_options.isolate_ambient_extensions && project_resources_trusted(session.project_trust())
-                                                ? session.workspace_dir() / ".ava" / "plugins"
-                                                : std::filesystem::path{},
-              .plugin_enablement_file =
-                  runtime_options.isolate_ambient_extensions ? std::filesystem::path{} : session.paths().ava_state_dir / "plugin-enablement.json",
-              .include_plugin_tools = !runtime_options.isolate_ambient_extensions,
-              .session_mcp_config = runtime_options.disable_session_mcp ? std::make_shared<ava::mcp::McpConfig const>() : session.mcp_config(),
+              .plugin_global_plugins_dir = resource_policy.plugin_discovery.global_plugins_dir,
+              .plugin_project_plugins_dir = resource_policy.plugin_discovery.project_plugins_dir,
+              .plugin_enablement_file = resource_policy.plugin_enablement_file,
+              .include_plugin_tools = include_ambient,
+              .mcp_global_config_file = resource_policy.mcp_config.global_config_file,
+              .mcp_project_config_file = resource_policy.mcp_config.project_config_file,
+              .include_global_mcp_config = include_ambient,
+              .session_mcp_config = std::move(effective_session_mcp_config),
+              .skill_global_dirs = resource_policy.global_skill_dirs,
+              .skill_project_dirs = resource_policy.project_skill_dirs,
+              .include_global_skills = include_ambient,
               .exact_builtin_tool_names = runtime_options.exact_builtin_tool_names,
           },
       .tool_execution =

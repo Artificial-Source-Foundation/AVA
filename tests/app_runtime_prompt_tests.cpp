@@ -127,6 +127,9 @@ void test_app_run_prompt_isolates_ambient_extensions()
                       "---\nname: ordinary-canary\ndescription: ACP_ORDINARY_SKILL_CANARY_193c\n---\nOrdinary skill body.\n");
   write_app_test_file(workspace / ".ava" / "agents" / "ambient-agent.md",
                       "---\nname: ambient-agent-canary\ndescription: ACP_SUBAGENT_CANARY_629e\nmode: subagent\n---\nCustom agent prompt.\n");
+  auto const global_skill_name = "ambient-global-skill";
+  write_app_test_file(paths.ava_config_dir / "skills" / global_skill_name / "SKILL.md",
+                      "---\nname: ambient-global-skill\ndescription: ACP_GLOBAL_SKILL_CANARY_73c2\n---\nACP_GLOBAL_SKILL_BODY_CANARY_8a91\n");
 
   auto const plugin_id = "com.example.acp-isolation";
   auto const plugin_dir = paths.ava_config_dir / "plugins" / plugin_id;
@@ -162,6 +165,7 @@ void test_app_run_prompt_isolates_ambient_extensions()
              ordinary_prompt.find("ACP_ORDINARY_CONTEXT_CANARY_846d") != std::string::npos &&
              ordinary_prompt.find("ACP_PLUGIN_PROMPT_CANARY_e8ad") != std::string::npos &&
              ordinary_prompt.find("ACP_PLUGIN_SKILL_CANARY_1b64") != std::string::npos &&
+             ordinary_prompt.find("ACP_GLOBAL_SKILL_CANARY_73c2") != std::string::npos &&
              ordinary_prompt.find("ACP_ORDINARY_SKILL_CANARY_193c") != std::string::npos &&
              ordinary_prompt.find("ACP_SUBAGENT_CANARY_629e") != std::string::npos && ordinary_prompt.find("<available_skills>") != std::string::npos &&
              ordinary_prompt.find("<available_subagents>") != std::string::npos,
@@ -188,8 +192,9 @@ void test_app_run_prompt_isolates_ambient_extensions()
   expect(request.find("ACP_BASE_PROMPT_CANARY_5fa7") != std::string::npos && request.find("ACP_ORDINARY_CONTEXT_CANARY_846d") != std::string::npos,
          "isolated runtime request preserves explicit base prompt and ordinary AGENTS context");
   expect(request.find("ACP_PLUGIN_PROMPT_CANARY_e8ad") == std::string::npos && request.find("ACP_PLUGIN_SKILL_CANARY_1b64") == std::string::npos &&
-             request.find("ACP_PLUGIN_SKILL_BODY_CANARY_a53f") == std::string::npos,
-         "isolated runtime request omits plugin prompt and skill canaries");
+             request.find("ACP_PLUGIN_SKILL_BODY_CANARY_a53f") == std::string::npos && request.find(global_skill_name) == std::string::npos &&
+             request.find("ACP_GLOBAL_SKILL_CANARY_73c2") == std::string::npos && request.find("ACP_GLOBAL_SKILL_BODY_CANARY_8a91") == std::string::npos,
+         "isolated runtime request omits plugin and global skill names, catalogs, and bodies");
   expect(request.find("ACP_ORDINARY_SKILL_CANARY_193c") == std::string::npos && request.find("<available_skills>") == std::string::npos,
          "isolated runtime request omits ordinary available-skill catalogs");
   expect(request.find("ACP_SUBAGENT_CANARY_629e") == std::string::npos && request.find("ambient-agent-canary") == std::string::npos &&
@@ -202,7 +207,74 @@ void test_app_run_prompt_isolates_ambient_extensions()
   expect(request.find("\"name\":\"read_file\"") != std::string::npos && request.find("\"name\":\"list_directory\"") != std::string::npos &&
              request.find("\"name\":\"write_file\"") == std::string::npos,
          "isolated runtime exact composition preserves requested builtins and omits non-exact builtins");
-  expect(session->system_prompt() == ordinary_prompt, "isolated runtime request leaves the ordinary session system prompt unchanged");
+
+  session->resources().mcp_config.reset();
+  ava::tests::FakeTransport generic_transport({
+      ava::http::HttpResponse{
+          .status_code = 200,
+          .headers = {},
+          .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_global_skill\",\"name\":\"skill\"}\n\n"
+                  "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_global_skill\","
+                  "\"delta\":\"{\\\"name\\\":\\\"ambient-global-skill\\\"}\"}\n\n"
+                  "data: [DONE]\n\n",
+      },
+      ava::http::HttpResponse{
+          .status_code = 200,
+          .headers = {},
+          .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_plugin_skill\",\"name\":\"skill\"}\n\n"
+                  "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_plugin_skill\","
+                  "\"delta\":\"{\\\"name\\\":\\\"ambient-plugin-skill\\\"}\"}\n\n"
+                  "data: [DONE]\n\n",
+      },
+      ava::http::HttpResponse{
+          .status_code = 200,
+          .headers = {},
+          .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"generic isolated answer\"}\n\n"
+                  "data: [DONE]\n\n",
+      },
+  });
+  ava::app::runtime::RunOptions generic_options;
+  generic_options.access_token = "fake";
+  generic_options.isolate_ambient_extensions = true;
+  generic_options.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto generic_result = ava::app::run_prompt(*session, "generic isolated prompt", provider, generic_transport, generic_options);
+  expect(generic_result && generic_result->final_text == "generic isolated answer" && generic_transport.requests().size() == 3,
+         "generic ambient isolation with null session MCP completes successive unavailable global and plugin skill calls");
+  for (auto const& isolated_request : generic_transport.requests())
+  {
+    expect(isolated_request.body.find(ambient_mcp_name) == std::string::npos &&
+               isolated_request.body.find("ACP_GLOBAL_SKILL_CANARY_73c2") == std::string::npos &&
+               isolated_request.body.find("ACP_GLOBAL_SKILL_BODY_CANARY_8a91") == std::string::npos &&
+               isolated_request.body.find("ACP_PLUGIN_SKILL_CANARY_1b64") == std::string::npos &&
+               isolated_request.body.find("ACP_PLUGIN_SKILL_BODY_CANARY_a53f") == std::string::npos,
+           "every generic isolated request omits ambient MCP schema and global/plugin skill catalog and body canaries");
+  }
+  if (!generic_transport.requests().empty())
+  {
+    expect(generic_transport.requests().front().body.find(global_skill_name) == std::string::npos &&
+               generic_transport.requests().front().body.find("ambient-plugin-skill") == std::string::npos,
+           "generic isolated initial request omits ambient global and plugin skill names");
+    expect(generic_transport.requests().front().body.find(R"("name":"task")") != std::string::npos &&
+               generic_transport.requests().front().body.find(R"("name":"job")") != std::string::npos,
+           "generic ambient isolation preserves compiled-in task and job product capabilities");
+  }
+
+  ava::tests::FakeTransport exact_null_transport({ava::http::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"exact null answer\"}\n\n"
+              "data: [DONE]\n\n",
+  }});
+  ava::app::runtime::RunOptions exact_null_options;
+  exact_null_options.access_token = "fake";
+  exact_null_options.isolate_ambient_extensions = true;
+  exact_null_options.exact_builtin_tool_names = std::vector<std::string>{"read_file"};
+  auto exact_null_result = ava::app::run_prompt(*session, "exact null MCP prompt", provider, exact_null_transport, exact_null_options);
+  expect(exact_null_result && exact_null_result->final_text == "exact null answer" && exact_null_transport.requests().size() == 1,
+         "exact isolated composition allocates an empty immutable MCP config when the session config is null");
+  expect(session->system_prompt() == ordinary_prompt, "isolated runtime requests leave the ordinary session system prompt unchanged");
 }
 
 void test_app_run_prompt_emits_events()

@@ -52,10 +52,16 @@ using namespace ava::tests;
 
 void test_extension_resource_policy_derives_synthetic_paths_and_trust()
 {
+  std::filesystem::path const home = "/synthetic-extension-policy/home-root";
+  ScopedEnvVar home_env("HOME", home.string());
   ava::config::XdgPaths paths;
   paths.ava_config_dir = "/synthetic-extension-policy/config-root";
   paths.ava_state_dir = "/synthetic-extension-policy/state-root";
   std::filesystem::path const workspace = "/synthetic-extension-policy/workspace-root";
+  auto const expected_global_skill_dirs =
+      std::vector<std::filesystem::path>{paths.ava_config_dir / "skills", home / ".agents" / "skills", home / ".claude" / "skills"};
+  auto const expected_project_skill_dirs =
+      std::vector<std::filesystem::path>{workspace / ".ava" / "skills", workspace / ".agents" / "skills", workspace / ".claude" / "skills"};
 
   auto const trusted = ava::app::runtime::make_extension_resource_policy(paths, workspace, true);
   expect(trusted.include_project_resources && trusted.plugin_discovery.global_plugins_dir == paths.ava_config_dir / "plugins" &&
@@ -63,7 +69,8 @@ void test_extension_resource_policy_derives_synthetic_paths_and_trust()
              trusted.plugin_enablement_file == paths.ava_state_dir / "plugin-enablement.json" && trusted.mcp_config.workspace_dir == workspace &&
              trusted.mcp_config.global_config_file == paths.ava_config_dir / "mcp.json" &&
              trusted.mcp_config.project_config_file == workspace / ".ava" / "mcp.json" && trusted.global_lsp_config_file == paths.ava_config_dir / "lsp.json" &&
-             trusted.project_lsp_config_file == workspace / ".ava" / "lsp.json",
+             trusted.project_lsp_config_file == workspace / ".ava" / "lsp.json" && trusted.global_skill_dirs == expected_global_skill_dirs &&
+             trusted.project_skill_dirs == expected_project_skill_dirs,
          "trusted extension resource policy derives every path from synthetic XDG and workspace inputs");
 
   auto const untrusted = ava::app::runtime::make_extension_resource_policy(paths, workspace, false);
@@ -71,7 +78,8 @@ void test_extension_resource_policy_derives_synthetic_paths_and_trust()
              untrusted.plugin_discovery.project_plugins_dir.empty() && untrusted.plugin_enablement_file == trusted.plugin_enablement_file &&
              untrusted.mcp_config.workspace_dir == trusted.mcp_config.workspace_dir &&
              untrusted.mcp_config.global_config_file == trusted.mcp_config.global_config_file && untrusted.mcp_config.project_config_file.empty() &&
-             untrusted.global_lsp_config_file == trusted.global_lsp_config_file && untrusted.project_lsp_config_file.empty(),
+             untrusted.global_lsp_config_file == trusted.global_lsp_config_file && untrusted.project_lsp_config_file.empty() &&
+             untrusted.global_skill_dirs == expected_global_skill_dirs && untrusted.project_skill_dirs.empty(),
          "untrusted extension resource policy preserves synthetic global paths and workspace while omitting every project path");
 }
 

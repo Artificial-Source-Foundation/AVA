@@ -1122,6 +1122,20 @@ void test_mcp_ordinary_global_and_project_environment_is_inherited()
          inherited ? "ordinary loaded global MCP inherits benign parent variables and replaces parent PATH with the trusted default"
                    : "ordinary loaded global MCP environment discovery failed: " + inherited.error().format());
 
+  std::filesystem::remove(marker);
+  ava::tools::ToolContext suppressed_context;
+  suppressed_context.workspace_dir = workspace;
+  suppressed_context.mcp_global_config_file = global_config;
+  suppressed_context.include_global_mcp_config = false;
+  suppressed_context.include_project_mcp_config = false;
+  suppressed_context.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto suppressed = ava::agent::ToolDispatcher::create_strict(std::move(suppressed_context));
+  expect(suppressed && !std::filesystem::exists(marker),
+         suppressed ? "disabled global MCP ignores an explicitly supplied config path"
+                    : "disabled global MCP config unexpectedly affected strict dispatcher creation: " + suppressed.error().format());
+
   auto server = fake_server_config(root);
   server.scope = ava::mcp::McpServerScope::Project;
   server.args = {"env-marker", marker.string()};

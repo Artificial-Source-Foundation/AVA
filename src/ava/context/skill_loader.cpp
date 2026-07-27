@@ -232,15 +232,20 @@ std::string to_string(SkillSourceType source_type)
   return "unknown";
 }
 
-std::vector<std::filesystem::path> default_global_skill_dirs()
+std::vector<std::filesystem::path> default_global_skill_dirs(ava::config::XdgPaths const& paths)
 {
-  std::vector<std::filesystem::path> dirs{ava::config::xdg_paths().ava_config_dir / "skills"};
+  std::vector<std::filesystem::path> dirs{paths.ava_config_dir / "skills"};
   if (auto home = home_dir())
   {
     dirs.push_back(*home / ".agents" / "skills");
     dirs.push_back(*home / ".claude" / "skills");
   }
   return dirs;
+}
+
+std::vector<std::filesystem::path> default_global_skill_dirs()
+{
+  return default_global_skill_dirs(ava::config::xdg_paths());
 }
 
 std::vector<std::filesystem::path> default_project_skill_dirs(std::filesystem::path const& workspace_root)
@@ -312,7 +317,7 @@ ava::core::Result<LoadedSkill> load_declared_skill_file(DeclaredSkillFileOptions
 
 SkillLoadResult load_skills(SkillLoadOptions options)
 {
-  if (options.global_skill_dirs.empty())
+  if (options.include_global_skills && options.global_skill_dirs.empty())
     options.global_skill_dirs = default_global_skill_dirs();
   if (options.include_project_skills && options.project_skill_dirs.empty())
     options.project_skill_dirs = default_project_skill_dirs(options.workspace_root);
@@ -320,9 +325,12 @@ SkillLoadResult load_skills(SkillLoadOptions options)
     options.max_file_bytes = 64 * 1024;
 
   SkillLoadResult result;
-  for (auto const& dir : options.global_skill_dirs)
+  if (options.include_global_skills)
   {
-    discover_from_root(result.skills, result.diagnostics, dir, SkillSourceType::Global, options.max_file_bytes);
+    for (auto const& dir : options.global_skill_dirs)
+    {
+      discover_from_root(result.skills, result.diagnostics, dir, SkillSourceType::Global, options.max_file_bytes);
+    }
   }
   if (options.include_project_skills)
   {

@@ -2,6 +2,7 @@
 #include "ExtensionResourcePolicy.h"
 #include "Session.h"
 #include "ava/app/project_trust.h"
+#include "ava/context/skill_loader.h"
 
 namespace ava::app::runtime {
 
@@ -24,6 +25,8 @@ ExtensionResourcePolicy make_extension_resource_policy(ava::config::XdgPaths con
           },
       .global_lsp_config_file = paths.ava_config_dir / "lsp.json",
       .project_lsp_config_file = include_project_resources ? workspace_dir / ".ava" / "lsp.json" : std::filesystem::path{},
+      .global_skill_dirs = ava::context::default_global_skill_dirs(paths),
+      .project_skill_dirs = include_project_resources ? ava::context::default_project_skill_dirs(workspace_dir) : std::vector<std::filesystem::path>{},
   };
 }
 

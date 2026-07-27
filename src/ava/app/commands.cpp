@@ -1156,6 +1156,8 @@ ava::core::Result<std::string> skill_prompt_message(runtime::Session& session, C
       ava::plugin::collect_plugin_diagnostics(resource_policy.plugin_discovery, resource_policy.plugin_enablement_file, session.workspace_dir());
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = session.workspace_dir(),
+      .global_skill_dirs = resource_policy.global_skill_dirs,
+      .project_skill_dirs = resource_policy.project_skill_dirs,
       .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
       .include_project_skills = resource_policy.include_project_resources,
   });

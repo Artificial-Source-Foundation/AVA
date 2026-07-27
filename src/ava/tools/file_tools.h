@@ -128,6 +128,7 @@ struct ToolContext
   bool include_plugin_tools = true;
   std::filesystem::path mcp_global_config_file = {};
   std::filesystem::path mcp_project_config_file = {};
+  bool include_global_mcp_config = true;
   bool include_project_mcp_config = true;
   std::shared_ptr<ava::mcp::McpConfig const> session_mcp_config = nullptr;
   // Present means compose exactly these built-ins with immutable session MCP
@@ -136,6 +137,7 @@ struct ToolContext
   bool require_descriptor_secure_workspace = false;
   std::vector<std::filesystem::path> skill_global_dirs = {};
   std::vector<std::filesystem::path> skill_project_dirs = {};
+  bool include_global_skills = true;
   bool include_project_skills = true;
   std::string session_id = {};
   std::string provider_id = {};

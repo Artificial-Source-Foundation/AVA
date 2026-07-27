@@ -1460,12 +1460,44 @@ void test_tui_selector_authority_dispatch_paints_before_callback()
              snapshot.input_cursor == original_cursor,
          "failed selector authority dispatch keeps modal cleared, reports authority failure, and retains draft and cursor");
 }
+
+void test_tui_envelope_replay_inherits_session_identity_fields()
+{
+  ava::tui::TuiEventState state;
+  auto envelope_for = [](ava::app::runtime::Event const& event, std::string event_id) {
+    ava::app::EventEnvelopeContext context;
+    context.event_id = std::move(event_id);
+    return ava::app::to_event_envelope(event, context);
+  };
+
+  ava::app::runtime::Event session_start;
+  session_start.type = ava::app::runtime::EventType::SessionStart;
+  session_start.mode = ava::agent::Mode::Plan;
+  session_start.provider_id = "openai";
+  session_start.model_id = "model-x";
+  ava::tui::apply_event_envelope(state, envelope_for(session_start, "event_session"));
+
+  ava::app::runtime::Event message_update;
+  message_update.type = ava::app::runtime::EventType::MessageUpdate;
+  message_update.text = "inherited context";
+  ava::tui::apply_event_envelope(state, envelope_for(message_update, "event_update"));
+
+  ava::app::runtime::Event message_end;
+  message_end.type = ava::app::runtime::EventType::MessageEnd;
+  ava::tui::apply_event_envelope(state, envelope_for(message_end, "event_end"));
+
+  expect(state.current_mode == ava::agent::Mode::Plan && state.current_provider_id == "openai" && state.current_model_id == "model-x" &&
+             state.transcript.size() == 1 && state.transcript.front().meta.starts_with("Plan"),
+         "TUI envelope replay inherits Plan/openai/model-x from session_start when later runtime envelopes omit identity fields");
+}
+
 }  // namespace
 
 void run_tui_runtime_event_state_tests()
 {
   test_tui_event_state_reduces_runtime_events();
   test_tui_transcript_projection_and_cap_parity();
+  test_tui_envelope_replay_inherits_session_identity_fields();
 }
 
 void run_tui_runtime_dispatch_tests()

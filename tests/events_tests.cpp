@@ -75,12 +75,43 @@ void test_runtime_event_conversion_preserves_legacy_payload_shape()
          "runtime event envelopes advertise payload family without changing payload shape");
 }
 
+void test_event_bus_preserves_order_and_stops_on_first_failure()
+{
+  ava::app::EventBus bus;
+  std::vector<std::string> calls;
+  auto expected_error = ava::core::Error(ava::core::ErrorCategory::Io, "stable second sink failure").with_context("sink", "second");
+  bus.subscribe([&calls](ava::app::EventEnvelope const&) {
+    calls.push_back("first");
+    return ava::core::VoidResult{};
+  });
+  bus.subscribe([&calls](ava::app::EventEnvelope const&) -> ava::core::VoidResult {
+    calls.push_back("second");
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "stable second sink failure").with_context("sink", "second"));
+  });
+  bus.subscribe([&calls](ava::app::EventEnvelope const&) {
+    calls.push_back("third");
+    return ava::core::VoidResult{};
+  });
+
+  ava::app::EventEnvelope envelope;
+  envelope.event_id = "event_order";
+  envelope.name = "done";
+  auto const published = bus.publish(envelope);
+  expect(!published && calls == std::vector<std::string>({"first", "second"}),
+         "EventBus calls sinks synchronously in registration order and stops on the first failure");
+  expect(!published && published.error().category() == expected_error.category() && published.error().message() == expected_error.message() &&
+             published.error().format() == expected_error.format(),
+         "EventBus propagates the first sink failure exactly");
+}
+
 void test_runtime_event_bus_adapter_publishes_and_forwards()
 {
   ava::app::EventBus bus;
+  std::vector<std::string> call_order;
   std::vector<ava::app::EventEnvelope> published;
   std::vector<ava::app::runtime::Event> forwarded;
-  bus.subscribe([&published](ava::app::EventEnvelope const& envelope) {
+  bus.subscribe([&call_order, &published](ava::app::EventEnvelope const& envelope) {
+    call_order.push_back("publish");
     published.push_back(envelope);
     return ava::core::VoidResult{};
   });
@@ -88,7 +119,8 @@ void test_runtime_event_bus_adapter_publishes_and_forwards()
   ava::app::EventEnvelopeContext context;
   context.event_id = "event_3";
   context.correlation_id = "correlation_1";
-  auto sink = ava::app::make_runtime_event_bus_adapter(bus, context, [&forwarded](ava::app::runtime::Event const& event) {
+  auto sink = ava::app::make_runtime_event_bus_adapter(bus, context, [&call_order, &forwarded](ava::app::runtime::Event const& event) {
+    call_order.push_back("legacy");
     forwarded.push_back(event);
     return ava::core::VoidResult{};
   });
@@ -103,7 +135,45 @@ void test_runtime_event_bus_adapter_publishes_and_forwards()
   expect(emitted.has_value(), "runtime event bus adapter succeeds when bus and legacy sink succeed");
   expect(published.size() == 1 && published.front().name == "assistant_message" && published.front().correlation_id == "correlation_1",
          "runtime event bus adapter publishes converted envelopes");
-  expect(forwarded.size() == 1 && forwarded.front().text == "done", "runtime event bus adapter forwards runtime events to legacy sink");
+  expect(forwarded.size() == 1 && forwarded.front().text == "done" && call_order == std::vector<std::string>({"publish", "legacy"}),
+         "runtime event bus adapter publishes before forwarding runtime events to the legacy sink");
+}
+
+void test_runtime_event_bus_adapter_failure_order()
+{
+  ava::app::runtime::Event event;
+  event.type = ava::app::runtime::EventType::Done;
+  event.timestamp = "2026-04-30T00:00:03Z";
+  event.session_id = "session_1";
+
+  ava::app::EventBus failing_bus;
+  bool legacy_called = false;
+  auto expected_publish_error = ava::core::Error(ava::core::ErrorCategory::Io, "stable envelope publish failure");
+  failing_bus.subscribe([](ava::app::EventEnvelope const&) -> ava::core::VoidResult {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "stable envelope publish failure"));
+  });
+  auto publish_failure_sink = ava::app::make_runtime_event_bus_adapter(failing_bus, {}, [&legacy_called](ava::app::runtime::Event const&) {
+    legacy_called = true;
+    return ava::core::VoidResult{};
+  });
+  auto const publish_failure = publish_failure_sink(event);
+  expect(!publish_failure && !legacy_called && publish_failure.error().format() == expected_publish_error.format(),
+         "runtime event bus adapter propagates envelope publish failure without calling the legacy sink");
+
+  ava::app::EventBus successful_bus;
+  std::vector<std::string> calls;
+  successful_bus.subscribe([&calls](ava::app::EventEnvelope const&) {
+    calls.push_back("publish");
+    return ava::core::VoidResult{};
+  });
+  auto expected_legacy_error = ava::core::Error(ava::core::ErrorCategory::Tool, "stable legacy sink failure").with_context("sink", "legacy");
+  auto legacy_failure_sink = ava::app::make_runtime_event_bus_adapter(successful_bus, {}, [&calls](ava::app::runtime::Event const&) -> ava::core::VoidResult {
+    calls.push_back("legacy");
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "stable legacy sink failure").with_context("sink", "legacy"));
+  });
+  auto const legacy_failure = legacy_failure_sink(event);
+  expect(!legacy_failure && calls == std::vector<std::string>({"publish", "legacy"}) && legacy_failure.error().format() == expected_legacy_error.format(),
+         "runtime event bus adapter publishes first and propagates the legacy sink failure exactly");
 }
 
 void test_runtime_event_bus_adapter_allows_default_legacy_sink()
@@ -656,7 +726,9 @@ void run_app_event_bus_tests()
 {
   test_event_envelope_serialization_is_deterministic();
   test_runtime_event_conversion_preserves_legacy_payload_shape();
+  test_event_bus_preserves_order_and_stops_on_first_failure();
   test_runtime_event_bus_adapter_publishes_and_forwards();
+  test_runtime_event_bus_adapter_failure_order();
   test_runtime_event_bus_adapter_allows_default_legacy_sink();
   test_tool_progress_runtime_event_serialization_and_bus_adapter();
   test_tool_runtime_event_serializes_semantic_frontend_payloads();

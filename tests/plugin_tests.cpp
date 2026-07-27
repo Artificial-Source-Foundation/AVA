@@ -1616,16 +1616,17 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
              "read line\n"
              "printf '%s\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
              "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
-             "read line\n"
-             "printf '%s\n' \"$line\" > event-request.txt\n"
-             "printf '%s\n' '{\"id\":\"ava_event_call_diag\",\"type\":\"tool.result\",\"ok\":true,"
+             "while read line; do\n"
+             "  printf '%s\n' \"$line\" > event-request.txt\n"
+             "  printf '%s\n' '{\"id\":\"ava_event_call_diag\",\"type\":\"tool.result\",\"ok\":true,"
              "\"content\":\"wrong response type\"}'\n"
-             "while read line; do :; done\n");
+             "done\n");
   auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.eventdiag", true, ava::plugin::PluginScope::Project);
   expect(enabled.has_value(), "event hook diagnostic test enables project plugin");
 
   std::vector<CapturedFailure> failures;
   bool forwarded = false;
+  bool fail_downstream = false;
   auto sink = ava::app::make_plugin_event_observer_sink(
       ava::app::PluginEventObserverOptions{
           .workspace_dir = workspace,
@@ -1648,8 +1649,10 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
           .provider_id = "openai",
           .model_id = "gpt-test",
           .current_dir = workspace},
-      [&forwarded](ava::app::runtime::Event const&) -> ava::core::VoidResult {
+      [&forwarded, &fail_downstream](ava::app::runtime::Event const&) -> ava::core::VoidResult {
         forwarded = true;
+        if (fail_downstream)
+          return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "stable downstream event sink failure"));
         return {};
       });
 
@@ -1671,6 +1674,13 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
     expect(failures[0].message.find("plugin event response is malformed") != std::string::npos, "hook failure sink receives error message");
     expect(failures[0].details.find("response_bytes") != std::string::npos, "hook failure sink receives bounded formatted error metadata");
   }
+
+  fail_downstream = true;
+  forwarded = false;
+  auto downstream_failure = sink(event);
+  expect(!downstream_failure && forwarded && downstream_failure.error().category() == ava::core::ErrorCategory::Io &&
+             downstream_failure.error().message() == "stable downstream event sink failure",
+         "plugin event observer remains best-effort for hook failures but propagates the downstream sink failure exactly");
 }
 
 void test_plugin_tool_dispatcher()

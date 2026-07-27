@@ -995,15 +995,20 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .stream = runtime_options.stream,
       .model_supports_tools = session.model().supports_tools.value_or(true),
       .model_supports_streaming = session.model().supports_streaming.value_or(true),
-      .include_project_resources = !runtime_options.isolate_ambient_extensions && project_resources_trusted(session.project_trust()),
-      .plugin_global_plugins_dir = runtime_options.isolate_ambient_extensions ? std::filesystem::path{} : session.paths().ava_config_dir / "plugins",
-      .plugin_project_plugins_dir = !runtime_options.isolate_ambient_extensions && project_resources_trusted(session.project_trust())
-                                        ? session.workspace_dir() / ".ava" / "plugins"
-                                        : std::filesystem::path{},
-      .plugin_enablement_file = runtime_options.isolate_ambient_extensions ? std::filesystem::path{} : session.paths().ava_state_dir / "plugin-enablement.json",
-      .include_plugin_tools = !runtime_options.isolate_ambient_extensions,
-      .session_mcp_config = runtime_options.disable_session_mcp ? std::make_shared<ava::mcp::McpConfig const>() : session.mcp_config(),
-      .exact_builtin_tool_names = runtime_options.exact_builtin_tool_names,
+      .tool_resources =
+          ava::agent::ToolResourceOptions{
+              .include_project_resources = !runtime_options.isolate_ambient_extensions && project_resources_trusted(session.project_trust()),
+              .lsp_diagnostics_provider = configured_lsp_provider,
+              .plugin_global_plugins_dir = runtime_options.isolate_ambient_extensions ? std::filesystem::path{} : session.paths().ava_config_dir / "plugins",
+              .plugin_project_plugins_dir = !runtime_options.isolate_ambient_extensions && project_resources_trusted(session.project_trust())
+                                                ? session.workspace_dir() / ".ava" / "plugins"
+                                                : std::filesystem::path{},
+              .plugin_enablement_file =
+                  runtime_options.isolate_ambient_extensions ? std::filesystem::path{} : session.paths().ava_state_dir / "plugin-enablement.json",
+              .include_plugin_tools = !runtime_options.isolate_ambient_extensions,
+              .session_mcp_config = runtime_options.disable_session_mcp ? std::make_shared<ava::mcp::McpConfig const>() : session.mcp_config(),
+              .exact_builtin_tool_names = runtime_options.exact_builtin_tool_names,
+          },
       .require_descriptor_secure_workspace = runtime_options.require_descriptor_secure_workspace,
       .announce_execution_after_permission = runtime_options.announce_execution_after_permission,
       .redact_permission_audit_arguments = runtime_options.redact_permission_audit_arguments,
@@ -1120,7 +1125,6 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .cancel_requested = [&runtime_options,
                            &sink_error] { return sink_error.has_value() || (runtime_options.cancel_requested && runtime_options.cancel_requested()); },
       .take_steering_messages = runtime_options.take_steering_messages,
-      .lsp_diagnostics_provider = configured_lsp_provider,
       .compact_context = runtime_options.access_token.empty() ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
                                                               : [&](ava::session::SessionReadAuthority read_authority, std::string_view trigger,
                                                                     std::vector<std::string> const& replayed_user_messages) -> ava::core::Result<bool> {

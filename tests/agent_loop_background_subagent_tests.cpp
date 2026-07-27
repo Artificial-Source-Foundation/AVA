@@ -80,10 +80,13 @@ void test_agent_loop_background_task_starts_child_session()
       .model_id = "gpt-5.5",
       .system_prompt = "system prompt",
       .access_token = "token",
+      .tool_resources =
+          ava::agent::ToolResourceOptions{
+              .lsp_diagnostics_provider = std::make_shared<NoopDiagnosticsProvider>(),
+          },
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
       },
-      .lsp_diagnostics_provider = std::make_shared<NoopDiagnosticsProvider>(),
       .background_provider_factory = []() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
         std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
         return provider;

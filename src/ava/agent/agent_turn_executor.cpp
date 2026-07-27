@@ -42,6 +42,7 @@ AgentTurnExecutor::AgentTurnExecutor(AgentLoopOptions const& options, std::strin
 
 ava::core::VoidResult AgentTurnExecutor::initialize_tools()
 {
+  auto const& tool_resources = options_.tool_resources;
   tool_context_storage_.emplace(
       ava::tools::ToolContext{.workspace_dir = options_.workspace_dir,
                               .spill_dir = store_.session_path().parent_path() / "spill",
@@ -63,17 +64,17 @@ ava::core::VoidResult AgentTurnExecutor::initialize_tools()
                               .ava_authority_roots = options_.ava_authority_roots,
                               .exact_file_access = options_.exact_file_access,
                               .command_executor = options_.command_executor,
-                              .lsp_diagnostics_provider = options_.lsp_diagnostics_provider,
-                              .plugin_global_plugins_dir = options_.plugin_global_plugins_dir,
-                              .plugin_project_plugins_dir = options_.plugin_project_plugins_dir,
-                              .plugin_enablement_file = options_.plugin_enablement_file,
-                              .include_project_plugins = options_.include_project_resources,
-                              .include_plugin_tools = options_.include_plugin_tools,
-                              .include_project_mcp_config = options_.include_project_resources,
-                              .session_mcp_config = options_.session_mcp_config,
-                              .exact_builtin_tool_names = options_.exact_builtin_tool_names,
+                              .lsp_diagnostics_provider = tool_resources.lsp_diagnostics_provider,
+                              .plugin_global_plugins_dir = tool_resources.plugin_global_plugins_dir,
+                              .plugin_project_plugins_dir = tool_resources.plugin_project_plugins_dir,
+                              .plugin_enablement_file = tool_resources.plugin_enablement_file,
+                              .include_project_plugins = tool_resources.include_project_resources,
+                              .include_plugin_tools = tool_resources.include_plugin_tools,
+                              .include_project_mcp_config = tool_resources.include_project_resources,
+                              .session_mcp_config = tool_resources.session_mcp_config,
+                              .exact_builtin_tool_names = tool_resources.exact_builtin_tool_names,
                               .require_descriptor_secure_workspace = options_.require_descriptor_secure_workspace,
-                              .include_project_skills = options_.include_project_resources,
+                              .include_project_skills = tool_resources.include_project_resources,
                               .session_id = store_.session_id(),
                               .provider_id = options_.provider_id,
                               .model_id = options_.model_id,
@@ -103,7 +104,7 @@ ava::core::VoidResult AgentTurnExecutor::initialize_tools()
       options_.observation->account_external_failure();
     }
   }
-  if (options_.exact_builtin_tool_names || options_.require_descriptor_secure_workspace)
+  if (tool_resources.exact_builtin_tool_names || options_.require_descriptor_secure_workspace)
   {
     auto strict_dispatcher = ToolDispatcher::create_strict(tool_context, dispatch_services, options_.tool_visibility);
     if (!strict_dispatcher)

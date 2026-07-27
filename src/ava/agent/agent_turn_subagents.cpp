@@ -246,7 +246,7 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
     child_options.permission_resolver = interaction_gate->permission_resolver();
     child_options.question_resolver = interaction_gate->question_resolver();
     child_options.session_mutex = nullptr;
-    child_options.lsp_diagnostics_provider = nullptr;
+    child_options.tool_resources.lsp_diagnostics_provider = nullptr;
     struct CoordinatedTaskResultState
     {
       std::mutex mutex;

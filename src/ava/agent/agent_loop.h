@@ -8,13 +8,13 @@
 #include "ava/agent/run_phase.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/agent/subagent_coordinator.h"
+#include "ava/agent/tool_resources.h"
 #include "ava/agent/tool_visibility.h"
 #include "ava/config/model_config.h"
 #include "ava/session/attachments.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/provider.h"
-#include "ava/lsp/lsp_client.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/result.h"
 #include "ava/core/runtime_outcome.h"
@@ -27,10 +27,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-
-namespace ava::mcp {
-struct McpConfig;
-}
 
 namespace ava::tools {
 class ExactFileAccess;
@@ -125,13 +121,7 @@ struct AgentLoopOptions
   bool stream = true;
   bool model_supports_tools = true;
   bool model_supports_streaming = true;
-  bool include_project_resources = true;
-  std::filesystem::path plugin_global_plugins_dir = {};
-  std::filesystem::path plugin_project_plugins_dir = {};
-  std::filesystem::path plugin_enablement_file = {};
-  bool include_plugin_tools = true;
-  std::shared_ptr<ava::mcp::McpConfig const> session_mcp_config = nullptr;
-  std::optional<std::vector<std::string>> exact_builtin_tool_names = std::nullopt;
+  ToolResourceOptions tool_resources = {};
   bool require_descriptor_secure_workspace = false;
   bool announce_execution_after_permission = false;
   bool redact_permission_audit_arguments = false;
@@ -158,7 +148,6 @@ struct AgentLoopOptions
   QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
-  std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
   std::function<ava::core::Result<bool>(ava::session::SessionReadAuthority, std::string_view, std::vector<std::string> const& replayed_user_messages)>
       compact_context = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Provider>>()> background_provider_factory = nullptr;

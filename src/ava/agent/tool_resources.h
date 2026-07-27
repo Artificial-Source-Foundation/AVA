@@ -1,0 +1,38 @@
+#pragma once
+
+#include "ava/debug/print_members_on.h"
+
+#include <filesystem>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace ava::lsp {
+class DiagnosticsProvider;
+}  // namespace ava::lsp
+
+namespace ava::mcp {
+struct McpConfig;
+}  // namespace ava::mcp
+
+namespace ava::agent {
+
+// Agent-owned tool composition inputs. Runtime and loop construction assemble
+// this once; ToolContext mapping and child inheritance consume the nested
+// fields without re-deriving discovery policy.
+struct ToolResourceOptions
+{
+  bool include_project_resources = true;
+  std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
+  std::filesystem::path plugin_global_plugins_dir = {};
+  std::filesystem::path plugin_project_plugins_dir = {};
+  std::filesystem::path plugin_enablement_file = {};
+  bool include_plugin_tools = true;
+  std::shared_ptr<ava::mcp::McpConfig const> session_mcp_config = nullptr;
+  std::optional<std::vector<std::string>> exact_builtin_tool_names = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+}  // namespace ava::agent

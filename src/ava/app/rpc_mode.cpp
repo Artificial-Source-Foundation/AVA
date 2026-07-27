@@ -377,7 +377,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
   std::optional<std::jthread> prompt_worker;
 
   // At this point we are still single-threaded.
-  // Need a read-lock anyway to get some information from the passed Session.
+  // Still need to create a rat object, to access information from the passed unlocked_session.
   std::string injected_provider_id;
   {
     runtime::session_ts::rat session_r(unlocked_session);
@@ -466,8 +466,8 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
     }
 
     auto session_command = rpc::handle_session_rpc_command(rpc::RpcSessionCommandContext{
-        .command = *command, .session = *runtime::session_ts::wat(unlocked_session),            // FIXME: should not lock unlocked_session here.
-        .open_options = open_options, .output = output, .run_state = run_state, .session_mutex = session_mutex});
+        .command = *command, .unlocked_session = unlocked_session,
+        .open_options = open_options, .output = output, .run_state = run_state});
     if (!session_command)
       return std::unexpected(std::move(session_command.error()));
     if (*session_command)

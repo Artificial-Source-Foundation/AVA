@@ -639,23 +639,6 @@ ava::core::VoidResult replace_runtime_session(runtime::Session& destination, run
   return {};
 }
 
-ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(runtime::Session& session, ava::session::SessionMetadataUpdate update)
-{
-  auto read_authority = session.read_authority();
-  if (!read_authority)
-    return std::unexpected(std::move(read_authority.error()));
-  auto entries = read_authority->load();
-  if (!entries)
-    return std::unexpected(std::move(entries.error()));
-  auto entry = ava::session::make_session_metadata_entry(std::move(update), entries->empty() ? std::string{} : entries->back().id);
-  if (!entry)
-    return std::unexpected(std::move(entry.error()));
-  if (auto appended = session.append_owned(*entry); !appended)
-    return std::unexpected(std::move(appended.error()));
-  entries->push_back(std::move(*entry));
-  return ava::session::session_metadata_from_entries(*entries);
-}
-
 ava::core::VoidResult append_runtime_mode_change(runtime::Session& session, ava::agent::Mode mode)
 {
   return session.append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),

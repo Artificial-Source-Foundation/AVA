@@ -57,10 +57,6 @@ struct PreparedCompactionContext
 // retained parent capsule without changing its safe policy snapshot.
 [[nodiscard]] ava::core::VoidResult refresh_runtime_parent_configuration(runtime::Session const& session);
 
-// Append session metadata through the runtime owner's serialized route.
-[[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(runtime::Session& session,
-                                                                                                   ava::session::SessionMetadataUpdate update);
-
 // Append a mode change through the runtime owner's serialized route.
 [[nodiscard]] ava::core::VoidResult append_runtime_mode_change(runtime::Session& session, ava::agent::Mode mode);
 

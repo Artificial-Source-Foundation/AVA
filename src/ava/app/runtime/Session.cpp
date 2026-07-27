@@ -406,4 +406,21 @@ CommandRegistry Session::load_command_registry(CommandRegistryOptions options)
   return std::move(builder.registry);
 }
 
+ava::core::Result<ava::session::SessionMetadataView> Session::append_runtime_session_metadata(ava::session::SessionMetadataUpdate update)
+{
+  auto read_authority = this->read_authority();
+  if (!read_authority)
+    return std::unexpected(std::move(read_authority.error()));
+  auto entries = read_authority->load();
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  auto entry = ava::session::make_session_metadata_entry(std::move(update), entries->empty() ? std::string{} : entries->back().id);
+  if (!entry)
+    return std::unexpected(std::move(entry.error()));
+  if (auto appended = append_owned(*entry); !appended)
+    return std::unexpected(std::move(appended.error()));
+  entries->push_back(std::move(*entry));
+  return ava::session::session_metadata_from_entries(store.session_id(), *entries);
+}
+
 }  // namespace ava::app::runtime

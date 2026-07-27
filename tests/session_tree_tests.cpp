@@ -45,7 +45,7 @@ void test_session_tree_metadata_entries_validate_and_export()
 
   auto const validation = ava::session::validate_session_replay(entries);
   expect(validation.ok(), "session tree metadata and branch summary entries are replay-valid");
-  auto const metadata = ava::session::session_metadata_from_entries(entries);
+  auto const metadata = ava::session::session_metadata_from_entries({}, entries);
   expect(metadata && metadata->actor == "auditor" && metadata->archived && metadata->labels_updated == "2026-04-27T00:00:00Z",
          "session metadata read-back exposes persisted actor, archive state, and label update time");
 

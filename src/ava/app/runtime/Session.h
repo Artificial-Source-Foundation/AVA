@@ -307,6 +307,9 @@ class Session : protected Session_aggregate_base
             .anchor_set = anchor_set()};
   }
 
+  // Append session metadata through the runtime owner's serialized route.
+  [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);
+
   AVA_DEBUG_PRINT_MEMBERS_ON_BASE(Session_aggregate_base)
 };
 

@@ -119,7 +119,7 @@ ava::core::Result<CommandResult> run_sessions_rename_command(runtime::Session& s
   if (requested_session_id == session.store.session_id())
   {
     target_id = session.store.session_id();
-    metadata = append_runtime_session_metadata(session, std::move(update));
+    metadata = session.append_runtime_session_metadata(std::move(update));
   }
   else
   {
@@ -127,7 +127,7 @@ ava::core::Result<CommandResult> run_sessions_rename_command(runtime::Session& s
     if (!target)
       return std::unexpected(std::move(target.error()));
     target_id = target->store.session_id();
-    metadata = append_runtime_session_metadata(*target, std::move(update));
+    metadata = target->append_runtime_session_metadata(std::move(update));
   }
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
@@ -186,15 +186,16 @@ ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& s
   ava::session::SessionMetadataUpdate update;
   update.labels = next_labels;
   update.actor = "tui";
-  auto metadata = append_runtime_session_metadata(*target, std::move(update));
+  std::string const target_id = target->store.session_id();
+  auto metadata = target->append_runtime_session_metadata(std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
   result.session_tree_changed = true;
   if (metadata->labels.empty())
-    add_output(result, "session " + target->store.session_id() + " labels cleared");
+    add_output(result, "session " + target_id + " labels cleared");
   else
-    add_output(result, "session " + target->store.session_id() + " labels set: " + sanitize_inline_text(labels_text(metadata->labels)));
+    add_output(result, "session " + target_id + " labels set: " + sanitize_inline_text(labels_text(metadata->labels)));
   return result;
 }
 
@@ -244,7 +245,7 @@ ava::core::Result<CommandResult> run_sessions_archive_command(runtime::Session& 
   ava::session::SessionMetadataUpdate update;
   update.archived = archived;
   update.actor = "tui";
-  auto metadata = append_runtime_session_metadata(*target, std::move(update));
+  auto metadata = target->append_runtime_session_metadata(std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 

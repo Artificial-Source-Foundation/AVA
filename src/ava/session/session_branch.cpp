@@ -322,7 +322,7 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
   auto source_entries = source->load_bounded(*source_lease, options.read_limits.value_or(legacy_unbounded_session_read_limits()));
   if (!source_entries)
     return std::unexpected(std::move(source_entries.error()));
-  auto source_metadata = session_metadata_from_entries(*source_entries);
+  auto source_metadata = session_metadata_from_entries({}, *source_entries);
   if (!source_metadata)
     return std::unexpected(std::move(source_metadata.error()));
 

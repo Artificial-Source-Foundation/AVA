@@ -454,7 +454,7 @@ AutomaticTitleAppendOutcome append_automatic_title(ava::session::SessionReadAuth
   auto entries = authority.load();
   if (!entries || !captured_commit_belongs_to_first_ordinary_turn(*entries, committed_turn_id))
     return AutomaticTitleAppendOutcome::Ineligible;
-  auto metadata = ava::session::session_metadata_from_entries(*entries);
+  auto metadata = ava::session::session_metadata_from_entries({}, *entries);
   if (!metadata || !metadata_predicate(*metadata))
     return AutomaticTitleAppendOutcome::Ineligible;
 
@@ -721,7 +721,7 @@ void SessionTitleCoordinator::process(Work work, std::stop_token stop_token) noe
       finish();
       return;
     }
-    auto metadata = ava::session::session_metadata_from_entries(*entries);
+    auto metadata = ava::session::session_metadata_from_entries({}, *entries);
     if (!metadata || !captured_commit_belongs_to_first_ordinary_turn(*entries, work.committed_turn_id) ||
         !metadata_allows_refinement(*metadata, work.fallback_title))
     {

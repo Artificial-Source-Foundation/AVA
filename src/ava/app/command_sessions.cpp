@@ -129,7 +129,7 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::Session& sessi
   if (!trimmed_name.empty())
   {
     auto metadata =
-        append_runtime_session_metadata(*opened, ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
+        opened->append_runtime_session_metadata(ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
   }
@@ -183,7 +183,7 @@ ava::core::Result<CommandResult> run_name_command(runtime::Session& session, std
   ava::session::SessionMetadataUpdate update;
   update.name = clear_name ? std::optional<std::string>(std::string{}) : std::optional<std::string>(trimmed_name);
   update.actor = "tui";
-  auto metadata = append_runtime_session_metadata(session, std::move(update));
+  auto metadata = session.append_runtime_session_metadata(std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
@@ -222,7 +222,7 @@ ava::core::Result<CommandResult> run_labels_command(runtime::Session& session, s
   ava::session::SessionMetadataUpdate update;
   update.labels = next_labels;
   update.actor = "tui";
-  auto metadata = append_runtime_session_metadata(session, std::move(update));
+  auto metadata = session.append_runtime_session_metadata(std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 

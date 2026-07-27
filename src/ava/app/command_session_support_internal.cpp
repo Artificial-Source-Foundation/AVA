@@ -42,7 +42,7 @@ ava::core::Result<ava::session::SessionMetadataView> load_runtime_metadata(runti
   auto entries = load_runtime_entries(session);
   if (!entries)
     return std::unexpected(std::move(entries.error()));
-  return ava::session::session_metadata_from_entries(*entries);
+  return ava::session::session_metadata_from_entries(session.store.session_id(), *entries);
 }
 
 std::string labels_text(std::vector<std::string> const& labels)

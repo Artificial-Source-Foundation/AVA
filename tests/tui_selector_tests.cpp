@@ -135,7 +135,8 @@ void run_tui_selector_tests()
                                                                                                  .path = "/tmp/ava/sessions/parent.jsonl",
                                                                                                  .last_updated = "2026-05-06T08:00:00Z",
                                                                                                  .entry_count = 6},
-                                                         .metadata = ava::session::SessionMetadataView{.name = "Parent session",
+                                                          .metadata = ava::session::SessionMetadataView{.session_id = "session_parent",
+                                                                                                        .name = "Parent session",
                                                                                                        .labels = {"root"},
                                                                                                        .labels_updated = "2026-05-06T08:05:00Z",
                                                                                                        .parent_session_id = {},
@@ -149,7 +150,8 @@ void run_tui_selector_tests()
                                                                                                  .path = "/tmp/ava/sessions/child.jsonl",
                                                                                                  .last_updated = "2026-05-06T10:00:00Z",
                                                                                                  .entry_count = 11},
-                                                         .metadata = ava::session::SessionMetadataView{.name = "Review branch",
+                                                          .metadata = ava::session::SessionMetadataView{.session_id = "session_child",
+                                                                                                        .name = "Review branch",
                                                                                                        .labels = {"review", "ui"},
                                                                                                        .labels_updated = "2026-05-06T10:05:00Z",
                                                                                                        .parent_session_id = "session_parent",
@@ -217,8 +219,8 @@ void run_tui_selector_tests()
           ava::session::SessionSummary{
               .session_id = "session_unnamed", .path = "/tmp/ava/sessions/unnamed.jsonl", .last_updated = "2026-05-06T11:00:00Z", .entry_count = 2},
       .metadata =
-          ava::session::SessionMetadataView{
-              .name = {}, .labels = {}, .parent_session_id = {}, .source_session_id = {}, .branch_from_entry_id = {}, .branch_origin = "root", .actor = "test"},
+           ava::session::SessionMetadataView{
+               .session_id = "session_unnamed", .name = {}, .labels = {}, .parent_session_id = {}, .source_session_id = {}, .branch_from_entry_id = {}, .branch_origin = "root", .actor = "test"},
       .children = {},
       .current = false});
   auto named_only_sessions = ava::app::session_selector_view(tree_with_unnamed, ava::app::SessionSelectorSort::Name, "Ctrl+N show all", true);
@@ -246,7 +248,8 @@ void run_tui_selector_tests()
       .summary =
           ava::session::SessionSummary{
               .session_id = "session_archived", .path = "/tmp/ava/sessions/archived.jsonl", .last_updated = "2026-05-06T12:00:00Z", .entry_count = 3},
-      .metadata = ava::session::SessionMetadataView{.name = "Archived branch",
+      .metadata = ava::session::SessionMetadataView{.session_id = "session_archived",
+                                                    .name = "Archived branch",
                                                     .labels = {"old"},
                                                     .archived = true,
                                                     .parent_session_id = {},

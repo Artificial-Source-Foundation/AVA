@@ -18,6 +18,9 @@ inline constexpr std::size_t kMaxSessionLabelBytes = 64;
 
 struct SessionMetadataView
 {
+  // The session ID that this view was built from, captured atomically with the
+  // metadata entries so callers never pair a stale ID with a fresh view.
+  std::string session_id;
   // `name` remains the latest manual value. Presence is tracked separately so
   // a historical name:"" durably suppresses generated titles.
   std::string name;
@@ -57,13 +60,13 @@ struct SessionMetadataUpdate
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-[[nodiscard]] ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::vector<SessionEntry> const& entries);
+[[nodiscard]] ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::string session_id, std::vector<SessionEntry> const& entries);
 [[nodiscard]] ava::core::Result<SessionMetadataView> load_session_metadata(SessionStore const& store);
 [[nodiscard]] ava::core::Result<SessionMetadataView> load_session_metadata(SessionStore const& store, SessionLease const& lease);
 [[nodiscard]] ava::core::Result<SessionEntry> make_session_metadata_entry(SessionMetadataUpdate update, std::string parent_entry_id = {});
 [[nodiscard]] ava::core::Result<SessionMetadataView> append_session_metadata(SessionStore& store, SessionLease const& lease, SessionMetadataUpdate update);
 [[nodiscard]] ava::core::Result<SessionMetadataView> append_session_metadata_ephemeral(SessionStore& store, SessionMetadataUpdate update);
 
-[[nodiscard]] std::string session_metadata_json(std::string_view session_id, SessionMetadataView const& metadata);
+[[nodiscard]] std::string session_metadata_json(SessionMetadataView const& metadata);
 
 }  // namespace ava::session

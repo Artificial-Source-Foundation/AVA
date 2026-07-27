@@ -1069,12 +1069,12 @@ ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_current_session_d
   auto entries = authority->load();
   if (!entries)
     return std::unexpected(std::move(entries.error()));
-  auto metadata = ava::session::session_metadata_from_entries(*entries);
+  auto metadata = ava::session::session_metadata_from_entries(session.store.session_id(), *entries);
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
-  ava::session::SessionSummary summary{.session_id = session.store.session_id(),
-                                       .path = session.store.session_path(),
+  ava::session::SessionSummary summary{.session_id = metadata->session_id,
+                                       .path = session.store.session_path(), //FIXME: race condition? Shouldn't this come from metadata too?
                                        .last_updated = entries->empty() ? std::string{} : entries->back().timestamp,
                                        .entry_count = entries->size(),
                                        .original_cwd = metadata->original_cwd,

@@ -226,12 +226,12 @@ void test_app_rpc_protocol_version_and_session_commands()
   expect(session.has_value(), "RPC protocol/session test opens runtime session");
   if (!session)
     return;
-  auto const initial_id = session->store.session_id();
 
   ava::session::SessionMetadataUpdate metadata_update;
   metadata_update.name = "Stats audit";
   metadata_update.actor = "test";
-  auto appended_metadata = ava::app::append_runtime_session_metadata(*session, std::move(metadata_update));
+  auto const initial_id = session->store.session_id();
+  auto appended_metadata = session->append_runtime_session_metadata(std::move(metadata_update));
 
   auto appended_user = session->append_owned(ava::session::SessionEntry{.id = "entry_user",
                                                                         .parent_id = "",

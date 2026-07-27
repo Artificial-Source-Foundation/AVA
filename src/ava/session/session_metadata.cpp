@@ -193,9 +193,10 @@ void append_bool_field(std::string& json, bool& first, std::string_view key, boo
 
 }  // namespace
 
-ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::vector<SessionEntry> const& entries)
+ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::string session_id, std::vector<SessionEntry> const& entries)
 {
   SessionMetadataView metadata;
+  metadata.session_id = std::move(session_id);
   for (auto const& entry : entries)
   {
     if (entry.type != EntryType::SessionMetadata)
@@ -266,20 +267,22 @@ ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::vector
   return metadata;
 }
 
+//FIXME: the Session that store belongs to must be locked.
 ava::core::Result<SessionMetadataView> load_session_metadata(SessionStore const& store)
 {
   auto entries = store.load();
   if (!entries)
     return std::unexpected(std::move(entries.error()));
-  return session_metadata_from_entries(*entries);
+  return session_metadata_from_entries(store.session_id(), *entries);
 }
 
+//FIXME: the Session that store belongs to must be locked.
 ava::core::Result<SessionMetadataView> load_session_metadata(SessionStore const& store, SessionLease const& lease)
 {
   auto entries = store.load(lease);
   if (!entries)
     return std::unexpected(std::move(entries.error()));
-  return session_metadata_from_entries(*entries);
+  return session_metadata_from_entries(store.session_id(), *entries);
 }
 
 ava::core::Result<SessionEntry> make_session_metadata_entry(SessionMetadataUpdate update, std::string parent_entry_id)
@@ -327,9 +330,10 @@ ava::core::Result<SessionEntry> make_session_metadata_entry(SessionMetadataUpdat
 
 namespace {
 
+// FIXME: the Session of session_id and entries must be locked.
 template <typename Append>
-ava::core::Result<SessionMetadataView> append_session_metadata_impl(ava::core::Result<std::vector<SessionEntry>> entries, SessionMetadataUpdate update,
-                                                                    Append&& append)
+ava::core::Result<SessionMetadataView> append_session_metadata_impl(std::string session_id, ava::core::Result<std::vector<SessionEntry>> entries,
+                                                                    SessionMetadataUpdate update, Append&& append)
 {
   if (!entries)
     return std::unexpected(std::move(entries.error()));
@@ -340,25 +344,28 @@ ava::core::Result<SessionMetadataView> append_session_metadata_impl(ava::core::R
   if (auto appended = append(*entry); !appended)
     return std::unexpected(std::move(appended.error()));
   entries->push_back(std::move(*entry));
-  return session_metadata_from_entries(*entries);
+  return session_metadata_from_entries(std::move(session_id), *entries);
 }
 
 }  // namespace
 
 ava::core::Result<SessionMetadataView> append_session_metadata(SessionStore& store, SessionLease const& lease, SessionMetadataUpdate update)
 {
-  return append_session_metadata_impl(store.load(lease), std::move(update), [&](SessionEntry const& entry) { return store.append(lease, entry); });
+  return append_session_metadata_impl(store.session_id(), store.load(lease), std::move(update),
+                                      [&](SessionEntry const& entry) { return store.append(lease, entry); });
 }
 
 ava::core::Result<SessionMetadataView> append_session_metadata_ephemeral(SessionStore& store, SessionMetadataUpdate update)
 {
-  return append_session_metadata_impl(store.load(), std::move(update), [&](SessionEntry const& entry) { return store.append_ephemeral(entry); });
+  return append_session_metadata_impl(store.session_id(), store.load(), std::move(update),
+                                      [&](SessionEntry const& entry) { return store.append_ephemeral(entry); });
 }
 
-std::string session_metadata_json(std::string_view session_id, SessionMetadataView const& metadata)
+// FIXME: this should become a member function of SessionMetadataView.
+std::string session_metadata_json(SessionMetadataView const& metadata)
 {
   std::string json = "{";
-  json += "\"session_id\":\"" + ava::core::json::escape(session_id) + "\"";
+  json += "\"session_id\":\"" + ava::core::json::escape(metadata.session_id) + "\"";
   json += ",\"name\":\"" + ava::core::json::escape(metadata.name) + "\"";
   json += ",\"has_manual_name\":" + std::string(metadata.has_manual_name ? "true" : "false");
   json += ",\"generated_title\":\"" + ava::core::json::escape(metadata.generated_title) + "\"";

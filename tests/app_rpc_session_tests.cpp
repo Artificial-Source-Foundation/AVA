@@ -363,8 +363,6 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   expect(parent.has_value() && child.has_value(), "RPC session_tree test opens parent and child sessions");
   if (!parent || !child)
     return;
-  auto const parent_id = parent->store.session_id();
-  auto const child_id = child->store.session_id();
   auto parent_entries = parent->store.load();
   expect(parent_entries && !parent_entries->empty(), "RPC session_tree test loads parent start entry");
   if (!parent_entries || parent_entries->empty())
@@ -375,7 +373,8 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   parent_metadata.labels = std::vector<std::string>{"root"};
   parent_metadata.branch_origin = "root";
   parent_metadata.actor = "test";
-  auto parent_meta = ava::app::append_runtime_session_metadata(*parent, std::move(parent_metadata));
+  auto const parent_id = parent->store.session_id();
+  auto parent_meta = parent->append_runtime_session_metadata(std::move(parent_metadata));
 
   ava::session::SessionMetadataUpdate child_metadata;
   child_metadata.name = "Child";
@@ -386,7 +385,8 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   child_metadata.branch_from_entry_id = parent_entries->front().id;
   child_metadata.branch_origin = "fork";
   child_metadata.actor = "test";
-  auto child_meta = ava::app::append_runtime_session_metadata(*child, std::move(child_metadata));
+  auto const child_id = child->store.session_id();
+  auto child_meta = child->append_runtime_session_metadata(std::move(child_metadata));
   expect(parent_meta && child_meta, "RPC session_tree test persists branch metadata");
   parent = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release parent runtime before RPC switch"));
 

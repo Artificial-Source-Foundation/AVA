@@ -268,7 +268,7 @@ void test_metadata_manual_precedence_and_summary_projection()
                                                    .type = ava::session::EntryType::SessionMetadata,
                                                    .timestamp = "3",
                                                    .data_json = R"({"schema_version":1,"generated_title":"Generated Later","actor":"auto-title"})"}};
-  auto metadata = ava::session::session_metadata_from_entries(entries);
+  auto metadata = ava::session::session_metadata_from_entries({}, entries);
   expect(
       metadata && metadata->has_manual_name && metadata->name.empty() && metadata->generated_title == "Generated Later" && metadata->effective_title().empty(),
       "an empty historical manual name permanently suppresses generated titles regardless of later record order");
@@ -341,7 +341,7 @@ void test_direct_provider_generation_is_isolated()
          "direct title provider makes one bounded tool-free request and persists only its sanitized title metadata");
   auto list_json = ava::app::rpc::list_sessions_result_json(*session);
   auto tree_json = ava::app::rpc::session_tree_result_json(*session);
-  auto metadata_json = metadata ? ava::session::session_metadata_json(session->store.session_id(), *metadata) : std::string{};
+  auto metadata_json = metadata ? ava::session::session_metadata_json(*metadata) : std::string{};
   expect(list_json && tree_json && list_json->find("\"title\":\"Direct Fake Provider Session Title\"") != std::string::npos &&
              tree_json->find("\"title\":\"Direct Fake Provider Session Title\"") != std::string::npos &&
              tree_json->find("\"name\":\"\"") != std::string::npos &&
@@ -373,8 +373,8 @@ void test_coordinator_dedupes_and_preserves_manual_rename_races()
   coordinator->schedule(*session, "First ordinary prompt", *seeded, options);
   coordinator->schedule(*session, "Second prompt must not replace first", *seeded, options);
   expect(state->wait_started(), "title race fake generator starts");
-  auto renamed = ava::app::append_runtime_session_metadata(
-      *session, ava::session::SessionMetadataUpdate{.name = "Manual Rename", .actor = "test", .generated_title = std::nullopt});
+  auto renamed = session->append_runtime_session_metadata(
+      ava::session::SessionMetadataUpdate{.name = "Manual Rename", .actor = "test", .generated_title = std::nullopt});
   expect(renamed.has_value(), renamed ? "manual rename wins title race" : renamed.error().format());
   state->allow_completion();
   expect(coordinator->wait_until_idle(3s), "title race coordinator becomes idle");
@@ -438,7 +438,7 @@ void test_session_specific_catalog_notifications_survive_navigation()
   if (!old_session || !new_session || !late_session || !coordinator)
     return;
 
-  auto named = ava::app::append_runtime_session_metadata(*new_session, {.name = "New Current Session", .actor = "test"});
+  auto named = new_session->append_runtime_session_metadata({.name = "New Current Session", .actor = "test"});
   auto committed = seed_committed_ordinary_turn(*old_session, "Fallback Old Session Catalog Title");
   auto late_committed = seed_committed_ordinary_turn(*late_session, "Late Session Notification Title");
   auto new_authority = new_session->append_target()->read_authority();
@@ -630,7 +630,7 @@ void test_fallback_append_failure_latches_without_retry()
   ava::app::runtime::RunOptions options;
   coordinator->schedule(*session, "Never retry a title metadata mutation", *committed, options);
   expect(coordinator->wait_until_idle(1s), "failed fallback leaves no provider refinement work queued");
-  auto later = ava::app::append_runtime_session_metadata(*session, {.name = "must remain latched", .actor = "test"});
+  auto later = session->append_runtime_session_metadata({.name = "must remain latched", .actor = "test"});
   auto metadata = ava::session::load_session_metadata(session->store, session->lease());
   expect(!later && metadata && metadata->effective_title().empty() && state->calls == 0 && write_calls->load() == 1,
          "title fallback uses the controller route, never retries a mutation error, and preserves its append-failure latch");
@@ -658,7 +658,7 @@ void test_runtime_trigger_is_after_completion_and_excludes_synthetic_turns()
     {
       auto authority = session->read_authority();
       auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(authority.error()));
-      auto metadata = entries ? ava::session::session_metadata_from_entries(*entries)
+      auto metadata = entries ? ava::session::session_metadata_from_entries(session->store.session_id(), *entries)
                               : ava::core::Result<ava::session::SessionMetadataView>(std::unexpected(entries.error()));
       title_absent_at_done = metadata && metadata->effective_title().empty();
     }
@@ -709,7 +709,7 @@ void test_existing_manual_child_generated_and_sessionless_exclusions()
   expect(manual.has_value(), "manual-title exclusion session opens");
   if (manual)
   {
-    auto named = ava::app::append_runtime_session_metadata(*manual, {.name = "Manual Session Title", .actor = "test"});
+    auto named = manual->append_runtime_session_metadata({.name = "Manual Session Title", .actor = "test"});
     expect(named.has_value(), "manual-title exclusion metadata appends");
     coordinator->schedule(*manual, "Prompt for a manually titled session", "missing_commit", options);
     expect(coordinator->wait_until_idle(3s), "manual-title exclusion check becomes idle");
@@ -719,7 +719,7 @@ void test_existing_manual_child_generated_and_sessionless_exclusions()
   expect(child.has_value(), "child exclusion session opens");
   if (child)
   {
-    auto marked = ava::app::append_runtime_session_metadata(*child, {.parent_session_id = "session_parent", .actor = "subagent"});
+    auto marked = child->append_runtime_session_metadata({.parent_session_id = "session_parent", .actor = "subagent"});
     expect(marked.has_value(), "child exclusion metadata appends");
     coordinator->schedule(*child, "Prompt for a child session", "missing_commit", options);
     expect(coordinator->wait_until_idle(3s), "child exclusion check becomes idle");
@@ -732,7 +732,7 @@ void test_existing_manual_child_generated_and_sessionless_exclusions()
     ava::session::SessionMetadataUpdate update;
     update.generated_title = "Existing Generated Session Title";
     update.actor = "auto-title";
-    auto titled = ava::app::append_runtime_session_metadata(*generated, std::move(update));
+    auto titled = generated->append_runtime_session_metadata(std::move(update));
     expect(titled.has_value(), "generated-title exclusion metadata appends");
     coordinator->schedule(*generated, "Prompt for an already titled session", "missing_commit", options);
     expect(coordinator->wait_until_idle(3s), "generated-title exclusion check becomes idle");

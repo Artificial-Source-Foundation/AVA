@@ -523,11 +523,26 @@ add_test(
           -DAVA_TEST_ROOT=${CMAKE_BINARY_DIR}/ctags-json-detection
           -P ${CMAKE_CURRENT_SOURCE_DIR}/ctags_json_detection_test.cmake)
 
+add_test(
+  NAME ava_build.generate_ctags_json_sources
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+          -DAVA_TEST_ROOT=${CMAKE_BINARY_DIR}/generate-ctags-json-sources
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/generate_ctags_json_sources_test.cmake)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
   message(FATAL_ERROR "AVA_ENABLE_ACPX_INTEROP requires Python 3 for the bounded launcher")
 endif()
 if(Python3_Interpreter_FOUND)
+  add_test(
+    NAME ava_build.generate_print_members_completion
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DAVA_TEST_ROOT=${CMAKE_BINARY_DIR}/generate-print-members-completion
+            -DPYTHON3_EXECUTABLE=${Python3_EXECUTABLE}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/generate_print_members_completion_test.cmake)
+
   add_test(
     NAME ava_tests.module_dependency_rules
     COMMAND ${Python3_EXECUTABLE}

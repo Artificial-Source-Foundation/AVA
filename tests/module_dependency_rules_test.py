@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check internal-module dependency direction and temporary exceptions.
 
-Only the eight production modules named by the policy are scanned. The policy
+Only the ten production modules named by the policy are scanned. The policy
 is intentionally an exact include inventory rather than a module-pair waiver.
 """
 
@@ -15,17 +15,19 @@ import sys
 import tempfile
 import unittest
 
-MODULES = ("config", "http", "provider", "session", "agent", "tools", "permissions", "app")
+MODULES = ("config", "http", "provider", "session", "agent", "tools", "permissions", "mcp", "plugin", "app")
 MODULE_SET = frozenset(MODULES)
 ALLOWED = {
     "app": MODULE_SET - {"app"},
-    "agent": frozenset({"config", "http", "provider", "session", "tools", "permissions"}),
+    "agent": frozenset({"config", "http", "provider", "session", "tools", "permissions", "mcp", "plugin"}),
     "provider": frozenset({"config", "http"}),
     "session": frozenset({"config"}),
     "tools": frozenset({"http", "permissions"}),
     "config": frozenset({"http"}),
     "http": frozenset(),
     "permissions": frozenset(),
+    "mcp": frozenset({"config", "tools", "permissions"}),
+    "plugin": frozenset({"config", "tools", "permissions"}),
 }
 SOURCE_SUFFIXES = frozenset({".h", ".hpp", ".cpp"})
 IGNORED_TREE_NAMES = frozenset({"build", "generated", "reference", "tests", "vendor"})
@@ -178,8 +180,26 @@ class ModuleDependencyRulesSelfTest(unittest.TestCase):
         self.assertEqual(self.run_check('#include "ava/http/transport.h"\n', [], module="config"), [])
         self.assertEqual(self.run_check('#include "ava/http/transport.h"\n', [], module="tools"), [])
 
+    def test_agent_may_depend_on_external_tool_brokers(self) -> None:
+        self.assertEqual(self.run_check('#include "ava/mcp/tool_broker.h"\n', [], module="agent"), [])
+        self.assertEqual(self.run_check('#include "ava/plugin/tool_broker.h"\n', [], module="agent"), [])
+
+    def test_external_tool_brokers_may_depend_only_on_lower_tool_layers(self) -> None:
+        for module in ("mcp", "plugin"):
+            for target in ("config", "tools", "permissions"):
+                with self.subTest(module=module, target=target):
+                    self.assertEqual(self.run_check(f'#include "ava/{target}/fixture.h"\n', [], module=module), [])
+
+    def test_external_tool_brokers_cannot_depend_on_agent(self) -> None:
+        for module in ("mcp", "plugin"):
+            with self.subTest(module=module):
+                self.assertEqual(
+                    self.run_check('#include "ava/agent/tool_registry.h"\n', [], module=module),
+                    [f"src/ava/{module}/fixture.cpp:1: implementation {module} -> agent (ava/agent/tool_registry.h)"],
+                )
+
     def test_http_cannot_depend_on_higher_layers(self) -> None:
-        for target in ("provider", "config", "tools", "agent", "app"):
+        for target in ("provider", "config", "tools", "agent", "mcp", "plugin", "app"):
             with self.subTest(target=target):
                 self.assertEqual(
                     self.run_check(f'#include "ava/{target}/fixture.h"\n', [], module="http"),

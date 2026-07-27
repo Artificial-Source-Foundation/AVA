@@ -27,6 +27,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 #include <signal.h>
 #include <sys/types.h>
@@ -36,6 +37,12 @@
 #endif
 
 namespace {
+
+using McpDescriptorExecutor = decltype(ava::mcp::McpBrokeredTool::executor);
+static_assert(
+    std::is_invocable_r_v<ava::tools::ToolDispatchResult, McpDescriptorExecutor, ava::tools::ToolContext const&, ava::tools::ProviderToolCall const&>);
+static_assert(
+    !std::is_invocable_v<McpDescriptorExecutor, ava::tools::ToolContext const&, ava::agent::ToolDispatchServices const&, ava::tools::ProviderToolCall const&>);
 
 void write_text(std::filesystem::path const& path, std::string const& text)
 {
@@ -1016,9 +1023,10 @@ void test_mcp_strict_session_registry_failures_and_nested_cwd()
       context_for_servers(std::vector<ava::mcp::McpServerConfig>{std::move(first_collision), std::move(second_collision)}));
   auto const collision_details = collision ? std::string{} : collision.error().format();
   expect(!collision && collision_details.find("duplicate model tool name") != std::string::npos &&
-             collision_details.find("mcp_demo_one_echo") != std::string::npos && collision_details.find("demo-one") != std::string::npos &&
-             collision_details.find("demo_one") != std::string::npos,
-         "strict session MCP registry rejects cross-server normalized model-name collisions: " + collision_details);
+             collision_details.find("tool: mcp_demo_one_echo") != std::string::npos && collision_details.find("mcp_server: demo_one") != std::string::npos &&
+             collision_details.find("mcp_name: echo") != std::string::npos && collision_details.find("existing_source: mcp") != std::string::npos &&
+             collision_details.find("existing_source_id: demo-one") != std::string::npos,
+         "strict session MCP registry preserves exact collision diagnostic fields: " + collision_details);
 
   first_collision = fake_server_config(root);
   first_collision.id = "demo-one";

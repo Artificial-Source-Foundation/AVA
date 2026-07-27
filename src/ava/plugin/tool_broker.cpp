@@ -334,21 +334,21 @@ std::string session_status_proxy_content_json(ava::tools::ToolContext const& con
          "\"}";
 }
 
-ava::agent::ToolDispatchResult safe_tool_failure_result(ava::agent::ProviderToolCall const& call, ava::diagnostics::SafeFailure const& failure, bool canceled)
+ava::tools::ToolDispatchResult safe_tool_failure_result(ava::tools::ProviderToolCall const& call, ava::diagnostics::SafeFailure const& failure, bool canceled)
 {
   auto const json = ava::diagnostics::serialize_safe_failure_json(failure);
   auto const message = ava::diagnostics::serialize_safe_failure_human(failure);
-  ava::agent::ToolResultPayload payload;
-  payload.status = canceled ? ava::agent::ToolResultStatus::Canceled : ava::agent::ToolResultStatus::Error;
+  ava::tools::ToolResultPayload payload;
+  payload.status = canceled ? ava::tools::ToolResultStatus::Canceled : ava::tools::ToolResultStatus::Error;
   payload.content = json;
   payload.content_type = "application/json";
   payload.error_category = std::string(ava::diagnostics::to_string(failure.category));
   payload.error_code = std::string(ava::diagnostics::to_string(failure.code));
   payload.error_message = message;
-  return ava::agent::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = json, .payload = std::move(payload)};
+  return ava::tools::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = json, .payload = std::move(payload)};
 }
 
-ava::agent::ToolDispatchResult tool_error_result(ava::agent::ProviderToolCall const& call, ava::core::Error const& error)
+ava::tools::ToolDispatchResult tool_error_result(ava::tools::ProviderToolCall const& call, ava::core::Error const& error)
 {
   bool const canceled = is_canceled_error(error);
   auto const failure = canceled ? ava::diagnostics::canceled_failure(ava::diagnostics::ComponentClass::Plugin)
@@ -356,12 +356,12 @@ ava::agent::ToolDispatchResult tool_error_result(ava::agent::ProviderToolCall co
   return safe_tool_failure_result(call, failure, canceled);
 }
 
-ava::agent::ToolDispatchResult remote_tool_error_result(ava::agent::ProviderToolCall const& call)
+ava::tools::ToolDispatchResult remote_tool_error_result(ava::tools::ProviderToolCall const& call)
 {
   return safe_tool_failure_result(call, ava::diagnostics::external_failure(ava::diagnostics::ComponentClass::Plugin), false);
 }
 
-std::string result_json(ava::agent::ProviderToolCall const& call, PluginToolBinding const& binding, PluginToolCallResult const& result)
+std::string result_json(ava::tools::ProviderToolCall const& call, PluginToolBinding const& binding, PluginToolCallResult const& result)
 {
   std::string text = "{\"tool\":\"" + ava::core::json::escape(call.name) + "\",\"ok\":true,\"plugin\":\"" + ava::core::json::escape(binding.manifest.id) +
                      "\",\"plugin_tool\":\"" + ava::core::json::escape(binding.contribution.name) + "\",\"content\":\"" +
@@ -372,10 +372,10 @@ std::string result_json(ava::agent::ProviderToolCall const& call, PluginToolBind
   return text;
 }
 
-ava::agent::ToolResultPayload result_payload(std::string const& text)
+ava::tools::ToolResultPayload result_payload(std::string const& text)
 {
-  ava::agent::ToolResultPayload payload;
-  payload.status = ava::agent::ToolResultStatus::Success;
+  ava::tools::ToolResultPayload payload;
+  payload.status = ava::tools::ToolResultStatus::Success;
   payload.content_type = "application/json";
   payload.content = text;
   return payload;
@@ -552,7 +552,7 @@ ava::core::Result<PluginProxyResponse> dispatch_session_status_proxy(ava::tools:
       .error_details = ""};
 }
 
-ava::agent::ToolDispatchResult dispatch_plugin_tool(ava::tools::ToolContext const& context, ava::agent::ProviderToolCall const& call,
+ava::tools::ToolDispatchResult dispatch_plugin_tool(ava::tools::ToolContext const& context, ava::tools::ProviderToolCall const& call,
                                                     PluginToolBinding const& binding)
 {
   if (is_canceled(context))
@@ -608,7 +608,7 @@ ava::agent::ToolDispatchResult dispatch_plugin_tool(ava::tools::ToolContext cons
   if (!result->ok)
     return remote_tool_error_result(call);
   auto text = result_json(call, binding, *result);
-  return ava::agent::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text, .payload = result_payload(text)};
+  return ava::tools::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text, .payload = result_payload(text)};
 }
 
 std::string schema_json(std::string_view model_tool_name, PluginToolContribution const& contribution)
@@ -618,18 +618,23 @@ std::string schema_json(std::string_view model_tool_name, PluginToolContribution
          "\",\"parameters\":" + contribution.input_schema_json + '}';
 }
 
-ava::agent::RegisteredToolMetadata metadata_for_tool(std::string model_tool_name, PluginToolContribution const& contribution)
+PluginBrokeredTool brokered_tool(std::shared_ptr<PluginToolBinding const> binding)
 {
-  auto const description = contribution.description.empty() ? std::string("Plugin tool ") + contribution.name : contribution.description;
-  auto const schema = schema_json(model_tool_name, contribution);
-  return ava::agent::RegisteredToolMetadata{.name = std::move(model_tool_name),
-                                            .description = description,
-                                            .schema_json = schema,
-                                            .permission_category = "plugin.tool.call",
-                                            .output_bound_summary = "Plugin tool output is bounded by JSONL record size",
-                                            .execution_mode = "plugin_process",
-                                            .event_rendering_hint = "plugin_tool",
-                                            .description_family = "plugin"};
+  auto const description =
+      binding->contribution.description.empty() ? std::string("Plugin tool ") + binding->contribution.name : binding->contribution.description;
+  return PluginBrokeredTool{.model_tool_name = binding->model_tool_name,
+                            .description = description,
+                            .schema_json = schema_json(binding->model_tool_name, binding->contribution),
+                            .permission_category = "plugin.tool.call",
+                            .output_bound_summary = "Plugin tool output is bounded by JSONL record size",
+                            .execution_mode = "plugin_process",
+                            .event_rendering_hint = "plugin_tool",
+                            .description_family = "plugin",
+                            .source_id = binding->manifest.id,
+                            .plugin_name = binding->contribution.name,
+                            .executor = [binding = std::move(binding)](ava::tools::ToolContext const& tool_context, ava::tools::ProviderToolCall const& call) {
+                              return dispatch_plugin_tool(tool_context, call, *binding);
+                            }};
 }
 
 PluginDiscoveryOptions discovery_options_for_context(ava::tools::ToolContext const& context)
@@ -720,10 +725,12 @@ PluginProxyHandler make_core_service_proxy_handler(ava::tools::ToolContext conte
   };
 }
 
-void register_enabled_plugin_tools(ava::agent::ToolRegistry& registry, ava::tools::ToolContext const& context)
+ava::core::VoidResult visit_enabled_plugin_tools(ava::tools::ToolContext const& context, PluginBrokeredToolVisitor const& visitor)
 {
-  if (context.workspace_dir.empty())
-    return;
+  // Exact composition has historically included only requested built-ins and
+  // immutable session MCP tools; plugin discovery remains a legacy extension.
+  if (context.exact_builtin_tool_names.has_value() || context.workspace_dir.empty())
+    return {};
 
   auto diagnostics = collect_plugin_diagnostics(discovery_options_for_context(context), enablement_file_for_context(context), context.workspace_dir);
   for (auto const& status : diagnostics.plugins)
@@ -733,23 +740,15 @@ void register_enabled_plugin_tools(ava::agent::ToolRegistry& registry, ava::tool
     auto const& manifest = status.plugin.manifest;
     for (auto const& contribution : manifest.contributes.tools)
     {
-      auto const model_tool_name = plugin_model_tool_name(manifest.id, contribution.name);
-      if (registry.find(model_tool_name) != nullptr)
-        continue;
-
-      auto binding =
-          std::make_shared<PluginToolBinding const>(PluginToolBinding{.manifest = manifest, .contribution = contribution, .model_tool_name = model_tool_name});
-      auto registered = registry.register_tool(ava::agent::RegisteredTool{
-          .metadata = metadata_for_tool(model_tool_name, contribution),
-          .executor = [binding](ava::tools::ToolContext const& tool_context, ava::agent::ToolDispatchServices const&,
-                                ava::agent::ProviderToolCall const& call) { return dispatch_plugin_tool(tool_context, call, *binding); },
-          .source = ava::agent::ToolSource::Plugin,
-          .source_id = manifest.id,
-          .brokered_external = true,
-          .requires_lsp_diagnostics = false});
-      (void)registered;
+      auto model_tool_name = plugin_model_tool_name(manifest.id, contribution.name);
+      auto binding = std::make_shared<PluginToolBinding const>(
+          PluginToolBinding{.manifest = manifest, .contribution = contribution, .model_tool_name = std::move(model_tool_name)});
+      auto descriptor = brokered_tool(std::move(binding));
+      if (auto visited = visitor(descriptor); !visited)
+        return std::unexpected(std::move(visited.error()));
     }
   }
+  return {};
 }
 
 }  // namespace ava::plugin

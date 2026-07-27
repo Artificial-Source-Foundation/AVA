@@ -31,6 +31,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <vector>
 #include <fcntl.h>
 #include <signal.h>
@@ -43,6 +44,12 @@
 #endif
 
 namespace {
+
+using PluginDescriptorExecutor = decltype(ava::plugin::PluginBrokeredTool::executor);
+static_assert(
+    std::is_invocable_r_v<ava::tools::ToolDispatchResult, PluginDescriptorExecutor, ava::tools::ToolContext const&, ava::tools::ProviderToolCall const&>);
+static_assert(!std::is_invocable_v<PluginDescriptorExecutor, ava::tools::ToolContext const&, ava::agent::ToolDispatchServices const&,
+                                   ava::tools::ProviderToolCall const&>);
 
 std::string valid_manifest_json(std::string id = "com.example.todo")
 {

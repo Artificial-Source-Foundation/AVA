@@ -1148,6 +1148,83 @@ ToolExecutor builtin_tool_executor(std::string_view name)
   return nullptr;
 }
 
+RegisteredTool plugin_registered_tool(ava::plugin::PluginBrokeredTool const& descriptor)
+{
+  auto executor = descriptor.executor;
+  return RegisteredTool{.metadata = RegisteredToolMetadata{.name = descriptor.model_tool_name,
+                                                           .description = descriptor.description,
+                                                           .schema_json = descriptor.schema_json,
+                                                           .permission_category = descriptor.permission_category,
+                                                           .output_bound_summary = descriptor.output_bound_summary,
+                                                           .execution_mode = descriptor.execution_mode,
+                                                           .event_rendering_hint = descriptor.event_rendering_hint,
+                                                           .description_family = descriptor.description_family},
+                        .executor = [executor = std::move(executor)](ava::tools::ToolContext const& tool_context, ToolDispatchServices const&,
+                                                                     ProviderToolCall const& call) { return executor(tool_context, call); },
+                        .source = ToolSource::Plugin,
+                        .source_id = descriptor.source_id,
+                        .brokered_external = true,
+                        .requires_lsp_diagnostics = false};
+}
+
+RegisteredTool mcp_registered_tool(ava::mcp::McpBrokeredTool const& descriptor)
+{
+  auto executor = descriptor.executor;
+  return RegisteredTool{.metadata = RegisteredToolMetadata{.name = descriptor.model_tool_name,
+                                                           .description = descriptor.description,
+                                                           .schema_json = descriptor.schema_json,
+                                                           .permission_category = descriptor.permission_category,
+                                                           .output_bound_summary = descriptor.output_bound_summary,
+                                                           .execution_mode = descriptor.execution_mode,
+                                                           .event_rendering_hint = descriptor.event_rendering_hint,
+                                                           .description_family = descriptor.description_family},
+                        .executor = [executor = std::move(executor)](ava::tools::ToolContext const& tool_context, ToolDispatchServices const&,
+                                                                     ProviderToolCall const& call) { return executor(tool_context, call); },
+                        .source = ToolSource::Mcp,
+                        .source_id = descriptor.source_id,
+                        .brokered_external = true,
+                        .requires_lsp_diagnostics = false};
+}
+
+ava::core::Error strict_mcp_model_name_collision(ava::mcp::McpBrokeredTool const& descriptor, RegisteredTool const& existing)
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "strict session MCP tools normalize to a duplicate model tool name");
+  error.with_context("tool", descriptor.model_tool_name);
+  error.with_context("mcp_server", descriptor.mcp_server);
+  error.with_context("mcp_name", descriptor.mcp_name);
+  error.with_context("existing_source", std::string(to_string(existing.source)));
+  error.with_context("existing_source_id", existing.source_id);
+  return error;
+}
+
+ava::core::VoidResult register_plugin_brokered_tools(ToolRegistry& registry, ava::tools::ToolContext const& context)
+{
+  return ava::plugin::visit_enabled_plugin_tools(context, [&registry](ava::plugin::PluginBrokeredTool const& descriptor) -> ava::core::VoidResult {
+    if (registry.find(descriptor.model_tool_name) != nullptr)
+      return {};
+    auto registered = registry.register_tool(plugin_registered_tool(descriptor));
+    (void)registered;
+    return {};
+  });
+}
+
+ava::core::VoidResult register_mcp_brokered_tools(ToolRegistry& registry, ava::tools::ToolContext const& context)
+{
+  bool const exact_composition = context.exact_builtin_tool_names.has_value();
+  return ava::mcp::visit_enabled_mcp_tools(context, [&registry, exact_composition](ava::mcp::McpBrokeredTool const& descriptor) -> ava::core::VoidResult {
+    if (auto const* existing = registry.find(descriptor.model_tool_name); existing != nullptr)
+    {
+      if (exact_composition)
+        return std::unexpected(strict_mcp_model_name_collision(descriptor, *existing));
+      return {};
+    }
+    auto registered = registry.register_tool(mcp_registered_tool(descriptor));
+    if (!registered && exact_composition)
+      return std::unexpected(std::move(registered.error()));
+    return {};
+  });
+}
+
 ava::core::Result<ToolRegistry> build_tool_registry_result(ava::tools::ToolContext const& context, ToolVisibilityOptions const& visibility = {})
 {
   ToolRegistry registry;
@@ -1168,7 +1245,9 @@ ava::core::Result<ToolRegistry> build_tool_registry_result(ava::tools::ToolConte
       if (auto registered = registry.register_tool(*entry); !registered)
         return std::unexpected(std::move(registered.error()));
     }
-    if (auto registered = ava::mcp::register_enabled_mcp_tools(registry, context); !registered)
+    if (auto registered = register_plugin_brokered_tools(registry, context); !registered)
+      return std::unexpected(std::move(registered.error()));
+    if (auto registered = register_mcp_brokered_tools(registry, context); !registered)
       return std::unexpected(std::move(registered.error()));
     return registry;
   }
@@ -1182,8 +1261,9 @@ ava::core::Result<ToolRegistry> build_tool_registry_result(ava::tools::ToolConte
       std::abort();
     }
   }
-  ava::plugin::register_enabled_plugin_tools(registry, context);
-  if (auto registered = ava::mcp::register_enabled_mcp_tools(registry, context); !registered)
+  if (auto registered = register_plugin_brokered_tools(registry, context); !registered)
+    return std::unexpected(std::move(registered.error()));
+  if (auto registered = register_mcp_brokered_tools(registry, context); !registered)
     return std::unexpected(std::move(registered.error()));
   registry.apply_visibility_filter(visibility);
   return registry;

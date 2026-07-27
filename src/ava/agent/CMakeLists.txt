@@ -24,6 +24,7 @@ add_library(ava_agent
   "tool_dispatch_lsp.cpp"
   "tool_dispatch_patch.cpp"
   "tool_dispatch_search.cpp"
+  "tool_dispatch_skill.cpp"
   "tool_dispatch_web.cpp"
   "tool_dispatcher.cpp"
   "tool_registry.cpp"

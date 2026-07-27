@@ -2,12 +2,18 @@
 #include "EventEnvelope.h"
 #include "events.h"
 #include "runtime/CancellationPayload.h"
+#include "runtime/CompactionPayload.h"
 #include "runtime/CompletionPayload.h"
 #include "runtime/ErrorPayload.h"
+#include "runtime/MessagePayload.h"
+#include "runtime/ProviderPayload.h"
+#include "runtime/ReasoningPayload.h"
 #include "runtime/RetryPayload.h"
+#include "runtime/SessionPayload.h"
 #include "runtime/ToolPayload.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/mode.h"
 
 #include <utility>
 
@@ -177,82 +183,32 @@ void append_payload_string_array_field(std::string& out, bool& has_field, std::s
   has_field = true;
 }
 
-std::string generic_payload_json_for_runtime_event(runtime::Event const& event)
-{
-  std::string out = "{";
-  bool has_field = false;
-  if (event.type == runtime::EventType::SessionStart)
-    append_payload_string_field(out, has_field, "mode", ava::agent::to_string(event.mode));
-  if (event.type == runtime::EventType::SessionStart || event.type == runtime::EventType::CompactionStart || event.type == runtime::EventType::CompactionEnd)
-  {
-    append_payload_string_field(out, has_field, "provider", event.provider_id);
-    append_payload_string_field(out, has_field, "model", event.model_id);
-  }
-  append_payload_string_field(out, has_field, "text", event.text);
-  append_payload_string_field(out, has_field, "call_id", event.call_id);
-  append_payload_string_field(out, has_field, "tool", event.tool_name);
-  append_payload_json_object_field(out, has_field, "args", event.tool_arguments_json);
-  append_payload_json_object_field(out, has_field, "result", event.tool_result_json);
-  append_payload_json_object_field(out, has_field, "structured_result", event.tool_structured_result_json);
-  append_payload_string_field(out, has_field, "status", event.status);
-  append_payload_string_field(out, has_field, "category", event.error_category);
-  append_payload_string_field(out, has_field, "error_code", event.error_code);
-  append_payload_string_field(out, has_field, "message", event.error_message);
-  append_payload_string_field(out, has_field, "details", event.error_details);
-  append_payload_string_field(out, has_field, "content_type", event.content_type);
-  append_payload_string_field(out, has_field, "stop_reason", event.stop_reason);
-  append_payload_string_field(out, has_field, "trigger", event.trigger);
-  append_payload_string_field(out, has_field, "reason", event.reason);
-  append_payload_string_field(out, has_field, "reasoning_format", event.reasoning_format);
-  append_payload_string_field(out, has_field, "diff", event.diff);
-  append_payload_string_array_field(out, has_field, "changed_paths", event.changed_paths);
-  append_payload_string_array_field(out, has_field, "permission_request_ids", event.permission_request_ids);
-  append_payload_string_field(out, has_field, "spill_path", event.spill_path);
-  append_payload_bool_field(out, has_field, "reasoning_redacted", event.reasoning_redacted);
-  append_payload_bool_field(out, has_field, "reasoning_signature_present", event.reasoning_signature_present);
-  append_payload_bool_field(out, has_field, "diff_truncated", event.diff_truncated);
-  append_payload_bool_field(out, has_field, "truncated", event.truncated);
-  append_payload_bool_field(out, has_field, "byte_limited", event.byte_limited);
-  append_payload_bool_field(out, has_field, "line_limited", event.line_limited);
-  append_payload_bool_field(out, has_field, "spill_truncated", event.spill_truncated);
-  append_payload_number_field(out, has_field, "provider_iterations", event.provider_iterations);
-  append_payload_number_field(out, has_field, "tool_calls", event.tool_calls);
-  append_payload_number_field(out, has_field, "attempt", event.attempt);
-  append_payload_number_field(out, has_field, "max_attempts", event.max_attempts);
-  append_payload_number_field(out, has_field, "delay_ms", event.delay_ms);
-  append_payload_number_field(out, has_field, "remaining_ms", event.remaining_ms);
-  append_payload_number_field(out, has_field, "estimated_tokens", event.estimated_tokens);
-  append_payload_number_field(out, has_field, "threshold_tokens", event.threshold_tokens);
-  append_payload_number_field(out, has_field, "retained_tokens", event.retained_tokens);
-  append_payload_number_field(out, has_field, "post_compaction_tokens", event.post_compaction_tokens);
-  append_payload_number_field(out, has_field, "summary_bytes", event.summary_bytes);
-  append_payload_number_field(out, has_field, "snapshot_entries", event.snapshot_entries);
-  append_payload_number_field(out, has_field, "current_entries", event.current_entries);
-  append_payload_number_field(out, has_field, "output_bytes", event.output_bytes);
-  append_payload_number_field(out, has_field, "total_bytes", event.total_bytes);
-  append_payload_number_field(out, has_field, "output_lines", event.output_lines);
-  append_payload_number_field(out, has_field, "total_lines", event.total_lines);
-  append_payload_number_field(out, has_field, "start_line", event.start_line);
-  append_payload_number_field(out, has_field, "end_line", event.end_line);
-  append_payload_number_field(out, has_field, "next_offset_line", event.next_offset_line);
-  append_payload_number_field(out, has_field, "omitted_bytes", event.omitted_bytes);
-  append_payload_number_field(out, has_field, "omitted_lines", event.omitted_lines);
-  append_payload_number_field(out, has_field, "visible_matches", event.visible_matches);
-  append_payload_number_field(out, has_field, "total_matches", event.total_matches);
-  out += '}';
-  return out;
-}
-
 std::string payload_json_for_runtime_event(runtime::Event const& event)
 {
   using runtime::EventType;
 
   switch (event.type)
   {
+    case runtime::EventType::SessionStart:
+      return serialize_payload_json(session_payload_from_event(event));
+    case runtime::EventType::UserMessage:
+    case runtime::EventType::AssistantMessage:
+    case runtime::EventType::MessageUpdate:
+    case runtime::EventType::MessageEnd:
+      return serialize_payload_json(message_payload_from_event(event));
+    case runtime::EventType::ReasoningStart:
+    case runtime::EventType::ReasoningDelta:
+    case runtime::EventType::ReasoningEnd:
+      return serialize_payload_json(reasoning_payload_from_event(event));
+    case runtime::EventType::ProviderEvent:
+      return serialize_payload_json(provider_payload_from_event(event));
     case runtime::EventType::ToolStart:
     case runtime::EventType::ToolProgress:
     case runtime::EventType::ToolResult:
       return serialize_payload_json(tool_payload_from_event(event));
+    case runtime::EventType::CompactionStart:
+    case runtime::EventType::CompactionEnd:
+      return serialize_payload_json(compaction_payload_from_event(event));
     case runtime::EventType::Retry:
     case runtime::EventType::RetryTick:
       return serialize_payload_json(retry_payload_from_event(event));
@@ -262,20 +218,8 @@ std::string payload_json_for_runtime_event(runtime::Event const& event)
       return serialize_payload_json(error_payload_from_event(event));
     case runtime::EventType::Done:
       return serialize_payload_json(completion_payload_from_event(event));
-    case runtime::EventType::SessionStart:
-    case runtime::EventType::UserMessage:
-    case runtime::EventType::AssistantMessage:
-    case runtime::EventType::MessageUpdate:
-    case runtime::EventType::MessageEnd:
-    case runtime::EventType::ReasoningStart:
-    case runtime::EventType::ReasoningDelta:
-    case runtime::EventType::ReasoningEnd:
-    case runtime::EventType::ProviderEvent:
-    case runtime::EventType::CompactionStart:
-    case runtime::EventType::CompactionEnd:
-      return generic_payload_json_for_runtime_event(event);
   }
-  return generic_payload_json_for_runtime_event(event);
+  return "{}";
 }
 
 void append_payload_aliases(std::string& out, std::string_view payload_json)
@@ -427,6 +371,43 @@ runtime::PayloadType payload_type_for_event(runtime::EventType type) noexcept
   return runtime::PayloadType::Error;
 }
 
+runtime::SessionPayload session_payload_from_event(runtime::Event const& event)
+{
+  return runtime::SessionPayload{.mode = event.mode, .provider = event.provider_id, .model = event.model_id};
+}
+
+runtime::MessagePayload message_payload_from_event(runtime::Event const& event)
+{
+  return runtime::MessagePayload{.text = event.text, .status = event.status, .error_message = event.error_message, .stop_reason = event.stop_reason};
+}
+
+runtime::ReasoningPayload reasoning_payload_from_event(runtime::Event const& event)
+{
+  return runtime::ReasoningPayload{.text = event.text,
+                                   .status = event.status,
+                                   .error_message = event.error_message,
+                                   .stop_reason = event.stop_reason,
+                                   .reasoning_format = event.reasoning_format,
+                                   .reasoning_redacted = event.reasoning_redacted,
+                                   .reasoning_signature_present = event.reasoning_signature_present};
+}
+
+runtime::ProviderPayload provider_payload_from_event(runtime::Event const& event)
+{
+  return runtime::ProviderPayload{.text = event.text,
+                                  .call_id = event.call_id,
+                                  .tool = event.tool_name,
+                                  .status = event.status,
+                                  .error_message = event.error_message,
+                                  .error_details = event.error_details,
+                                  .stop_reason = event.stop_reason,
+                                  .reason = event.reason,
+                                  .reasoning_format = event.reasoning_format,
+                                  .permission_request_ids = event.permission_request_ids,
+                                  .reasoning_redacted = event.reasoning_redacted,
+                                  .reasoning_signature_present = event.reasoning_signature_present};
+}
+
 runtime::ToolPayload tool_payload_from_event(runtime::Event const& event)
 {
   return runtime::ToolPayload{.text = event.text,
@@ -461,6 +442,22 @@ runtime::ToolPayload tool_payload_from_event(runtime::Event const& event)
                               .omitted_lines = event.omitted_lines,
                               .visible_matches = event.visible_matches,
                               .total_matches = event.total_matches};
+}
+
+runtime::CompactionPayload compaction_payload_from_event(runtime::Event const& event)
+{
+  return runtime::CompactionPayload{.provider = event.provider_id,
+                                    .model = event.model_id,
+                                    .status = event.status,
+                                    .trigger = event.trigger,
+                                    .reason = event.reason,
+                                    .attempt = event.attempt,
+                                    .max_attempts = event.max_attempts,
+                                    .estimated_tokens = event.estimated_tokens,
+                                    .threshold_tokens = event.threshold_tokens,
+                                    .retained_tokens = event.retained_tokens,
+                                    .post_compaction_tokens = event.post_compaction_tokens,
+                                    .summary_bytes = event.summary_bytes};
 }
 
 runtime::RetryPayload retry_payload_from_event(runtime::Event const& event)
@@ -513,6 +510,64 @@ runtime::CompletionPayload completion_payload_from_event(runtime::Event const& e
                                     .tool_calls = event.tool_calls};
 }
 
+std::string serialize_payload_json(runtime::SessionPayload const& payload)
+{
+  std::string out = "{";
+  bool has_field = false;
+  append_payload_string_field(out, has_field, "mode", ava::core::to_string(payload.mode));
+  append_payload_string_field(out, has_field, "provider", payload.provider);
+  append_payload_string_field(out, has_field, "model", payload.model);
+  out += '}';
+  return out;
+}
+
+std::string serialize_payload_json(runtime::MessagePayload const& payload)
+{
+  std::string out = "{";
+  bool has_field = false;
+  append_payload_string_field(out, has_field, "text", payload.text);
+  append_payload_string_field(out, has_field, "status", payload.status);
+  append_payload_string_field(out, has_field, "message", payload.error_message);
+  append_payload_string_field(out, has_field, "stop_reason", payload.stop_reason);
+  out += '}';
+  return out;
+}
+
+std::string serialize_payload_json(runtime::ReasoningPayload const& payload)
+{
+  std::string out = "{";
+  bool has_field = false;
+  append_payload_string_field(out, has_field, "text", payload.text);
+  append_payload_string_field(out, has_field, "status", payload.status);
+  append_payload_string_field(out, has_field, "message", payload.error_message);
+  append_payload_string_field(out, has_field, "stop_reason", payload.stop_reason);
+  append_payload_string_field(out, has_field, "reasoning_format", payload.reasoning_format);
+  append_payload_bool_field(out, has_field, "reasoning_redacted", payload.reasoning_redacted);
+  append_payload_bool_field(out, has_field, "reasoning_signature_present", payload.reasoning_signature_present);
+  out += '}';
+  return out;
+}
+
+std::string serialize_payload_json(runtime::ProviderPayload const& payload)
+{
+  std::string out = "{";
+  bool has_field = false;
+  append_payload_string_field(out, has_field, "text", payload.text);
+  append_payload_string_field(out, has_field, "call_id", payload.call_id);
+  append_payload_string_field(out, has_field, "tool", payload.tool);
+  append_payload_string_field(out, has_field, "status", payload.status);
+  append_payload_string_field(out, has_field, "message", payload.error_message);
+  append_payload_string_field(out, has_field, "details", payload.error_details);
+  append_payload_string_field(out, has_field, "stop_reason", payload.stop_reason);
+  append_payload_string_field(out, has_field, "reason", payload.reason);
+  append_payload_string_field(out, has_field, "reasoning_format", payload.reasoning_format);
+  append_payload_string_array_field(out, has_field, "permission_request_ids", payload.permission_request_ids);
+  append_payload_bool_field(out, has_field, "reasoning_redacted", payload.reasoning_redacted);
+  append_payload_bool_field(out, has_field, "reasoning_signature_present", payload.reasoning_signature_present);
+  out += '}';
+  return out;
+}
+
 std::string serialize_payload_json(runtime::ToolPayload const& payload)
 {
   std::string out = "{";
@@ -549,6 +604,26 @@ std::string serialize_payload_json(runtime::ToolPayload const& payload)
   append_payload_number_field(out, has_field, "omitted_lines", payload.omitted_lines);
   append_payload_number_field(out, has_field, "visible_matches", payload.visible_matches);
   append_payload_number_field(out, has_field, "total_matches", payload.total_matches);
+  out += '}';
+  return out;
+}
+
+std::string serialize_payload_json(runtime::CompactionPayload const& payload)
+{
+  std::string out = "{";
+  bool has_field = false;
+  append_payload_string_field(out, has_field, "provider", payload.provider);
+  append_payload_string_field(out, has_field, "model", payload.model);
+  append_payload_string_field(out, has_field, "status", payload.status);
+  append_payload_string_field(out, has_field, "trigger", payload.trigger);
+  append_payload_string_field(out, has_field, "reason", payload.reason);
+  append_payload_number_field(out, has_field, "attempt", payload.attempt);
+  append_payload_number_field(out, has_field, "max_attempts", payload.max_attempts);
+  append_payload_number_field(out, has_field, "estimated_tokens", payload.estimated_tokens);
+  append_payload_number_field(out, has_field, "threshold_tokens", payload.threshold_tokens);
+  append_payload_number_field(out, has_field, "retained_tokens", payload.retained_tokens);
+  append_payload_number_field(out, has_field, "post_compaction_tokens", payload.post_compaction_tokens);
+  append_payload_number_field(out, has_field, "summary_bytes", payload.summary_bytes);
   out += '}';
   return out;
 }

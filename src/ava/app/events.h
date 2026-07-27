@@ -14,7 +14,12 @@ namespace ava::app {
 struct EventEnvelope;
 
 namespace runtime {
+struct SessionPayload;
+struct MessagePayload;
+struct ReasoningPayload;
+struct ProviderPayload;
 struct ToolPayload;
+struct CompactionPayload;
 struct RetryPayload;
 struct CancellationPayload;
 struct ErrorPayload;
@@ -60,12 +65,22 @@ class EventBus
 [[nodiscard]] std::string to_string(runtime::EventType type);
 [[nodiscard]] std::string_view to_string(runtime::PayloadType type) noexcept;
 [[nodiscard]] runtime::PayloadType payload_type_for_event(runtime::EventType type) noexcept;
+[[nodiscard]] runtime::SessionPayload session_payload_from_event(runtime::Event const& event);
+[[nodiscard]] runtime::MessagePayload message_payload_from_event(runtime::Event const& event);
+[[nodiscard]] runtime::ReasoningPayload reasoning_payload_from_event(runtime::Event const& event);
+[[nodiscard]] runtime::ProviderPayload provider_payload_from_event(runtime::Event const& event);
 [[nodiscard]] runtime::ToolPayload tool_payload_from_event(runtime::Event const& event);
+[[nodiscard]] runtime::CompactionPayload compaction_payload_from_event(runtime::Event const& event);
 [[nodiscard]] runtime::RetryPayload retry_payload_from_event(runtime::Event const& event);
 [[nodiscard]] runtime::CancellationPayload cancellation_payload_from_event(runtime::Event const& event);
 [[nodiscard]] runtime::ErrorPayload error_payload_from_event(runtime::Event const& event);
 [[nodiscard]] runtime::CompletionPayload completion_payload_from_event(runtime::Event const& event);
+[[nodiscard]] std::string serialize_payload_json(runtime::SessionPayload const& payload);
+[[nodiscard]] std::string serialize_payload_json(runtime::MessagePayload const& payload);
+[[nodiscard]] std::string serialize_payload_json(runtime::ReasoningPayload const& payload);
+[[nodiscard]] std::string serialize_payload_json(runtime::ProviderPayload const& payload);
 [[nodiscard]] std::string serialize_payload_json(runtime::ToolPayload const& payload);
+[[nodiscard]] std::string serialize_payload_json(runtime::CompactionPayload const& payload);
 [[nodiscard]] std::string serialize_payload_json(runtime::RetryPayload const& payload);
 [[nodiscard]] std::string serialize_payload_json(runtime::CancellationPayload const& payload);
 [[nodiscard]] std::string serialize_payload_json(runtime::ErrorPayload const& payload);

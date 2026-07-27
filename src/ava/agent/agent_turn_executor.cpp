@@ -77,8 +77,8 @@ ava::core::VoidResult AgentTurnExecutor::initialize_tools()
                               .require_descriptor_secure_workspace = tool_execution.require_descriptor_secure_workspace,
                               .include_project_skills = tool_resources.include_project_resources,
                               .session_id = store_.session_id(),
-                              .provider_id = options_.provider_id,
-                              .model_id = options_.model_id,
+                              .provider_id = options_.model.provider_id,
+                              .model_id = options_.model.model_id,
                               .current_dir = options_.current_dir.empty() ? options_.workspace_dir : options_.current_dir});
   // Build agent-owned dispatch services only after subagents_ is finalized so
   // task/job/question collaborators see the exact runtime catalog.

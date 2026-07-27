@@ -194,7 +194,7 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
   // model ToolContext; duplicates remain bounded and harmless.
   append_authority_root(child_options.tool_execution.ava_authority_roots, child_store.session_path().parent_path());
   child_options.session_read_authority = std::move(*child_read_authority);
-  child_options.system_prompt = subagent_system_prompt(options_.system_prompt, request.subagent_system_prompt);
+  child_options.model.system_prompt = subagent_system_prompt(options_.model.system_prompt, request.subagent_system_prompt);
   child_options.tool_visibility = subagent_tool_visibility(options_.tool_visibility, request.tool_preset);
   child_options.max_tool_iterations = std::min<std::size_t>(child_options.max_tool_iterations, 6);
   // Child history is independent. Never inherit a parent append callback:
@@ -216,7 +216,7 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
   child_options.trace_context = {.run_id = {},
                                  .turn_id = {},
                                  .session_id = {},
-                                 .provider_id = options_.provider_id,
+                                 .provider_id = options_.model.provider_id,
                                  .parent_run_id = trace_context_.run_id,
                                  .parent_turn_id = trace_context_.turn_id,
                                  .parent_session_id = store_.session_id()};

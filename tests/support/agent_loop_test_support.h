@@ -1,6 +1,7 @@
 #pragma once
 #include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
+#include "ava/agent/model_invocation_options.h"
 #include "ava/provider/provider.h"
 
 #include <chrono>
@@ -24,6 +25,8 @@ class TraceCollector final : public ava::observability::RunObserver
 
 ava::http::HttpResponse sse_response(std::string const& body);
 std::string tool_call_sse(std::string_view id, std::string_view name, std::string_view arguments_json);
+ava::agent::ModelInvocationOptions model_invocation_options(std::string system_prompt = "system prompt", std::string provider_id = "openai",
+                                                            std::string model_id = "gpt-5.5");
 
 class SharedFakeTransport final : public ava::http::Transport
 {

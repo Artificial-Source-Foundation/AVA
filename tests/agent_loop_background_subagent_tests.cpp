@@ -76,9 +76,7 @@ void test_agent_loop_background_task_starts_child_session()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .tool_resources =
           ava::agent::ToolResourceOptions{
@@ -141,9 +139,7 @@ void test_agent_loop_background_task_starts_child_session()
     ava::agent::AgentLoop competing_loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
           return ava::permissions::PermissionResolution::Allow;
@@ -238,9 +234,7 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
@@ -338,9 +332,7 @@ void test_agent_loop_background_task_cancel_requests_child_cancellation()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
@@ -417,9 +409,7 @@ void test_agent_loop_background_task_requires_coordinator()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
@@ -477,9 +467,7 @@ void test_agent_loop_coordinator_start_failure_rolls_back_child()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;

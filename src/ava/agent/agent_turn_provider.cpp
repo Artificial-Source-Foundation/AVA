@@ -162,17 +162,17 @@ ava::core::Result<ProviderTurn> AgentTurnExecutor::request_provider_turn()
     auto messages = build_messages();
     if (!messages)
       return std::unexpected(messages.error());
-    auto const tool_schemas = options_.model_supports_tools ? dispatcher.registered_tool_schemas_json() : std::vector<std::string>{};
-    ava::provider::ProviderRequest provider_request{.provider_id = options_.provider_id,
-                                                    .model_id = options_.model_id,
-                                                    .system_prompt = options_.system_prompt,
+    auto const tool_schemas = options_.model.supports_tools ? dispatcher.registered_tool_schemas_json() : std::vector<std::string>{};
+    ava::provider::ProviderRequest provider_request{.provider_id = options_.model.provider_id,
+                                                    .model_id = options_.model.model_id,
+                                                    .system_prompt = options_.model.system_prompt,
                                                     .messages = messages->messages,
                                                     .tools_json = tool_schemas,
-                                                    .stream = options_.stream && options_.model_supports_streaming,
-                                                    .max_output_tokens = options_.model_max_output_tokens,
-                                                    .reasoning = options_.reasoning};
+                                                    .stream = options_.model.stream && options_.model.supports_streaming,
+                                                    .max_output_tokens = options_.model.max_output_tokens,
+                                                    .reasoning = options_.model.reasoning};
     bool const model_supports_images =
-        std::find(options_.model_input_modalities.begin(), options_.model_input_modalities.end(), "image") != options_.model_input_modalities.end();
+        std::find(options_.model.input_modalities.begin(), options_.model.input_modalities.end(), "image") != options_.model.input_modalities.end();
     if (auto valid_images = ava::provider::validate_image_content_parts(provider_request, model_supports_images); !valid_images)
     {
       static_cast<void>(session_.append_error(valid_images.error()));
@@ -253,7 +253,7 @@ ava::core::Result<ProviderTurn> AgentTurnExecutor::request_provider_turn()
 
     ++result_.provider_iterations;
     auto usage = turn->usage ? with_total_tokens(*turn->usage) : estimate_usage_from_turn(built_request->body, *turn);
-    auto const cost_usd = options_.model_pricing && !usage.estimated ? usage_cost_usd(*options_.model_pricing, usage) : std::optional<long double>{};
+    auto const cost_usd = options_.model.pricing && !usage.estimated ? usage_cost_usd(*options_.model.pricing, usage) : std::optional<long double>{};
     accumulate_usage(result_.usage, usage);
     if (cost_usd && accumulated_cost_known_)
     {

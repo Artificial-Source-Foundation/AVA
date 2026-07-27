@@ -121,7 +121,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     {
       trace_context = options_.trace_context;
       trace_context.session_id = trace_context.session_id.empty() ? store.session_id() : trace_context.session_id;
-      trace_context.provider_id = trace_context.provider_id.empty() ? options_.provider_id : trace_context.provider_id;
+      trace_context.provider_id = trace_context.provider_id.empty() ? options_.model.provider_id : trace_context.provider_id;
       // Empty/failed IDs are still isolated at RunObservation; do not let them
       // prevent the authoritative run.
       if (trace_context.run_id.empty())

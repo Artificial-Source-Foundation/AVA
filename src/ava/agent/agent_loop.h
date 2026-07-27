@@ -4,6 +4,7 @@
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
+#include "ava/agent/model_invocation_options.h"
 #include "ava/agent/question.h"
 #include "ava/agent/run_phase.h"
 #include "ava/agent/subagent_config.h"
@@ -102,9 +103,7 @@ struct AgentLoopOptions
   // at startup and shared across all turns and subagent loops.
   std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
   Mode mode = Mode::Build;
-  std::string provider_id = "openai";
-  std::string model_id = "gpt-5.5";
-  std::string system_prompt;
+  ModelInvocationOptions model = {};
   std::string access_token;
   std::string credential_type = "bearer";
   bool openai_oauth = false;
@@ -114,16 +113,10 @@ struct AgentLoopOptions
   std::size_t max_assistant_text_bytes = 256 * 1024;
   std::size_t max_tool_argument_bytes = 256 * 1024;
   std::size_t max_tool_result_context_bytes = 8 * 1024;
-  bool stream = true;
-  bool model_supports_tools = true;
-  bool model_supports_streaming = true;
   ToolResourceOptions tool_resources = {};
   ToolExecutionOptions tool_execution = {};
   std::vector<SubagentDefinition> subagents = {};
   ToolVisibilityOptions tool_visibility = {};
-  std::vector<std::string> model_input_modalities = {"text"};
-  std::optional<long long> model_max_output_tokens = std::nullopt;
-  std::optional<ava::provider::ProviderReasoningOptions> reasoning = std::nullopt;
   std::function<void(ToolTimelineEntry const&)> on_tool_event = nullptr;
   std::function<ava::core::VoidResult(ToolProgressEntry const&)> on_tool_progress = nullptr;
   std::function<ava::core::VoidResult(ava::provider::StreamEvent const&)> on_stream_event = nullptr;
@@ -160,7 +153,6 @@ struct AgentLoopOptions
   // Called at real loop boundaries; errors abort the loop rather than being
   // swallowed as observer-only state.
   std::function<ava::core::VoidResult(RunPhase)> on_phase = nullptr;
-  std::optional<ava::config::ModelPricing> model_pricing = std::nullopt;
   bool parallel_read_search_tools = false;
   std::size_t parallel_read_search_max_workers = 4;
   // Disabled by default. This is independent from runtime::Event/RPC output.
@@ -168,11 +160,6 @@ struct AgentLoopOptions
   // Runtime may pre-establish this so retries, compaction, and the agent share
   // one run/turn identity.
   ava::observability::TraceContext trace_context = {};
-  // Explicit source/request compatibility identity. Runtime construction sets
-  // both. A direct-loop request may use a family fallback for serialization,
-  // but only these explicit values are persisted as replay provenance.
-  std::string api_family = {};
-  std::string reasoning_format = {};
 
   // Includes provider credentials and callback/runtime ownership state; never
   // stream this aggregate through generated debug output.

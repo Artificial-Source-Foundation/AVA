@@ -985,16 +985,25 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .additional_writable_dirs = session.additional_writable_dirs(),
       .anchor_set = session.anchor_set(),
       .mode = session.mode(),
-      .provider_id = session.model().provider_id,
-      .model_id = session.model().model_id,
-      .system_prompt = runtime_options.isolate_ambient_extensions ? session.ambient_extension_free_system_prompt() : session.system_prompt(),
+      .model =
+          ava::agent::ModelInvocationOptions{
+              .provider_id = session.model().provider_id,
+              .model_id = session.model().model_id,
+              .system_prompt = runtime_options.isolate_ambient_extensions ? session.ambient_extension_free_system_prompt() : session.system_prompt(),
+              .stream = runtime_options.stream,
+              .supports_tools = session.model().supports_tools.value_or(true),
+              .supports_streaming = session.model().supports_streaming.value_or(true),
+              .input_modalities = session.model().input_modalities,
+              .max_output_tokens = session.model().max_output_tokens,
+              .reasoning = session.reasoning() ? std::optional(runtime::provider_reasoning_options(*session.reasoning())) : std::nullopt,
+              .pricing = session.model().pricing,
+              .api_family = session.model().api_family,
+              .reasoning_format = session.model().reasoning_format,
+          },
       .access_token = options.access_token,
       .credential_type = options.openai_oauth && options.credential_type == "bearer" ? "oauth" : options.credential_type,
       .openai_oauth = options.openai_oauth,
       .openai_account_id = options.openai_account_id,
-      .stream = runtime_options.stream,
-      .model_supports_tools = session.model().supports_tools.value_or(true),
-      .model_supports_streaming = session.model().supports_streaming.value_or(true),
       .tool_resources =
           ava::agent::ToolResourceOptions{
               .include_project_resources = !runtime_options.isolate_ambient_extensions && project_resources_trusted(session.project_trust()),
@@ -1021,9 +1030,6 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
           },
       .subagents = std::move(subagents),
       .tool_visibility = session.tool_visibility(),
-      .model_input_modalities = session.model().input_modalities,
-      .model_max_output_tokens = session.model().max_output_tokens,
-      .reasoning = session.reasoning() ? std::optional(runtime::provider_reasoning_options(*session.reasoning())) : std::nullopt,
       .on_tool_event =
           [&session, &options, &event_sink, &sink_error](ava::agent::ToolTimelineEntry const& entry) {
             if (sink_error)
@@ -1160,11 +1166,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
           return runtime_options.on_phase(phase);
         return {};
       },
-      .model_pricing = session.model().pricing,
       .observation = runtime_options.observation,
-      .trace_context = runtime_options.trace_context,
-      .api_family = session.model().api_family,
-      .reasoning_format = session.model().reasoning_format});
+      .trace_context = runtime_options.trace_context});
 
   auto result = loop.run_turn(*expanded_user_message, runtime_options.image_attachments, session.store, provider, *runtime_transport);
   if (sink_error)

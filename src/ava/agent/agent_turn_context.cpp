@@ -129,11 +129,12 @@ ava::core::Result<PersistedAssistantTurn> AgentTurnSession::append_assistant_tur
                                                                                   std::optional<long double> const& cost_usd)
 {
   return with_session_lock(options_, [&]() -> ava::core::Result<PersistedAssistantTurn> {
-    auto const source_api_family = options_.api_family.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.api_family};
+    auto const source_api_family =
+        options_.model.api_family.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.model.api_family};
     auto const source_reasoning_format =
-        options_.reasoning_format.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.reasoning_format};
-    return ava::agent::append_assistant_turn(options_.append_batch, turn, options_.provider_id, options_.model_id, usage, cost_usd, source_api_family,
-                                             source_reasoning_format);
+        options_.model.reasoning_format.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.model.reasoning_format};
+    return ava::agent::append_assistant_turn(options_.append_batch, turn, options_.model.provider_id, options_.model.model_id, usage, cost_usd,
+                                             source_api_family, source_reasoning_format);
   });
 }
 
@@ -197,15 +198,15 @@ ava::core::VoidResult AgentTurnExecutor::publish_phase(RunPhase phase) const
 
 MessageBuildOptions AgentTurnExecutor::message_build_options() const
 {
-  auto api_family = options_.api_family;
-  auto reasoning_format = options_.reasoning_format;
+  auto api_family = options_.model.api_family;
+  auto reasoning_format = options_.model.reasoning_format;
   if (api_family.empty())
   {
-    if (options_.provider_id == "openai")
+    if (options_.model.provider_id == "openai")
       api_family = "openai_responses";
-    else if (options_.provider_id == "anthropic")
+    else if (options_.model.provider_id == "anthropic")
       api_family = "anthropic_messages";
-    else if (options_.provider_id == "gemini")
+    else if (options_.model.provider_id == "gemini")
       api_family = "gemini_generate_content";
     else
       api_family = "openai_chat_completions";
@@ -221,13 +222,13 @@ MessageBuildOptions AgentTurnExecutor::message_build_options() const
   active_entry_ids.reserve(active_turn_user_messages_.size());
   for (auto const& message : active_turn_user_messages_) active_entry_ids.push_back(message.id);
   bool const supports_images =
-      std::find(options_.model_input_modalities.begin(), options_.model_input_modalities.end(), "image") != options_.model_input_modalities.end();
+      std::find(options_.model.input_modalities.begin(), options_.model.input_modalities.end(), "image") != options_.model.input_modalities.end();
   return MessageBuildOptions{.max_tool_result_context_bytes = options_.max_tool_result_context_bytes,
-                             .target = HistoryReplayTarget{.provider_id = options_.provider_id,
-                                                           .model_id = options_.model_id,
+                             .target = HistoryReplayTarget{.provider_id = options_.model.provider_id,
+                                                           .model_id = options_.model.model_id,
                                                            .api_family = std::move(api_family),
                                                            .reasoning_format = std::move(reasoning_format),
-                                                           .supports_tools = options_.model_supports_tools,
+                                                           .supports_tools = options_.model.supports_tools,
                                                            .supports_images = supports_images},
                              .active_turn_user_entry_ids = std::move(active_entry_ids)};
 }

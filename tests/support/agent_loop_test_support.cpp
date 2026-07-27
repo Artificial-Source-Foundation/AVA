@@ -27,6 +27,11 @@ std::string tool_call_sse(std::string_view id, std::string_view name, std::strin
          "\"}\n\n";
 }
 
+ava::agent::ModelInvocationOptions model_invocation_options(std::string system_prompt, std::string provider_id, std::string model_id)
+{
+  return ava::agent::ModelInvocationOptions{.provider_id = std::move(provider_id), .model_id = std::move(model_id), .system_prompt = std::move(system_prompt)};
+}
+
 SharedFakeTransport::SharedFakeTransport(std::shared_ptr<std::vector<ava::http::HttpResponse>> responses,
                                          std::shared_ptr<std::vector<ava::http::HttpRequest>> requests, std::shared_ptr<std::mutex> mutex)
     : responses_(std::move(responses)), requests_(std::move(requests)), mutex_(std::move(mutex))

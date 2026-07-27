@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "tests/support/agent_loop_test_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/http/transport.h"
@@ -883,9 +884,7 @@ void test_agent_fake_provider_boundaries()
       .status_code = 200, .headers = {}, .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: [DONE]\n\n"}});
   ava::agent::AgentLoopOptions options;
   options.workspace_dir = workspace;
-  options.provider_id = "openai";
-  options.model_id = "gpt-5.5";
-  options.system_prompt = "system";
+  options.model = agent_loop_test::model_invocation_options("system");
   options.access_token = "CANARY_TOKEN";
   options.append_entry = append_route_for_test(store);
   options.append_batch = append_batch_route_for_test(store);
@@ -936,9 +935,7 @@ void test_disabled_and_enabled_runs_preserve_authoritative_session_semantics()
                                                                          std::make_shared<ava::observability::CounterIdGenerator>());
     }
     ava::agent::AgentLoop loop({.workspace_dir = run_root / "workspace",
-                                .provider_id = "openai",
-                                .model_id = "gpt-5.5",
-                                .system_prompt = "system",
+                                .model = agent_loop_test::model_invocation_options("system"),
                                 .access_token = "CANARY_TOKEN",
                                 .append_entry = append_route_for_test(store),
                                 .append_batch = append_batch_route_for_test(store),
@@ -1224,9 +1221,7 @@ void test_agent_terminal_uses_returned_control_state_without_callback_repoll()
   ava::tests::FakeTransport transport({});
   unsigned cancellation_callback_calls = 0;
   ava::agent::AgentLoop loop({.workspace_dir = workspace,
-                              .provider_id = "openai",
-                              .model_id = "gpt-5.5",
-                              .system_prompt = "system",
+                              .model = agent_loop_test::model_invocation_options("system"),
                               .access_token = "CANARY",
                               .cancel_requested = [&cancellation_callback_calls]() -> bool {
                                 ++cancellation_callback_calls;
@@ -1271,9 +1266,7 @@ void test_agent_lifecycle_survives_observation_attachment_failure()
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200, .headers = {}, .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: [DONE]\n\n"}});
   ava::agent::AgentLoop loop({.workspace_dir = workspace,
-                              .provider_id = "openai",
-                              .model_id = "gpt-5.5",
-                              .system_prompt = "system",
+                              .model = agent_loop_test::model_invocation_options("system"),
                               .access_token = "CANARY",
                               .append_entry = append_route_for_test(store),
                               .append_batch = append_batch_route_for_test(store),
@@ -1320,9 +1313,7 @@ void test_session_results_and_agent_terminal_cleanup()
   auto append_route = append_route_for_test(store);
   auto append_batch = append_batch_route_for_test(store);
   ava::agent::AgentLoop failed_loop({.workspace_dir = workspace,
-                                     .provider_id = "openai",
-                                     .model_id = "gpt-5.5",
-                                     .system_prompt = "system",
+                                     .model = agent_loop_test::model_invocation_options("system"),
                                      .access_token = "CANARY",
                                      .append_entry = append_route,
                                      .append_batch = append_batch,
@@ -1332,9 +1323,7 @@ void test_session_results_and_agent_terminal_cleanup()
   expect(!failed, "fake provider failure reaches the agent terminal observer");
   ava::tests::FakeTransport canceled_transport({});
   ava::agent::AgentLoop canceled_loop({.workspace_dir = workspace,
-                                       .provider_id = "openai",
-                                       .model_id = "gpt-5.5",
-                                       .system_prompt = "system",
+                                       .model = agent_loop_test::model_invocation_options("system"),
                                        .access_token = "CANARY",
                                        .cancel_requested = [] { return true; },
                                        .append_entry = append_route,
@@ -1346,9 +1335,7 @@ void test_session_results_and_agent_terminal_cleanup()
   auto const events_after_observed_runs = collector->events.size();
   ava::agent::AgentLoop disabled_loop({
       .workspace_dir = workspace,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system",
+      .model = agent_loop_test::model_invocation_options("system"),
       .access_token = "CANARY",
       .cancel_requested = [] { return true; },
       .append_entry = append_route,
@@ -1591,9 +1578,7 @@ void test_provider_stream_event_outcomes_are_exhaustive()
   auto target = *append_target;
   ava::agent::AgentLoopOptions options;
   options.workspace_dir = root;
-  options.provider_id = "test";
-  options.model_id = "test";
-  options.stream = false;
+  options.model = ava::agent::ModelInvocationOptions{.provider_id = "test", .model_id = "test", .stream = false};
   options.observation = observation;
   options.append_entry = [target](ava::session::SessionEntry entry) { return target->append(std::move(entry)); };
   options.append_batch = [target](std::vector<ava::session::SessionEntry> entries) { return target->append_batch(std::move(entries)); };

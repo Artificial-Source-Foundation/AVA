@@ -68,8 +68,8 @@ ava::observability::TraceOutcome terminal_outcome(ava::core::Error const& error)
 
 AgentLoop::AgentLoop(AgentLoopOptions options) : options_(std::move(options))
 {
-  auto [roots, over_limit] = detail::bounded_deduplicated_authority_roots(std::move(options_.ava_authority_roots));
-  options_.ava_authority_roots = std::move(roots);
+  auto [roots, over_limit] = detail::bounded_deduplicated_authority_roots(std::move(options_.tool_execution.ava_authority_roots));
+  options_.tool_execution.ava_authority_roots = std::move(roots);
   ava_authority_roots_over_limit_ = over_limit;
 }
 

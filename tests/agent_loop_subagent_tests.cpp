@@ -628,7 +628,10 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
         .model_id = "gpt-5.5",
         .system_prompt = "system prompt",
         .access_token = "token",
-        .ava_authority_roots = {workspace},
+        .tool_execution =
+            ava::agent::ToolExecutionOptions{
+                .ava_authority_roots = {workspace},
+            },
         .permission_resolver = [&task_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
           ++task_prompts;
           return ava::permissions::PermissionResolution::Allow;

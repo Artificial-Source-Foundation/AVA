@@ -126,7 +126,10 @@ void test_agent_loop_model_command_rejects_authority_workspace_before_permission
       .model_id = "gpt-5.5",
       .system_prompt = "system prompt",
       .access_token = "token",
-      .ava_authority_roots = std::move(duplicate_roots),
+      .tool_execution =
+          ava::agent::ToolExecutionOptions{
+              .ava_authority_roots = std::move(duplicate_roots),
+          },
       .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++prompts;
         return ava::permissions::PermissionResolution::Allow;

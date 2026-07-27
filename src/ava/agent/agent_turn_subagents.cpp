@@ -192,7 +192,7 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
   // A child owns a distinct exact session namespace. Preserve the parent
   // roots and add the child directory before its AgentLoop constructs any
   // model ToolContext; duplicates remain bounded and harmless.
-  append_authority_root(child_options.ava_authority_roots, child_store.session_path().parent_path());
+  append_authority_root(child_options.tool_execution.ava_authority_roots, child_store.session_path().parent_path());
   child_options.session_read_authority = std::move(*child_read_authority);
   child_options.system_prompt = subagent_system_prompt(options_.system_prompt, request.subagent_system_prompt);
   child_options.tool_visibility = subagent_tool_visibility(options_.tool_visibility, request.tool_preset);

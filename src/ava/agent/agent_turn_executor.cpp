@@ -43,6 +43,7 @@ AgentTurnExecutor::AgentTurnExecutor(AgentLoopOptions const& options, std::strin
 ava::core::VoidResult AgentTurnExecutor::initialize_tools()
 {
   auto const& tool_resources = options_.tool_resources;
+  auto const& tool_execution = options_.tool_execution;
   tool_context_storage_.emplace(
       ava::tools::ToolContext{.workspace_dir = options_.workspace_dir,
                               .spill_dir = store_.session_path().parent_path() / "spill",
@@ -56,14 +57,14 @@ ava::core::VoidResult AgentTurnExecutor::initialize_tools()
                                 return publish_tool_progress(
                                     *options, ToolProgressEntry{.call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
                               },
-                              .announce_execution_after_permission = options_.announce_execution_after_permission,
+                              .announce_execution_after_permission = tool_execution.announce_execution_after_permission,
                               .cancel_requested = options_.cancel_requested,
-                              .redact_permission_audit_arguments = options_.redact_permission_audit_arguments,
-                              .require_explicit_file_permissions = options_.require_explicit_file_permissions,
+                              .redact_permission_audit_arguments = tool_execution.redact_permission_audit_arguments,
+                              .require_explicit_file_permissions = tool_execution.require_explicit_file_permissions,
                               .anchor_set = options_.anchor_set,
-                              .ava_authority_roots = options_.ava_authority_roots,
-                              .exact_file_access = options_.exact_file_access,
-                              .command_executor = options_.command_executor,
+                              .ava_authority_roots = tool_execution.ava_authority_roots,
+                              .exact_file_access = tool_execution.exact_file_access,
+                              .command_executor = tool_execution.command_executor,
                               .lsp_diagnostics_provider = tool_resources.lsp_diagnostics_provider,
                               .plugin_global_plugins_dir = tool_resources.plugin_global_plugins_dir,
                               .plugin_project_plugins_dir = tool_resources.plugin_project_plugins_dir,
@@ -73,7 +74,7 @@ ava::core::VoidResult AgentTurnExecutor::initialize_tools()
                               .include_project_mcp_config = tool_resources.include_project_resources,
                               .session_mcp_config = tool_resources.session_mcp_config,
                               .exact_builtin_tool_names = tool_resources.exact_builtin_tool_names,
-                              .require_descriptor_secure_workspace = options_.require_descriptor_secure_workspace,
+                              .require_descriptor_secure_workspace = tool_execution.require_descriptor_secure_workspace,
                               .include_project_skills = tool_resources.include_project_resources,
                               .session_id = store_.session_id(),
                               .provider_id = options_.provider_id,
@@ -104,7 +105,7 @@ ava::core::VoidResult AgentTurnExecutor::initialize_tools()
       options_.observation->account_external_failure();
     }
   }
-  if (tool_resources.exact_builtin_tool_names || options_.require_descriptor_secure_workspace)
+  if (tool_resources.exact_builtin_tool_names || tool_execution.require_descriptor_secure_workspace)
   {
     auto strict_dispatcher = ToolDispatcher::create_strict(tool_context, dispatch_services, options_.tool_visibility);
     if (!strict_dispatcher)

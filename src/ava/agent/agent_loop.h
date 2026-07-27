@@ -8,6 +8,7 @@
 #include "ava/agent/run_phase.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/agent/subagent_coordinator.h"
+#include "ava/agent/tool_execution_options.h"
 #include "ava/agent/tool_resources.h"
 #include "ava/agent/tool_visibility.h"
 #include "ava/config/model_config.h"
@@ -27,11 +28,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-
-namespace ava::tools {
-class ExactFileAccess;
-class CommandExecutor;
-} // namespace ava::tools
 
 namespace ava::agent {
 
@@ -122,15 +118,7 @@ struct AgentLoopOptions
   bool model_supports_tools = true;
   bool model_supports_streaming = true;
   ToolResourceOptions tool_resources = {};
-  bool require_descriptor_secure_workspace = false;
-  bool announce_execution_after_permission = false;
-  bool redact_permission_audit_arguments = false;
-  bool require_explicit_file_permissions = false;
-  // Runtime-owned AVA config/state/session directories that command sealing
-  // must keep disjoint from the model command workspace.
-  std::vector<std::filesystem::path> ava_authority_roots = {};
-  std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
-  std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
+  ToolExecutionOptions tool_execution = {};
   std::vector<SubagentDefinition> subagents = {};
   ToolVisibilityOptions tool_visibility = {};
   std::vector<std::string> model_input_modalities = {"text"};

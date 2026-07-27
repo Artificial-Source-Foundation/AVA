@@ -1,0 +1,109 @@
+{
+  "exceptions": [
+    {
+      "source": "src/ava/agent/subagent_config.cpp",
+      "include": "ava/app/runtime/command_names.h",
+      "kind": "implementation",
+      "reason": "Subagent configuration currently reads the application command-name catalog.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/agent/subagent_config.cpp",
+      "include": "ava/app/runtime/markdown_files.h",
+      "kind": "implementation",
+      "reason": "Subagent configuration currently reads application markdown-file discovery helpers.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/config/model_config.h",
+      "include": "ava/provider/provider.h",
+      "kind": "public",
+      "reason": "Model configuration exposes provider model metadata.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/config/openai_oauth.h",
+      "include": "ava/provider/provider.h",
+      "kind": "public",
+      "reason": "OAuth configuration exposes provider credential types.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/config/prompt_config.h",
+      "include": "ava/agent/mode.h",
+      "kind": "public",
+      "reason": "Prompt configuration exposes the selected agent mode.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/permissions/permission.h",
+      "include": "ava/agent/mode.h",
+      "kind": "public",
+      "reason": "Permission decisions expose the agent mode they apply to.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/session/session_store.h",
+      "include": "ava/agent/mode.h",
+      "kind": "public",
+      "reason": "Session store APIs expose the persisted agent mode.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/tools/file_tools.h",
+      "include": "ava/agent/mode.h",
+      "kind": "public",
+      "reason": "Tool definitions expose their agent-mode availability.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/tools/file_tools.h",
+      "include": "ava/agent/question.h",
+      "kind": "public",
+      "reason": "Tool definitions expose agent question handling types.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/tools/file_tools.h",
+      "include": "ava/agent/subagent_config.h",
+      "kind": "public",
+      "reason": "Tool definitions expose subagent configuration types.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/tools/file_tools.h",
+      "include": "ava/agent/tool_visibility.h",
+      "kind": "public",
+      "reason": "Tool definitions expose agent tool-visibility types.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/tools/webfetch_tool.cpp",
+      "include": "ava/provider/curl_transport.h",
+      "kind": "implementation",
+      "reason": "Web fetch currently constructs the provider curl transport.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/tools/webfetch_tool.h",
+      "include": "ava/provider/provider.h",
+      "kind": "public",
+      "reason": "Web fetch exposes provider transport types.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/tools/websearch_tool.cpp",
+      "include": "ava/provider/curl_transport.h",
+      "kind": "implementation",
+      "reason": "Web search currently constructs the provider curl transport.",
+      "tracking": "module-dependency-boundaries"
+    },
+    {
+      "source": "src/ava/tools/websearch_tool.h",
+      "include": "ava/provider/provider.h",
+      "kind": "public",
+      "reason": "Web search exposes provider transport types.",
+      "tracking": "module-dependency-boundaries"
+    }
+  ]
+}

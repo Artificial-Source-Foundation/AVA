@@ -252,8 +252,7 @@ ava::core::Result<ProviderTurn> AgentTurnExecutor::request_provider_turn()
 
     ++result_.provider_iterations;
     auto usage = turn->usage ? with_total_tokens(*turn->usage) : estimate_usage_from_turn(built_request->body, *turn);
-    auto const cost_usd =
-        options_.model_pricing && !usage.estimated ? ava::config::usage_cost_usd(*options_.model_pricing, usage) : std::optional<long double>{};
+    auto const cost_usd = options_.model_pricing && !usage.estimated ? usage_cost_usd(*options_.model_pricing, usage) : std::optional<long double>{};
     accumulate_usage(result_.usage, usage);
     if (cost_usd && accumulated_cost_known_)
     {

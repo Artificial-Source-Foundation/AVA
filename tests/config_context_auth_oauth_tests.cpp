@@ -10,6 +10,7 @@
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatcher.h"
+#include "ava/agent/usage_accounting.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/search_tools.h"
@@ -1015,7 +1016,6 @@ void test_openai_oauth_refresh()
 
   auto const root = create_empty_root("oauth-refresh");
 
-
   setenv("HOME", (root / "home").c_str(), 1);
   setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
   setenv("XDG_STATE_HOME", (root / "state").c_str(), 1);
@@ -1613,7 +1613,7 @@ void test_model_and_prompt_config()
                                           .estimated_output_bytes = std::nullopt,
                                           .estimated_total_bytes = std::nullopt,
                                           .estimated = false};
-    auto cost = selected.pricing ? ava::config::usage_cost_usd(*selected.pricing, usage) : std::nullopt;
+    auto cost = selected.pricing ? ava::agent::usage_cost_usd(*selected.pricing, usage) : std::nullopt;
     auto const cost_value = cost.value_or(0.0L);
     auto const custom_off = ava::config::resolve_reasoning_level(selected, "off");
     auto const custom_minimal = ava::config::resolve_reasoning_level(selected, "minimal");
@@ -1631,7 +1631,7 @@ void test_model_and_prompt_config()
                *custom_ultra.provider_level == "turbo" && custom_future.explicit_mapping && custom_future.supported && !custom_future.provider_level &&
                custom_typo.explicit_mapping && !custom_typo.supported,
            "model registry parses local capability, reasoning-level policy, and pricing metadata and calculates cost");
-    expect(!ava::config::usage_cost_usd(ava::config::ModelPricing{}, usage), "usage cost remains unknown when pricing rates are absent");
+    expect(!ava::agent::usage_cost_usd(ava::config::ModelPricing{}, usage), "usage cost remains unknown when pricing rates are absent");
     auto const maximum_price = std::numeric_limits<long double>::max();
     ava::config::ModelPricing const maximum_pricing{.input_per_million = maximum_price,
                                                     .output_per_million = maximum_price,
@@ -1648,7 +1648,7 @@ void test_model_and_prompt_config()
                                                   .estimated_output_bytes = std::nullopt,
                                                   .estimated_total_bytes = std::nullopt,
                                                   .estimated = false};
-    auto const maximum_cost = ava::config::usage_cost_usd(maximum_pricing, maximum_usage);
+    auto const maximum_cost = ava::agent::usage_cost_usd(maximum_pricing, maximum_usage);
     expect(maximum_cost && *maximum_cost == maximum_price, "usage cost calculation saturates overflowing token-price components and totals");
     ava::provider::TokenUsage const cached_usage{.input_tokens = 1000,
                                                  .output_tokens = 0,
@@ -1660,7 +1660,7 @@ void test_model_and_prompt_config()
                                                  .estimated_output_bytes = std::nullopt,
                                                  .estimated_total_bytes = std::nullopt,
                                                  .estimated = false};
-    expect(!ava::config::usage_cost_usd(*selected.pricing, cached_usage), "usage cost remains unknown when present cache usage has no cache pricing");
+    expect(!ava::agent::usage_cost_usd(*selected.pricing, cached_usage), "usage cost remains unknown when present cache usage has no cache pricing");
   }
 
   {

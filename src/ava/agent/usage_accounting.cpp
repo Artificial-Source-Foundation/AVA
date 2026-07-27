@@ -1,6 +1,8 @@
 #include "sys.h"
 #include "ava/agent/usage_accounting.h"
 
+#include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -80,7 +82,90 @@ void add_optional_usage_field(std::optional<long long>& total, std::optional<lon
   *total = saturating_add(*total, *value);
 }
 
+long double millionths(long long tokens, long double price_per_million)
+{
+  auto const token_millions = static_cast<long double>(tokens) / 1'000'000.0L;
+  constexpr auto maximum = std::numeric_limits<long double>::max();
+  if (token_millions > 0.0L && price_per_million > maximum / token_millions)
+    return maximum;
+  auto const value = token_millions * price_per_million;
+  return std::isfinite(value) ? value : maximum;
+}
+
+void add_cost_component(long double& total, long double component) noexcept
+{
+  constexpr auto maximum = std::numeric_limits<long double>::max();
+  if (!std::isfinite(component) || !std::isfinite(total) || (component > 0.0L && total > maximum - component))
+    total = maximum;
+  else
+    total += component;
+}
+
 }  // namespace
+
+std::optional<long double> usage_cost_usd(ava::config::ModelPricing const& pricing, ava::provider::TokenUsage const& usage)
+{
+  if (usage.estimated)
+    return std::nullopt;
+
+  long long const input_tokens = usage.input_tokens.value_or(0);
+  long long const cache_read_tokens = usage.cache_read_tokens.value_or(0);
+  long long const cache_write_tokens = usage.cache_write_tokens.value_or(0);
+  if (cache_read_tokens > 0 && !pricing.cache_read_per_million)
+    return std::nullopt;
+  if (cache_write_tokens > 0 && !pricing.cache_write_per_million)
+    return std::nullopt;
+  long long regular_input_tokens = input_tokens;
+  if (pricing.cache_read_per_million)
+    regular_input_tokens -= std::min(regular_input_tokens, cache_read_tokens);
+  if (pricing.cache_write_per_million)
+    regular_input_tokens -= std::min(regular_input_tokens, cache_write_tokens);
+
+  auto output_tokens = usage.output_tokens.or_else([&usage, input_tokens]() -> std::optional<long long> {
+    if (!usage.total_tokens || *usage.total_tokens < input_tokens)
+      return std::nullopt;
+    return *usage.total_tokens - input_tokens;
+  });
+  long long const reasoning_tokens = usage.reasoning_tokens.value_or(0);
+  long long regular_output_tokens = output_tokens.value_or(0);
+  if (pricing.reasoning_per_million)
+    regular_output_tokens -= std::min(regular_output_tokens, reasoning_tokens);
+
+  if (regular_input_tokens > 0 && !pricing.input_per_million)
+    return std::nullopt;
+  if (regular_output_tokens > 0 && !pricing.output_per_million)
+    return std::nullopt;
+
+  long double total = 0.0L;
+  bool has_billable_usage = false;
+  if (regular_input_tokens > 0)
+  {
+    add_cost_component(total, millionths(regular_input_tokens, *pricing.input_per_million));
+    has_billable_usage = true;
+  }
+  if (pricing.cache_read_per_million && cache_read_tokens > 0)
+  {
+    add_cost_component(total, millionths(cache_read_tokens, *pricing.cache_read_per_million));
+    has_billable_usage = true;
+  }
+  if (pricing.cache_write_per_million && cache_write_tokens > 0)
+  {
+    add_cost_component(total, millionths(cache_write_tokens, *pricing.cache_write_per_million));
+    has_billable_usage = true;
+  }
+  if (regular_output_tokens > 0)
+  {
+    add_cost_component(total, millionths(regular_output_tokens, *pricing.output_per_million));
+    has_billable_usage = true;
+  }
+  if (pricing.reasoning_per_million && reasoning_tokens > 0)
+  {
+    add_cost_component(total, millionths(reasoning_tokens, *pricing.reasoning_per_million));
+    has_billable_usage = true;
+  }
+
+  return has_billable_usage ? std::optional<long double>(total) : std::nullopt;
+}
 
 std::string usage_json(ava::provider::TokenUsage const& usage, std::optional<long double> const& cost_usd)
 {

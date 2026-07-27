@@ -2,7 +2,6 @@
 
 #include "ava/debug/print_members_on.h"
 #include "ava/config/xdg_paths.h"
-#include "ava/provider/provider.h"
 #include "ava/core/result.h"
 
 #include <optional>
@@ -85,6 +84,5 @@ struct ModelRegistry
 [[nodiscard]] std::optional<ModelReasoningLevelMapping> find_reasoning_level_mapping(ModelInfo const& model, std::string_view level);
 [[nodiscard]] ModelReasoningLevelResolution resolve_reasoning_level(ModelInfo const& model, std::string_view level);
 [[nodiscard]] std::vector<std::string> supported_reasoning_levels(ModelInfo const& model);
-[[nodiscard]] std::optional<long double> usage_cost_usd(ModelPricing const& pricing, ava::provider::TokenUsage const& usage);
 
 }  // namespace ava::config

@@ -1,13 +1,6 @@
 {
   "exceptions": [
     {
-      "source": "src/ava/config/model_config.h",
-      "include": "ava/provider/provider.h",
-      "kind": "public",
-      "reason": "Model configuration exposes provider model metadata.",
-      "tracking": "module-dependency-boundaries"
-    },
-    {
       "source": "src/ava/config/openai_oauth.h",
       "include": "ava/provider/provider.h",
       "kind": "public",

@@ -30,6 +30,7 @@ add_library(ava_agent
   "tool_dispatch_task.cpp"
   "tool_dispatch_web.cpp"
   "tool_dispatcher.cpp"
+  "tool_registration.cpp"
   "tool_registry.cpp"
   "tool_result.cpp"
   "tool_scheduler.cpp"

@@ -4,6 +4,8 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_tools.h"
 #include "ava/app/rpc/protocol.h"
+#include "ava/app/rpc/serialization.h"
+#include "ava/app/rpc/serialization_json.h"
 #include "ava/app/runtime/command_names.h"
 #include "ava/app/runtime/markdown_files.h"
 #include "ava/plugin/diagnostics.h"
@@ -428,55 +430,57 @@ ava::core::Result<ava::session::SessionMetadataView> Session::append_runtime_ses
 
 std::string Session::state_result_json(bool cancel_requested) const
 {
+  using namespace rpc;
+
   std::string json = "{";
   json += "\"protocol_version\":";
-  json += std::to_string(kRpcProtocolVersion);
+  json += std::to_string(rpc::kRpcProtocolVersion);
   json += ',';
-  json += string_field_json("session_id", session.store.session_id());
+  json += string_field_json("session_id", store.session_id());
   json += ',';
-  json += string_field_json("session_path", session.store.session_path().string());
+  json += string_field_json("session_path", store.session_path().string());
   json += ',';
-  json += string_field_json("mode", ava::agent::to_string(session.mode()));
+  json += string_field_json("mode", ava::agent::to_string(mode()));
   json += ',';
-  json += string_field_json("provider", session.model().provider_id);
+  json += string_field_json("provider", model().provider_id);
   json += ',';
-  json += string_field_json("model", session.model().model_id);
+  json += string_field_json("model", model().model_id);
   json += ',';
-  json += string_field_json("workspace_dir", session.workspace_dir().string());
+  json += string_field_json("workspace_dir", workspace_dir().string());
   json += ',';
-  json += string_field_json("current_dir", session.current_dir().string());
+  json += string_field_json("current_dir", current_dir().string());
   json += ',';
-  json += bool_field_json("created", session.created);
+  json += bool_field_json("created", created);
   json += ',';
-  json += bool_field_json("sessionless", session.sessionless());
+  json += bool_field_json("sessionless", sessionless());
   json += ',';
   json += bool_field_json("cancel_requested", cancel_requested);
   json += ',';
-  json += bool_field_json("reasoning_enabled", session.reasoning().has_value());
-  if (session.reasoning())
+  json += bool_field_json("reasoning_enabled", reasoning().has_value());
+  if (reasoning())
   {
     json += ',';
-    json += string_field_json("reasoning_level", session.reasoning()->level);
-    if (session.reasoning()->provider_level && *session.reasoning()->provider_level != session.reasoning()->level)
+    json += string_field_json("reasoning_level", reasoning()->level);
+    if (reasoning()->provider_level && *reasoning()->provider_level != reasoning()->level)
     {
       json += ',';
-      json += string_field_json("reasoning_provider_level", *session.reasoning()->provider_level);
+      json += string_field_json("reasoning_provider_level", *reasoning()->provider_level);
     }
-    if (session.reasoning()->budget_tokens)
+    if (reasoning()->budget_tokens)
     {
       json += ',';
-      json += integer_field_json("reasoning_budget_tokens", *session.reasoning()->budget_tokens);
+      json += integer_field_json("reasoning_budget_tokens", *reasoning()->budget_tokens);
     }
-    if (!session.reasoning()->display.empty())
+    if (!reasoning()->display.empty())
     {
       json += ',';
-      json += string_field_json("reasoning_display", session.reasoning()->display);
+      json += string_field_json("reasoning_display", reasoning()->display);
     }
   }
   json += ',';
-  json += number_field_json("context_source_count", session.context_sources().size());
+  json += number_field_json("context_source_count", context_sources().size());
   json += ",\"context_sources\":";
-  json += context_sources_json(session);
+  json += context_sources_json(*this);
   json += '}';
   return json;
 }

@@ -38,26 +38,6 @@ ava::core::Result<std::vector<ava::session::SessionEntry>> load_runtime_entries(
   return read_authority->load();
 }
 
-std::string context_sources_json(runtime::Session const& session)
-{
-  std::string json = "[";
-  for (std::size_t index = 0; index < session.context_sources().size(); ++index)
-  {
-    auto const& source = session.context_sources()[index];
-    if (index > 0)
-      json += ',';
-    json += '{';
-    json += string_field_json("path", source.path.string());
-    json += ',';
-    json += string_field_json("source_type", ava::context::to_string(source.source_type));
-    json += ',';
-    json += number_field_json("byte_count", source.byte_count);
-    json += '}';
-  }
-  json += ']';
-  return json;
-}
-
 std::string session_entry_json(ava::session::SessionEntry const& entry, bool include_ordered_output = true)
 {
   auto const data_json =
@@ -1065,6 +1045,26 @@ std::string prompt_result_json(std::string_view session_id, ava::agent::AgentLoo
     json += tool_timeline_json(result.tool_timeline);
   }
   json += '}';
+  return json;
+}
+
+std::string context_sources_json(runtime::Session const& session)
+{
+  std::string json = "[";
+  for (std::size_t index = 0; index < session.context_sources().size(); ++index)
+  {
+    auto const& source = session.context_sources()[index];
+    if (index > 0)
+      json += ',';
+    json += '{';
+    json += string_field_json("path", source.path.string());
+    json += ',';
+    json += string_field_json("source_type", ava::context::to_string(source.source_type));
+    json += ',';
+    json += number_field_json("byte_count", source.byte_count);
+    json += '}';
+  }
+  json += ']';
   return json;
 }
 

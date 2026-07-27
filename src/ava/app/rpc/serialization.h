@@ -39,5 +39,6 @@ namespace ava::app::rpc {
                                                         std::string_view active_request_id = {});
 [[nodiscard]] std::string queued_message_payload_json(std::string_view message, std::string_view reason = {});
 [[nodiscard]] std::string prompt_result_json(std::string_view session_id, ava::agent::AgentLoopResult const& result);
+[[nodiscard]] std::string context_sources_json(runtime::Session const& session);
 
 }  // namespace ava::app::rpc

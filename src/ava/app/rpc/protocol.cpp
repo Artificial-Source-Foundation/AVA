@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "protocol.h"
+#include "serialization_json.h"
 #include "ava/agent/job_control.h"
 #include "ava/session/session_store.h"
 #include "ava/core/json.h"
@@ -80,11 +81,6 @@ bool is_json_object_line(std::string_view line)
   if (in_string || depth != 0 || object_end == std::string_view::npos)
     return false;
   return core::trim(line.substr(object_end + 1)).empty();
-}
-
-std::string string_field_json(std::string_view key, std::string_view value)
-{
-  return "\"" + std::string(key) + "\":\"" + ava::core::json::escape(value) + "\"";
 }
 
 ava::core::Result<std::optional<long long>> exact_optional_integer_field(std::string_view object, std::string_view key)

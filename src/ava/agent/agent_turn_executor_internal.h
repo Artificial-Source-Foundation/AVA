@@ -146,7 +146,7 @@ class AgentTurnExecutor final
   [[nodiscard]] ava::core::VoidResult run_parallel_tool_epoch_and_commit(ParsedAssistantTurn const& turn, std::span<ToolScheduleSlot const> epoch,
                                                                          PendingCommittedToolResults& pending_results);
   [[nodiscard]] ava::core::VoidResult execute_tools(ParsedAssistantTurn const& turn, PendingCommittedToolResults& pending_results);
-  [[nodiscard]] ava::core::Result<ava::tools::TaskSubagentResult> run_task_subagent(ava::tools::TaskSubagentRequest const& request);
+  [[nodiscard]] ava::core::Result<TaskSubagentResult> run_task_subagent(TaskSubagentRequest const& request);
 
   AgentLoopOptions const& options_;
   std::string const& user_message_;

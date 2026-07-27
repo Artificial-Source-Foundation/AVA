@@ -124,7 +124,7 @@ std::pair<std::vector<std::filesystem::path>, bool> bounded_deduplicated_authori
   return {std::move(bounded), over_limit};
 }
 
-ava::core::Result<ava::tools::TaskSubagentResult> AgentTurnExecutor::run_task_subagent(ava::tools::TaskSubagentRequest const& request)
+ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskSubagentRequest const& request)
 {
   auto const session_root = store_.session_path().parent_path().parent_path();
   if (request.background && request.task_id)
@@ -347,16 +347,16 @@ ava::core::Result<ava::tools::TaskSubagentResult> AgentTurnExecutor::run_task_su
 
     if (request.background)
     {
-      return ava::tools::TaskSubagentResult{.task_id = task_id,
-                                            .job_id = job_id,
-                                            .session_path = session_path,
-                                            .subagent_type = request.subagent_type,
-                                            .state = job_state,
-                                            .final_text = "",
-                                            .stop_reason = "background",
-                                            .provider_iterations = 0,
-                                            .tool_calls = 0,
-                                            .tool_iterations = 0};
+      return TaskSubagentResult{.task_id = task_id,
+                                .job_id = job_id,
+                                .session_path = session_path,
+                                .subagent_type = request.subagent_type,
+                                .state = job_state,
+                                .final_text = "",
+                                .stop_reason = "background",
+                                .provider_iterations = 0,
+                                .tool_calls = 0,
+                                .tool_iterations = 0};
     }
 
     for (;;)
@@ -366,16 +366,16 @@ ava::core::Result<ava::tools::TaskSubagentResult> AgentTurnExecutor::run_task_su
         return std::unexpected(std::move(waited.error()));
       if (waited->job.was_promoted && !subagent_terminal(waited->job.execution))
       {
-        return ava::tools::TaskSubagentResult{.task_id = task_id,
-                                              .job_id = job_id,
-                                              .session_path = session_path,
-                                              .subagent_type = request.subagent_type,
-                                              .state = std::string(to_string(waited->job.execution)),
-                                              .final_text = "",
-                                              .stop_reason = "promoted",
-                                              .provider_iterations = 0,
-                                              .tool_calls = 0,
-                                              .tool_iterations = 0};
+        return TaskSubagentResult{.task_id = task_id,
+                                  .job_id = job_id,
+                                  .session_path = session_path,
+                                  .subagent_type = request.subagent_type,
+                                  .state = std::string(to_string(waited->job.execution)),
+                                  .final_text = "",
+                                  .stop_reason = "promoted",
+                                  .provider_iterations = 0,
+                                  .tool_calls = 0,
+                                  .tool_iterations = 0};
       }
       if (subagent_terminal(waited->job.execution))
       {
@@ -396,16 +396,16 @@ ava::core::Result<ava::tools::TaskSubagentResult> AgentTurnExecutor::run_task_su
         std::lock_guard result_lock(run_state->result_state->mutex);
         if (!run_state->result_state->terminal_result)
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "foreground subagent terminal result is unavailable"));
-        return ava::tools::TaskSubagentResult{.task_id = task_id,
-                                              .job_id = job_id,
-                                              .session_path = session_path,
-                                              .subagent_type = request.subagent_type,
-                                              .state = std::string(to_string(waited->job.execution)),
-                                              .final_text = run_state->result_state->terminal_result->final_text,
-                                              .stop_reason = std::string(ava::core::to_string(run_state->result_state->terminal_result->outcome)),
-                                              .provider_iterations = run_state->result_state->terminal_result->provider_iterations,
-                                              .tool_calls = run_state->result_state->terminal_result->tool_calls,
-                                              .tool_iterations = run_state->result_state->terminal_result->tool_iterations};
+        return TaskSubagentResult{.task_id = task_id,
+                                  .job_id = job_id,
+                                  .session_path = session_path,
+                                  .subagent_type = request.subagent_type,
+                                  .state = std::string(to_string(waited->job.execution)),
+                                  .final_text = run_state->result_state->terminal_result->final_text,
+                                  .stop_reason = std::string(ava::core::to_string(run_state->result_state->terminal_result->outcome)),
+                                  .provider_iterations = run_state->result_state->terminal_result->provider_iterations,
+                                  .tool_calls = run_state->result_state->terminal_result->tool_calls,
+                                  .tool_iterations = run_state->result_state->terminal_result->tool_iterations};
       }
       if (options_.cancel_requested && options_.cancel_requested())
         static_cast<void>(options_.subagent_coordinator->cancel(store_.session_id(), job_id));
@@ -431,15 +431,15 @@ ava::core::Result<ava::tools::TaskSubagentResult> AgentTurnExecutor::run_task_su
   auto child_result = child_loop.run_turn(request.prompt, child_store, provider_, transport_);
   if (!child_result)
     return std::unexpected(std::move(child_result.error()));
-  return ava::tools::TaskSubagentResult{.task_id = child_store.session_id(),
-                                        .job_id = "",
-                                        .session_path = child_store.session_path(),
-                                        .subagent_type = request.subagent_type,
-                                        .final_text = child_result->final_text,
-                                        .stop_reason = std::string(ava::core::to_string(child_result->outcome)),
-                                        .provider_iterations = child_result->provider_iterations,
-                                        .tool_calls = child_result->tool_calls,
-                                        .tool_iterations = child_result->tool_iterations};
+  return TaskSubagentResult{.task_id = child_store.session_id(),
+                            .job_id = "",
+                            .session_path = child_store.session_path(),
+                            .subagent_type = request.subagent_type,
+                            .final_text = child_result->final_text,
+                            .stop_reason = std::string(ava::core::to_string(child_result->outcome)),
+                            .provider_iterations = child_result->provider_iterations,
+                            .tool_calls = child_result->tool_calls,
+                            .tool_iterations = child_result->tool_iterations};
 }
 
 }  // namespace ava::agent::detail

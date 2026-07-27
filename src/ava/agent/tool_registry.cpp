@@ -23,11 +23,16 @@ std::optional<std::string> tool_name_from_schema(std::string_view schema_json)
 
 std::string_view native_tool_name_for_visibility(std::string_view name)
 {
-  if (name == "read") return "read_file";
-  if (name == "write") return "write_file";
-  if (name == "edit") return "edit_file";
-  if (name == "find") return "glob";
-  if (name == "ls") return "list_directory";
+  if (name == "read")
+    return "read_file";
+  if (name == "write")
+    return "write_file";
+  if (name == "edit")
+    return "edit_file";
+  if (name == "find")
+    return "glob";
+  if (name == "ls")
+    return "list_directory";
   return name;
 }
 
@@ -38,9 +43,7 @@ bool visibility_name_matches(std::string_view configured, std::string_view regis
 
 bool name_list_contains(std::vector<std::string> const& names, std::string_view name)
 {
-  return std::ranges::any_of(names, [name](std::string const& candidate) {
-    return visibility_name_matches(candidate, name);
-  });
+  return std::ranges::any_of(names, [name](std::string const& candidate) { return visibility_name_matches(candidate, name); });
 }
 
 bool tool_is_visible(ToolVisibilityOptions const& options, RegisteredTool const& tool)
@@ -145,11 +148,9 @@ ava::core::VoidResult ToolRegistry::register_tool(RegisteredTool tool)
   return {};
 }
 
-void ToolRegistry::apply_visibility_filter(ava::tools::ToolContext const& context)
+void ToolRegistry::apply_visibility_filter(ToolVisibilityOptions const& visibility)
 {
-  std::erase_if(tools_, [&context](RegisteredTool const& tool) {
-    return !tool_is_visible(context.tool_visibility, tool);
-  });
+  std::erase_if(tools_, [&visibility](RegisteredTool const& tool) { return !tool_is_visible(visibility, tool); });
 }
 
 RegisteredTool const* ToolRegistry::find(std::string_view name) const noexcept

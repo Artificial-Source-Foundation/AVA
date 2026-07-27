@@ -653,8 +653,7 @@ ava::tools::ToolContext prompt_file_reference_context(runtime::Session& session,
                                  .session_id = session.store.session_id(),
                                  .provider_id = session.model().provider_id,
                                  .model_id = session.model().model_id,
-                                 .current_dir = session.current_dir(),
-                                 .tool_visibility = session.tool_visibility()};
+                                 .current_dir = session.current_dir()};
 }
 
 ava::core::Result<std::string> expand_prompt_file_references(runtime::Session& session, std::string const& user_message, runtime::RunOptions const& options)

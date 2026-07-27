@@ -1,7 +1,9 @@
 #pragma once
 
+#include "ava/agent/tool_dispatch_services.h"
 #include "ava/agent/tool_metadata.h"
 #include "ava/agent/tool_types.h"
+#include "ava/agent/tool_visibility.h"
 #include "ava/tools/file_tools.h"
 #include "ava/core/result.h"
 
@@ -23,9 +25,12 @@ enum class ToolSource
 
 [[nodiscard]] std::string_view to_string(ToolSource source) noexcept;
 
-// Built-in handlers receive the full ToolContext. External plugin/MCP tools should register AVA-owned broker
-// executors here, not plugin code with direct access to internal safety escape hatches.
-using ToolExecutor = std::function<ToolDispatchResult(ava::tools::ToolContext const& context, ProviderToolCall const& call)>;
+// Built-in handlers receive ToolContext plus agent-owned dispatch services.
+// External plugin/MCP tools should register AVA-owned broker executors here that
+// accept and ignore services, never plugin code with direct access to internal
+// safety escape hatches or agent collaborators.
+using ToolExecutor =
+    std::function<ToolDispatchResult(ava::tools::ToolContext const& context, ToolDispatchServices const& services, ProviderToolCall const& call)>;
 
 struct RegisteredToolMetadata
 {
@@ -61,7 +66,7 @@ class ToolRegistry
 {
  public:
   [[nodiscard]] ava::core::VoidResult register_tool(RegisteredTool tool);
-  void apply_visibility_filter(ava::tools::ToolContext const& context);
+  void apply_visibility_filter(ToolVisibilityOptions const& visibility);
   [[nodiscard]] RegisteredTool const* find(std::string_view name) const noexcept;
   [[nodiscard]] std::span<RegisteredTool const> entries() const noexcept;
   [[nodiscard]] std::vector<ToolMetadata> metadata() const;

@@ -265,14 +265,14 @@ ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths con
   ava::app::runtime::InvocationInputs invocation_inputs = {
       .workspace_dir = workspace, .current_dir = workspace, .paths = paths, .sessionless = store ? store->is_ephemeral() : false};
   ava::app::runtime::SessionResources session_resources{
-    .lease = {}, .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr)};
+      .lease = {}, .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr)};
   return ava::app::runtime::Session_aggregate_base{.invocation_inputs_ = std::move(invocation_inputs),
-                                                    .resolved_prompt_state_ = {},
-                                                    .model_selection_ = {.model = std::move(model)},
-                                                    .trust_state_ = {.project_trust = std::move(trust)},
-                                                    .resources_ = std::move(session_resources),
-                                                    .store = std::move(*store),
-                                                    .created = false};
+                                                   .resolved_prompt_state_ = {},
+                                                   .model_selection_ = {.model = std::move(model)},
+                                                   .trust_state_ = {.project_trust = std::move(trust)},
+                                                   .resources_ = std::move(session_resources),
+                                                   .store = std::move(*store),
+                                                   .created = false};
 }
 
 std::string command_output_text(ava::core::Result<ava::app::CommandResult> const& command)
@@ -1719,9 +1719,8 @@ void test_plugin_tool_dispatcher()
     ava::test::expect_json_matches_golden(*plugin_schema, "plugin-tool-schema.json", "plugin tool provider schema matches AVA 0.80 golden fixture");
   }
   {
-    auto no_builtin_context = context;
-    no_builtin_context.tool_visibility.mode = ava::agent::ToolVisibilityMode::NoBuiltinTools;
-    auto const no_builtin_schemas = ava::agent::ToolDispatcher::tool_schemas_json(no_builtin_context);
+    ava::agent::ToolVisibilityOptions const no_builtin_visibility{.mode = ava::agent::ToolVisibilityMode::NoBuiltinTools};
+    auto const no_builtin_schemas = ava::agent::ToolDispatcher::tool_schemas_json(context, no_builtin_visibility);
     auto const visible_plugin_schema = std::find_if(no_builtin_schemas.begin(), no_builtin_schemas.end(), [&](std::string const& schema) {
       return schema.find("\"name\":\"" + model_tool_name + "\"") != std::string::npos;
     });

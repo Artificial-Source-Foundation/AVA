@@ -15,27 +15,6 @@
       "tracking": "module-dependency-boundaries"
     },
     {
-      "source": "src/ava/tools/file_tools.h",
-      "include": "ava/agent/question.h",
-      "kind": "public",
-      "reason": "Tool definitions expose agent question handling types.",
-      "tracking": "module-dependency-boundaries"
-    },
-    {
-      "source": "src/ava/tools/file_tools.h",
-      "include": "ava/agent/subagent_config.h",
-      "kind": "public",
-      "reason": "Tool definitions expose subagent configuration types.",
-      "tracking": "module-dependency-boundaries"
-    },
-    {
-      "source": "src/ava/tools/file_tools.h",
-      "include": "ava/agent/tool_visibility.h",
-      "kind": "public",
-      "reason": "Tool definitions expose agent tool-visibility types.",
-      "tracking": "module-dependency-boundaries"
-    },
-    {
       "source": "src/ava/tools/webfetch_tool.cpp",
       "include": "ava/provider/curl_transport.h",
       "kind": "implementation",

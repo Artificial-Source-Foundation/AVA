@@ -420,10 +420,9 @@ ava::core::VoidResult AgentTurnExecutor::run_parallel_tool_epoch_and_commit(Pars
         BufferedToolCallbacks callbacks;
         auto worker_context = *tool_context_storage_;
         // Preflight proved these slots non-interactive. Clear every live
-        // resolver that must not run from a worker thread.
+        // ToolContext resolver that must not run from a worker thread, and pass
+        // empty dispatch services so question/task/job cannot run off-thread.
         worker_context.permission_resolver = nullptr;
-        worker_context.question_resolver = nullptr;
-        worker_context.task_subagent_runner = nullptr;
         worker_context.lsp_diagnostics_provider = nullptr;
         worker_context.permission_audit_sink = [&callbacks](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
           callbacks.permission_audits.push_back(event);
@@ -444,7 +443,7 @@ ava::core::VoidResult AgentTurnExecutor::run_parallel_tool_epoch_and_commit(Pars
           return false;
         };
 
-        auto dispatch = dispatcher_storage_->dispatch_with_context(std::move(worker_context), slot.call);
+        auto dispatch = dispatcher_storage_->dispatch_with_context(std::move(worker_context), ToolDispatchServices{}, slot.call);
         auto dispatch_result = dispatch ? *dispatch : synthetic_failed_dispatch_result(slot.call, dispatch.error());
         dispatch_result.payload.summary = summarize_tool_result(dispatch_result);
         if (slot.provider_index < callbacks_by_provider_index.size())

@@ -4,6 +4,7 @@
 #include "ava/agent/subagent_coordinator.h"
 #include "ava/agent/tool_dispatch_common.h"
 #include "ava/agent/tool_dispatch_patch.h"
+#include "ava/agent/tool_dispatch_services.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
@@ -350,10 +351,10 @@ ToolDispatchResult job_control_error(ProviderToolCall const& call, ava::core::Er
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = std::move(text)};
 }
 
-ava::core::Result<SubagentDefinition> selected_subagent_definition(ava::tools::ToolContext const& context, std::string_view subagent_type,
+ava::core::Result<SubagentDefinition> selected_subagent_definition(ToolDispatchServices const& services, std::string_view subagent_type,
                                                                    std::string_view tool_name)
 {
-  auto subagents = context.subagents.empty() ? builtin_subagents() : context.subagents;
+  auto subagents = services.subagents.empty() ? builtin_subagents() : services.subagents;
   auto const* match = find_subagent(subagents, subagent_type);
   if (match)
     return *match;
@@ -820,7 +821,7 @@ ToolDispatchResult skill_result(ava::tools::ToolContext const& context, Provider
                                            ava::core::json::escape(match->path.string()) + "\",\"content\":\"" + ava::core::json::escape(content) + "\"}"};
 }
 
-ToolDispatchResult task_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+ToolDispatchResult task_result(ava::tools::ToolContext const& context, ToolDispatchServices const& services, ProviderToolCall const& call)
 {
   auto description = required_safe_string_arg(call.arguments_json, "description", call.name);
   if (!description)
@@ -843,7 +844,7 @@ ToolDispatchResult task_result(ava::tools::ToolContext const& context, ProviderT
   {
     return tool_error_result(call, bounded.error());
   }
-  auto subagent = selected_subagent_definition(context, *subagent_type, call.name);
+  auto subagent = selected_subagent_definition(services, *subagent_type, call.name);
   if (!subagent)
     return tool_error_result(call, subagent.error());
   auto task_id = optional_task_string_arg(call.arguments_json, "task_id", kMaxTaskIdBytes, call.name);
@@ -855,7 +856,7 @@ ToolDispatchResult task_result(ava::tools::ToolContext const& context, ProviderT
   auto background = task_background_mode(call.arguments_json, call.name);
   if (!background)
     return tool_error_result(call, background.error());
-  if (!context.task_subagent_runner)
+  if (!services.task_subagent_runner)
   {
     return simple_error_result(call, ava::core::ErrorCategory::Tool, "task subagent runner is unavailable");
   }
@@ -868,14 +869,14 @@ ToolDispatchResult task_result(ava::tools::ToolContext const& context, ProviderT
     return tool_error_result(call, permission.error());
   }
 
-  auto run = context.task_subagent_runner(ava::tools::TaskSubagentRequest{.description = *description,
-                                                                          .prompt = *prompt,
-                                                                          .subagent_type = *subagent_type,
-                                                                          .subagent_system_prompt = subagent->system_prompt,
-                                                                          .tool_preset = subagent->tool_preset,
-                                                                          .task_id = *task_id,
-                                                                          .command = command->value_or(""),
-                                                                          .background = *background});
+  auto run = services.task_subagent_runner(TaskSubagentRequest{.description = *description,
+                                                               .prompt = *prompt,
+                                                               .subagent_type = *subagent_type,
+                                                               .subagent_system_prompt = subagent->system_prompt,
+                                                               .tool_preset = subagent->tool_preset,
+                                                               .task_id = *task_id,
+                                                               .command = command->value_or(""),
+                                                               .background = *background});
   if (!run)
     return tool_error_result(call, run.error());
 
@@ -894,33 +895,33 @@ ToolDispatchResult task_result(ava::tools::ToolContext const& context, ProviderT
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
 }
 
-ToolDispatchResult job_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+ToolDispatchResult job_result(ava::tools::ToolContext const& context, ToolDispatchServices const& services, ProviderToolCall const& call)
 {
   auto request = parse_job_tool_request(call.arguments_json, call.name);
   if (!request)
     return job_control_error(call, request.error());
-  if (!context.subagent_coordinator || context.session_id.empty())
+  if (!services.subagent_coordinator || context.session_id.empty())
     return job_control_error(call, ava::core::Error(ava::core::ErrorCategory::Tool, "job controls are unavailable"));
   if (request->action == "list")
   {
     return ToolDispatchResult{
-        .call_id = call.id, .name = call.name, .success = true, .result_text = public_job_list_json(context.subagent_coordinator->list(context.session_id))};
+        .call_id = call.id, .name = call.name, .success = true, .result_text = public_job_list_json(services.subagent_coordinator->list(context.session_id))};
   }
 
   ava::core::Result<SubagentCoordinatorJobSnapshot> snapshot =
       std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "job action was not dispatched"));
   PublicJobContent content = PublicJobContent::OmitTerminalContent;
   if (request->action == "status")
-    snapshot = context.subagent_coordinator->snapshot(context.session_id, request->job_id);
+    snapshot = services.subagent_coordinator->snapshot(context.session_id, request->job_id);
   else if (request->action == "wait")
-    snapshot = context.subagent_coordinator->wait(context.session_id, request->job_id, request->timeout);
+    snapshot = services.subagent_coordinator->wait(context.session_id, request->job_id, request->timeout);
   else if (request->action == "result")
   {
-    snapshot = context.subagent_coordinator->result(context.session_id, request->job_id);
+    snapshot = services.subagent_coordinator->result(context.session_id, request->job_id);
     content = PublicJobContent::IncludeTerminalResult;
   }
   else if (request->action == "cancel")
-    snapshot = context.subagent_coordinator->cancel(context.session_id, request->job_id);
+    snapshot = services.subagent_coordinator->cancel(context.session_id, request->job_id);
   if (!snapshot)
     return job_control_error(call, snapshot.error());
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = public_job_snapshot_json(*snapshot, content)};
@@ -1077,18 +1078,18 @@ ToolDispatchResult lsp_references_result(ava::tools::ToolContext const& context,
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
 }
 
-ToolDispatchResult question_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+ToolDispatchResult question_result(ava::tools::ToolContext const&, ToolDispatchServices const& services, ProviderToolCall const& call)
 {
   auto prompt = parse_question_prompt(call.arguments_json, call.name);
   if (!prompt)
     return tool_error_result(call, prompt.error());
-  if (!context.question_resolver)
+  if (!services.question_resolver)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "question resolver is unavailable");
     error.with_context("tool", call.name);
     return tool_error_result(call, error);
   }
-  auto answer = context.question_resolver(*prompt);
+  auto answer = services.question_resolver(*prompt);
   if (!answer)
     return tool_error_result(call, answer.error());
   if (auto valid_answer = validate_question_answer(*answer, call.name); !valid_answer)
@@ -1098,50 +1099,56 @@ ToolDispatchResult question_result(ava::tools::ToolContext const& context, Provi
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = serialize_question_answer_result(*prompt, *answer)};
 }
 
+template <typename Handler>
+ToolExecutor ignore_dispatch_services(Handler handler)
+{
+  return [handler](ava::tools::ToolContext const& context, ToolDispatchServices const&, ProviderToolCall const& call) { return handler(context, call); };
+}
+
 ToolExecutor builtin_tool_executor(std::string_view name)
 {
   if (name == "read_file")
-    return read_file_result;
+    return ignore_dispatch_services(read_file_result);
   if (name == "write_file")
-    return write_file_result;
+    return ignore_dispatch_services(write_file_result);
   if (name == "edit_file")
-    return edit_file_result;
+    return ignore_dispatch_services(edit_file_result);
   if (name == "glob")
-    return glob_result;
+    return ignore_dispatch_services(glob_result);
   if (name == "list_directory")
-    return list_directory_result;
+    return ignore_dispatch_services(list_directory_result);
   if (name == "grep")
-    return grep_result;
+    return ignore_dispatch_services(grep_result);
   if (name == "bash")
-    return bash_result;
+    return ignore_dispatch_services(bash_result);
   if (name == "webfetch")
-    return webfetch_result;
+    return ignore_dispatch_services(webfetch_result);
   if (name == "websearch")
-    return websearch_result;
+    return ignore_dispatch_services(websearch_result);
   if (name == "skill")
-    return skill_result;
+    return ignore_dispatch_services(skill_result);
   if (name == "task")
     return task_result;
   if (name == "job")
     return job_result;
   if (name == "lsp_diagnostics")
-    return lsp_diagnostics_result;
+    return ignore_dispatch_services(lsp_diagnostics_result);
   if (name == "lsp_document_symbols")
-    return lsp_document_symbols_result;
+    return ignore_dispatch_services(lsp_document_symbols_result);
   if (name == "lsp_workspace_symbols")
-    return lsp_workspace_symbols_result;
+    return ignore_dispatch_services(lsp_workspace_symbols_result);
   if (name == "lsp_definition")
-    return lsp_definition_result;
+    return ignore_dispatch_services(lsp_definition_result);
   if (name == "lsp_references")
-    return lsp_references_result;
+    return ignore_dispatch_services(lsp_references_result);
   if (name == "apply_patch")
-    return apply_patch_result;
+    return ignore_dispatch_services(apply_patch_result);
   if (name == "question")
     return question_result;
   return nullptr;
 }
 
-ava::core::Result<ToolRegistry> build_tool_registry_result(ava::tools::ToolContext const& context)
+ava::core::Result<ToolRegistry> build_tool_registry_result(ava::tools::ToolContext const& context, ToolVisibilityOptions const& visibility = {})
 {
   ToolRegistry registry;
   if (context.exact_builtin_tool_names)
@@ -1178,13 +1185,13 @@ ava::core::Result<ToolRegistry> build_tool_registry_result(ava::tools::ToolConte
   ava::plugin::register_enabled_plugin_tools(registry, context);
   if (auto registered = ava::mcp::register_enabled_mcp_tools(registry, context); !registered)
     return std::unexpected(std::move(registered.error()));
-  registry.apply_visibility_filter(context);
+  registry.apply_visibility_filter(visibility);
   return registry;
 }
 
-ToolRegistry build_tool_registry(ava::tools::ToolContext const& context)
+ToolRegistry build_tool_registry(ava::tools::ToolContext const& context, ToolVisibilityOptions const& visibility = {})
 {
-  auto registry = build_tool_registry_result(context);
+  auto registry = build_tool_registry_result(context, visibility);
   return registry ? std::move(*registry) : ToolRegistry{};
 }
 
@@ -1212,21 +1219,24 @@ ToolRegistry const& builtin_tool_registry()
   return registry;
 }
 
-ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context)
+ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context, ToolDispatchServices services, ToolVisibilityOptions visibility)
 {
   if (!context.mutation_queue)
     context.mutation_queue = std::make_shared<ava::tools::MutationQueue>();
   context_ = std::move(context);
-  registry_ = build_tool_registry(context_);
+  services_ = std::move(services);
+  registry_ = build_tool_registry(context_, visibility);
 }
 
-ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context, ToolRegistry registry) : context_(std::move(context)), registry_(std::move(registry))
+ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context, ToolDispatchServices services, ToolRegistry registry)
+    : context_(std::move(context)), services_(std::move(services)), registry_(std::move(registry))
 {
   if (!context_.mutation_queue)
     context_.mutation_queue = std::make_shared<ava::tools::MutationQueue>();
 }
 
-ava::core::Result<ToolDispatcher> ToolDispatcher::create_strict(ava::tools::ToolContext context)
+ava::core::Result<ToolDispatcher> ToolDispatcher::create_strict(ava::tools::ToolContext context, ToolDispatchServices services,
+                                                                ToolVisibilityOptions visibility)
 {
   if (context.require_descriptor_secure_workspace && !context.secure_workspace)
   {
@@ -1235,18 +1245,19 @@ ava::core::Result<ToolDispatcher> ToolDispatcher::create_strict(ava::tools::Tool
       return std::unexpected(std::move(workspace.error()));
     context.secure_workspace = std::move(*workspace);
   }
-  auto registry = build_tool_registry_result(context);
+  auto registry = build_tool_registry_result(context, visibility);
   if (!registry)
     return std::unexpected(std::move(registry.error()));
-  return ToolDispatcher(std::move(context), std::move(*registry));
+  return ToolDispatcher(std::move(context), std::move(services), std::move(*registry));
 }
 
 ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall const& call) const
 {
-  return dispatch_with_context(context_, call);
+  return dispatch_with_context(context_, services_, call);
 }
 
-ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch_with_context(ava::tools::ToolContext context, ProviderToolCall const& call) const
+ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch_with_context(ava::tools::ToolContext context, ToolDispatchServices const& services,
+                                                                            ProviderToolCall const& call) const
 {
   auto const arguments = call.arguments_json.empty() ? std::string("{}") : call.arguments_json;
   ProviderToolCall const normalized{.id = call.id, .name = call.name, .arguments_json = arguments};
@@ -1320,7 +1331,7 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch_with_context(ava:
     context.execution_started = std::make_shared<std::atomic_bool>(false);
   if (context.lsp_diagnostics_provider)
     context.lsp_diagnostics_provider->set_permission_request_ids(context.permission_request_ids);
-  auto result = tool->executor(context, normalized);
+  auto result = tool->executor(context, services, normalized);
   if (context.permission_request_ids && !context.permission_request_ids->empty())
   {
     result.payload.permission_request_ids = *context.permission_request_ids;
@@ -1345,19 +1356,19 @@ std::span<ToolMetadata const> ToolDispatcher::tool_metadata()
   return builtin_tool_metadata();
 }
 
-std::vector<ToolMetadata> ToolDispatcher::tool_metadata(ava::tools::ToolContext const& context)
+std::vector<ToolMetadata> ToolDispatcher::tool_metadata(ava::tools::ToolContext const& context, ToolVisibilityOptions const& visibility)
 {
-  return build_tool_registry(context).metadata();
+  return build_tool_registry(context, visibility).metadata();
 }
 
 std::vector<std::string> ToolDispatcher::tool_schemas_json()
 {
-  return tool_schemas_json(ava::tools::ToolContext{});
+  return tool_schemas_json(ava::tools::ToolContext{}, ToolVisibilityOptions{});
 }
 
-std::vector<std::string> ToolDispatcher::tool_schemas_json(ava::tools::ToolContext const& context)
+std::vector<std::string> ToolDispatcher::tool_schemas_json(ava::tools::ToolContext const& context, ToolVisibilityOptions const& visibility)
 {
-  return build_tool_registry(context).tool_schemas_json(context);
+  return build_tool_registry(context, visibility).tool_schemas_json(context);
 }
 
 }  // namespace ava::agent

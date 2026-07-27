@@ -9,6 +9,7 @@
 #include "ava/app/runtime.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
+#include "ava/agent/tool_dispatch_services.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
@@ -130,56 +131,49 @@ void test_tool_dispatcher()
 
   ava::agent::ToolDispatcher const dispatcher(ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build});
   {
-    ava::tools::ToolContext allowlisted_context{.workspace_dir = workspace,
-                                                .mode = ava::agent::Mode::Build,
-                                                .tool_visibility = ava::agent::ToolVisibilityOptions{.included_tools = {"read_file", "grep"}}};
-    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(allowlisted_context);
+    ava::tools::ToolContext allowlisted_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
+    ava::agent::ToolVisibilityOptions const allowlisted_visibility{.included_tools = {"read_file", "grep"}};
+    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(allowlisted_context, allowlisted_visibility);
     expect(schemas_contain_tool(schemas, "read_file") && schemas_contain_tool(schemas, "grep") && !schemas_contain_tool(schemas, "bash") &&
                !schemas_contain_tool(schemas, "write_file"),
            "tool visibility allowlist limits exported provider schemas");
 
-    ava::agent::ToolDispatcher const allowlisted_dispatcher(allowlisted_context);
+    ava::agent::ToolDispatcher const allowlisted_dispatcher(allowlisted_context, {}, allowlisted_visibility);
     auto hidden =
         allowlisted_dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_hidden_bash", .name = "bash", .arguments_json = "{\"command\":\"pwd\"}"});
     expect(hidden && !hidden->success && hidden->result_text.find("unknown tool") != std::string::npos,
            "tool visibility allowlist removes hidden tools from dispatch");
   }
   {
-    ava::tools::ToolContext excluded_context{
-        .workspace_dir = workspace,
-        .mode = ava::agent::Mode::Build,
-        .tool_visibility = ava::agent::ToolVisibilityOptions{.included_tools = {"read_file", "grep"}, .excluded_tools = {"grep"}}};
-    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(excluded_context);
+    ava::tools::ToolContext excluded_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
+    ava::agent::ToolVisibilityOptions const excluded_visibility{.included_tools = {"read_file", "grep"}, .excluded_tools = {"grep"}};
+    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(excluded_context, excluded_visibility);
     expect(schemas_contain_tool(schemas, "read_file") && !schemas_contain_tool(schemas, "grep"), "tool visibility exclusion overrides an explicit allowlist");
   }
   {
-    ava::tools::ToolContext pi_alias_context{
-        .workspace_dir = workspace,
-        .mode = ava::agent::Mode::Build,
-        .tool_visibility = ava::agent::ToolVisibilityOptions{.included_tools = {"read", "grep", "find", "ls"}, .excluded_tools = {"find"}}};
-    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(pi_alias_context);
+    ava::tools::ToolContext pi_alias_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
+    ava::agent::ToolVisibilityOptions const pi_alias_visibility{.included_tools = {"read", "grep", "find", "ls"}, .excluded_tools = {"find"}};
+    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(pi_alias_context, pi_alias_visibility);
     expect(schemas_contain_tool(schemas, "read_file") && schemas_contain_tool(schemas, "grep") && schemas_contain_tool(schemas, "list_directory") &&
                !schemas_contain_tool(schemas, "glob") && !schemas_contain_tool(schemas, "write_file"),
            "tool visibility accepts Pi read/find/ls aliases while exporting native AVA schema names");
   }
   {
-    ava::tools::ToolContext no_tools_context{.workspace_dir = workspace,
-                                             .mode = ava::agent::Mode::Build,
-                                             .tool_visibility = ava::agent::ToolVisibilityOptions{.mode = ava::agent::ToolVisibilityMode::NoTools}};
-    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(no_tools_context);
+    ava::tools::ToolContext no_tools_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
+    ava::agent::ToolVisibilityOptions const no_tools_visibility{.mode = ava::agent::ToolVisibilityMode::NoTools};
+    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(no_tools_context, no_tools_visibility);
     expect(schemas.empty(), "tool visibility no-tools hides built-in provider schemas");
 
-    ava::agent::ToolDispatcher const no_tools_dispatcher(no_tools_context);
+    ava::agent::ToolDispatcher const no_tools_dispatcher(no_tools_context, {}, no_tools_visibility);
     auto hidden =
         no_tools_dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_hidden_read", .name = "read_file", .arguments_json = "{\"path\":\"note.txt\"}"});
     expect(hidden && !hidden->success && hidden->result_text.find("unknown tool") != std::string::npos,
            "tool visibility no-tools removes built-in tools from dispatch");
   }
   {
-    ava::tools::ToolContext no_builtin_context{.workspace_dir = workspace,
-                                               .mode = ava::agent::Mode::Build,
-                                               .tool_visibility = ava::agent::ToolVisibilityOptions{.mode = ava::agent::ToolVisibilityMode::NoBuiltinTools}};
-    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(no_builtin_context);
+    ava::tools::ToolContext no_builtin_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
+    ava::agent::ToolVisibilityOptions const no_builtin_visibility{.mode = ava::agent::ToolVisibilityMode::NoBuiltinTools};
+    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(no_builtin_context, no_builtin_visibility);
     expect(schemas.empty(), "tool visibility no-builtin-tools hides built-in provider schemas when no external tools exist");
   }
   auto read =
@@ -206,11 +200,11 @@ void test_tool_dispatcher()
       ava::agent::ProviderToolCall{.id = "call_list_directory", .name = "list_directory", .arguments_json = "{\"path\":\".\",\"max_entries\":20}"});
   auto const default_list_arguments =
       ava::agent::summarize_tool_arguments(ava::agent::ProviderToolCall{.id = "call_list_directory_default", .name = "list_directory", .arguments_json = "{}"});
-  auto const empty_list_arguments =
-      ava::agent::summarize_tool_arguments(ava::agent::ProviderToolCall{.id = "call_list_directory_empty", .name = "list_directory", .arguments_json = "{\"path\":\"\"}"});
+  auto const empty_list_arguments = ava::agent::summarize_tool_arguments(
+      ava::agent::ProviderToolCall{.id = "call_list_directory_empty", .name = "list_directory", .arguments_json = "{\"path\":\"\"}"});
   auto const list_result = listed ? ava::agent::summarize_tool_result(*listed) : std::string{};
-  expect(list_arguments == "path=., max_entries=20" && default_list_arguments == "path=." && empty_list_arguments == "path=." && list_result.find("entries") != std::string::npos &&
-             list_arguments.find("arguments provided") == std::string::npos && list_result != "ok",
+  expect(list_arguments == "path=., max_entries=20" && default_list_arguments == "path=." && empty_list_arguments == "path=." &&
+             list_result.find("entries") != std::string::npos && list_arguments.find("arguments provided") == std::string::npos && list_result != "ok",
          "tool dispatcher summarizes list_directory paths, bounds, and results without generic placeholders");
 
   auto grep_case_insensitive = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_grep_ci",
@@ -1046,17 +1040,17 @@ void test_tool_dispatcher()
          "question tool fails closed when no backend resolver is supplied");
 
   int question_prompts = 0;
-  ava::agent::ToolDispatcher const question_dispatcher(ava::tools::ToolContext{
-      .workspace_dir = workspace,
-      .mode = ava::agent::Mode::Build,
-      .question_resolver = [&question_prompts](ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
-        ++question_prompts;
-        expect(prompt.header == "Choose" && prompt.question == "Which approach?", "question resolver receives prompt text");
-        expect(prompt.options.size() == 2 && prompt.options[0].value == "safe" && prompt.options[0].label == "Safe",
-               "question resolver receives structured options");
-        expect(!prompt.multiple && !prompt.allow_custom, "question resolver receives default selection flags");
-        return ava::agent::QuestionAnswer{.selected_options = {"safe"}, .custom_text = ""};
-      }});
+  ava::agent::ToolDispatcher const question_dispatcher(
+      ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build},
+      ava::agent::ToolDispatchServices{
+          .question_resolver = [&question_prompts](ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
+            ++question_prompts;
+            expect(prompt.header == "Choose" && prompt.question == "Which approach?", "question resolver receives prompt text");
+            expect(prompt.options.size() == 2 && prompt.options[0].value == "safe" && prompt.options[0].label == "Safe",
+                   "question resolver receives structured options");
+            expect(!prompt.multiple && !prompt.allow_custom, "question resolver receives default selection flags");
+            return ava::agent::QuestionAnswer{.selected_options = {"safe"}, .custom_text = ""};
+          }});
   auto question =
       question_dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_question",
                                                                 .name = "question",
@@ -1067,13 +1061,12 @@ void test_tool_dispatcher()
          "question tool calls resolver and serializes selected answer");
 
   ava::agent::ToolDispatcher const multi_question_dispatcher(
-      ava::tools::ToolContext{.workspace_dir = workspace,
-                              .mode = ava::agent::Mode::Build,
-                              .question_resolver = [](ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
-                                expect(prompt.multiple && prompt.allow_custom, "question resolver receives multi/custom flags");
-                                expect(prompt.options.size() == 2 && prompt.options[1].value == "Beta", "question resolver accepts string options");
-                                return ava::agent::QuestionAnswer{.selected_options = {"alpha", "Beta"}, .custom_text = "Use both"};
-                              }});
+      ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build},
+      ava::agent::ToolDispatchServices{.question_resolver = [](ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
+        expect(prompt.multiple && prompt.allow_custom, "question resolver receives multi/custom flags");
+        expect(prompt.options.size() == 2 && prompt.options[1].value == "Beta", "question resolver accepts string options");
+        return ava::agent::QuestionAnswer{.selected_options = {"alpha", "Beta"}, .custom_text = "Use both"};
+      }});
   auto multi_question =
       multi_question_dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_question_multi",
                                                                       .name = "question",
@@ -1090,45 +1083,43 @@ void test_tool_dispatcher()
          "question tool rejects model-originated secret prompts");
 
   ava::agent::ToolDispatcher const too_many_answers_dispatcher(
-      ava::tools::ToolContext{.workspace_dir = workspace,
-                              .mode = ava::agent::Mode::Build,
-                              .question_resolver = [](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
-                                return ava::agent::QuestionAnswer{.selected_options = std::vector<std::string>(65, "option"), .custom_text = ""};
-                              }});
+      ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build},
+      ava::agent::ToolDispatchServices{.question_resolver = [](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
+        return ava::agent::QuestionAnswer{.selected_options = std::vector<std::string>(65, "option"), .custom_text = ""};
+      }});
   auto too_many_answers = too_many_answers_dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_question_too_many_answers", .name = "question", .arguments_json = "{\"question\":\"Pick\"}"});
   expect(too_many_answers && !too_many_answers->success && too_many_answers->result_text.find("too many selected options") != std::string::npos,
          "question tool rejects resolver answers with too many selected options");
 
   std::string const oversized_answer_text(9000, 'x');
-  ava::agent::ToolDispatcher const oversized_selected_dispatcher(ava::tools::ToolContext{
-      .workspace_dir = workspace,
-      .mode = ava::agent::Mode::Build,
-      .question_resolver = [&oversized_answer_text](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
-        return ava::agent::QuestionAnswer{.selected_options = {oversized_answer_text}, .custom_text = ""};
-      }});
+  ava::agent::ToolDispatcher const oversized_selected_dispatcher(
+      ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build},
+      ava::agent::ToolDispatchServices{
+          .question_resolver = [&oversized_answer_text](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
+            return ava::agent::QuestionAnswer{.selected_options = {oversized_answer_text}, .custom_text = ""};
+          }});
   auto oversized_selected = oversized_selected_dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_question_oversized_selected", .name = "question", .arguments_json = "{\"question\":\"Pick\"}"});
   expect(oversized_selected && !oversized_selected->success && oversized_selected->result_text.find("selected option is too long") != std::string::npos,
          "question tool rejects oversized resolver selected option strings");
 
-  ava::agent::ToolDispatcher const oversized_custom_dispatcher(ava::tools::ToolContext{
-      .workspace_dir = workspace,
-      .mode = ava::agent::Mode::Build,
-      .question_resolver = [&oversized_answer_text](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
-        return ava::agent::QuestionAnswer{.selected_options = {}, .custom_text = oversized_answer_text};
-      }});
+  ava::agent::ToolDispatcher const oversized_custom_dispatcher(
+      ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build},
+      ava::agent::ToolDispatchServices{
+          .question_resolver = [&oversized_answer_text](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
+            return ava::agent::QuestionAnswer{.selected_options = {}, .custom_text = oversized_answer_text};
+          }});
   auto oversized_custom = oversized_custom_dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_question_oversized_custom", .name = "question", .arguments_json = "{\"question\":\"Pick\"}"});
   expect(oversized_custom && !oversized_custom->success && oversized_custom->result_text.find("custom text is too long") != std::string::npos,
          "question tool rejects oversized resolver custom text");
 
   ava::agent::ToolDispatcher const failing_question_dispatcher(
-      ava::tools::ToolContext{.workspace_dir = workspace,
-                              .mode = ava::agent::Mode::Build,
-                              .question_resolver = [](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
-                                return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question UI unavailable"));
-                              }});
+      ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build},
+      ava::agent::ToolDispatchServices{.question_resolver = [](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question UI unavailable"));
+      }});
   auto failed_question = failing_question_dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_question_failed", .name = "question", .arguments_json = "{\"question\":\"Continue?\"}"});
   expect(failed_question && !failed_question->success && failed_question->result_text.find("question UI unavailable") != std::string::npos,
@@ -1310,22 +1301,23 @@ void test_task_persistent_deny_preflight_blocks_runner()
   int resolver_prompts = 0;
   int runner_invocations = 0;
   std::vector<ava::tools::PermissionAuditEvent> audits;
-  ava::agent::ToolDispatcher dispatcher(ava::tools::ToolContext{
-      .workspace_dir = workspace,
-      .permission_resolver =
-          [&resolver_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-        ++resolver_prompts;
-        return ava::permissions::PermissionResolution::Allow;
-      },
-      .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(rule_store),
-      .permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
-        audits.push_back(event);
-        return {};
-      },
-      .task_subagent_runner = [&runner_invocations](ava::tools::TaskSubagentRequest const&) -> ava::core::Result<ava::tools::TaskSubagentResult> {
-        ++runner_invocations;
-        return ava::tools::TaskSubagentResult{};
-      }});
+  ava::agent::ToolDispatcher dispatcher(
+      ava::tools::ToolContext{.workspace_dir = workspace,
+                              .permission_resolver = [&resolver_prompts](ava::permissions::PermissionPrompt const&)
+                                  -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+                                ++resolver_prompts;
+                                return ava::permissions::PermissionResolution::Allow;
+                              },
+                              .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(rule_store),
+                              .permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+                                audits.push_back(event);
+                                return {};
+                              }},
+      ava::agent::ToolDispatchServices{
+          .task_subagent_runner = [&runner_invocations](ava::agent::TaskSubagentRequest const&) -> ava::core::Result<ava::agent::TaskSubagentResult> {
+            ++runner_invocations;
+            return ava::agent::TaskSubagentResult{};
+          }});
 
   auto result = dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "task_persistent_deny", .name = "task", .arguments_json = R"({"description":"blocked","prompt":"do not run","subagent_type":"general"})"});
@@ -1349,23 +1341,22 @@ void test_task_mode_and_job_tool_controls()
   ava::tools::ToolContext task_context{.workspace_dir = workspace,
                                        .permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
                                          return ava::permissions::PermissionResolution::Allow;
-                                       },
-                                       .task_subagent_runner =
-                                           [&](ava::tools::TaskSubagentRequest const& request) {
-                                             ++task_runs;
-                                             captured_background = request.background;
-                                             return ava::tools::TaskSubagentResult{.task_id = "task_mode",
-                                                                                   .job_id = {},
-                                                                                   .session_path = {},
-                                                                                   .subagent_type = request.subagent_type,
-                                                                                   .state = "completed",
-                                                                                   .final_text = {},
-                                                                                   .stop_reason = {},
-                                                                                   .provider_iterations = 0,
-                                                                                   .tool_calls = 0,
-                                                                                   .tool_iterations = 0};
-                                           }};
-  ava::agent::ToolDispatcher task_dispatcher(task_context);
+                                       }};
+  ava::agent::ToolDispatchServices task_services{.task_subagent_runner = [&](ava::agent::TaskSubagentRequest const& request) {
+    ++task_runs;
+    captured_background = request.background;
+    return ava::agent::TaskSubagentResult{.task_id = "task_mode",
+                                          .job_id = {},
+                                          .session_path = {},
+                                          .subagent_type = request.subagent_type,
+                                          .state = "completed",
+                                          .final_text = {},
+                                          .stop_reason = {},
+                                          .provider_iterations = 0,
+                                          .tool_calls = 0,
+                                          .tool_iterations = 0};
+  }};
+  ava::agent::ToolDispatcher task_dispatcher(task_context, task_services);
   auto preferred = task_dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "task_mode", .name = "task", .arguments_json = R"({"description":"mode","prompt":"run","subagent_type":"general","mode":"background"})"});
   expect(preferred && preferred->success && captured_background, "task prefers explicit background mode while preserving the runner contract");
@@ -1425,7 +1416,8 @@ void test_task_mode_and_job_tool_controls()
     expect(state->changed.wait_for(lock, std::chrono::seconds(1), [&] { return state->started; }), "job dispatcher worker reaches running state");
   }
   auto const job_id = started->job.identity.job_id;
-  ava::agent::ToolDispatcher job_dispatcher(ava::tools::ToolContext{.workspace_dir = workspace, .subagent_coordinator = coordinator, .session_id = "owner"});
+  ava::agent::ToolDispatcher job_dispatcher(ava::tools::ToolContext{.workspace_dir = workspace, .session_id = "owner"},
+                                            ava::agent::ToolDispatchServices{.subagent_coordinator = coordinator});
   auto list = job_dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "job_list", .name = "job", .arguments_json = R"({"action":"list"})"});
   auto status = job_dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "job_status", .name = "job", .arguments_json = "{\"action\":\"status\",\"job_id\":\"" + job_id + "\"}"});
@@ -1441,7 +1433,8 @@ void test_task_mode_and_job_tool_controls()
              not_ready->result_text.find("\"code\":\"job_not_ready\"") != std::string::npos && duplicate && !duplicate->success,
          "job tool shares bounded snapshots, strict parsing, timeout snapshots, and stable not-ready status");
 
-  ava::agent::ToolDispatcher other_owner(ava::tools::ToolContext{.workspace_dir = workspace, .subagent_coordinator = coordinator, .session_id = "other"});
+  ava::agent::ToolDispatcher other_owner(ava::tools::ToolContext{.workspace_dir = workspace, .session_id = "other"},
+                                         ava::agent::ToolDispatchServices{.subagent_coordinator = coordinator});
   auto hidden = other_owner.dispatch(
       ava::agent::ProviderToolCall{.id = "job_hidden", .name = "job", .arguments_json = "{\"action\":\"status\",\"job_id\":\"" + job_id + "\"}"});
   expect(hidden && !hidden->success && hidden->result_text.find("not_found") != std::string::npos, "job tool maps owner mismatch to NotFound");
@@ -1497,6 +1490,61 @@ void test_task_mode_and_job_tool_controls()
   }
 }
 
+void test_empty_worker_services_disable_interactive_tools()
+{
+  auto const root = create_empty_root("dispatcher-empty-worker-services");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+
+  int question_prompts = 0;
+  int task_runs = 0;
+  ava::agent::ToolDispatchServices owned_services{
+      .question_resolver = [&question_prompts](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
+        ++question_prompts;
+        return ava::agent::QuestionAnswer{.selected_options = {"ok"}, .custom_text = ""};
+      },
+      .task_subagent_runner = [&task_runs](ava::agent::TaskSubagentRequest const& request) -> ava::core::Result<ava::agent::TaskSubagentResult> {
+        ++task_runs;
+        return ava::agent::TaskSubagentResult{.task_id = "task_worker",
+                                              .job_id = {},
+                                              .session_path = {},
+                                              .subagent_type = request.subagent_type,
+                                              .state = "completed",
+                                              .final_text = "done",
+                                              .stop_reason = {}};
+      }};
+  ava::agent::ToolDispatcher const dispatcher(
+      ava::tools::ToolContext{.workspace_dir = workspace,
+                              .mode = ava::agent::Mode::Build,
+                              .permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+                                return ava::permissions::PermissionResolution::Allow;
+                              },
+                              .session_id = "owner"},
+      owned_services);
+
+  auto owned_question =
+      dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "owned_question", .name = "question", .arguments_json = R"({"question":"Ready?"})"});
+  auto owned_task = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "owned_task", .name = "task", .arguments_json = R"({"description":"work","prompt":"do it","subagent_type":"general"})"});
+  expect(owned_question && owned_question->success && question_prompts == 1 && owned_task && owned_task->success && task_runs == 1,
+         "dispatcher-owned services retain question and task behavior");
+
+  ava::tools::ToolContext worker_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build, .session_id = "owner"};
+  auto worker_question =
+      dispatcher.dispatch_with_context(worker_context, ava::agent::ToolDispatchServices{},
+                                       ava::agent::ProviderToolCall{.id = "worker_question", .name = "question", .arguments_json = R"({"question":"Ready?"})"});
+  auto worker_task = dispatcher.dispatch_with_context(
+      worker_context, ava::agent::ToolDispatchServices{},
+      ava::agent::ProviderToolCall{
+          .id = "worker_task", .name = "task", .arguments_json = R"({"description":"work","prompt":"do it","subagent_type":"general"})"});
+  auto worker_job = dispatcher.dispatch_with_context(worker_context, ava::agent::ToolDispatchServices{},
+                                                     ava::agent::ProviderToolCall{.id = "worker_job", .name = "job", .arguments_json = R"({"action":"list"})"});
+  expect(worker_question && !worker_question->success && worker_question->result_text.find("unavailable") != std::string::npos && worker_task &&
+             !worker_task->success && worker_task->result_text.find("unavailable") != std::string::npos && worker_job && !worker_job->success &&
+             worker_job->result_text.find("unavailable") != std::string::npos && question_prompts == 1 && task_runs == 1,
+         "explicit empty worker-style services make question/task/job unavailable without touching dispatcher-owned services");
+}
+
 void test_tool_dispatcher_plan_mode_denies_mutation()
 {
   auto const root = create_empty_root("dispatcher-plan");
@@ -1524,5 +1572,6 @@ void run_agent_tool_dispatcher_tests()
   test_tool_dispatcher();
   test_task_persistent_deny_preflight_blocks_runner();
   test_task_mode_and_job_tool_controls();
+  test_empty_worker_services_disable_interactive_tools();
   test_tool_dispatcher_plan_mode_denies_mutation();
 }

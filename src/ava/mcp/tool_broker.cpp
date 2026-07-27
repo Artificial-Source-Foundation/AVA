@@ -556,7 +556,7 @@ ava::core::VoidResult register_enabled_mcp_tools(ava::agent::ToolRegistry& regis
         auto binding = std::make_shared<McpToolBinding const>(McpToolBinding{.server = server, .tool = tool, .model_tool_name = model_tool_name});
         auto registered = registry.register_tool(ava::agent::RegisteredTool{
             .metadata = metadata_for_tool(model_tool_name, server, tool),
-            .executor = [binding](ava::tools::ToolContext const& tool_context,
+            .executor = [binding](ava::tools::ToolContext const& tool_context, ava::agent::ToolDispatchServices const&,
                                   ava::agent::ProviderToolCall const& call) { return dispatch_mcp_tool(tool_context, call, *binding); },
             .source = ava::agent::ToolSource::Mcp,
             .source_id = server.id,
@@ -592,7 +592,7 @@ ava::core::VoidResult register_enabled_mcp_tools(ava::agent::ToolRegistry& regis
       auto binding = std::make_shared<McpResourceBinding const>(McpResourceBinding{.server = server, .resource = resource, .model_tool_name = model_tool_name});
       auto registered = registry.register_tool(ava::agent::RegisteredTool{
           .metadata = metadata_for_resource(model_tool_name, server, resource),
-          .executor = [binding](ava::tools::ToolContext const& tool_context,
+          .executor = [binding](ava::tools::ToolContext const& tool_context, ava::agent::ToolDispatchServices const&,
                                 ava::agent::ProviderToolCall const& call) { return dispatch_mcp_resource(tool_context, call, *binding); },
           .source = ava::agent::ToolSource::Mcp,
           .source_id = server.id,

@@ -310,6 +310,8 @@ class Session : protected Session_aggregate_base
   // Append session metadata through the runtime owner's serialized route.
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);
 
+  [[nodiscard]] std::string state_result_json(bool cancel_requested) const;
+
   AVA_DEBUG_PRINT_MEMBERS_ON_BASE(Session_aggregate_base)
 };
 

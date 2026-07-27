@@ -415,7 +415,7 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
   std::string session_json((std::istreambuf_iterator<char>(session_file)), std::istreambuf_iterator<char>());
   auto messages_json = ava::app::rpc::messages_result_json(*session);
   auto prompt_json = ava::app::rpc::prompt_result_json(session->store.session_id(), *result);
-  auto state_json = ava::app::rpc::state_result_json(*session, false);
+  auto state_json = session->state_result_json(false);
   auto has_observer_fields = [](std::string_view json) {
     return json.find("agent.run_start") != std::string_view::npos || json.find("transport.attempt_result") != std::string_view::npos ||
            json.find("\"timestamp_ms\":") != std::string_view::npos || json.find("\"run_id\":") != std::string_view::npos ||

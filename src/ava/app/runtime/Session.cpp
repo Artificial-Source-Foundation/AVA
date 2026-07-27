@@ -1,14 +1,15 @@
 #include "sys.h"
 #include "Session.h"
 #include "ava/app/command_catalog.h"
-#include "ava/app/command_tools.h"
 #include "ava/app/command_format.h"
-#include "ava/core/string_utils.h"
+#include "ava/app/command_tools.h"
+#include "ava/app/rpc/protocol.h"
 #include "ava/app/runtime/command_names.h"
 #include "ava/app/runtime/markdown_files.h"
-#include "ava/context/skill_loader.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/static_resources.h"
+#include "ava/context/skill_loader.h"
+#include "ava/core/string_utils.h"
 
 namespace ava::app::runtime {
 namespace {
@@ -247,7 +248,8 @@ void load_mcp_prompt_commands(RegistryBuilder& builder, runtime::Session& sessio
 {
   auto config_options = ava::mcp::default_mcp_config_options(session.workspace_dir());
   config_options.global_config_file = session.paths().ava_config_dir / "mcp.json";
-  config_options.project_config_file = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "mcp.json" : std::filesystem::path{};
+  config_options.project_config_file =
+      project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "mcp.json" : std::filesystem::path{};
   auto config = ava::mcp::load_mcp_config(config_options);
   if (!config)
   {
@@ -359,7 +361,8 @@ std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(
 
 void load_skill_commands(RegistryBuilder& builder, runtime::Session const& session)
 {
-  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir());
+  auto plugin_diagnostics =
+      ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir());
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = session.workspace_dir(),
       .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
@@ -421,6 +424,61 @@ ava::core::Result<ava::session::SessionMetadataView> Session::append_runtime_ses
     return std::unexpected(std::move(appended.error()));
   entries->push_back(std::move(*entry));
   return ava::session::session_metadata_from_entries(store.session_id(), *entries);
+}
+
+std::string Session::state_result_json(bool cancel_requested) const
+{
+  std::string json = "{";
+  json += "\"protocol_version\":";
+  json += std::to_string(kRpcProtocolVersion);
+  json += ',';
+  json += string_field_json("session_id", session.store.session_id());
+  json += ',';
+  json += string_field_json("session_path", session.store.session_path().string());
+  json += ',';
+  json += string_field_json("mode", ava::agent::to_string(session.mode()));
+  json += ',';
+  json += string_field_json("provider", session.model().provider_id);
+  json += ',';
+  json += string_field_json("model", session.model().model_id);
+  json += ',';
+  json += string_field_json("workspace_dir", session.workspace_dir().string());
+  json += ',';
+  json += string_field_json("current_dir", session.current_dir().string());
+  json += ',';
+  json += bool_field_json("created", session.created);
+  json += ',';
+  json += bool_field_json("sessionless", session.sessionless());
+  json += ',';
+  json += bool_field_json("cancel_requested", cancel_requested);
+  json += ',';
+  json += bool_field_json("reasoning_enabled", session.reasoning().has_value());
+  if (session.reasoning())
+  {
+    json += ',';
+    json += string_field_json("reasoning_level", session.reasoning()->level);
+    if (session.reasoning()->provider_level && *session.reasoning()->provider_level != session.reasoning()->level)
+    {
+      json += ',';
+      json += string_field_json("reasoning_provider_level", *session.reasoning()->provider_level);
+    }
+    if (session.reasoning()->budget_tokens)
+    {
+      json += ',';
+      json += integer_field_json("reasoning_budget_tokens", *session.reasoning()->budget_tokens);
+    }
+    if (!session.reasoning()->display.empty())
+    {
+      json += ',';
+      json += string_field_json("reasoning_display", session.reasoning()->display);
+    }
+  }
+  json += ',';
+  json += number_field_json("context_source_count", session.context_sources().size());
+  json += ",\"context_sources\":";
+  json += context_sources_json(session);
+  json += '}';
+  return json;
 }
 
 }  // namespace ava::app::runtime

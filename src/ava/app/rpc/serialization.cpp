@@ -340,61 +340,6 @@ std::string tool_timeline_json(std::vector<ava::agent::ToolTimelineEntry> const&
 
 }  // namespace
 
-std::string state_result_json(runtime::Session const& session, bool cancel_requested)
-{
-  std::string json = "{";
-  json += "\"protocol_version\":";
-  json += std::to_string(kRpcProtocolVersion);
-  json += ',';
-  json += string_field_json("session_id", session.store.session_id());
-  json += ',';
-  json += string_field_json("session_path", session.store.session_path().string());
-  json += ',';
-  json += string_field_json("mode", ava::agent::to_string(session.mode()));
-  json += ',';
-  json += string_field_json("provider", session.model().provider_id);
-  json += ',';
-  json += string_field_json("model", session.model().model_id);
-  json += ',';
-  json += string_field_json("workspace_dir", session.workspace_dir().string());
-  json += ',';
-  json += string_field_json("current_dir", session.current_dir().string());
-  json += ',';
-  json += bool_field_json("created", session.created);
-  json += ',';
-  json += bool_field_json("sessionless", session.sessionless());
-  json += ',';
-  json += bool_field_json("cancel_requested", cancel_requested);
-  json += ',';
-  json += bool_field_json("reasoning_enabled", session.reasoning().has_value());
-  if (session.reasoning())
-  {
-    json += ',';
-    json += string_field_json("reasoning_level", session.reasoning()->level);
-    if (session.reasoning()->provider_level && *session.reasoning()->provider_level != session.reasoning()->level)
-    {
-      json += ',';
-      json += string_field_json("reasoning_provider_level", *session.reasoning()->provider_level);
-    }
-    if (session.reasoning()->budget_tokens)
-    {
-      json += ',';
-      json += integer_field_json("reasoning_budget_tokens", *session.reasoning()->budget_tokens);
-    }
-    if (!session.reasoning()->display.empty())
-    {
-      json += ',';
-      json += string_field_json("reasoning_display", session.reasoning()->display);
-    }
-  }
-  json += ',';
-  json += number_field_json("context_source_count", session.context_sources().size());
-  json += ",\"context_sources\":";
-  json += context_sources_json(session);
-  json += '}';
-  return json;
-}
-
 ava::core::Result<std::string> list_sessions_result_json(runtime::Session const& session)
 {
   auto sessions = ava::session::SessionStore::list_sessions(session.workspace_dir(), session.paths().sessions_dir);

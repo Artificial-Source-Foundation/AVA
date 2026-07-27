@@ -20,7 +20,6 @@ namespace ava::app::rpc {
 
 [[nodiscard]] std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry);
 
-[[nodiscard]] std::string state_result_json(runtime::Session const& session, bool cancel_requested);
 [[nodiscard]] ava::core::Result<std::string> list_sessions_result_json(runtime::Session const& session);
 [[nodiscard]] ava::core::Result<std::string> session_tree_result_json(runtime::Session const& session);
 [[nodiscard]] ava::core::Result<std::string> list_models_result_json(runtime::Session const& session);

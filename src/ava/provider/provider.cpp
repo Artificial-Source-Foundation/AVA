@@ -96,11 +96,6 @@ bool looks_like_refusal(std::string_view text)
   return has_any(text, {"refusal", "refused", "cannot comply", "can't comply"});
 }
 
-bool is_retryable_kind(ProviderErrorKind kind) noexcept
-{
-  return kind == ProviderErrorKind::RateLimited || kind == ProviderErrorKind::Transient;
-}
-
 bool is_retryable_transport_error(ava::core::Error const& error) noexcept
 {
   return error.category() == ava::core::ErrorCategory::Io;
@@ -146,6 +141,22 @@ bool retry_cancel_requested(RetryOptions const& options, Transport::CancelCallba
 ava::core::Error retry_canceled_error()
 {
   return ava::core::Error(ava::core::ErrorCategory::Unknown, "transport retry canceled");
+}
+
+std::optional<std::string_view> response_retry_reason(RetryOptions const& options, HttpResponse const& response)
+{
+  if (!options.response_retry_decision)
+    return std::nullopt;
+  switch (options.response_retry_decision(response))
+  {
+    case ResponseRetryDecision::NoRetry:
+      return std::nullopt;
+    case ResponseRetryDecision::RateLimited:
+      return "rate_limited";
+    case ResponseRetryDecision::Transient:
+      return "transient";
+  }
+  return std::nullopt;
 }
 
 ava::core::VoidResult sleep_before_retry(RetryOptions const& options, std::size_t attempt, std::size_t max_attempts, int delay_ms, std::string_view reason,
@@ -373,17 +384,17 @@ ava::core::Result<HttpResponse> RetryTransport::send(HttpRequest const& request,
       return std::unexpected(retry_canceled_error());
     if (response)
     {
-      if (!is_retryable_kind(classify_provider_error(*response)))
+      auto const reason = response_retry_reason(options_, *response);
+      if (!reason)
         break;
-      auto const reason = to_string(classify_provider_error(*response));
       int const delay_ms = retry_after_ms(*response, options_.max_retry_after_ms).value_or(exponential_delay_ms(options_, attempt));
       if (auto published = publish_retry_event(options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts), delay_ms,
-                                               static_cast<std::size_t>(delay_ms), reason, response->status_code, false);
+                                               static_cast<std::size_t>(delay_ms), *reason, response->status_code, false);
           !published)
       {
         return std::unexpected(std::move(published.error()));
       }
-      if (auto slept = sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts), delay_ms, reason,
+      if (auto slept = sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts), delay_ms, *reason,
                                           response->status_code, false, cancel_requested);
           !slept)
       {
@@ -456,23 +467,25 @@ ava::core::Result<HttpResponse> RetryTransport::send_streaming(HttpRequest const
     bool const last_attempt = attempt == max_attempts;
     if (response)
     {
-      if (!last_attempt && !delivered_chunks && is_retryable_kind(classify_provider_error(*response)))
+      if (!last_attempt && !delivered_chunks)
       {
-        auto const reason = to_string(classify_provider_error(*response));
-        int const delay_ms = retry_after_ms(*response, options_.max_retry_after_ms).value_or(exponential_delay_ms(options_, attempt));
-        if (auto published = publish_retry_event(options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts), delay_ms,
-                                                 static_cast<std::size_t>(delay_ms), reason, response->status_code, true);
-            !published)
+        if (auto const reason = response_retry_reason(options_, *response))
         {
-          return std::unexpected(std::move(published.error()));
+          int const delay_ms = retry_after_ms(*response, options_.max_retry_after_ms).value_or(exponential_delay_ms(options_, attempt));
+          if (auto published = publish_retry_event(options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts), delay_ms,
+                                                   static_cast<std::size_t>(delay_ms), *reason, response->status_code, true);
+              !published)
+          {
+            return std::unexpected(std::move(published.error()));
+          }
+          if (auto slept = sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts), delay_ms, *reason,
+                                              response->status_code, true, cancel_requested);
+              !slept)
+          {
+            return std::unexpected(std::move(slept.error()));
+          }
+          continue;
         }
-        if (auto slept = sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts), delay_ms, reason,
-                                            response->status_code, true, cancel_requested);
-            !slept)
-        {
-          return std::unexpected(std::move(slept.error()));
-        }
-        continue;
       }
       if (!delivered_chunks)
         final_body = std::move(attempt_body);
@@ -693,6 +706,26 @@ ProviderErrorKind classify_provider_error(HttpResponse const& response)
     return ProviderErrorKind::Transient;
   }
   return ProviderErrorKind::Unknown;
+}
+
+ResponseRetryDecision provider_retry_decision(HttpResponse const& response)
+{
+  switch (classify_provider_error(response))
+  {
+    case ProviderErrorKind::RateLimited:
+      return ResponseRetryDecision::RateLimited;
+    case ProviderErrorKind::Transient:
+      return ResponseRetryDecision::Transient;
+    case ProviderErrorKind::Authentication:
+    case ProviderErrorKind::Quota:
+    case ProviderErrorKind::InvalidRequest:
+    case ProviderErrorKind::ContextOverflow:
+    case ProviderErrorKind::Refusal:
+    case ProviderErrorKind::ContentFilter:
+    case ProviderErrorKind::Unknown:
+      return ResponseRetryDecision::NoRetry;
+  }
+  return ResponseRetryDecision::NoRetry;
 }
 
 std::optional<std::string> retry_after_header(HttpResponse const& response)

@@ -319,6 +319,22 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
   events.clear();
   auto retry_options = ava::app::runtime::runtime_retry_options(*session, run_options);
   expect(retry_options.on_retry != nullptr, "runtime retry options expose provider retry event mapping");
+  expect(retry_options.response_retry_decision != nullptr, "runtime retry options install provider response retry classification");
+  if (retry_options.response_retry_decision)
+  {
+    expect(retry_options.response_retry_decision(ava::provider::HttpResponse{.status_code = 429, .headers = {}, .body = "rate limited"}) ==
+               ava::provider::ResponseRetryDecision::RateLimited,
+           "runtime retry options classify generic 429 responses as rate-limited retries");
+    expect(retry_options.response_retry_decision(ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "try again"}) ==
+               ava::provider::ResponseRetryDecision::Transient,
+           "runtime retry options classify generic 503 responses as transient retries");
+    expect(retry_options.response_retry_decision(ava::provider::HttpResponse{.status_code = 401, .headers = {}, .body = "unauthorized"}) ==
+               ava::provider::ResponseRetryDecision::NoRetry,
+           "runtime retry options classify authentication failures as non-retryable");
+    expect(retry_options.response_retry_decision(ava::provider::HttpResponse{
+               .status_code = 429, .headers = {}, .body = "insufficient_quota: billing hard limit"}) == ava::provider::ResponseRetryDecision::NoRetry,
+           "runtime retry options classify 429 quota bodies as non-retryable");
+  }
   runtime_retry_cancel = true;
   expect(retry_options.cancel_requested && retry_options.cancel_requested(), "runtime retry options preserve the active run cancellation callback");
   runtime_retry_cancel = false;

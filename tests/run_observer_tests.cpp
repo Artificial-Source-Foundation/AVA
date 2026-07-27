@@ -1095,7 +1095,10 @@ void test_observed_transport_cancellation_callback_contracts()
   CallbackPollingTransport retry_inner({ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "retry"},
                                         ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "done"}});
   unsigned retry_callback_calls = 0;
-  ava::provider::RetryTransport retry(retry_inner, ava::provider::RetryOptions{.observation = transport_observation, .max_attempts = 2, .base_delay_ms = 0});
+  ava::provider::RetryTransport retry(
+      retry_inner,
+      ava::provider::RetryOptions{
+          .observation = transport_observation, .max_attempts = 2, .base_delay_ms = 0, .response_retry_decision = ava::provider::provider_retry_decision});
   auto retry_result = retry.send(request, [&retry_callback_calls] {
     ++retry_callback_calls;
     return false;
@@ -1104,7 +1107,9 @@ void test_observed_transport_cancellation_callback_contracts()
          "retry reuses each authoritative post-attempt cancellation poll for tracing and control flow");
 
   CallbackPollingTransport retry_cancel_inner({ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "retry"}});
-  ava::provider::RetryTransport retry_cancel(retry_cancel_inner, ava::provider::RetryOptions{.observation = transport_observation, .max_attempts = 2});
+  ava::provider::RetryTransport retry_cancel(
+      retry_cancel_inner,
+      ava::provider::RetryOptions{.observation = transport_observation, .max_attempts = 2, .response_retry_decision = ava::provider::provider_retry_decision});
   unsigned retry_cancel_callback_calls = 0;
   bool retry_callback_threw = false;
   ava::core::Result<ava::provider::HttpResponse> retry_cancel_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "not run"));
@@ -1134,11 +1139,13 @@ void test_observed_transport_cancellation_callback_contracts()
                                                                             .max_attempts = 2,
                                                                             .base_delay_ms = 20,
                                                                             .countdown_tick_ms = 5,
-                                                                            .on_retry = [&retry_ticks](ava::provider::RetryOptions::Event const& event) {
-                                                                              if (event.countdown_tick)
-                                                                                ++retry_ticks;
-                                                                              return ava::core::VoidResult{};
-                                                                            }});
+                                                                            .on_retry =
+                                                                                [&retry_ticks](ava::provider::RetryOptions::Event const& event) {
+                                                                                  if (event.countdown_tick)
+                                                                                    ++retry_ticks;
+                                                                                  return ava::core::VoidResult{};
+                                                                                },
+                                                                            .response_retry_decision = ava::provider::provider_retry_decision});
   auto retry_countdown_result = retry_countdown.send(request);
   std::lock_guard lock(collector->mutex);
   auto const retry_traces = std::count_if(collector->events.begin(), collector->events.end(),
@@ -1170,8 +1177,11 @@ void test_transport_terminal_boundaries()
   auto canceled_result = observed_canceled.send(request, [] { return true; });
   ava::tests::FakeTransport retry_inner({ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "retry"},
                                          ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "done"}});
-  ava::provider::RetryTransport retry(
-      retry_inner, ava::provider::RetryOptions{.observation = transport_observation, .max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0});
+  ava::provider::RetryTransport retry(retry_inner, ava::provider::RetryOptions{.observation = transport_observation,
+                                                                               .max_attempts = 2,
+                                                                               .base_delay_ms = 0,
+                                                                               .max_retry_after_ms = 0,
+                                                                               .response_retry_decision = ava::provider::provider_retry_decision});
   ava::provider::ObservedTransport observed_retry(retry, transport_observation);
   auto retry_result = observed_retry.send(request);
   expect(success_result && !failure_result && !canceled_result && retry_result,

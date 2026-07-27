@@ -187,13 +187,15 @@ void exercise_contract_http_retry(ava::provider::OpenAIProvider const&)
   ava::tests::FakeTransport retry_inner({ava::provider::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "0"}}, .body = "rate limited"},
                                          ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
   std::vector<ava::provider::RetryOptions::Event> retry_events;
-  ava::provider::RetryTransport retry_transport(
-      retry_inner,
-      ava::provider::RetryOptions{
-          .max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0, .on_retry = [&retry_events](ava::provider::RetryOptions::Event const& event) {
-            retry_events.push_back(event);
-            return ava::core::VoidResult{};
-          }});
+  ava::provider::RetryTransport retry_transport(retry_inner, ava::provider::RetryOptions{.max_attempts = 2,
+                                                                                         .base_delay_ms = 0,
+                                                                                         .max_retry_after_ms = 0,
+                                                                                         .on_retry =
+                                                                                             [&retry_events](ava::provider::RetryOptions::Event const& event) {
+                                                                                               retry_events.push_back(event);
+                                                                                               return ava::core::VoidResult{};
+                                                                                             },
+                                                                                         .response_retry_decision = ava::provider::provider_retry_decision});
   auto const retry_request = ava::provider::HttpRequest{.method = "POST",
                                                         .url = "https://api.example.test",
                                                         .headers = {},
@@ -211,15 +213,17 @@ void exercise_contract_http_retry(ava::provider::OpenAIProvider const&)
   ava::tests::FakeTransport countdown_inner({ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "try again"},
                                              ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
   std::vector<ava::provider::RetryOptions::Event> countdown_events;
-  ava::provider::RetryTransport countdown_transport(
-      countdown_inner, ava::provider::RetryOptions{.max_attempts = 2,
-                                                   .base_delay_ms = 1,
-                                                   .max_retry_after_ms = 1,
-                                                   .countdown_tick_ms = 1,
-                                                   .on_retry = [&countdown_events](ava::provider::RetryOptions::Event const& event) {
-                                                     countdown_events.push_back(event);
-                                                     return ava::core::VoidResult{};
-                                                   }});
+  ava::provider::RetryTransport countdown_transport(countdown_inner,
+                                                    ava::provider::RetryOptions{.max_attempts = 2,
+                                                                                .base_delay_ms = 1,
+                                                                                .max_retry_after_ms = 1,
+                                                                                .countdown_tick_ms = 1,
+                                                                                .on_retry =
+                                                                                    [&countdown_events](ava::provider::RetryOptions::Event const& event) {
+                                                                                      countdown_events.push_back(event);
+                                                                                      return ava::core::VoidResult{};
+                                                                                    },
+                                                                                .response_retry_decision = ava::provider::provider_retry_decision});
   auto countdown_retry = countdown_transport.send(retry_request);
   expect(countdown_retry && countdown_retry->status_code == 200 && countdown_inner.requests().size() == 2,
          "retry transport completes after a countdown-backed retry");
@@ -242,6 +246,7 @@ void exercise_contract_http_retry(ava::provider::OpenAIProvider const&)
                                                                  return ava::core::VoidResult{};
                                                                },
                                                            .cancel_requested = [&cancel_retry_events] { return !cancel_retry_events.empty(); },
+                                                           .response_retry_decision = ava::provider::provider_retry_decision,
                                                        });
   auto canceled_retry = cancel_retry_transport.send(retry_request);
   expect(!canceled_retry && canceled_retry.error().message().find("retry canceled") != std::string::npos && cancel_retry_inner.requests().size() == 1 &&
@@ -278,8 +283,9 @@ void exercise_contract_http_retry(ava::provider::OpenAIProvider const&)
 
   StreamingFakeTransport streaming_inner({ava::provider::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "0"}}, .body = ""},
                                           ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "data: [DONE]\n\n"}});
-  ava::provider::RetryTransport streaming_retry_transport(streaming_inner,
-                                                          ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0});
+  ava::provider::RetryTransport streaming_retry_transport(
+      streaming_inner, ava::provider::RetryOptions{
+                           .max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0, .response_retry_decision = ava::provider::provider_retry_decision});
   std::string streamed_body;
   auto streaming_retry = streaming_retry_transport.send_streaming(retry_request, [&streamed_body](std::string_view chunk) -> ava::core::VoidResult {
     streamed_body.append(chunk);
@@ -295,6 +301,81 @@ void exercise_contract_http_retry(ava::provider::OpenAIProvider const&)
   expect(!streaming_pre_canceled && streaming_pre_canceled.error().message().find("retry canceled") != std::string::npos &&
              streaming_cancel_inner.requests().empty(),
          "retry streaming transport checks cancellation before dispatching the first attempt");
+
+  ava::tests::FakeTransport absent_callback_inner({ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "try again"},
+                                                   ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  ava::provider::RetryTransport absent_callback_transport(absent_callback_inner,
+                                                          ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0});
+  auto absent_callback = absent_callback_transport.send(retry_request);
+  expect(absent_callback && absent_callback->status_code == 503 && absent_callback_inner.requests().size() == 1,
+         "retry transport does not retry HTTP responses when response_retry_decision is absent");
+
+  expect(ava::provider::provider_retry_decision(ava::provider::HttpResponse{.status_code = 429, .headers = {}, .body = "rate limited"}) ==
+             ava::provider::ResponseRetryDecision::RateLimited,
+         "provider retry decision retries generic 429 responses");
+  expect(ava::provider::provider_retry_decision(ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "try again"}) ==
+             ava::provider::ResponseRetryDecision::Transient,
+         "provider retry decision retries generic 503 responses");
+  expect(ava::provider::provider_retry_decision(ava::provider::HttpResponse{
+             .status_code = 429, .headers = {}, .body = "insufficient_quota: billing hard limit"}) == ava::provider::ResponseRetryDecision::NoRetry,
+         "provider retry decision maps 429 quota bodies to NoRetry");
+  expect(ava::provider::provider_retry_decision(ava::provider::HttpResponse{
+             .status_code = 500, .headers = {}, .body = "prompt tokens exceeded context window limit"}) == ava::provider::ResponseRetryDecision::NoRetry,
+         "provider retry decision maps 500 context-overflow bodies to NoRetry");
+  expect(ava::provider::provider_retry_decision(ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "model refusal: cannot comply"}) ==
+             ava::provider::ResponseRetryDecision::NoRetry,
+         "provider retry decision maps 500 refusal bodies to NoRetry");
+
+  ava::tests::FakeTransport no_retry_quota_inner(
+      {ava::provider::HttpResponse{.status_code = 429, .headers = {}, .body = "insufficient_quota: billing hard limit"},
+       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  ava::provider::RetryTransport no_retry_quota_transport(
+      no_retry_quota_inner,
+      ava::provider::RetryOptions{
+          .max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0, .response_retry_decision = ava::provider::provider_retry_decision});
+  auto no_retry_quota = no_retry_quota_transport.send(retry_request);
+  expect(no_retry_quota && no_retry_quota->status_code == 429 && no_retry_quota_inner.requests().size() == 1,
+         "retry transport does not retry 429 quota bodies under provider_retry_decision");
+
+  ava::tests::FakeTransport no_retry_overflow_inner(
+      {ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "prompt tokens exceeded context window limit"},
+       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  ava::provider::RetryTransport no_retry_overflow_transport(
+      no_retry_overflow_inner,
+      ava::provider::RetryOptions{
+          .max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0, .response_retry_decision = ava::provider::provider_retry_decision});
+  auto no_retry_overflow = no_retry_overflow_transport.send(retry_request);
+  expect(no_retry_overflow && no_retry_overflow->status_code == 500 && no_retry_overflow_inner.requests().size() == 1,
+         "retry transport does not retry 500 context-overflow bodies under provider_retry_decision");
+
+  ava::tests::FakeTransport no_retry_refusal_inner({ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "model refusal: cannot comply"},
+                                                    ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  ava::provider::RetryTransport no_retry_refusal_transport(
+      no_retry_refusal_inner,
+      ava::provider::RetryOptions{
+          .max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0, .response_retry_decision = ava::provider::provider_retry_decision});
+  auto no_retry_refusal = no_retry_refusal_transport.send(retry_request);
+  expect(no_retry_refusal && no_retry_refusal->status_code == 500 && no_retry_refusal_inner.requests().size() == 1,
+         "retry transport does not retry 500 refusal bodies under provider_retry_decision");
+
+  constexpr char const* kBodyCanary = "RETRY_REASON_BODY_CANARY_9f3c";
+  ava::tests::FakeTransport canary_inner({ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = kBodyCanary},
+                                          ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  std::vector<ava::provider::RetryOptions::Event> canary_events;
+  ava::provider::RetryTransport canary_transport(canary_inner,
+                                                 ava::provider::RetryOptions{.max_attempts = 2,
+                                                                             .base_delay_ms = 0,
+                                                                             .max_retry_after_ms = 0,
+                                                                             .on_retry =
+                                                                                 [&canary_events](ava::provider::RetryOptions::Event const& event) {
+                                                                                   canary_events.push_back(event);
+                                                                                   return ava::core::VoidResult{};
+                                                                                 },
+                                                                             .response_retry_decision = ava::provider::provider_retry_decision});
+  auto canary_retry = canary_transport.send(retry_request);
+  expect(canary_retry && canary_retry->status_code == 200 && canary_inner.requests().size() == 2 && canary_events.size() == 1 &&
+             canary_events[0].reason == "transient" && canary_events[0].reason.find(kBodyCanary) == std::string::npos,
+         "retry transport emits fixed reason strings and never copies response body canaries into retry events");
 }
 
 void exercise_contract_final_transport(std::optional<ava::provider::HttpRequest> const& request)

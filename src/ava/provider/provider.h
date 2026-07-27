@@ -273,6 +273,13 @@ class Transport
   AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS
 };
 
+enum class ResponseRetryDecision
+{
+  NoRetry,
+  RateLimited,
+  Transient,
+};
+
 struct RetryOptions
 {
   // Deliberately separate from HttpRequest: this configuration observes retry
@@ -297,6 +304,9 @@ struct RetryOptions
   };
   std::function<ava::core::VoidResult(Event const&)> on_retry = nullptr;
   Transport::CancelCallback cancel_requested = nullptr;
+  // Closed HTTP response retry policy. Null means responses are never retried;
+  // transport IO retries remain independent of this callback.
+  std::function<ResponseRetryDecision(HttpResponse const&)> response_retry_decision = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -347,6 +357,7 @@ void observe_transport_retry(TransportObservation const& observation, std::size_
 [[nodiscard]] std::string to_string(StreamEventType type);
 [[nodiscard]] std::string to_string(ProviderErrorKind kind);
 [[nodiscard]] ProviderErrorKind classify_provider_error(HttpResponse const& response);
+[[nodiscard]] ResponseRetryDecision provider_retry_decision(HttpResponse const& response);
 [[nodiscard]] std::optional<std::string> retry_after_header(HttpResponse const& response);
 [[nodiscard]] bool is_context_overflow_error(ava::core::Error const& error);
 struct ImageInputPolicy

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <iostream>
 #include <ostream>
+#include <streambuf>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -48,6 +49,16 @@ class UniqueFd final
   int fd_;
 };
 
+class NullStreambuf final : public std::streambuf
+{
+ public:
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+ protected:
+  int_type overflow(int_type character) override { return traits_type::not_eof(character); }
+  std::streamsize xsputn(char const*, std::streamsize count) override { return count; }
+};
+
 std::string errno_message(std::string_view operation, std::filesystem::path const& path, int error_number)
 {
   return std::string(operation) + " '" + path.string() + "': " + std::error_code(error_number, std::generic_category()).message();
@@ -64,9 +75,13 @@ bool same_identity(struct stat const& lhs, struct stat const& rhs)
 struct LibcwdTestOutput::Impl
 {
 #ifdef CWDEBUG
+  NullStreambuf null_buffer;
+  std::ostream null_stream{&null_buffer};
   std::unique_ptr<__gnu_cxx::stdio_filebuf<char>> file_buffer;
   std::unique_ptr<std::ostream> file_stream;
 #endif
+  bool enabled = false;
+  bool libcwd_turned_off = false;
   std::string error;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
@@ -75,12 +90,11 @@ struct LibcwdTestOutput::Impl
 LibcwdTestOutput::LibcwdTestOutput(std::string_view suite_token) : impl_(std::make_unique<Impl>())
 {
 #ifdef CWDEBUG
-  // Constructed after ava::app::debug_init(): when AVA_NO_DEBUG_OUTPUT is set
-  // (no AVA_DEBUG_OUTPUT_DIR) libcwd was never initialized and this constructor
-  // returns immediately below, leaving no ostream to configure. When
-  // AVA_DEBUG_OUTPUT_DIR is set, libcwd is already initialized and
-  // LIBCWD_NO_STARTUP_MSGS=1 has suppressed its rcfile/startup diagnostics, so
-  // we only need to point the ostream at the per-suite log file here.
+  // This must precede ava::app::debug_init(): rcfile selection and parser
+  // diagnostics are libcwd output too and must never reach the test protocol.
+  impl_->null_stream << std::unitbuf;
+  Debug(libcw_do.set_ostream(&impl_->null_stream));
+
   char const* configured_directory = std::getenv("AVA_DEBUG_OUTPUT_DIR");
   if (configured_directory == nullptr || configured_directory[0] == '\0')
     return;
@@ -220,6 +234,7 @@ LibcwdTestOutput::LibcwdTestOutput(std::string_view suite_token) : impl_(std::ma
   impl_->file_stream = std::make_unique<std::ostream>(impl_->file_buffer.get());
   *impl_->file_stream << std::unitbuf;
   Debug(libcw_do.set_ostream(impl_->file_stream.get()));
+  impl_->enabled = true;
 #else
   static_cast<void>(suite_token);
 #endif
@@ -229,14 +244,31 @@ LibcwdTestOutput::~LibcwdTestOutput()
 {
 #ifdef CWDEBUG
   // set_ostream waits for the configured libcwd stream mutex, so no writer can
-  // retain the file stream when its owning RAII objects are destroyed. Restore
-  // the default ostream (std::cerr) which stays alive through static teardown.
-  Debug(libcw_do.off(); libcw_do.set_ostream(&std::cerr));
+  // retain the file stream when its owning RAII objects are destroyed. Standard
+  // error remains alive through static teardown; the implementation-owned null
+  // stream does not.
+  Debug(if (!impl_->libcwd_turned_off) libcw_do.off(); libcw_do.set_ostream(&std::cerr));
   if (impl_->file_stream)
     impl_->file_stream->flush();
   impl_->file_stream.reset();
   impl_->file_buffer.reset();
 #endif
+}
+
+void LibcwdTestOutput::after_libcwd_init()
+{
+#ifdef CWDEBUG
+  if (!impl_->enabled && !impl_->libcwd_turned_off)
+  {
+    Debug(libcw_do.off());
+    impl_->libcwd_turned_off = true;
+  }
+#endif
+}
+
+bool LibcwdTestOutput::enabled() const noexcept
+{
+  return impl_->enabled;
 }
 
 bool LibcwdTestOutput::setup_succeeded() const noexcept

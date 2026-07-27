@@ -230,9 +230,9 @@ foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   # Keep pre-main libcwd diagnostics quiet without replacing the caller's
   # rcfile policy. ava_tests itself routes all output produced from main.
   # AVA_NO_DEBUG_OUTPUT makes ava::app::debug_init() skip NAMESPACE_DEBUG::init()
-  # entirely so no libcwd output can reach stdout/stderr; a developer who wants
-  # per-suite log files sets AVA_DEBUG_OUTPUT_DIR and runs ava_tests directly
-  # (LibcwdTestOutput then routes to ava_tests.<suite>.libcwd.log).
+  # when no private output was requested, so libcwd cannot contaminate the test
+  # protocol. A nonempty inherited AVA_DEBUG_OUTPUT_DIR overrides suppression
+  # after LibcwdTestOutput installs its validated per-suite private stream.
   set_tests_properties(ava_tests.${AVA_TEST_SUITE} PROPERTIES
     ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1;AVA_NO_DEBUG_OUTPUT=1")
 endforeach()

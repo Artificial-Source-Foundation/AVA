@@ -5,6 +5,10 @@
 #include "ava/core/path.h"
 #include "ava/core/trusted_home.h"
 
+#ifdef DEBUGGLOBAL
+#include "utils/GlobalObjectManager.h"
+#endif
+
 #include <array>
 #include <cstdlib>
 #include <iostream>
@@ -161,15 +165,15 @@ int print_failures()
 
 int main(int argc, char** argv)
 {
-  // Keep this the very first statement: ava::app::debug_init() skips
-  // NAMESPACE_DEBUG::init() when AVA_NO_DEBUG_OUTPUT is set (the test harness
-  // sets that whenever AVA_DEBUG_OUTPUT_DIR is not configured) and otherwise
-  // runs the same preamble debug::init() does, including GlobalObjectManager
-  // main-entry bookkeeping when DEBUGGLOBAL is configured.
-  Debug(ava::app::debug_init());
+#ifdef DEBUGGLOBAL
+  // Keep GlobalObjectManager's transition to main as the first operation.
+  GlobalObjectManager::main_entered();
+#endif
 
   std::string_view const debug_suite_token = libcwd_suite_token(argc, argv);
   ava::test::LibcwdTestOutput libcwd_output(debug_suite_token);
+  Debug(ava::app::debug_init(libcwd_output.enabled()));
+  libcwd_output.after_libcwd_init();
   if (!libcwd_output.setup_succeeded())
   {
     std::cerr << "failed to configure libcwd test output: " << libcwd_output.setup_error() << '\n';

@@ -11,26 +11,33 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 ## Source Map
 
 - `src/main.cpp`: application entry point, CLI argument handling, OpenAI connect flow, TUI startup, and non-TTY line shell wiring.
-- `src/ava/core/`: shared primitives such as `Result<T>`, errors, JSON helpers, and IDs.
+- `src/ava/core/`: shared primitives such as `Result<T>`, errors, JSON helpers, descriptor anchors, and IDs.
 - `src/ava/config/`: XDG paths, auth storage, model configuration, prompt configuration, and OpenAI OAuth support.
-- `src/ava/provider/`: provider contracts plus the OpenAI provider and `curl` transport.
+- `src/ava/provider/`: provider contracts and transports for OpenAI, Anthropic, Gemini, and OpenAI-compatible services.
 - `src/ava/agent/`: agent loop, mode handling, tool dispatch, user-question plumbing, configurable task subagents, and background job registry.
-- `src/ava/app/`: runtime orchestration, CLI/TUI/print/RPC glue, command dispatch, project trust, headless policy, and event serialization.
-- `src/ava/permissions/`: backend permission policy and prompt/decision types.
-- `src/ava/tools/`: built-in file, search, and shell tools. Keep filesystem and process safety checks here or in clearly permissioned call paths.
-- `src/ava/session/`: append-only JSONL session storage and session-level formatting/lifecycle helpers.
-- `src/ava/context/`: project/global instruction loading for provider context.
+- `src/ava/command/`: canonical command planning, classification, policy, environment, and execution metadata.
+- `src/ava/containment/`: Linux Landlock/seccomp command-containment planning and enforcement helpers.
+- `src/ava/app/`: runtime orchestration, CLI/TUI/print/RPC/ACP glue (including `app/acp/`), command dispatch, project trust, headless policy, and event serialization.
+- `src/ava/permissions/`: backend permission policy, persistent rules, prompts, and decisions.
+- `src/ava/tools/`: built-in file, search, shell, web, LSP, and interaction tools. Keep filesystem and process safety checks here or in clearly permissioned call paths.
+- `src/ava/session/`: append-only JSONL session storage, leases/authority, compaction, validation, and session lifecycle helpers.
+- `src/ava/context/`: project/global instruction and skill loading for provider context.
 - `src/ava/mcp/`: stdio MCP config, protocol, client lifecycle, tool/resource/prompt broker, and containment helpers.
 - `src/ava/plugin/`: local out-of-process plugin manifest, discovery, enablement, runner, diagnostics, tool broker, and event hooks.
-- `src/ava/lsp/`: LSP client and configured provider integration for diagnostics, symbols, definitions, and references.
+- `src/ava/lsp/`: LSP client/process lifecycle and configured provider integration for diagnostics, symbols, definitions, and references.
+- `src/ava/diagnostics/`: sanitized runtime diagnostics, records, and bounded diagnostic artifacts.
+- `src/ava/observability/`: run observers, trace accounting, and deterministic trace validation/scoring.
+- `src/ava/debug/`: optional libcwd-backed debug channels and generated print-member support.
 - `src/ava/tui/`: custom terminal UI rendering, input handling, runtime glue, and terminal abstraction.
 - `src/ava/desktop/`: optional Qt/QML desktop prototype.
-- `tests/`: focused test sources linked into the `ava_tests` CTest target, plus support fakes under `tests/support/`.
+- `tests/`: focused `ava_tests` sources and support fakes, plus CMake/Python CLI, RPC, ACP, package/release, PTY, and TUI integration tests. The split tmux harness is `tests/tui_tmux_smoke.py` plus `tests/tui_tmux_scenarios/`.
 
 ## Local Workflow
 
+Use `BetaTest` for normal local development. It keeps Release-style optimization and assertions, so AVA and its tests stay fast while invariant failures remain visible. Keep project debug output off unless a diagnosis specifically needs it.
+
 ```sh
-cmake -S . -B build -DAVA_BUILD_TESTS=ON
+cmake -S . -B build -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=OFF
 scripts/build.sh --build-dir build
 scripts/run-tests.sh --build-dir build
 ```
@@ -43,10 +50,20 @@ scripts/build.sh
 scripts/run-tests.sh
 ```
 
+When deeper diagnosis requires reliable debugger stepping or full debug output, use a separate Debug tree rather than weakening the normal BetaTest tree:
+
+```sh
+cmake -S . -B build-debug -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DEnableDebug=ON
+scripts/build.sh --build-dir build-debug
+scripts/run-tests.sh --build-dir build-debug
+```
+
+Return to `build/` for ordinary work. `EnableDebug=ON` may also be combined with BetaTest when optimized debug logging is specifically needed, but it should not be the default.
+
 Sanitizers:
 
 ```sh
-cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
+cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=OFF
 scripts/build.sh --build-dir build-sanitize --jobs 2
 scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
@@ -71,9 +88,11 @@ git --no-pager diff --check
 - Keep destructive operations behind explicit policy checks.
 - Treat model output, terminal input, paths, JSON, session files, auth files, and shell text as untrusted.
 - Preserve actionable error context: operation, path/provider/tool name, and underlying cause.
-- New classes and structs must have their last public block end with `AVA_DEBUG_PRINT_MEMBERS_ON` (without trailing semicolon),
-  use `#include "debug.h"` as last include in the header to get its definition.
-- If you get a linker error: undefined symbol: *::print_members then try to build the cmake target `generate-print-members`.
+- Every `.cpp` beneath `src/ava/` must use `#include "sys.h"` as its first include.
+- Header-defined classes and structs beneath `src/ava/` must end their final public section with an accepted marker: `AVA_DEBUG_PRINT_MEMBERS_ON`, `AVA_DEBUG_PRINT_MEMBERS_ON_BASE(base)`, `AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS`, or deliberate `AVA_DEBUG_PRINT_MEMBERS_OPT_OUT` (none take a trailing semicolon).
+- Include `ava/debug/print_members_on.h` in headers that use those markers. Include `debug.h` only when cwds debug APIs such as `Dout`, `Debug`, `DoutEntering`, or `ASSERT` are required.
+- Types in anonymous namespaces must use `AVA_DEBUG_PRINT_MEMBERS_OPT_OUT`; generated print-member definitions cannot support their internal linkage.
+- If generated `print_members.cpp` compilation or `*::print_members` linking fails, first build the `generate-print-members` target.
 
 ## Change Guidelines
 
@@ -88,6 +107,7 @@ git --no-pager diff --check
 
 ## TUI And Terminal Testing
 
+- The opt-in tmux suite is 15 isolated `ava_tui.tmux_smoke_*` scenarios dispatched by `tests/tui_tmux_smoke.py` into `tests/tui_tmux_scenarios/`. Run the complete wave with `AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 15 -R '^ava_tui\.tmux_smoke_'`.
 - Start TUI verification at the smallest deterministic layer: text wrapping, width calculation, editor state, keybinding dispatch, palette/filter state, event reducers, permission/tool-card formatting, and transcript rendering should be covered by CTest unit tests where possible.
 - For full terminal behavior, use a pseudo-terminal harness rather than plain pipes. A PTY smoke can set `TERM`, rows, columns, and environment variables, start `ava`, send keystrokes or escape sequences, resize the terminal, and assert on captured screen state and process exit.
 - For ncurses-backed behavior, keep `newterm`/RAII lifecycle tests and add real terminal smokes only for behavior that requires a controlling terminal: alternate-screen cleanup, bracketed paste, resize redraw, mouse events, Escape latency, cursor visibility, Unicode cell placement, and terminal-state restoration after cancellation or crash.

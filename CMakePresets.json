@@ -9,10 +9,12 @@
     {
       "name": "dev",
       "displayName": "Developer build",
-      "description": "Configure a local developer build with tests and compile commands enabled.",
+      "description": "Configure an optimized developer build with assertions, tests, and compile commands enabled.",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "EnableAvaBuildTests": "ON",
+        "CMAKE_BUILD_TYPE": "BetaTest",
+        "EnableDebug": "OFF",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },

@@ -36,7 +36,7 @@ struct RuntimeActiveRunState final
   std::optional<TuiActiveRunQueues> active_queues;
   std::mutex event_context_mutex;
   std::string current_request_id;
-  ava::app::runtime::EventSink event_sink;
+  ava::event::RuntimeEventSink event_sink;
   std::chrono::steady_clock::time_point turn_started_at;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

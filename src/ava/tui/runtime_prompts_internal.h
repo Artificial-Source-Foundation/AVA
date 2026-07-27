@@ -64,7 +64,7 @@ class RuntimePromptCoordinator final
   [[nodiscard]] ava::agent::QuestionResolver question_resolver();
   void fail_pending_requests();
   [[nodiscard]] bool service_pending_request(std::function<bool()> const& stop_requested = {}, std::function<bool()> const& request_stop = {});
-  void set_audit_sink(ava::app::runtime::EventSink sink);
+  void set_audit_sink(ava::event::RuntimeEventSink sink);
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
@@ -91,7 +91,7 @@ class RuntimePromptCoordinator final
   std::deque<std::shared_ptr<PendingQuestionRequest>> pending_question_requests_;
   std::atomic_bool accept_prompt_requests_{true};
   std::mutex prompt_audit_mutex_;
-  ava::app::runtime::EventSink prompt_audit_sink_;
+  ava::event::RuntimeEventSink prompt_audit_sink_;
 };
 
 }  // namespace ava::tui

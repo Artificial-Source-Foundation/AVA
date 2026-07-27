@@ -326,8 +326,8 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       };
     }
   }
-  auto runtime_event_to_bus_sink = [&]() -> ava::app::runtime::EventSink {
-    return [&](ava::app::runtime::Event const& event) {
+  auto runtime_event_to_bus_sink = [&]() -> ava::event::RuntimeEventSink {
+    return [&](ava::event::RuntimeEvent const& event) {
       ava::app::EventEnvelopeContext event_context;
       {
         std::lock_guard lock(event_context_mutex);
@@ -337,11 +337,11 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
           event_context.correlation_id = current_request_id;
         }
       }
-      return event_bus.publish(ava::app::to_event_envelope(event, event_context));
+      return event_bus.publish(ava::event::to_event_envelope(event, event_context));
     };
   };
   auto& event_sink = state.event_sink;
-  event_sink = supports_active_queue ? runtime_event_to_bus_sink() : ava::app::runtime::EventSink{};
+  event_sink = supports_active_queue ? runtime_event_to_bus_sink() : ava::event::RuntimeEventSink{};
   prompt_coordinator_.set_audit_sink(event_sink);
   state.turn_started_at = std::chrono::steady_clock::now();
   auto const turn_started_at = state.turn_started_at;

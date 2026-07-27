@@ -421,7 +421,7 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   ava::app::runtime::RunOptions tool_options;
   tool_options.access_token = "token";
   tool_options.observation = std::make_shared<ava::observability::RunObservation>(supplied_observer);
-  tool_options.event_sink = [](ava::app::runtime::Event const&) -> ava::core::VoidResult {
+  tool_options.event_sink = [](ava::event::RuntimeEvent const&) -> ava::core::VoidResult {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "TOOL_FAILURE_CANARY_PRIVATE_6202"));
   };
   ava::tests::FakeTransport tool_transport({});
@@ -440,7 +440,7 @@ void test_runtime_failure_boundaries_and_observation_precedence()
                                             : ava::core::Result<ava::app::runtime::Session>(std::unexpected(session_diagnostics.error()));
   ava::app::runtime::RunOptions session_options;
   session_options.access_token = "token";
-  session_options.event_sink = [](ava::app::runtime::Event const&) -> ava::core::VoidResult {
+  session_options.event_sink = [](ava::event::RuntimeEvent const&) -> ava::core::VoidResult {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "SESSION_FAILURE_CANARY_PRIVATE_6203"));
   };
   ava::tests::FakeTransport session_transport({});

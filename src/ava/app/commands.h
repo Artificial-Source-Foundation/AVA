@@ -18,7 +18,7 @@ namespace ava::app {
 struct CommandRequest
 {
   std::string command;
-  runtime::EventSink event_sink = nullptr;
+  ava::event::RuntimeEventSink event_sink = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   CompactionSummaryGenerator compaction_summary_generator = nullptr;

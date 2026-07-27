@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
+#include "tests/support/runtime_event_test_support.h"
 #include "tests/support/test_harness.h"
 #include "tests/support/tui_test_support.h"
 #include "ava/http/transport.h"
@@ -266,20 +267,21 @@ void test_app_runtime_enabled_plugin_resources_autoload()
                                                    "\"plugin skill done\"}\n\n"
                                                    "data: [DONE]\n\n",
                                        }});
-  std::vector<ava::app::runtime::Event> events;
+  std::vector<ava::event::RuntimeEvent> events;
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
   run_options.permission_resolver = allow;
-  run_options.event_sink = [&events](ava::app::runtime::Event const& event) {
+  run_options.event_sink = [&events](ava::event::RuntimeEvent const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
   auto run = ava::app::run_prompt(*session, "load the plugin skill", provider, transport, run_options);
   expect(run && run->final_text == "plugin skill done" &&
              std::ranges::any_of(events,
-                                 [](ava::app::runtime::Event const& event) {
-                                   return event.type == ava::app::runtime::EventType::ToolResult && event.tool_name == "skill" &&
-                                          event.tool_result_json.find("Enabled plugin skill body autoload marker") != std::string::npos;
+                                 [](ava::event::RuntimeEvent const& event) {
+                                   auto const* result = ava::tests::runtime_event_as<ava::event::ToolResultEvent>(event);
+                                   return result && result->payload.tool == "skill" &&
+                                          result->payload.result_json.find("Enabled plugin skill body autoload marker") != std::string::npos;
                                  }),
          "runtime agent loop loads enabled plugin static skills from the session plugin paths");
   expect(std::ranges::find(operations, ava::permissions::Operation::SkillLoad) != operations.end(), "plugin static skill loading remains permission-gated");

@@ -11,10 +11,13 @@
 #include "ava/provider/registry.h"
 #include "ava/core/error.h"
 
+#include <concepts>
 #include <iterator>
 #include <ostream>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <unistd.h>
 
 namespace ava::app {
@@ -61,38 +64,53 @@ std::string terminal_output_text(std::string_view text, bool sanitize)
   return sanitize ? sanitize_terminal_output_text(text) : std::string(text);
 }
 
-void write_text_event_diagnostic(runtime::Event const& event, std::ostream& err, bool sanitize)
+void write_text_event_diagnostic(ava::event::RuntimeEvent const& event, std::ostream& err, bool sanitize)
 {
-  if (event.type == runtime::EventType::ToolStart)
-  {
-    err << "tool_start";
-    if (!event.tool_name.empty())
-      err << " " << terminal_output_text(event.tool_name, sanitize);
-    if (!event.text.empty())
-      err << ": " << terminal_output_text(event.text, sanitize);
-    err << '\n';
-    return;
-  }
-  if (event.type == runtime::EventType::ToolResult)
-  {
-    err << "tool_result";
-    if (!event.tool_name.empty())
-      err << " " << terminal_output_text(event.tool_name, sanitize);
-    if (!event.status.empty())
-      err << " " << terminal_output_text(event.status, sanitize);
-    if (!event.text.empty())
-      err << ": " << terminal_output_text(event.text, sanitize);
-    err << '\n';
-    if ((event.error_code == "permission_denied" || event.error_category == "permission_denied") && !event.error_details.empty())
-    {
-      err << terminal_output_text(event.error_details, sanitize) << '\n';
-    }
-    return;
-  }
-  if (event.type == runtime::EventType::Error)
-  {
-    err << terminal_output_text(event.error_details.empty() ? event.error_message : event.error_details, sanitize) << '\n';
-  }
+  std::visit(
+      [&](auto const& concrete) {
+        using Event = std::remove_cvref_t<decltype(concrete)>;
+        if constexpr (std::same_as<Event, ava::event::ToolStartEvent>)
+        {
+          auto const& payload = concrete.payload;
+          err << "tool_start";
+          if (!payload.tool.empty())
+            err << " " << terminal_output_text(payload.tool, sanitize);
+          if (!payload.text.empty())
+            err << ": " << terminal_output_text(payload.text, sanitize);
+          err << '\n';
+        }
+        else if constexpr (std::same_as<Event, ava::event::ToolResultEvent>)
+        {
+          auto const& payload = concrete.payload;
+          err << "tool_result";
+          if (!payload.tool.empty())
+            err << " " << terminal_output_text(payload.tool, sanitize);
+          if (!payload.status.empty())
+            err << " " << terminal_output_text(payload.status, sanitize);
+          if (!payload.text.empty())
+            err << ": " << terminal_output_text(payload.text, sanitize);
+          err << '\n';
+          if ((payload.error_code == "permission_denied" || payload.error_category == "permission_denied") && !payload.error_details.empty())
+            err << terminal_output_text(payload.error_details, sanitize) << '\n';
+        }
+        else if constexpr (std::same_as<Event, ava::event::ErrorEvent>)
+        {
+          auto const& payload = concrete.payload;
+          err << terminal_output_text(payload.error_details.empty() ? payload.error_message : payload.error_details, sanitize) << '\n';
+        }
+        else
+        {
+          static_assert(std::same_as<Event, ava::event::SessionStartEvent> || std::same_as<Event, ava::event::UserMessageEvent> ||
+                        std::same_as<Event, ava::event::AssistantMessageEvent> || std::same_as<Event, ava::event::MessageUpdateEvent> ||
+                        std::same_as<Event, ava::event::MessageEndEvent> || std::same_as<Event, ava::event::ReasoningStartEvent> ||
+                        std::same_as<Event, ava::event::ReasoningDeltaEvent> || std::same_as<Event, ava::event::ReasoningEndEvent> ||
+                        std::same_as<Event, ava::event::ProviderEvent> || std::same_as<Event, ava::event::ToolProgressEvent> ||
+                        std::same_as<Event, ava::event::CompactionStartEvent> || std::same_as<Event, ava::event::CompactionEndEvent> ||
+                        std::same_as<Event, ava::event::RetryEvent> || std::same_as<Event, ava::event::RetryTickEvent> ||
+                        std::same_as<Event, ava::event::CancellationEvent> || std::same_as<Event, ava::event::CompletionEvent>);
+        }
+      },
+      event.payload());
 }
 
 runtime::RunOptions print_runtime_options(runtime::RunOptions options)
@@ -147,7 +165,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session
   if (options.output_format == PrintOutputFormat::Json)
   {
     event_bus.subscribe([&out, &emitted_error](EventEnvelope const& envelope) {
-      if (envelope.name == to_string(runtime::EventType::Error))
+      if (envelope.name == ava::event::to_string(ava::event::RuntimeEventType::Error))
         emitted_error = true;
       out << serialize_event_envelope_jsonl(envelope);
       if (!out)
@@ -160,8 +178,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session
   }
   else
   {
-    runtime_options.event_sink = [&err, &emitted_error, sanitize = options.sanitize_terminal_diagnostics](runtime::Event const& event) {
-      if (event.type == runtime::EventType::Error)
+    runtime_options.event_sink = [&err, &emitted_error, sanitize = options.sanitize_terminal_diagnostics](ava::event::RuntimeEvent const& event) {
+      if (event.type() == ava::event::RuntimeEventType::Error)
         emitted_error = true;
       write_text_event_diagnostic(event, err, sanitize);
       if (!err)

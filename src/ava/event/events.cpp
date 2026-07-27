@@ -484,6 +484,23 @@ EventEnvelope to_event_envelope(RuntimeEvent const& event, EventEnvelopeContext 
                        .payload_type = std::string(to_string(payload_type_for_event(type)))};
 }
 
+ava::core::VoidResult emit_event(RuntimeEventSink const& sink, RuntimeEvent const& event)
+{
+  if (!sink)
+    return {};
+  return sink(event);
+}
+
+RuntimeEventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context, RuntimeEventSink next)
+{
+  return [&bus, context = std::move(context), next = std::move(next)](RuntimeEvent const& event) -> ava::core::VoidResult {
+    auto envelope = to_event_envelope(event, context);
+    if (auto published = bus.publish(envelope); !published)
+      return std::unexpected(std::move(published.error()));
+    return emit_event(next, event);
+  };
+}
+
 std::string serialize_event_envelope_json(EventEnvelope const& envelope)
 {
   std::string out = "{\"schema_version\":" + std::to_string(envelope.schema_version);

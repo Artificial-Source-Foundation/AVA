@@ -61,7 +61,7 @@ runtime::Event command_event(runtime::Session const& session, runtime::EventType
   return event;
 }
 
-ava::core::VoidResult emit_tool_event(runtime::Session const& session, runtime::EventSink const& sink, ava::agent::ToolTimelineEntry const& entry)
+ava::core::VoidResult emit_tool_event(runtime::Session const& session, ava::event::RuntimeEventSink const& sink, ava::agent::ToolTimelineEntry const& entry)
 {
   auto event = command_event(session, entry.status == ava::agent::ToolTimelineStatus::Running ? runtime::EventType::ToolStart : runtime::EventType::ToolResult);
   event.call_id = entry.call_id;
@@ -172,7 +172,7 @@ ava::agent::ToolTimelineEntry command_result_entry(std::string const& call_id, s
   };
 }
 
-ava::core::VoidResult record_tool_event(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result,
+ava::core::VoidResult record_tool_event(runtime::Session const& session, ava::event::RuntimeEventSink const& sink, CommandResult& result,
                                         ava::agent::ToolTimelineEntry entry)
 {
   if (auto emitted = emit_tool_event(session, sink, entry); !emitted)
@@ -238,8 +238,8 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
       .current_dir = session.current_dir()};
 }
 
-ava::core::VoidResult record_tool_start(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result, std::string const& call_id,
-                                        std::string name, std::string argument_summary)
+ava::core::VoidResult record_tool_start(runtime::Session const& session, ava::event::RuntimeEventSink const& sink, CommandResult& result,
+                                        std::string const& call_id, std::string name, std::string argument_summary)
 {
   return record_tool_event(
       session, sink, result,
@@ -247,9 +247,9 @@ ava::core::VoidResult record_tool_start(runtime::Session const& session, runtime
           .status = ava::agent::ToolTimelineStatus::Running, .call_id = call_id, .name = std::move(name), .argument_summary = std::move(argument_summary)});
 }
 
-ava::core::VoidResult record_tool_result(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result, std::string const& call_id,
-                                         std::string name, ava::agent::ToolTimelineStatus status, std::string result_summary, std::string result_content,
-                                         std::vector<std::string> permission_request_ids)
+ava::core::VoidResult record_tool_result(runtime::Session const& session, ava::event::RuntimeEventSink const& sink, CommandResult& result,
+                                         std::string const& call_id, std::string name, ava::agent::ToolTimelineStatus status, std::string result_summary,
+                                         std::string result_content, std::vector<std::string> permission_request_ids)
 {
   auto entry = command_result_entry(call_id, std::move(name), status, std::move(result_summary), std::move(result_content));
   add_permission_request_ids(entry, permission_request_ids);

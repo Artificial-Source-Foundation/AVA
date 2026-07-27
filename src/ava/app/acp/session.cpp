@@ -598,7 +598,7 @@ RequestResult AcpSessionHost::prompt(AcpPromptContent content, std::stop_token s
   run_options.image_attachments = std::move(image_attachments);
   run_options.expand_prompt_file_references = false;
   RuntimeSessionUpdateMapper mapper(RuntimeSessionUpdateMapperOptions{.workspace_root = options_.launch_root, .message_id = request_id});
-  run_options.event_sink = [this, &mapper](runtime::Event const& event) -> ava::core::VoidResult {
+  run_options.event_sink = [this, &mapper](ava::event::RuntimeEvent const& event) -> ava::core::VoidResult {
     auto updates = mapper.map_coalesced_and_encode(event);
     if (!updates)
       return std::unexpected(std::move(updates.error()));

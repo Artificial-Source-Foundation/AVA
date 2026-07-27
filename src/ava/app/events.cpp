@@ -343,26 +343,18 @@ std::string serialize_event_jsonl(runtime::Event const& event)
   return serialize_event_json(event) + '\n';
 }
 
-ava::core::VoidResult emit_event(runtime::EventSink const& sink, runtime::Event const& event)
+ava::core::VoidResult emit_event(ava::event::RuntimeEventSink const& sink, runtime::Event const& event)
 {
   if (!sink)
     return {};
-  return sink(event);
+  auto typed_event = to_runtime_event(event);
+  return ava::event::emit_event(sink, typed_event);
 }
 
 EventEnvelope to_event_envelope(runtime::Event const& event, EventEnvelopeContext const& context)
 {
-  return ava::event::to_event_envelope(to_runtime_event(event), context);
-}
-
-runtime::EventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context, runtime::EventSink legacy_sink)
-{
-  return [&bus, context = std::move(context), legacy_sink = std::move(legacy_sink)](runtime::Event const& event) -> ava::core::VoidResult {
-    auto envelope = to_event_envelope(event, context);
-    if (auto published = bus.publish(envelope); !published)
-      return std::unexpected(std::move(published.error()));
-    return emit_event(legacy_sink, event);
-  };
+  auto typed_event = to_runtime_event(event);
+  return ava::event::to_event_envelope(typed_event, context);
 }
 
 }  // namespace ava::app

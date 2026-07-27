@@ -51,7 +51,7 @@ bool RuntimePromptCoordinator::render()
   return renderer_.render();
 }
 
-void RuntimePromptCoordinator::set_audit_sink(ava::app::runtime::EventSink sink)
+void RuntimePromptCoordinator::set_audit_sink(ava::event::RuntimeEventSink sink)
 {
   std::lock_guard<std::mutex> lock(prompt_audit_mutex_);
   prompt_audit_sink_ = std::move(sink);
@@ -62,7 +62,7 @@ void RuntimePromptCoordinator::emit_prompt_audit(std::string status, std::string
 {
   auto& prompt_audit_mutex = prompt_audit_mutex_;
   auto& prompt_audit_sink = prompt_audit_sink_;
-  ava::app::runtime::EventSink sink;
+  ava::event::RuntimeEventSink sink;
   {
     std::lock_guard<std::mutex> lock(prompt_audit_mutex);
     sink = prompt_audit_sink;
@@ -78,7 +78,7 @@ void RuntimePromptCoordinator::emit_prompt_audit(std::string status, std::string
   event.error_details = std::move(resolution_reason);
   if (!permission_request_id.empty())
     event.permission_request_ids.push_back(std::move(permission_request_id));
-  static_cast<void>(sink(event));
+  static_cast<void>(ava::app::emit_event(sink, event));
 }
 
 ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptCoordinator::resolve_permission_prompt(

@@ -872,7 +872,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   // runs bypass ambient plugin event hooks entirely.
   auto append_route = guard.append_route();
   auto append_batch_route = guard.append_batch_route();
-  runtime::EventSink event_sink = options.event_sink;
+  ava::event::RuntimeEventSink event_sink = options.event_sink;
   if (!options.isolate_ambient_extensions)
   {
     auto plugin_observer_options = plugin_event_observer_options(session, options.permission_resolver, options.session_mutex);

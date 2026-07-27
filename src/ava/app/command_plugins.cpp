@@ -269,7 +269,7 @@ std::string format_dynamic_resource_text(ava::plugin::PluginManifest const& mani
   return output.str();
 }
 
-ava::core::VoidResult record_dynamic_resource_result(runtime::Session const& session, runtime::EventSink const& sink, CommandResult& result,
+ava::core::VoidResult record_dynamic_resource_result(runtime::Session const& session, ava::event::RuntimeEventSink const& sink, CommandResult& result,
                                                      std::string const& call_id, ava::agent::ToolTimelineStatus status, std::string result_summary,
                                                      std::string result_content, ava::tools::ToolContext const& context)
 {

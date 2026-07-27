@@ -59,6 +59,9 @@ class EventBus
 [[nodiscard]] std::string serialize_payload_json(ErrorPayload const& payload);
 [[nodiscard]] std::string serialize_payload_json(CompletionPayload const& payload);
 [[nodiscard]] EventEnvelope to_event_envelope(RuntimeEvent const& event, EventEnvelopeContext const& context = {});
+[[nodiscard]] ava::core::VoidResult emit_event(RuntimeEventSink const& sink, RuntimeEvent const& event);
+// The returned sink captures `bus` by reference and must not outlive it.
+[[nodiscard]] RuntimeEventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context = {}, RuntimeEventSink next = nullptr);
 [[nodiscard]] std::string serialize_event_envelope_json(EventEnvelope const& envelope);
 [[nodiscard]] std::string serialize_event_envelope_jsonl(EventEnvelope const& envelope);
 

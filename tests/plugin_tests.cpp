@@ -1554,6 +1554,7 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
 
   std::vector<ava::permissions::PermissionPrompt> prompts;
   bool forwarded = false;
+  bool hook_observed_before_forward = false;
   auto sink = ava::app::make_plugin_event_observer_sink(
       ava::app::PluginEventObserverOptions{.workspace_dir = workspace,
                                            .plugin_global_plugins_dir = root / "global-plugins",
@@ -1569,8 +1570,9 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
                                            .provider_id = "openai",
                                            .model_id = "gpt-test",
                                            .current_dir = workspace},
-      [&forwarded](ava::app::runtime::Event const&) -> ava::core::VoidResult {
+      [&forwarded, &hook_observed_before_forward, &plugin_dir](ava::event::RuntimeEvent const&) -> ava::core::VoidResult {
         forwarded = true;
+        hook_observed_before_forward = std::filesystem::exists(plugin_dir / "event-request.txt");
         return {};
       });
 
@@ -1580,16 +1582,17 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
   event.tool_name = "demo";
   event.status = "success";
   event.text = "ok";
-  auto observed = sink(event);
+  auto observed = sink(ava::app::to_runtime_event(event));
   expect(observed.has_value(), "plugin event observer sink forwards runtime event successfully");
-  expect(forwarded, "plugin event observer forwards to the next runtime event sink");
+  expect(forwarded && hook_observed_before_forward, "plugin event observer runs matching hooks before forwarding to the next typed sink");
   expect(prompts.size() == 2 && prompts[0].operation == ava::permissions::Operation::PluginExecute &&
              prompts[1].operation == ava::permissions::Operation::PluginEventObserve && prompts[1].command == "com.example.events:tool.result",
          "plugin event hooks require plugin.execute and plugin.event.observe permission approval");
   auto const request = read_text(plugin_dir / "event-request.txt");
   expect(request.find("\"type\":\"event.observe\"") != std::string::npos && request.find("\"event\":\"tool_result\"") != std::string::npos &&
-             request.find("\"tool\":\"demo\"") != std::string::npos,
-         "enabled plugin event hook observes matching runtime event aliases");
+             request.find("\"payload\":{\"text\":\"ok\",\"call_id\":\"call_hook\",\"tool\":\"demo\",\"status\":\"success\"}") != std::string::npos &&
+             request.find("\"context\":{\"call_id\":\"call_hook\"") != std::string::npos,
+         "enabled plugin event hook observes the exact typed name, payload, and call id");
 }
 
 void test_plugin_event_hook_failures_report_to_opt_in_sink()
@@ -1649,7 +1652,7 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
           .provider_id = "openai",
           .model_id = "gpt-test",
           .current_dir = workspace},
-      [&forwarded, &fail_downstream](ava::app::runtime::Event const&) -> ava::core::VoidResult {
+      [&forwarded, &fail_downstream](ava::event::RuntimeEvent const&) -> ava::core::VoidResult {
         forwarded = true;
         if (fail_downstream)
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "stable downstream event sink failure"));
@@ -1662,7 +1665,7 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
   event.tool_name = "demo";
   event.status = "success";
   event.text = "ok";
-  auto observed = sink(event);
+  auto observed = sink(ava::app::to_runtime_event(event));
   expect(observed.has_value(), "plugin event observer keeps hook failures best-effort");
   expect(forwarded, "plugin event observer forwards runtime events after hook failures");
   expect(failures.size() == 1, "plugin event observer reports hook protocol failures to opt-in sink");
@@ -1677,7 +1680,7 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
 
   fail_downstream = true;
   forwarded = false;
-  auto downstream_failure = sink(event);
+  auto downstream_failure = sink(ava::app::to_runtime_event(event));
   expect(!downstream_failure && forwarded && downstream_failure.error().category() == ava::core::ErrorCategory::Io &&
              downstream_failure.error().message() == "stable downstream event sink failure",
          "plugin event observer remains best-effort for hook failures but propagates the downstream sink failure exactly");

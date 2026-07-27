@@ -82,9 +82,9 @@ class RuntimeSessionUpdateMapper
  public:
   explicit RuntimeSessionUpdateMapper(RuntimeSessionUpdateMapperOptions options);
 
-  [[nodiscard]] ava::core::Result<std::optional<SessionUpdate>> map(runtime::Event const& event);
-  [[nodiscard]] ava::core::Result<std::optional<std::string>> map_and_encode(runtime::Event const& event);
-  [[nodiscard]] ava::core::Result<std::vector<std::string>> map_coalesced_and_encode(runtime::Event const& event);
+  [[nodiscard]] ava::core::Result<std::optional<SessionUpdate>> map(ava::event::RuntimeEvent const& event);
+  [[nodiscard]] ava::core::Result<std::optional<std::string>> map_and_encode(ava::event::RuntimeEvent const& event);
+  [[nodiscard]] ava::core::Result<std::vector<std::string>> map_coalesced_and_encode(ava::event::RuntimeEvent const& event);
   [[nodiscard]] ava::core::Result<std::vector<std::string>> flush_coalesced();
 
   [[nodiscard]] bool streamed_agent_text() const noexcept;

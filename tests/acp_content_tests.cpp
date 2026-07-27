@@ -74,6 +74,7 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
   using ava::app::runtime::EventType;
   auto root = std::filesystem::path("/workspace");
   RuntimeSessionUpdateMapper mapper(RuntimeSessionUpdateMapperOptions{.workspace_root = root, .message_id = "message_1"});
+  auto typed = [](runtime::Event const& event) { return ava::app::to_runtime_event(event); };
   runtime::Event text;
   text.type = runtime::EventType::MessageUpdate;
   text.text = "hello";
@@ -102,12 +103,12 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
   result.tool_result_json = R"({"ok":true})";
   result.status = "success";
   result.changed_paths = {"src/a.cpp"};
-  auto text_update = mapper.map_and_encode(text);
-  auto duplicate = mapper.map_and_encode(final);
-  auto thought_update = mapper.map_and_encode(thought);
-  auto start_update = mapper.map_and_encode(start);
-  auto progress_update = mapper.map_and_encode(progress);
-  auto result_update = mapper.map_and_encode(result);
+  auto text_update = mapper.map_and_encode(typed(text));
+  auto duplicate = mapper.map_and_encode(typed(final));
+  auto thought_update = mapper.map_and_encode(typed(thought));
+  auto start_update = mapper.map_and_encode(typed(start));
+  auto progress_update = mapper.map_and_encode(typed(progress));
+  auto result_update = mapper.map_and_encode(typed(result));
   expect(text_update && *text_update && (*text_update)->find("agent_message_chunk") != std::string::npos && duplicate && !*duplicate && thought_update &&
              *thought_update && (*thought_update)->find("agent_thought_chunk") != std::string::npos && start_update && *start_update &&
              (*start_update)->find(R"("sessionUpdate":"tool_call")") != std::string::npos && (*start_update)->find(R"("kind":"edit")") != std::string::npos &&
@@ -129,9 +130,9 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
   bounded_three.text = "3";
   bounded_three.call_id = "call";
   bounded_three.tool_name = "bash";
-  auto one = bounded.map_and_encode(bounded_one);
-  auto two = bounded.map_and_encode(bounded_two);
-  auto saturated = bounded.map_and_encode(bounded_three);
+  auto one = bounded.map_and_encode(typed(bounded_one));
+  auto two = bounded.map_and_encode(typed(bounded_two));
+  auto saturated = bounded.map_and_encode(typed(bounded_three));
   expect(one && *one && two && *two && !saturated && saturated.error().message().find("budget") != std::string::npos,
          "ACP mapper fails closed when the per-prompt update budget saturates");
 
@@ -144,7 +145,7 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
     runtime::Event delta;
     delta.type = runtime::EventType::MessageUpdate;
     delta.text = "x";
-    auto batch = coalesced.map_coalesced_and_encode(delta);
+    auto batch = coalesced.map_coalesced_and_encode(typed(delta));
     if (!batch)
       coalesce_failed = true;
     else
@@ -152,7 +153,7 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
   }
   runtime::Event done;
   done.type = runtime::EventType::Done;
-  auto flushed = coalesced.map_coalesced_and_encode(done);
+  auto flushed = coalesced.map_coalesced_and_encode(typed(done));
   if (flushed)
     coalesced_updates.insert(coalesced_updates.end(), std::make_move_iterator(flushed->begin()), std::make_move_iterator(flushed->end()));
   std::size_t coalesced_text_bytes = 0;
@@ -170,7 +171,7 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
   runtime::Event unicode_delta;
   unicode_delta.type = runtime::EventType::MessageUpdate;
   unicode_delta.text = std::string(kMaxStreamContentChunkBytes - 1, 'a') + "€x";
-  auto unicode_batch = unicode_mapper.map_coalesced_and_encode(unicode_delta);
+  auto unicode_batch = unicode_mapper.map_coalesced_and_encode(typed(unicode_delta));
   auto unicode_flush = unicode_mapper.flush_coalesced();
   std::string reconstructed;
   std::size_t unicode_updates = 0;

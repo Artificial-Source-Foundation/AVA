@@ -4,10 +4,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <concepts>
 #include <cstdint>
 #include <limits>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <nlohmann/json.hpp>
 
 namespace ava::app::acp {
@@ -90,7 +93,7 @@ std::string title_for_tool(std::string_view tool_name)
   return title.empty() ? std::string("Tool call") : title;
 }
 
-std::vector<AcpToolCallLocation> event_locations(runtime::Event const& event, std::filesystem::path const& root)
+std::vector<AcpToolCallLocation> event_locations(ava::event::ToolPayload const& event, std::filesystem::path const& root)
 {
   std::vector<AcpToolCallLocation> locations;
   auto add = [&](std::string_view value, std::optional<std::size_t> line = std::nullopt) {
@@ -110,9 +113,9 @@ std::vector<AcpToolCallLocation> event_locations(runtime::Event const& event, st
     add(path);
   }
 
-  if (locations.empty() && !event.tool_arguments_json.empty())
+  if (locations.empty() && !event.args_json.empty())
   {
-    auto arguments = Json::parse(event.tool_arguments_json, nullptr, false, true);
+    auto arguments = Json::parse(event.args_json, nullptr, false, true);
     if (arguments.is_object())
     {
       auto path = arguments.find("path");
@@ -173,87 +176,96 @@ RuntimeSessionUpdateMapper::RuntimeSessionUpdateMapper(RuntimeSessionUpdateMappe
   options_.max_encoded_bytes = std::max<std::size_t>(1, options_.max_encoded_bytes);
 }
 
-ava::core::Result<std::optional<SessionUpdate>> RuntimeSessionUpdateMapper::map(runtime::Event const& event)
+ava::core::Result<std::optional<SessionUpdate>> RuntimeSessionUpdateMapper::map(ava::event::RuntimeEvent const& event)
 {
-  switch (event.type)
-  {
-    case runtime::EventType::MessageUpdate:
-      if (event.text.empty())
-        return std::optional<SessionUpdate>{};
-      streamed_agent_text_ = true;
-      return std::optional<SessionUpdate>(
-          AcpContentChunkUpdate{.kind = AcpContentChunkKind::AgentMessage,
-                                .content = AcpTextContent{.text = event.text},
-                                .message_id = options_.message_id.empty() ? std::nullopt : std::optional<std::string>(options_.message_id)});
-    case runtime::EventType::AssistantMessage:
-      if (event.text.empty() || streamed_agent_text_)
-        return std::optional<SessionUpdate>{};
-      streamed_agent_text_ = true;
-      return std::optional<SessionUpdate>(
-          AcpContentChunkUpdate{.kind = AcpContentChunkKind::AgentMessage,
-                                .content = AcpTextContent{.text = event.text},
-                                .message_id = options_.message_id.empty() ? std::nullopt : std::optional<std::string>(options_.message_id)});
-    case runtime::EventType::ReasoningStart:
-    case runtime::EventType::ReasoningDelta:
-    case runtime::EventType::ReasoningEnd:
-      if (event.text.empty() || event.reasoning_redacted)
-        return std::optional<SessionUpdate>{};
-      return std::optional<SessionUpdate>(
-          AcpContentChunkUpdate{.kind = AcpContentChunkKind::AgentThought,
-                                .content = AcpTextContent{.text = event.text},
-                                .message_id = options_.message_id.empty() ? std::nullopt : std::optional<std::string>(options_.message_id)});
-    case runtime::EventType::ToolStart: {
-      if (event.call_id.empty() || event.call_id.size() > kMaxStringBytes || has_control_byte(event.call_id))
-        return std::optional<SessionUpdate>{};
-      auto locations = event_locations(event, options_.workspace_root);
-      return std::optional<SessionUpdate>(
-          AcpToolCallUpdate{.initial = true,
-                            .tool_call_id = event.call_id,
-                            .title = title_for_tool(event.tool_name),
-                            .kind = acp_tool_kind(event.tool_name),
-                            .status = "pending",
-                            .content = text_tool_content(event.text),
-                            .locations = locations.empty() ? std::nullopt : std::optional<std::vector<AcpToolCallLocation>>(std::move(locations))});
-    }
-    case runtime::EventType::ToolProgress:
-      if (event.call_id.empty() || event.call_id.size() > kMaxStringBytes || has_control_byte(event.call_id))
-        return std::optional<SessionUpdate>{};
-      return std::optional<SessionUpdate>(AcpToolCallUpdate{.initial = false,
-                                                            .tool_call_id = event.call_id,
-                                                            .title = title_for_tool(event.tool_name),
-                                                            .kind = acp_tool_kind(event.tool_name),
-                                                            .status = "in_progress",
-                                                            .content = text_tool_content(event.text),
-                                                            .locations = std::nullopt});
-    case runtime::EventType::ToolResult: {
-      if (event.call_id.empty() || event.call_id.size() > kMaxStringBytes || has_control_byte(event.call_id))
-        return std::optional<SessionUpdate>{};
-      auto locations = event_locations(event, options_.workspace_root);
-      auto const success = event.status == "success";
-      auto const content = !event.tool_result_json.empty() ? std::string_view(event.tool_result_json) : std::string_view(event.text);
-      return std::optional<SessionUpdate>(
-          AcpToolCallUpdate{.initial = false,
-                            .tool_call_id = event.call_id,
-                            .title = title_for_tool(event.tool_name),
-                            .kind = acp_tool_kind(event.tool_name),
-                            .status = success ? std::optional<std::string>("completed") : std::optional<std::string>("failed"),
-                            .content = text_tool_content(content),
-                            .locations = locations.empty() ? std::nullopt : std::optional<std::vector<AcpToolCallLocation>>(std::move(locations))});
-    }
-    case runtime::EventType::SessionStart:
-    case runtime::EventType::UserMessage:
-    case runtime::EventType::MessageEnd:
-    case runtime::EventType::ProviderEvent:
-    case runtime::EventType::CompactionStart:
-    case runtime::EventType::CompactionEnd:
-    case runtime::EventType::Retry:
-    case runtime::EventType::RetryTick:
-    case runtime::EventType::Canceled:
-    case runtime::EventType::Error:
-    case runtime::EventType::Done:
-      return std::optional<SessionUpdate>{};
-  }
-  return std::optional<SessionUpdate>{};
+  return std::visit(
+      [&](auto const& concrete) -> ava::core::Result<std::optional<SessionUpdate>> {
+        using Event = std::remove_cvref_t<decltype(concrete)>;
+        auto const& payload = concrete.payload;
+        if constexpr (std::same_as<Event, ava::event::MessageUpdateEvent>)
+        {
+          if (payload.text.empty())
+            return std::optional<SessionUpdate>{};
+          streamed_agent_text_ = true;
+          return std::optional<SessionUpdate>(
+              AcpContentChunkUpdate{.kind = AcpContentChunkKind::AgentMessage,
+                                    .content = AcpTextContent{.text = payload.text},
+                                    .message_id = options_.message_id.empty() ? std::nullopt : std::optional<std::string>(options_.message_id)});
+        }
+        else if constexpr (std::same_as<Event, ava::event::AssistantMessageEvent>)
+        {
+          if (payload.text.empty() || streamed_agent_text_)
+            return std::optional<SessionUpdate>{};
+          streamed_agent_text_ = true;
+          return std::optional<SessionUpdate>(
+              AcpContentChunkUpdate{.kind = AcpContentChunkKind::AgentMessage,
+                                    .content = AcpTextContent{.text = payload.text},
+                                    .message_id = options_.message_id.empty() ? std::nullopt : std::optional<std::string>(options_.message_id)});
+        }
+        else if constexpr (std::same_as<Event, ava::event::ReasoningStartEvent> || std::same_as<Event, ava::event::ReasoningDeltaEvent> ||
+                           std::same_as<Event, ava::event::ReasoningEndEvent>)
+        {
+          if (payload.text.empty() || payload.reasoning_redacted)
+            return std::optional<SessionUpdate>{};
+          return std::optional<SessionUpdate>(
+              AcpContentChunkUpdate{.kind = AcpContentChunkKind::AgentThought,
+                                    .content = AcpTextContent{.text = payload.text},
+                                    .message_id = options_.message_id.empty() ? std::nullopt : std::optional<std::string>(options_.message_id)});
+        }
+        else if constexpr (std::same_as<Event, ava::event::ToolStartEvent>)
+        {
+          if (payload.call_id.empty() || payload.call_id.size() > kMaxStringBytes || has_control_byte(payload.call_id))
+            return std::optional<SessionUpdate>{};
+          auto locations = event_locations(payload, options_.workspace_root);
+          return std::optional<SessionUpdate>(
+              AcpToolCallUpdate{.initial = true,
+                                .tool_call_id = payload.call_id,
+                                .title = title_for_tool(payload.tool),
+                                .kind = acp_tool_kind(payload.tool),
+                                .status = "pending",
+                                .content = text_tool_content(payload.text),
+                                .locations = locations.empty() ? std::nullopt : std::optional<std::vector<AcpToolCallLocation>>(std::move(locations))});
+        }
+        else if constexpr (std::same_as<Event, ava::event::ToolProgressEvent>)
+        {
+          if (payload.call_id.empty() || payload.call_id.size() > kMaxStringBytes || has_control_byte(payload.call_id))
+            return std::optional<SessionUpdate>{};
+          return std::optional<SessionUpdate>(AcpToolCallUpdate{.initial = false,
+                                                                .tool_call_id = payload.call_id,
+                                                                .title = title_for_tool(payload.tool),
+                                                                .kind = acp_tool_kind(payload.tool),
+                                                                .status = "in_progress",
+                                                                .content = text_tool_content(payload.text),
+                                                                .locations = std::nullopt});
+        }
+        else if constexpr (std::same_as<Event, ava::event::ToolResultEvent>)
+        {
+          if (payload.call_id.empty() || payload.call_id.size() > kMaxStringBytes || has_control_byte(payload.call_id))
+            return std::optional<SessionUpdate>{};
+          auto locations = event_locations(payload, options_.workspace_root);
+          auto const success = payload.status == "success";
+          auto const content = !payload.result_json.empty() ? std::string_view(payload.result_json) : std::string_view(payload.text);
+          return std::optional<SessionUpdate>(
+              AcpToolCallUpdate{.initial = false,
+                                .tool_call_id = payload.call_id,
+                                .title = title_for_tool(payload.tool),
+                                .kind = acp_tool_kind(payload.tool),
+                                .status = success ? std::optional<std::string>("completed") : std::optional<std::string>("failed"),
+                                .content = text_tool_content(content),
+                                .locations = locations.empty() ? std::nullopt : std::optional<std::vector<AcpToolCallLocation>>(std::move(locations))});
+        }
+        else
+        {
+          static_assert(std::same_as<Event, ava::event::SessionStartEvent> || std::same_as<Event, ava::event::UserMessageEvent> ||
+                        std::same_as<Event, ava::event::MessageEndEvent> || std::same_as<Event, ava::event::ProviderEvent> ||
+                        std::same_as<Event, ava::event::CompactionStartEvent> || std::same_as<Event, ava::event::CompactionEndEvent> ||
+                        std::same_as<Event, ava::event::RetryEvent> || std::same_as<Event, ava::event::RetryTickEvent> ||
+                        std::same_as<Event, ava::event::CancellationEvent> || std::same_as<Event, ava::event::ErrorEvent> ||
+                        std::same_as<Event, ava::event::CompletionEvent>);
+          return std::optional<SessionUpdate>{};
+        }
+      },
+      event.payload());
 }
 
 ava::core::Result<std::optional<std::string>> RuntimeSessionUpdateMapper::account_and_encode(std::optional<SessionUpdate> update)
@@ -275,7 +287,7 @@ ava::core::Result<std::optional<std::string>> RuntimeSessionUpdateMapper::accoun
   return std::optional<std::string>(std::move(*encoded));
 }
 
-ava::core::Result<std::optional<std::string>> RuntimeSessionUpdateMapper::map_and_encode(runtime::Event const& event)
+ava::core::Result<std::optional<std::string>> RuntimeSessionUpdateMapper::map_and_encode(ava::event::RuntimeEvent const& event)
 {
   auto update = map(event);
   if (!update)
@@ -303,7 +315,7 @@ ava::core::Result<std::vector<std::string>> RuntimeSessionUpdateMapper::flush_co
   return encoded;
 }
 
-ava::core::Result<std::vector<std::string>> RuntimeSessionUpdateMapper::map_coalesced_and_encode(runtime::Event const& event)
+ava::core::Result<std::vector<std::string>> RuntimeSessionUpdateMapper::map_coalesced_and_encode(ava::event::RuntimeEvent const& event)
 {
   std::vector<std::string> encoded;
   auto append_flushed = [&]() -> ava::core::VoidResult {

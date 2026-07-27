@@ -46,6 +46,6 @@ struct PluginEventObserverOptions
 
 // Event hooks are observational and best-effort: hook launch, protocol, timeout,
 // and shutdown failures are intentionally not surfaced to the originating event.
-[[nodiscard]] runtime::EventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, runtime::EventSink next = nullptr);
+[[nodiscard]] ava::event::RuntimeEventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, ava::event::RuntimeEventSink next = nullptr);
 
 }  // namespace ava::app

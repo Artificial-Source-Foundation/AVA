@@ -654,8 +654,8 @@ void test_runtime_trigger_is_after_completion_and_excludes_synthetic_turns()
   bool title_absent_at_done = false;
   ava::app::runtime::RunOptions options;
   options.access_token = "fake-token";
-  options.event_sink = [&](ava::app::runtime::Event const& event) -> ava::core::VoidResult {
-    if (event.type == ava::app::runtime::EventType::Done)
+  options.event_sink = [&](ava::event::RuntimeEvent const& event) -> ava::core::VoidResult {
+    if (event.type() == ava::event::RuntimeEventType::Done)
     {
       auto authority = session->read_authority();
       auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(authority.error()));

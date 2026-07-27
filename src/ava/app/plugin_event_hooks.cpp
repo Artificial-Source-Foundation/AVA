@@ -14,10 +14,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <concepts>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace ava::app {
@@ -60,19 +63,33 @@ std::string observation_key(ava::plugin::PluginManifest const& manifest, std::st
   return manifest.id + "\n" + std::string(event);
 }
 
+std::string_view event_call_id(ava::event::RuntimeEvent const& event)
+{
+  return std::visit(
+      [](auto const& concrete) -> std::string_view {
+        using Event = std::remove_cvref_t<decltype(concrete)>;
+        if constexpr (std::same_as<Event, ava::event::ProviderEvent> || std::same_as<Event, ava::event::ToolStartEvent> ||
+                      std::same_as<Event, ava::event::ToolProgressEvent> || std::same_as<Event, ava::event::ToolResultEvent>)
+          return concrete.payload.call_id;
+        return {};
+      },
+      event.payload());
+}
+
 class PluginEventObserverState final
 {
  public:
   explicit PluginEventObserverState(PluginEventObserverOptions options) : options_(std::move(options)) { }
 
-  void observe(runtime::Event const& event)
+  void observe(ava::event::RuntimeEvent const& event)
   {
     ensure_loaded();
     if (hooks_.empty())
       return;
 
-    auto const event_name = to_string(event.type);
-    auto const payload = to_event_envelope(event).payload_json;
+    auto const event_name = ava::event::to_string(event.type());
+    auto const payload = ava::event::to_event_envelope(event).payload_json;
+    auto const call_id = std::string(event_call_id(event));
     for (auto const& binding : hooks_)
     {
       if (!event_matches(binding.hook.event, event_name))
@@ -92,8 +109,8 @@ class PluginEventObserverState final
       }
       auto const hook_label = binding.manifest.id + ":" + binding.hook.event;
       auto proxy_handler = ava::plugin::make_core_service_proxy_handler(permission_context("plugin_event_observe"), binding.manifest, "event_hook",
-                                                                        binding.hook.event, hook_label, event.call_id);
-      auto observed = (*process)->observe_event(event_name, payload, event.call_id, options_.cancel_requested, std::move(proxy_handler));
+                                                                        binding.hook.event, hook_label, call_id);
+      auto observed = (*process)->observe_event(event_name, payload, call_id, options_.cancel_requested, std::move(proxy_handler));
       if (!observed)
         notify_failure(binding, observed.error());
       auto shutdown = (*process)->shutdown();
@@ -243,12 +260,12 @@ PluginEventObserverOptions plugin_event_observer_options(runtime::Session& sessi
       .current_dir = session.current_dir()};
 }
 
-runtime::EventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, runtime::EventSink next)
+ava::event::RuntimeEventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, ava::event::RuntimeEventSink next)
 {
   auto state = std::make_shared<PluginEventObserverState>(std::move(options));
-  return [state = std::move(state), next = std::move(next)](runtime::Event const& event) -> ava::core::VoidResult {
+  return [state = std::move(state), next = std::move(next)](ava::event::RuntimeEvent const& event) -> ava::core::VoidResult {
     state->observe(event);
-    return emit_event(next, event);
+    return ava::event::emit_event(next, event);
   };
 }
 

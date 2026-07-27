@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/app_runtime_test_declarations.h"
 #include "tests/support/app_runtime_support.h"
+#include "tests/support/runtime_event_test_support.h"
 #include "tests/support/test_harness.h"
 #include "ava/app/EventEnvelope.h"
 #include "ava/app/commands.h"
@@ -31,9 +32,9 @@ using namespace ava::tests;
 
 void app_command_dispatcher_tool_part(ava::app::runtime::Session* session, std::filesystem::path const& workspace)
 {
-  std::vector<ava::app::runtime::Event> command_tool_events;
+  std::vector<ava::event::RuntimeEvent> command_tool_events;
   auto glob = ava::app::run_command(
-      *session, ava::app::CommandRequest{.command = "/glob **/*.cpp", .event_sink = [&command_tool_events](ava::app::runtime::Event const& event) {
+      *session, ava::app::CommandRequest{.command = "/glob **/*.cpp", .event_sink = [&command_tool_events](ava::event::RuntimeEvent const& event) {
                                            command_tool_events.push_back(event);
                                            return ava::core::VoidResult{};
                                          }});
@@ -43,9 +44,9 @@ void app_command_dispatcher_tool_part(ava::app::runtime::Session* session, std::
              glob->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success &&
              glob->tool_timeline[1].structured_result_json.find("\"status\":\"success\"") != std::string::npos && glob->tool_timeline[1].total_matches,
          "command dispatcher records running and completed timeline entries with structured result metadata");
-  expect(command_tool_events.size() == 2 && command_tool_events[1].type == ava::app::runtime::EventType::ToolResult &&
-             !command_tool_events[1].tool_structured_result_json.empty() &&
-             command_tool_events[1].tool_structured_result_json.find("\"tool\":\"glob\"") != std::string::npos && command_tool_events[1].total_matches > 0,
+  auto const* glob_result = command_tool_events.size() == 2 ? ava::tests::runtime_event_as<ava::event::ToolResultEvent>(command_tool_events[1]) : nullptr;
+  expect(glob_result && !glob_result->payload.structured_result_json.empty() &&
+             glob_result->payload.structured_result_json.find("\"tool\":\"glob\"") != std::string::npos && glob_result->payload.total_matches > 0,
          "command dispatcher emits structured tool result runtime events");
 
   auto const fallback_timeline = ava::app::tool_timeline_for_tui({
@@ -108,23 +109,24 @@ void app_command_dispatcher_tool_part(ava::app::runtime::Session* session, std::
          "fallback TUI timeline retains first nonempty running arguments per field across later running and settled replacements while keeping empty ids "
          "separate");
 
-  std::vector<ava::app::runtime::Event> write_tool_events;
+  std::vector<ava::event::RuntimeEvent> write_tool_events;
   auto write = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/write src/main.cpp int changed() { return 1; }",
-                                                                        .event_sink = [&write_tool_events](ava::app::runtime::Event const& event) {
+                                                                        .event_sink = [&write_tool_events](ava::event::RuntimeEvent const& event) {
                                                                           write_tool_events.push_back(event);
                                                                           return ava::core::VoidResult{};
                                                                         }});
+  auto const* write_result = write_tool_events.size() == 2 ? ava::tests::runtime_event_as<ava::event::ToolResultEvent>(write_tool_events[1]) : nullptr;
   expect(write && write->handled && write->tool_timeline.size() == 2 && write->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success &&
              write->tool_timeline[1].diff.find("-int main()") != std::string::npos &&
-             write->tool_timeline[1].diff.find("+int changed()") != std::string::npos && write_tool_events.size() == 2 &&
-             write_tool_events[1].diff.find("+int changed()") != std::string::npos &&
-             std::ranges::any_of(write_tool_events[1].changed_paths, [](std::string const& path) { return path.ends_with("src/main.cpp"); }),
+             write->tool_timeline[1].diff.find("+int changed()") != std::string::npos && write_result &&
+             write_result->payload.diff.find("+int changed()") != std::string::npos &&
+             std::ranges::any_of(write_result->payload.changed_paths, [](std::string const& path) { return path.ends_with("src/main.cpp"); }),
          "command dispatcher /write forwards successful mutation diffs and changed paths into tool events");
   if (write && write_tool_events.size() == 2)
   {
     auto tui_timeline = ava::app::tool_timeline_for_tui(write->tool_timeline);
     ava::tui::TuiEventState event_state;
-    for (auto const& event : write_tool_events) ava::tui::apply_event_envelope(event_state, ava::app::to_event_envelope(event));
+    for (auto const& event : write_tool_events) ava::tui::apply_event_envelope(event_state, ava::event::to_event_envelope(event));
     auto event_transcript = ava::tui::event_state_transcript_snapshot(event_state);
     std::vector<ava::tui::TranscriptItem> timeline_transcript;
     if (!tui_timeline.empty())

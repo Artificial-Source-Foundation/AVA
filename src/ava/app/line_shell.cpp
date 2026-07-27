@@ -106,7 +106,7 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
 
 LineResult handle_line(ShellState& state, std::string const& line, ava::permissions::PermissionResolver permission_resolver,
                        ava::agent::QuestionResolver question_resolver, std::vector<ava::app::CommandHotkey> const& hotkeys,
-                       ava::app::runtime::EventSink event_sink, std::function<bool()> cancel_requested,
+                       ava::event::RuntimeEventSink event_sink, std::function<bool()> cancel_requested,
                        std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages,
                        std::vector<ava::session::ImageAttachmentRef> image_attachments)
 {

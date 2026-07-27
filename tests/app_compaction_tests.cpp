@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
+#include "tests/support/runtime_event_test_support.h"
 #include "tests/support/test_harness.h"
 #include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
@@ -1077,8 +1078,8 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
        sse_response(final_text_sse("retry answer"))});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
-  std::vector<ava::app::runtime::Event> events;
-  run_options.event_sink = [&events](ava::app::runtime::Event const& event) {
+  std::vector<ava::event::RuntimeEvent> events;
+  run_options.event_sink = [&events](ava::event::RuntimeEvent const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
@@ -1092,19 +1093,21 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
              compaction->data_json.find("OVERFLOW SUMMARY") != std::string::npos,
          "context overflow retry appends a context_overflow compaction summary");
   expect(std::ranges::any_of(events,
-                             [](ava::app::runtime::Event const& event) {
-                               return event.type == ava::app::runtime::EventType::Retry && event.reason == "context_overflow" && event.attempt == 1 &&
-                                      event.max_attempts == 1;
+                             [](ava::event::RuntimeEvent const& event) {
+                               auto const* retry = ava::tests::runtime_event_as<ava::event::RetryEvent>(event);
+                               return retry && retry->payload.reason == "context_overflow" && retry->payload.attempt == 1 && retry->payload.max_attempts == 1;
                              }) &&
              std::ranges::any_of(events,
-                                 [](ava::app::runtime::Event const& event) {
-                                   return event.type == ava::app::runtime::EventType::CompactionStart && event.trigger == "context_overflow" &&
-                                          event.attempt == 1 && event.max_attempts == 2;
+                                 [](ava::event::RuntimeEvent const& event) {
+                                   auto const* start = ava::tests::runtime_event_as<ava::event::CompactionStartEvent>(event);
+                                   return start && start->payload.trigger == "context_overflow" && start->payload.attempt == 1 &&
+                                          start->payload.max_attempts == 2;
                                  }) &&
              std::ranges::any_of(events,
-                                 [](ava::app::runtime::Event const& event) {
-                                   return event.type == ava::app::runtime::EventType::CompactionEnd &&
-                                          event.summary_bytes == std::string("OVERFLOW SUMMARY").size() && event.attempt == 1 && event.max_attempts == 2;
+                                 [](ava::event::RuntimeEvent const& event) {
+                                   auto const* end = ava::tests::runtime_event_as<ava::event::CompactionEndEvent>(event);
+                                   return end && end->payload.summary_bytes == std::string("OVERFLOW SUMMARY").size() && end->payload.attempt == 1 &&
+                                          end->payload.max_attempts == 2;
                                  }),
          "context overflow retry emits backend lifecycle events for replaying TUI compaction and retry state");
   expect(transport.requests().size() == 3 && transport.requests()[2].body.find("OVERFLOW SUMMARY") != std::string::npos &&

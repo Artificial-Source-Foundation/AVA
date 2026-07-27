@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "tests/support/runtime_event_test_support.h"
 #include "tests/support/test_harness.h"
 #include "ava/event/CancellationPayload.h"
 #include "ava/event/CompletionPayload.h"
@@ -75,6 +76,36 @@ void test_runtime_event_conversion_preserves_legacy_payload_shape()
          "runtime event envelopes advertise payload family without changing payload shape");
 }
 
+void test_app_emit_event_projects_once_and_neutral_emit_is_null_safe()
+{
+  ava::app::runtime::Event legacy_event;
+  legacy_event.type = ava::app::runtime::EventType::ProviderEvent;
+  legacy_event.timestamp = "2026-04-30T00:00:01Z";
+  legacy_event.session_id = "session_projection";
+  legacy_event.text = "provider payload";
+  legacy_event.call_id = "call_projection";
+  legacy_event.tool_name = "read_file";
+  legacy_event.status = "running";
+
+  std::size_t calls = 0;
+  auto emitted = ava::app::emit_event(
+      [&calls](ava::event::RuntimeEvent const& event) -> ava::core::VoidResult {
+        ++calls;
+        auto const* provider = ava::tests::runtime_event_as<ava::event::ProviderEvent>(event);
+        expect(provider && event.metadata().timestamp == "2026-04-30T00:00:01Z" && event.metadata().session_id == "session_projection" &&
+                   provider->payload.text == "provider payload" && provider->payload.call_id == "call_projection" && provider->payload.tool == "read_file" &&
+                   provider->payload.status == "running",
+               "app event bridge projects the legacy producer bag to the exact typed alternative and payload");
+        return {};
+      },
+      legacy_event);
+  expect(emitted.has_value() && calls == 1, "app event bridge projects once and invokes the typed sink once");
+
+  auto typed_event = ava::app::to_runtime_event(legacy_event);
+  ava::event::RuntimeEventSink null_sink;
+  expect(ava::event::emit_event(null_sink, typed_event).has_value(), "neutral typed emit treats a null sink as a successful no-op");
+}
+
 void test_event_bus_preserves_order_and_stops_on_first_failure()
 {
   ava::app::EventBus bus;
@@ -109,7 +140,7 @@ void test_runtime_event_bus_adapter_publishes_and_forwards()
   ava::app::EventBus bus;
   std::vector<std::string> call_order;
   std::vector<ava::app::EventEnvelope> published;
-  std::vector<ava::app::runtime::Event> forwarded;
+  std::vector<ava::event::RuntimeEvent> forwarded;
   bus.subscribe([&call_order, &published](ava::app::EventEnvelope const& envelope) {
     call_order.push_back("publish");
     published.push_back(envelope);
@@ -119,8 +150,8 @@ void test_runtime_event_bus_adapter_publishes_and_forwards()
   ava::app::EventEnvelopeContext context;
   context.event_id = "event_3";
   context.correlation_id = "correlation_1";
-  auto sink = ava::app::make_runtime_event_bus_adapter(bus, context, [&call_order, &forwarded](ava::app::runtime::Event const& event) {
-    call_order.push_back("legacy");
+  auto sink = ava::app::make_runtime_event_bus_adapter(bus, context, [&call_order, &forwarded](ava::event::RuntimeEvent const& event) {
+    call_order.push_back("next");
     forwarded.push_back(event);
     return ava::core::VoidResult{};
   });
@@ -131,12 +162,13 @@ void test_runtime_event_bus_adapter_publishes_and_forwards()
   event.session_id = "session_1";
   event.text = "done";
 
-  auto const emitted = sink(event);
-  expect(emitted.has_value(), "runtime event bus adapter succeeds when bus and legacy sink succeed");
+  auto const emitted = sink(ava::app::to_runtime_event(event));
+  expect(emitted.has_value(), "runtime event bus adapter succeeds when bus and next sink succeed");
   expect(published.size() == 1 && published.front().name == "assistant_message" && published.front().correlation_id == "correlation_1",
          "runtime event bus adapter publishes converted envelopes");
-  expect(forwarded.size() == 1 && forwarded.front().text == "done" && call_order == std::vector<std::string>({"publish", "legacy"}),
-         "runtime event bus adapter publishes before forwarding runtime events to the legacy sink");
+  auto const* forwarded_message = forwarded.size() == 1 ? ava::tests::runtime_event_as<ava::event::AssistantMessageEvent>(forwarded.front()) : nullptr;
+  expect(forwarded_message && forwarded_message->payload.text == "done" && call_order == std::vector<std::string>({"publish", "next"}),
+         "runtime event bus adapter publishes before forwarding typed runtime events to the next sink");
 }
 
 void test_runtime_event_bus_adapter_failure_order()
@@ -147,18 +179,18 @@ void test_runtime_event_bus_adapter_failure_order()
   event.session_id = "session_1";
 
   ava::app::EventBus failing_bus;
-  bool legacy_called = false;
+  bool next_called = false;
   auto expected_publish_error = ava::core::Error(ava::core::ErrorCategory::Io, "stable envelope publish failure");
   failing_bus.subscribe([](ava::app::EventEnvelope const&) -> ava::core::VoidResult {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "stable envelope publish failure"));
   });
-  auto publish_failure_sink = ava::app::make_runtime_event_bus_adapter(failing_bus, {}, [&legacy_called](ava::app::runtime::Event const&) {
-    legacy_called = true;
+  auto publish_failure_sink = ava::app::make_runtime_event_bus_adapter(failing_bus, {}, [&next_called](ava::event::RuntimeEvent const&) {
+    next_called = true;
     return ava::core::VoidResult{};
   });
-  auto const publish_failure = publish_failure_sink(event);
-  expect(!publish_failure && !legacy_called && publish_failure.error().format() == expected_publish_error.format(),
-         "runtime event bus adapter propagates envelope publish failure without calling the legacy sink");
+  auto const publish_failure = publish_failure_sink(ava::app::to_runtime_event(event));
+  expect(!publish_failure && !next_called && publish_failure.error().format() == expected_publish_error.format(),
+         "runtime event bus adapter propagates envelope publish failure without calling the next sink");
 
   ava::app::EventBus successful_bus;
   std::vector<std::string> calls;
@@ -166,17 +198,17 @@ void test_runtime_event_bus_adapter_failure_order()
     calls.push_back("publish");
     return ava::core::VoidResult{};
   });
-  auto expected_legacy_error = ava::core::Error(ava::core::ErrorCategory::Tool, "stable legacy sink failure").with_context("sink", "legacy");
-  auto legacy_failure_sink = ava::app::make_runtime_event_bus_adapter(successful_bus, {}, [&calls](ava::app::runtime::Event const&) -> ava::core::VoidResult {
-    calls.push_back("legacy");
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "stable legacy sink failure").with_context("sink", "legacy"));
+  auto expected_next_error = ava::core::Error(ava::core::ErrorCategory::Tool, "stable next sink failure").with_context("sink", "next");
+  auto next_failure_sink = ava::app::make_runtime_event_bus_adapter(successful_bus, {}, [&calls](ava::event::RuntimeEvent const&) -> ava::core::VoidResult {
+    calls.push_back("next");
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "stable next sink failure").with_context("sink", "next"));
   });
-  auto const legacy_failure = legacy_failure_sink(event);
-  expect(!legacy_failure && calls == std::vector<std::string>({"publish", "legacy"}) && legacy_failure.error().format() == expected_legacy_error.format(),
-         "runtime event bus adapter publishes first and propagates the legacy sink failure exactly");
+  auto const next_failure = next_failure_sink(ava::app::to_runtime_event(event));
+  expect(!next_failure && calls == std::vector<std::string>({"publish", "next"}) && next_failure.error().format() == expected_next_error.format(),
+         "runtime event bus adapter publishes first and propagates the next sink failure exactly");
 }
 
-void test_runtime_event_bus_adapter_allows_default_legacy_sink()
+void test_runtime_event_bus_adapter_allows_default_next_sink()
 {
   ava::app::EventBus bus;
   std::vector<ava::app::EventEnvelope> published;
@@ -191,8 +223,8 @@ void test_runtime_event_bus_adapter_allows_default_legacy_sink()
   event.timestamp = "2026-04-30T00:00:03Z";
   event.session_id = "session_1";
 
-  auto const emitted = sink(event);
-  expect(emitted.has_value() && published.size() == 1 && published.front().name == "done", "runtime event bus adapter supports a null legacy sink");
+  auto const emitted = sink(ava::app::to_runtime_event(event));
+  expect(emitted.has_value() && published.size() == 1 && published.front().name == "done", "runtime event bus adapter supports a null next sink");
 }
 
 void test_tool_progress_runtime_event_serialization_and_bus_adapter()
@@ -222,7 +254,7 @@ void test_tool_progress_runtime_event_serialization_and_bus_adapter()
   ava::app::EventEnvelopeContext context;
   context.event_id = "event_progress";
   auto sink = ava::app::make_runtime_event_bus_adapter(bus, context);
-  auto const emitted = sink(event);
+  auto const emitted = sink(ava::app::to_runtime_event(event));
   expect(emitted.has_value() && published.size() == 1 && published.front().name == "tool_progress", "event bus adapter publishes tool progress envelopes");
   expect(published.front().payload_json == "{\"text\":\"reading\",\"call_id\":\"call_2\",\"tool\":\"read_file\",\"status\":\"running\"}",
          "tool progress envelope payload keeps existing tool event fields");
@@ -726,10 +758,11 @@ void run_app_event_bus_tests()
 {
   test_event_envelope_serialization_is_deterministic();
   test_runtime_event_conversion_preserves_legacy_payload_shape();
+  test_app_emit_event_projects_once_and_neutral_emit_is_null_safe();
   test_event_bus_preserves_order_and_stops_on_first_failure();
   test_runtime_event_bus_adapter_publishes_and_forwards();
   test_runtime_event_bus_adapter_failure_order();
-  test_runtime_event_bus_adapter_allows_default_legacy_sink();
+  test_runtime_event_bus_adapter_allows_default_next_sink();
   test_tool_progress_runtime_event_serialization_and_bus_adapter();
   test_tool_runtime_event_serializes_semantic_frontend_payloads();
   test_high_risk_runtime_payload_builders_preserve_wire_shapes();

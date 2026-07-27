@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
+#include "tests/support/runtime_event_test_support.h"
 #include "tests/support/test_harness.h"
 #include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
@@ -306,19 +307,21 @@ void test_app_run_prompt_emits_events()
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"runtime answer\"}\n\n"
               "data: [DONE]\n\n",
   }});
-  std::vector<ava::app::runtime::Event> events;
+  std::vector<ava::event::RuntimeEvent> events;
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
-  run_options.event_sink = [&events](ava::app::runtime::Event const& event) {
+  run_options.event_sink = [&events](ava::event::RuntimeEvent const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
   auto result = ava::app::run_prompt(*session, "hello runtime", provider, transport, run_options);
   expect(result && result->final_text == "runtime answer", "runtime run_prompt returns agent loop result");
-  expect(events.size() == 4 && events[0].type == ava::app::runtime::EventType::SessionStart && events[1].type == ava::app::runtime::EventType::UserMessage &&
-             events[2].type == ava::app::runtime::EventType::AssistantMessage && events[3].type == ava::app::runtime::EventType::Done,
+  auto const* assistant = events.size() == 4 ? ava::tests::runtime_event_as<ava::event::AssistantMessageEvent>(events[2]) : nullptr;
+  auto const* completion = events.size() == 4 ? ava::tests::runtime_event_as<ava::event::CompletionEvent>(events[3]) : nullptr;
+  expect(events.size() == 4 && ava::tests::runtime_event_as<ava::event::SessionStartEvent>(events[0]) &&
+             ava::tests::runtime_event_as<ava::event::UserMessageEvent>(events[1]) && assistant && completion,
          "runtime run_prompt emits session, user, assistant, and done events");
-  expect(events.size() == 4 && events[2].text == "runtime answer" && events[3].provider_iterations == 1,
+  expect(assistant && assistant->payload.text == "runtime answer" && completion && completion->payload.provider_iterations == 1,
          "runtime run_prompt events include final text and completion counters");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("runtime run context") != std::string::npos,
          "runtime run_prompt sends context-augmented system prompt to provider");
@@ -362,17 +365,19 @@ void test_app_run_prompt_expands_file_references()
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"reference answer\"}\n\n"
               "data: [DONE]\n\n",
   }});
-  std::vector<ava::app::runtime::Event> events;
+  std::vector<ava::event::RuntimeEvent> events;
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
-  run_options.event_sink = [&events](ava::app::runtime::Event const& event) {
+  run_options.event_sink = [&events](ava::event::RuntimeEvent const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
   auto result = ava::app::run_prompt(*session, "review @src/reference.cpp and @\"my folder/reference file.cpp\"", provider, transport, run_options);
   expect(result && result->final_text == "reference answer", "runtime file reference prompt succeeds");
-  expect(events.size() >= 2 && events[1].type == ava::app::runtime::EventType::UserMessage && events[1].text.find("Referenced files:") != std::string::npos &&
-             events[1].text.find("int referenced_symbol()") != std::string::npos && events[1].text.find("int spaced_reference_symbol()") != std::string::npos,
+  auto const* user_message = events.size() >= 2 ? ava::tests::runtime_event_as<ava::event::UserMessageEvent>(events[1]) : nullptr;
+  expect(user_message && user_message->payload.text.find("Referenced files:") != std::string::npos &&
+             user_message->payload.text.find("int referenced_symbol()") != std::string::npos &&
+             user_message->payload.text.find("int spaced_reference_symbol()") != std::string::npos,
          "runtime user_message event contains expanded plain and quoted file reference content");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("review @src/reference.cpp") != std::string::npos &&
              transport.requests()[0].body.find("--- src/reference.cpp ---") != std::string::npos &&
@@ -492,11 +497,11 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
   ava::tests::FakeTransport transport(
       {ava::http::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "0"}}, .body = "{\"error\":{\"message\":\"rate limited\"}}"},
        sse_response(final_text_sse("retried answer"))});
-  std::vector<ava::app::runtime::Event> events;
+  std::vector<ava::event::RuntimeEvent> events;
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
   run_options.enable_transport_retries = true;
-  run_options.event_sink = [&events](ava::app::runtime::Event const& event) {
+  run_options.event_sink = [&events](ava::event::RuntimeEvent const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
@@ -507,10 +512,11 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
   expect(result && result->final_text == "retried answer" && transport.requests().size() == 2,
          "runtime run_prompt retries transient provider transport failures when enabled");
   expect(std::ranges::any_of(events,
-                             [](ava::app::runtime::Event const& event) {
-                               return event.type == ava::app::runtime::EventType::Retry && event.trigger == "provider_transport" &&
-                                      event.reason == "rate_limited" && event.attempt == 2 && event.max_attempts == 3 && event.delay_ms == 0 &&
-                                      event.text == "HTTP status 429";
+                             [](ava::event::RuntimeEvent const& event) {
+                               auto const* retry = ava::tests::runtime_event_as<ava::event::RetryEvent>(event);
+                               return retry && retry->payload.trigger == "provider_transport" && retry->payload.reason == "rate_limited" &&
+                                      retry->payload.attempt == 2 && retry->payload.max_attempts == 3 && retry->payload.delay_ms == 0 &&
+                                      retry->payload.text == "HTTP status 429";
                              }),
          "runtime run_prompt emits provider retry metadata through the shared event sink");
   events.clear();
@@ -545,8 +551,9 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
                                                                               .status_code = 429,
                                                                               .streaming = true,
                                                                               .countdown_tick = true});
-    expect(emitted_tick.has_value() && events.size() == 1 && events[0].type == ava::app::runtime::EventType::RetryTick &&
-               events[0].trigger == "provider_transport" && events[0].remaining_ms == 500 && events[0].delay_ms == 1000 && events[0].status == "streaming",
+    auto const* tick = events.size() == 1 ? ava::tests::runtime_event_as<ava::event::RetryTickEvent>(events[0]) : nullptr;
+    expect(emitted_tick.has_value() && tick && tick->payload.trigger == "provider_transport" && tick->payload.remaining_ms == 500 &&
+               tick->payload.delay_ms == 1000 && tick->payload.status == "streaming",
            "runtime retry options map provider countdown ticks to explicit backend retry_tick events");
   }
 }
@@ -677,13 +684,13 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
                                                    "\"tool done\"}\n\n"
                                                    "data: [DONE]\n\n",
                                        }});
-  std::vector<ava::app::runtime::Event> events;
+  std::vector<ava::event::RuntimeEvent> events;
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
   run_options.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Allow;
   };
-  run_options.event_sink = [&events](ava::app::runtime::Event const& event) {
+  run_options.event_sink = [&events](ava::event::RuntimeEvent const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
@@ -700,21 +707,24 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
   }
   expect(result && result->final_text == "tool done" &&
              std::ranges::any_of(events,
-                                 [](ava::app::runtime::Event const& event) {
-                                   return event.type == ava::app::runtime::EventType::ToolProgress && event.call_id == "call_bash" &&
-                                          event.tool_name == "bash" && !event.text.empty();
+                                 [](ava::event::RuntimeEvent const& event) {
+                                   auto const* progress = ava::tests::runtime_event_as<ava::event::ToolProgressEvent>(event);
+                                   return progress && progress->payload.call_id == "call_bash" && progress->payload.tool == "bash" &&
+                                          !progress->payload.text.empty();
                                  }),
          "runtime run_prompt emits additive tool_progress events from tool callbacks");
   expect(std::ranges::any_of(events,
-                             [](ava::app::runtime::Event const& event) {
-                               return event.type == ava::app::runtime::EventType::ToolStart && event.call_id == "call_bash" && event.tool_name == "bash" &&
-                                      event.tool_arguments_json.find("\"command\":\"pwd\"") != std::string::npos;
+                             [](ava::event::RuntimeEvent const& event) {
+                               auto const* start = ava::tests::runtime_event_as<ava::event::ToolStartEvent>(event);
+                               return start && start->payload.call_id == "call_bash" && start->payload.tool == "bash" &&
+                                      start->payload.args_json.find("\"command\":\"pwd\"") != std::string::npos;
                              }) &&
              std::ranges::any_of(events,
-                                 [](ava::app::runtime::Event const& event) {
-                                   return event.type == ava::app::runtime::EventType::ToolResult && event.call_id == "call_bash" && event.tool_name == "bash" &&
-                                          event.truncated && event.total_bytes > 0 && event.output_lines > 0 && event.total_lines > 0 &&
-                                          !event.spill_path.empty() && event.tool_result_json.find("\"spill_file\"") != std::string::npos;
+                                 [](ava::event::RuntimeEvent const& event) {
+                                   auto const* result = ava::tests::runtime_event_as<ava::event::ToolResultEvent>(event);
+                                   return result && result->payload.call_id == "call_bash" && result->payload.tool == "bash" && result->payload.truncated &&
+                                          result->payload.total_bytes > 0 && result->payload.output_lines > 0 && result->payload.total_lines > 0 &&
+                                          !result->payload.spill_path.empty() && result->payload.result_json.find("\"spill_file\"") != std::string::npos;
                                  }),
          "runtime run_prompt emits semantic tool args, result, and spill metadata for frontend adapters");
   expect(has_spill_file, "runtime run_prompt configures session-local spill files for truncated tool output");
@@ -815,8 +825,8 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
                                        }});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
-  run_options.event_sink = [](ava::app::runtime::Event const& event) {
-    if (event.type == ava::app::runtime::EventType::ToolStart)
+  run_options.event_sink = [](ava::event::RuntimeEvent const& event) {
+    if (event.type() == ava::event::RuntimeEventType::ToolStart)
     {
       return ava::core::VoidResult{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "event sink failed"))};
     }

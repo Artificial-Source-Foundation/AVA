@@ -6,13 +6,11 @@
 #include "ava/event/events.h"
 #include "ava/core/result.h"
 
-#include <functional>
 #include <string>
 
 namespace ava::app::runtime {
 
 struct Event;
-using EventSink = std::function<ava::core::VoidResult(Event const&)>;
 
 // Migration-only aliases for app consumers that have not moved to ava::event yet.
 using PayloadType = ava::event::PayloadType;
@@ -34,6 +32,7 @@ namespace ava::app {
 // Migration-only aliases and using-declarations preserve current app consumer syntax.
 using EventEnvelopeSink = ava::event::EventEnvelopeSink;
 using EventBus = ava::event::EventBus;
+using ava::event::make_runtime_event_bus_adapter;
 using ava::event::payload_type_for_event;
 using ava::event::serialize_event_envelope_json;
 using ava::event::serialize_event_envelope_jsonl;
@@ -54,10 +53,8 @@ using ava::event::to_string;
 
 [[nodiscard]] std::string serialize_event_json(runtime::Event const& event);
 [[nodiscard]] std::string serialize_event_jsonl(runtime::Event const& event);
-[[nodiscard]] ava::core::VoidResult emit_event(runtime::EventSink const& sink, runtime::Event const& event);
+[[nodiscard]] ava::core::VoidResult emit_event(ava::event::RuntimeEventSink const& sink, runtime::Event const& event);
 
 [[nodiscard]] EventEnvelope to_event_envelope(runtime::Event const& event, EventEnvelopeContext const& context = {});
-// The returned sink captures `bus` by reference and must not outlive it.
-[[nodiscard]] runtime::EventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context = {}, runtime::EventSink legacy_sink = nullptr);
 
 }  // namespace ava::app

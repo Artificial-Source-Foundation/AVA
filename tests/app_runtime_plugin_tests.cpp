@@ -3,6 +3,7 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "tests/support/tui_test_support.h"
+#include "ava/http/transport.h"
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/commands.h"
@@ -248,7 +249,7 @@ void test_app_runtime_enabled_plugin_resources_autoload()
          "enabled plugin static skill is loadable through the provider skill tool");
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
@@ -258,7 +259,7 @@ void test_app_runtime_enabled_plugin_resources_autoload()
                                                    "\\\"plugin-triage\\\"}\"}\n\n"
                                                    "data: [DONE]\n\n",
                                        },
-                                       ava::provider::HttpResponse{
+                                       ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":"

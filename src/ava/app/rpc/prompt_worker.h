@@ -1,8 +1,8 @@
 #pragma once
-
 #include "output.h"
 #include "resolvers.h"
 #include "run_state.h"
+#include "ava/http/transport.h"
 #include "ava/app/runtime.h"
 #include "ava/session/attachments.h"
 #include "ava/provider/provider.h"
@@ -23,8 +23,8 @@ struct RpcPromptWorkerOptions
   PendingResolverState& pending_state;
   ava::provider::Provider const& injected_provider;
   std::string injected_provider_id;
-  ava::provider::Transport& transport;
-  ava::provider::Transport& auth_transport;
+  ava::http::Transport& transport;
+  ava::http::Transport& auth_transport;
   runtime::RunOptions runtime_options;
   ava::config::XdgPaths paths;
   std::string request_id;

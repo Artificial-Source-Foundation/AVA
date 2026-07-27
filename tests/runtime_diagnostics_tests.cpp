@@ -4,6 +4,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/diagnostics/artifact_store.h"
 #include "ava/diagnostics/runtime_diagnostics.h"
+#include "ava/http/transport.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/provider/openai_provider.h"
@@ -399,7 +400,7 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   auto provider_diagnostics = ava::diagnostics::RuntimeDiagnostics::create(provider_paths, false);
   auto provider_session = provider_diagnostics ? open_diagnostic_session(provider_root, *provider_diagnostics)
                                                : ava::core::Result<ava::app::runtime::Session>(std::unexpected(provider_diagnostics.error()));
-  ava::tests::FakeTransport provider_transport({ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = std::string(provider_canary)}});
+  ava::tests::FakeTransport provider_transport({ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = std::string(provider_canary)}});
   ava::app::runtime::RunOptions provider_options;
   provider_options.access_token = "token";
   auto provider_result = provider_session ? ava::app::run_prompt(*provider_session, "fail", provider, provider_transport, provider_options)

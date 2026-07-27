@@ -4,6 +4,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
@@ -236,7 +237,7 @@ void test_app_rpc_compact_provider_failure_is_error_response()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"summary failed\"}}"}});
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"summary failed\"}}"}});
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
   ThreadSafeStringBuf output_buffer;
@@ -281,7 +282,7 @@ void test_app_rpc_compact_cancellation_is_error_response_without_provider_reques
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"unused\"}"}});
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"unused\"}"}});
   std::istringstream in("{\"id\":\"cmp-cancel\",\"type\":\"compact\"}\n");
   std::ostringstream out;
   ava::app::runtime::RunOptions runtime_options;

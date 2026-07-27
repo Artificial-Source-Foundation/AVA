@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/agent_loop_test_declarations.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/assistant_turn.h"
 #include "ava/agent/history_projection.h"
@@ -270,7 +271,7 @@ void test_legacy_reasoning_replay_requires_exact_entry_source()
                 ava::provider::ProviderRequest{
                     .provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "", .messages = *openai_messages, .tools_json = {}, .stream = false},
                 "token")
-          : ava::core::Result<ava::provider::HttpRequest>{std::unexpected(openai_messages.error())};
+          : ava::core::Result<ava::http::HttpRequest>{std::unexpected(openai_messages.error())};
   auto const openai_body = openai_request ? openai_request->body : std::string{};
   expect(
       openai_request && openai_body.find("VISIBLE_LEGACY_ANSWER") != std::string::npos && openai_body.find("OPENAI_LEGACY_") == std::string::npos &&
@@ -393,11 +394,11 @@ void test_v4_no_tools_fallback_survives_native_content_serializers()
                                           .system_prompt_cache_ttl = ""};
   };
   auto openai_request = openai_messages ? openai.build_request(request_for("openai", "gpt-5.5", *openai_messages), "token")
-                                        : ava::core::Result<ava::provider::HttpRequest>{std::unexpected(openai_messages.error())};
+                                        : ava::core::Result<ava::http::HttpRequest>{std::unexpected(openai_messages.error())};
   auto anthropic_request = anthropic_messages ? anthropic.build_request(request_for("anthropic", "claude-test", *anthropic_messages), "token")
-                                              : ava::core::Result<ava::provider::HttpRequest>{std::unexpected(anthropic_messages.error())};
+                                              : ava::core::Result<ava::http::HttpRequest>{std::unexpected(anthropic_messages.error())};
   auto compatible_request = compatible_messages ? compatible.build_request(request_for("kimi", "kimi-k2-thinking", *compatible_messages), "token")
-                                                : ava::core::Result<ava::provider::HttpRequest>{std::unexpected(compatible_messages.error())};
+                                                : ava::core::Result<ava::http::HttpRequest>{std::unexpected(compatible_messages.error())};
 
   auto has_portable_turn = [](std::string const& body) {
     auto const commentary = body.find("VISIBLE_COMMENTARY");

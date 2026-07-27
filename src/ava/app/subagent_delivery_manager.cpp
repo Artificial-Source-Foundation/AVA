@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
@@ -26,17 +27,17 @@ namespace {
 
 constexpr std::string_view kDeliveryMarkerPrefix = "[AVA_SUBAGENT_DELIVERY_V1 delivery_id=";
 
-class BoundedDeliveryTransport final : public ava::provider::Transport
+class BoundedDeliveryTransport final : public ava::http::Transport
 {
  public:
-  BoundedDeliveryTransport(std::unique_ptr<ava::provider::Transport> inner, std::stop_token stop_token, std::chrono::steady_clock::time_point deadline)
+  BoundedDeliveryTransport(std::unique_ptr<ava::http::Transport> inner, std::stop_token stop_token, std::chrono::steady_clock::time_point deadline)
       : inner_(std::move(inner)), stop_token_(stop_token), deadline_(deadline)
   {
   }
 
-  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override { return send(request, nullptr); }
+  ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override { return send(request, nullptr); }
 
-  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request, CancelCallback cancel_requested) override
+  ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request, CancelCallback cancel_requested) override
   {
     auto bounded = bounded_request(request);
     return inner_->send(bounded, [this, cancel_requested] { return canceled() || (cancel_requested && cancel_requested()); });
@@ -44,8 +45,8 @@ class BoundedDeliveryTransport final : public ava::provider::Transport
 
   bool supports_streaming() const noexcept override { return inner_->supports_streaming(); }
 
-  ava::core::Result<ava::provider::HttpResponse> send_streaming(ava::provider::HttpRequest const& request, BodyChunkSink on_body_chunk,
-                                                                CancelCallback cancel_requested = nullptr) override
+  ava::core::Result<ava::http::HttpResponse> send_streaming(ava::http::HttpRequest const& request, BodyChunkSink on_body_chunk,
+                                                            CancelCallback cancel_requested = nullptr) override
   {
     auto bounded = bounded_request(request);
     return inner_->send_streaming(bounded, std::move(on_body_chunk),
@@ -53,7 +54,7 @@ class BoundedDeliveryTransport final : public ava::provider::Transport
   }
 
  private:
-  ava::provider::HttpRequest bounded_request(ava::provider::HttpRequest request) const
+  ava::http::HttpRequest bounded_request(ava::http::HttpRequest request) const
   {
     auto const now = std::chrono::steady_clock::now();
     auto const remaining = now < deadline_ ? std::chrono::duration_cast<std::chrono::milliseconds>(deadline_ - now).count() : 0;
@@ -64,7 +65,7 @@ class BoundedDeliveryTransport final : public ava::provider::Transport
 
   bool canceled() const noexcept { return stop_token_.stop_requested() || std::chrono::steady_clock::now() >= deadline_; }
 
-  std::unique_ptr<ava::provider::Transport> inner_;
+  std::unique_ptr<ava::http::Transport> inner_;
   std::stop_token stop_token_;
   std::chrono::steady_clock::time_point deadline_;
 };

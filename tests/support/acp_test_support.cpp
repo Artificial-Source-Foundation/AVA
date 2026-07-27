@@ -2,6 +2,7 @@
 #include "tests/support/acp_test_support.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
+#include "ava/http/transport.h"
 #include "ava/app/acp/codec.h"
 #include "ava/provider/registry.h"
 #include "ava/core/error.h"
@@ -159,7 +160,7 @@ ava::app::acp::Request initialize_request_with_capabilities(std::string capabili
 
 namespace {
 
-class RecordingTransport final : public ava::provider::Transport
+class RecordingTransport final : public ava::http::Transport
 {
  public:
   RecordingTransport(std::string* body, std::atomic_bool* entered = nullptr, std::atomic_bool* release = nullptr)
@@ -167,14 +168,14 @@ class RecordingTransport final : public ava::provider::Transport
   {
   }
 
-  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override
   {
     if (body_)
       *body_ = request.body;
     if (entered_)
       entered_->store(true, std::memory_order_release);
     while (release_ && !release_->load(std::memory_order_acquire)) std::this_thread::sleep_for(1ms);
-    return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"choices":[{"message":{"content":"recorded"},"finish_reason":"stop"}]})"};
+    return ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"choices":[{"message":{"content":"recorded"},"finish_reason":"stop"}]})"};
   }
 
  private:
@@ -194,19 +195,19 @@ ava::app::RuntimeProviderRunBundleFactory recording_bundle_factory(std::string* 
       return std::unexpected(std::move(provider.error()));
     options.access_token = "test";
     options.stream = false;
-    std::unique_ptr<ava::provider::Transport> transport = std::make_unique<RecordingTransport>(body, entered, release);
-    std::unique_ptr<ava::provider::Transport> auth = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::provider::HttpResponse>{});
+    std::unique_ptr<ava::http::Transport> transport = std::make_unique<RecordingTransport>(body, entered, release);
+    std::unique_ptr<ava::http::Transport> auth = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::http::HttpResponse>{});
     return ava::app::RuntimeProviderRunBundle{
         .provider = std::move(*provider), .transport = std::move(transport), .auth_transport = std::move(auth), .options = std::move(options)};
   };
 }
 
-CapturingSequenceTransport::CapturingSequenceTransport(std::shared_ptr<CapturingSequenceState> state, std::vector<ava::provider::HttpResponse> responses)
+CapturingSequenceTransport::CapturingSequenceTransport(std::shared_ptr<CapturingSequenceState> state, std::vector<ava::http::HttpResponse> responses)
     : state_(std::move(state)), responses_(std::move(responses))
 {
 }
 
-ava::core::Result<ava::provider::HttpResponse> CapturingSequenceTransport::send(ava::provider::HttpRequest const& request)
+ava::core::Result<ava::http::HttpResponse> CapturingSequenceTransport::send(ava::http::HttpRequest const& request)
 {
   {
     std::lock_guard lock(state_->mutex);
@@ -219,8 +220,7 @@ ava::core::Result<ava::provider::HttpResponse> CapturingSequenceTransport::send(
   return response;
 }
 
-ava::app::RuntimeProviderRunBundleFactory sequence_bundle_factory(std::shared_ptr<CapturingSequenceState> state,
-                                                                  std::vector<ava::provider::HttpResponse> responses)
+ava::app::RuntimeProviderRunBundleFactory sequence_bundle_factory(std::shared_ptr<CapturingSequenceState> state, std::vector<ava::http::HttpResponse> responses)
 {
   return [state = std::move(state), responses = std::move(responses)](ava::app::runtime::Session const&, ava::app::runtime::RunOptions options,
                                                                       std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
@@ -229,8 +229,8 @@ ava::app::RuntimeProviderRunBundleFactory sequence_bundle_factory(std::shared_pt
       return std::unexpected(std::move(provider.error()));
     options.access_token = "test";
     options.stream = false;
-    std::unique_ptr<ava::provider::Transport> transport = std::make_unique<CapturingSequenceTransport>(state, responses);
-    std::unique_ptr<ava::provider::Transport> auth = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::provider::HttpResponse>{});
+    std::unique_ptr<ava::http::Transport> transport = std::make_unique<CapturingSequenceTransport>(state, responses);
+    std::unique_ptr<ava::http::Transport> auth = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::http::HttpResponse>{});
     return ava::app::RuntimeProviderRunBundle{
         .provider = std::move(*provider), .transport = std::move(transport), .auth_transport = std::move(auth), .options = std::move(options)};
   };
@@ -262,9 +262,9 @@ void RunPhaseBarrier::release()
   cv.notify_all();
 }
 
-ava::provider::HttpResponse acp_text_response(std::string_view text)
+ava::http::HttpResponse acp_text_response(std::string_view text)
 {
-  return ava::provider::HttpResponse{
+  return ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = std::string(R"({"choices":[{"message":{"content":")") + ava::core::json::escape(text) + R"("},"finish_reason":"stop"}]})"};

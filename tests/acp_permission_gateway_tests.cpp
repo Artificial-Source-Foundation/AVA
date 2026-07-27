@@ -5,6 +5,7 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/command/command.h"
+#include "ava/http/transport.h"
 #include "ava/app/acp/peer.h"
 #include "ava/app/acp/service.h"
 #include "ava/app/runtime_credentials.h"
@@ -177,9 +178,9 @@ void test_acp_cancel_terminal_arbitration_and_provider_setup_paths()
         return std::unexpected(std::move(provider.error()));
       run_options.access_token = "test";
       run_options.stream = false;
-      std::unique_ptr<ava::provider::Transport> transport =
-          std::make_unique<CapturingSequenceTransport>(transport_state, std::vector<ava::provider::HttpResponse>{acp_text_response()});
-      std::unique_ptr<ava::provider::Transport> auth = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::provider::HttpResponse>{});
+      std::unique_ptr<ava::http::Transport> transport =
+          std::make_unique<CapturingSequenceTransport>(transport_state, std::vector<ava::http::HttpResponse>{acp_text_response()});
+      std::unique_ptr<ava::http::Transport> auth = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::http::HttpResponse>{});
       return ava::app::RuntimeProviderRunBundle{
           .provider = std::move(*provider), .transport = std::move(transport), .auth_transport = std::move(auth), .options = std::move(run_options)};
     };
@@ -262,7 +263,7 @@ void test_acp_critical_commands_remain_one_shot()
   expect(!added && added.error().category() == ava::core::ErrorCategory::InvalidArgument, "ACP cannot persist an exact acknowledged Critical command Allow");
 
   auto state = std::make_shared<CapturingSequenceState>();
-  auto const bash_response = ava::provider::HttpResponse{
+  auto const bash_response = ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body =
@@ -407,8 +408,8 @@ void test_acp_strict_session_mcp_registry_and_error_propagation()
   auto paths = ava::tests::app_test_paths(root);
   auto const cwd_marker = root / "mcp-cwd.txt";
   auto transport_state = std::make_shared<CapturingSequenceState>();
-  std::vector<ava::provider::HttpResponse> responses{
-      ava::provider::HttpResponse{
+  std::vector<ava::http::HttpResponse> responses{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body =
@@ -496,11 +497,11 @@ void test_acp_strict_session_mcp_registry_and_error_propagation()
   auto const bash_marker = nested / "bash-must-not-run";
   auto bash_state = std::make_shared<CapturingSequenceState>();
   auto const bash_arguments = std::string("{\"command\":\"printf exposed > ") + ava::core::json::escape(bash_marker.string()) + "\"}";
-  std::vector<ava::provider::HttpResponse> bash_responses{
-      ava::provider::HttpResponse{.status_code = 200,
-                                  .headers = {},
-                                  .body = std::string(R"({"choices":[{"message":{"tool_calls":[{"id":"call_bash","function":{"name":"bash","arguments":")") +
-                                          ava::core::json::escape(bash_arguments) + R"("}}]},"finish_reason":"tool_calls"}]})"},
+  std::vector<ava::http::HttpResponse> bash_responses{
+      ava::http::HttpResponse{.status_code = 200,
+                              .headers = {},
+                              .body = std::string(R"({"choices":[{"message":{"tool_calls":[{"id":"call_bash","function":{"name":"bash","arguments":")") +
+                                      ava::core::json::escape(bash_arguments) + R"("}}]},"finish_reason":"tool_calls"}]})"},
       acp_text_response("bash stayed unavailable")};
   auto bash_options = options;
   bash_options.provider_bundle_factory = sequence_bundle_factory(bash_state, std::move(bash_responses));
@@ -617,7 +618,7 @@ void test_acp_negotiated_client_filesystem_and_terminal_routing()
     promise.set_value(std::move(result));
     return PendingCall{.id = std::move(id), .completion = promise.get_future()};
   };
-  auto const read_tool_response = ava::provider::HttpResponse{
+  auto const read_tool_response = ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = std::string(
@@ -690,7 +691,7 @@ void test_acp_negotiated_client_filesystem_and_terminal_routing()
   run_read_case(R"({"fs":{"readTextFile":false,"writeTextFile":false}})", false, true);
   run_read_case(R"({"fs":{"readTextFile":true,"writeTextFile":false}})", true, false, true);
 
-  auto const write_tool_response = ava::provider::HttpResponse{
+  auto const write_tool_response = ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = std::string(
@@ -757,11 +758,11 @@ void test_acp_negotiated_client_filesystem_and_terminal_routing()
   auto terminal_state = std::make_shared<CapturingSequenceState>();
   auto const marker = workspace / "terminal-must-not-run-locally";
   auto const bash_args = std::string("{\"command\":\"touch ") + marker.string() + "\"}";
-  auto const bash_tool_response = ava::provider::HttpResponse{
-      .status_code = 200,
-      .headers = {},
-      .body = std::string(R"({"choices":[{"message":{"tool_calls":[{"id":"call_terminal","function":{"name":"bash","arguments":")") +
-              ava::core::json::escape(bash_args) + R"("}}]},"finish_reason":"tool_calls"}]})"};
+  auto const bash_tool_response =
+      ava::http::HttpResponse{.status_code = 200,
+                              .headers = {},
+                              .body = std::string(R"({"choices":[{"message":{"tool_calls":[{"id":"call_terminal","function":{"name":"bash","arguments":")") +
+                                      ava::core::json::escape(bash_args) + R"("}}]},"finish_reason":"tool_calls"}]})"};
   AgentServiceOptions terminal_options;
   terminal_options.agent_version = "1";
   terminal_options.launch_root = ava::core::normalized_absolute_path(workspace);
@@ -822,7 +823,7 @@ void test_acp_builtin_permission_gateway_one_shot_mutations_and_updates()
   auto paths = ava::tests::app_test_paths(root);
   auto state = std::make_shared<CapturingSequenceState>();
   auto const arguments = R"({\"path\":\"approved.txt\",\"content\":\"approved content\"})";
-  auto tool_response = ava::provider::HttpResponse{
+  auto tool_response = ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = std::string(R"({"choices":[{"message":{"tool_calls":[{"id":"call_write_1","function":{"name":"write_file","arguments":")") + arguments +
@@ -922,11 +923,11 @@ void test_acp_session_grant_cannot_follow_retargeted_parent_symlink()
   auto const first_args = R"({\"path\":\"grant-parent/target.txt\",\"content\":\"inside approved\"})";
   auto const second_args = R"({\"path\":\"grant-parent/target.txt\",\"content\":\"outside denied\"})";
   auto tool_response = [](std::string_view id, std::string_view arguments) {
-    return ava::provider::HttpResponse{.status_code = 200,
-                                       .headers = {},
-                                       .body = std::string(R"({"choices":[{"message":{"tool_calls":[{"id":")") + std::string(id) +
-                                               R"(","function":{"name":"write_file","arguments":")" + std::string(arguments) +
-                                               R"("}}]},"finish_reason":"tool_calls"}]})"};
+    return ava::http::HttpResponse{.status_code = 200,
+                                   .headers = {},
+                                   .body = std::string(R"({"choices":[{"message":{"tool_calls":[{"id":")") + std::string(id) +
+                                           R"(","function":{"name":"write_file","arguments":")" + std::string(arguments) +
+                                           R"("}}]},"finish_reason":"tool_calls"}]})"};
   };
   auto provider_state = std::make_shared<CapturingSequenceState>();
   std::atomic_int bundle_number = 0;
@@ -937,8 +938,8 @@ void test_acp_session_grant_cannot_follow_retargeted_parent_symlink()
   options.provider_bundle_factory = [&, provider_state](ava::app::runtime::Session const& session, ava::app::runtime::RunOptions run_options,
                                                         std::string_view label) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
     auto const current = bundle_number.fetch_add(1);
-    auto responses = current == 0 ? std::vector<ava::provider::HttpResponse>{tool_response("grant_first", first_args), acp_text_response("first complete")}
-                                  : std::vector<ava::provider::HttpResponse>{tool_response("grant_second", second_args), acp_text_response("second complete")};
+    auto responses = current == 0 ? std::vector<ava::http::HttpResponse>{tool_response("grant_first", first_args), acp_text_response("first complete")}
+                                  : std::vector<ava::http::HttpResponse>{tool_response("grant_second", second_args), acp_text_response("second complete")};
     auto factory = sequence_bundle_factory(provider_state, std::move(responses));
     return factory(session, std::move(run_options), label);
   };
@@ -1002,7 +1003,7 @@ void test_acp_permission_once_always_reject_cancel_invalid_and_hard_policy_matri
     options.launch_root = ava::core::normalized_absolute_path(workspace);
     options.paths = paths;
     options.provider_bundle_factory = sequence_bundle_factory(
-        provider_state, {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = tool_body}, acp_text_response("matrix complete")});
+        provider_state, {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = tool_body}, acp_text_response("matrix complete")});
     AgentService service(options);
     std::atomic_bool execution_started = false;
     service.bind_update_sender([&](std::string_view, std::string_view update) -> ava::core::VoidResult {

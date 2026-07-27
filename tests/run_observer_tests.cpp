@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/tool_dispatcher.h"
@@ -89,24 +90,24 @@ class CountingIds final : public ava::observability::IdGenerator
   std::atomic<unsigned> calls = 0;
 };
 
-class CallbackPollingTransport final : public ava::provider::Transport
+class CallbackPollingTransport final : public ava::http::Transport
 {
  public:
-  explicit CallbackPollingTransport(std::vector<ava::provider::HttpResponse> responses, bool streaming = false)
+  explicit CallbackPollingTransport(std::vector<ava::http::HttpResponse> responses, bool streaming = false)
       : responses_(std::move(responses)), streaming_(streaming)
   {
   }
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const&) override { return next_response(); }
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const&, CancelCallback cancel_requested) override
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const&) override { return next_response(); }
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const&, CancelCallback cancel_requested) override
   {
     ++send_calls;
     poll(cancel_requested);
     return next_response();
   }
   [[nodiscard]] bool supports_streaming() const noexcept override { return streaming_; }
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send_streaming(ava::provider::HttpRequest const&, BodyChunkSink on_body_chunk,
-                                                                              CancelCallback cancel_requested) override
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send_streaming(ava::http::HttpRequest const&, BodyChunkSink on_body_chunk,
+                                                                          CancelCallback cancel_requested) override
   {
     ++streaming_calls;
     poll(cancel_requested);
@@ -133,14 +134,14 @@ class CallbackPollingTransport final : public ava::provider::Transport
         throw std::runtime_error("transport canceled");
     }
   }
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> next_response()
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> next_response()
   {
     if (next_ == responses_.size())
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "missing scripted response"));
     return responses_[next_++];
   }
 
-  std::vector<ava::provider::HttpResponse> responses_;
+  std::vector<ava::http::HttpResponse> responses_;
   std::size_t next_ = 0;
   bool streaming_ = false;
 };
@@ -878,7 +879,7 @@ void test_agent_fake_provider_boundaries()
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store({.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "observer-agent"});
   ava::provider::OpenAIProvider provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200, .headers = {}, .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: [DONE]\n\n"}});
   ava::agent::AgentLoopOptions options;
   options.workspace_dir = workspace;
@@ -924,7 +925,7 @@ void test_disabled_and_enabled_runs_preserve_authoritative_session_semantics()
     std::filesystem::create_directories(run_root / "workspace");
     ava::session::SessionStore store({.root_dir = run_root / "sessions", .workspace_dir = run_root / "workspace", .session_id = "semantic"});
     ava::provider::OpenAIProvider provider("https://api.example.test");
-    ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+    ava::tests::FakeTransport transport({ava::http::HttpResponse{
         .status_code = 200, .headers = {}, .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: [DONE]\n\n"}});
     std::shared_ptr<ava::observability::JsonlRunObserver> writer;
     std::shared_ptr<ava::observability::RunObservation> observation;
@@ -1018,36 +1019,36 @@ void test_jsonl_event_ordering_is_byte_identical()
 
 void test_observed_transport_cancellation_callback_contracts()
 {
-  ava::provider::HttpRequest request;
+  ava::http::HttpRequest request;
   request.method = "POST";
   request.url = "https://example.test";
   request.body = "{}";
   auto collector = std::make_shared<CollectingObserver>();
   auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
-  ava::provider::TransportObservation transport_observation{
+  ava::http::TransportObservation transport_observation{
       .observation = observation,
       .context = {
           .run_id = "callback", .turn_id = "turn", .session_id = {}, .provider_id = {}, .parent_run_id = {}, .parent_turn_id = {}, .parent_session_id = {}}};
 
   unsigned direct_send_callback_calls = 0;
-  CallbackPollingTransport direct_send({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  CallbackPollingTransport direct_send({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
   auto direct_send_result = direct_send.send(request, [&direct_send_callback_calls] { return ++direct_send_callback_calls == 2; });
   unsigned observed_send_callback_calls = 0;
-  CallbackPollingTransport observed_send_inner({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
-  ava::provider::ObservedTransport observed_send(observed_send_inner, transport_observation);
+  CallbackPollingTransport observed_send_inner({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  ava::http::ObservedTransport observed_send(observed_send_inner, transport_observation);
   auto observed_send_result = observed_send.send(request, [&observed_send_callback_calls] { return ++observed_send_callback_calls == 2; });
   expect(direct_send_result && observed_send_result && direct_send_callback_calls == 1 && observed_send_callback_calls == 1 &&
              direct_send.callback_polls == 1 && observed_send_inner.callback_polls == 1,
          "observed send forwards a stateful cancellation callback exactly as the disabled transport does");
 
   unsigned direct_stream_callback_calls = 0;
-  CallbackPollingTransport direct_stream({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "chunk"}}, true);
+  CallbackPollingTransport direct_stream({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "chunk"}}, true);
   auto direct_stream_result = direct_stream.send_streaming(
       request, [](std::string_view) { return ava::core::VoidResult{}; }, [&direct_stream_callback_calls] { return ++direct_stream_callback_calls == 2; });
   unsigned observed_stream_callback_calls = 0;
-  CallbackPollingTransport observed_stream_inner({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "chunk"}}, true);
-  ava::provider::ObservedTransport observed_stream(observed_stream_inner, transport_observation);
+  CallbackPollingTransport observed_stream_inner({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "chunk"}}, true);
+  ava::http::ObservedTransport observed_stream(observed_stream_inner, transport_observation);
   auto observed_stream_result = observed_stream.send_streaming(
       request, [](std::string_view) { return ava::core::VoidResult{}; }, [&observed_stream_callback_calls] { return ++observed_stream_callback_calls == 2; });
   expect(direct_stream_result && observed_stream_result && direct_stream_callback_calls == 1 && observed_stream_callback_calls == 1 &&
@@ -1055,8 +1056,8 @@ void test_observed_transport_cancellation_callback_contracts()
          "observed streaming forwards a stateful cancellation callback exactly as the disabled transport does");
 
   unsigned throwing_callback_calls = 0;
-  CallbackPollingTransport throwing_inner({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
-  ava::provider::ObservedTransport throwing_observed(throwing_inner, transport_observation);
+  CallbackPollingTransport throwing_inner({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  ava::http::ObservedTransport throwing_observed(throwing_inner, transport_observation);
   bool callback_threw = false;
   try
   {
@@ -1073,8 +1074,8 @@ void test_observed_transport_cancellation_callback_contracts()
          "observed transport neither catches nor repolls a throwing authoritative cancellation callback");
 
   unsigned throwing_stream_callback_calls = 0;
-  CallbackPollingTransport throwing_stream_inner({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "chunk"}}, true);
-  ava::provider::ObservedTransport throwing_stream_observed(throwing_stream_inner, transport_observation);
+  CallbackPollingTransport throwing_stream_inner({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "chunk"}}, true);
+  ava::http::ObservedTransport throwing_stream_observed(throwing_stream_inner, transport_observation);
   bool streaming_callback_threw = false;
   try
   {
@@ -1092,12 +1093,12 @@ void test_observed_transport_cancellation_callback_contracts()
   expect(streaming_callback_threw && throwing_stream_callback_calls == 1 && throwing_stream_inner.callback_polls == 1,
          "observed streaming neither catches nor repolls a throwing authoritative cancellation callback");
 
-  CallbackPollingTransport retry_inner({ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "retry"},
-                                        ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "done"}});
+  CallbackPollingTransport retry_inner({ava::http::HttpResponse{.status_code = 503, .headers = {}, .body = "retry"},
+                                        ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "done"}});
   unsigned retry_callback_calls = 0;
-  ava::provider::RetryTransport retry(
+  ava::http::RetryTransport retry(
       retry_inner,
-      ava::provider::RetryOptions{
+      ava::http::RetryOptions{
           .observation = transport_observation, .max_attempts = 2, .base_delay_ms = 0, .response_retry_decision = ava::provider::provider_retry_decision});
   auto retry_result = retry.send(request, [&retry_callback_calls] {
     ++retry_callback_calls;
@@ -1106,13 +1107,13 @@ void test_observed_transport_cancellation_callback_contracts()
   expect(retry_result && retry_callback_calls == 7 && retry_inner.callback_polls == 2,
          "retry reuses each authoritative post-attempt cancellation poll for tracing and control flow");
 
-  CallbackPollingTransport retry_cancel_inner({ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "retry"}});
-  ava::provider::RetryTransport retry_cancel(
+  CallbackPollingTransport retry_cancel_inner({ava::http::HttpResponse{.status_code = 503, .headers = {}, .body = "retry"}});
+  ava::http::RetryTransport retry_cancel(
       retry_cancel_inner,
-      ava::provider::RetryOptions{.observation = transport_observation, .max_attempts = 2, .response_retry_decision = ava::provider::provider_retry_decision});
+      ava::http::RetryOptions{.observation = transport_observation, .max_attempts = 2, .response_retry_decision = ava::provider::provider_retry_decision});
   unsigned retry_cancel_callback_calls = 0;
   bool retry_callback_threw = false;
-  ava::core::Result<ava::provider::HttpResponse> retry_cancel_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "not run"));
+  ava::core::Result<ava::http::HttpResponse> retry_cancel_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "not run"));
   try
   {
     retry_cancel_result = retry_cancel.send(request, [&retry_cancel_callback_calls]() -> bool {
@@ -1131,21 +1132,20 @@ void test_observed_transport_cancellation_callback_contracts()
   expect(!retry_cancel_result && !retry_callback_threw && retry_cancel_callback_calls == 3,
          "retry stores a stateful post-attempt cancellation result instead of invoking a throwing callback again for tracing");
 
-  CallbackPollingTransport retry_countdown_inner({ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "retry"},
-                                                  ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "done"}});
+  CallbackPollingTransport retry_countdown_inner({ava::http::HttpResponse{.status_code = 503, .headers = {}, .body = "retry"},
+                                                  ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "done"}});
   unsigned retry_ticks = 0;
-  ava::provider::RetryTransport retry_countdown(retry_countdown_inner,
-                                                ava::provider::RetryOptions{.observation = transport_observation,
-                                                                            .max_attempts = 2,
-                                                                            .base_delay_ms = 20,
-                                                                            .countdown_tick_ms = 5,
-                                                                            .on_retry =
-                                                                                [&retry_ticks](ava::provider::RetryOptions::Event const& event) {
-                                                                                  if (event.countdown_tick)
-                                                                                    ++retry_ticks;
-                                                                                  return ava::core::VoidResult{};
-                                                                                },
-                                                                            .response_retry_decision = ava::provider::provider_retry_decision});
+  ava::http::RetryTransport retry_countdown(retry_countdown_inner, ava::http::RetryOptions{.observation = transport_observation,
+                                                                                           .max_attempts = 2,
+                                                                                           .base_delay_ms = 20,
+                                                                                           .countdown_tick_ms = 5,
+                                                                                           .on_retry =
+                                                                                               [&retry_ticks](ava::http::RetryOptions::Event const& event) {
+                                                                                                 if (event.countdown_tick)
+                                                                                                   ++retry_ticks;
+                                                                                                 return ava::core::VoidResult{};
+                                                                                               },
+                                                                                           .response_retry_decision = ava::provider::provider_retry_decision});
   auto retry_countdown_result = retry_countdown.send(request);
   std::lock_guard lock(collector->mutex);
   auto const retry_traces = std::count_if(collector->events.begin(), collector->events.end(),
@@ -1158,31 +1158,31 @@ void test_transport_terminal_boundaries()
   auto collector = std::make_shared<CollectingObserver>();
   auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
-  ava::provider::HttpRequest request;
+  ava::http::HttpRequest request;
   request.method = "POST";
   request.url = "https://user:CANARY_URL_AUTH@example.test/path?CANARY_QUERY=1";
   request.headers = {{"Authorization", "CANARY_HEADER"}};
   request.body = "CANARY_BODY";
-  ava::provider::TransportObservation transport_observation{
+  ava::http::TransportObservation transport_observation{
       .observation = observation,
       .context = {.run_id = "run", .turn_id = "turn", .session_id = {}, .provider_id = {}, .parent_run_id = {}, .parent_turn_id = {}, .parent_session_id = {}}};
-  ava::tests::FakeTransport success({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
-  ava::provider::ObservedTransport observed_success(success, transport_observation);
+  ava::tests::FakeTransport success({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  ava::http::ObservedTransport observed_success(success, transport_observation);
   auto success_result = observed_success.send(request, [] { return false; });
   ava::tests::FakeTransport failure({});
-  ava::provider::ObservedTransport observed_failure(failure, transport_observation);
+  ava::http::ObservedTransport observed_failure(failure, transport_observation);
   auto failure_result = observed_failure.send(request, [] { return false; });
-  ava::tests::FakeTransport canceled({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "unused"}});
-  ava::provider::ObservedTransport observed_canceled(canceled, transport_observation);
+  ava::tests::FakeTransport canceled({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "unused"}});
+  ava::http::ObservedTransport observed_canceled(canceled, transport_observation);
   auto canceled_result = observed_canceled.send(request, [] { return true; });
-  ava::tests::FakeTransport retry_inner({ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "retry"},
-                                         ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "done"}});
-  ava::provider::RetryTransport retry(retry_inner, ava::provider::RetryOptions{.observation = transport_observation,
-                                                                               .max_attempts = 2,
-                                                                               .base_delay_ms = 0,
-                                                                               .max_retry_after_ms = 0,
-                                                                               .response_retry_decision = ava::provider::provider_retry_decision});
-  ava::provider::ObservedTransport observed_retry(retry, transport_observation);
+  ava::tests::FakeTransport retry_inner({ava::http::HttpResponse{.status_code = 503, .headers = {}, .body = "retry"},
+                                         ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "done"}});
+  ava::http::RetryTransport retry(retry_inner, ava::http::RetryOptions{.observation = transport_observation,
+                                                                       .max_attempts = 2,
+                                                                       .base_delay_ms = 0,
+                                                                       .max_retry_after_ms = 0,
+                                                                       .response_retry_decision = ava::provider::provider_retry_decision});
+  ava::http::ObservedTransport observed_retry(retry, transport_observation);
   auto retry_result = observed_retry.send(request);
   expect(success_result && !failure_result && !canceled_result && retry_result,
          "scripted transport covers success, error, cancel, and retry without a live provider");
@@ -1268,7 +1268,7 @@ void test_agent_lifecycle_survives_observation_attachment_failure()
   ava::session::SessionStore store({.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "attachment-failure"});
   store.fail_next_run_observation_attachment_for_test();
   ava::provider::OpenAIProvider provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200, .headers = {}, .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: [DONE]\n\n"}});
   ava::agent::AgentLoop loop({.workspace_dir = workspace,
                               .provider_id = "openai",
@@ -1535,18 +1535,18 @@ void test_provider_stream_event_outcomes_are_exhaustive()
   class AllEventsProvider final : public ava::provider::Provider
   {
    public:
-    [[nodiscard]] ava::core::Result<ava::provider::HttpRequest> build_request(ava::provider::ProviderRequest const&, std::string_view) const override
+    [[nodiscard]] ava::core::Result<ava::http::HttpRequest> build_request(ava::provider::ProviderRequest const&, std::string_view) const override
     {
-      return ava::provider::HttpRequest{.method = "POST",
-                                        .url = "https://example.test",
-                                        .headers = {},
-                                        .body = "{}",
-                                        .timeout_ms = 60000,
-                                        .follow_redirects = true,
-                                        .include_response_headers = false,
-                                        .resolve_hosts = {}};
+      return ava::http::HttpRequest{.method = "POST",
+                                    .url = "https://example.test",
+                                    .headers = {},
+                                    .body = "{}",
+                                    .timeout_ms = 60000,
+                                    .follow_redirects = true,
+                                    .include_response_headers = false,
+                                    .resolve_hosts = {}};
     }
-    [[nodiscard]] ava::core::Result<std::vector<ava::provider::StreamEvent>> parse_response(ava::provider::HttpResponse const&, bool) const override
+    [[nodiscard]] ava::core::Result<std::vector<ava::provider::StreamEvent>> parse_response(ava::http::HttpResponse const&, bool) const override
     {
       using Type = ava::provider::StreamEventType;
       auto event = [](Type type, std::string text = {}, std::string call_id = {}) {
@@ -1586,7 +1586,7 @@ void test_provider_stream_event_outcomes_are_exhaustive()
   if (!read_authority)
     return;
 
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
   AllEventsProvider provider;
   auto target = *append_target;
   ava::agent::AgentLoopOptions options;

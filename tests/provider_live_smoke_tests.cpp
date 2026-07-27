@@ -1,6 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
-#include "ava/provider/curl_transport.h"
+#include "ava/http/curl_transport.h"
 #include "ava/provider/registry.h"
 
 #include <cstdlib>
@@ -123,7 +123,7 @@ std::vector<LiveSmokeCase> configured_live_smokes()
   return cases;
 }
 
-void run_live_smoke_case(ava::provider::ProviderRegistry& registry, ava::provider::Transport& transport, LiveSmokeCase const& smoke)
+void run_live_smoke_case(ava::provider::ProviderRegistry& registry, ava::http::Transport& transport, LiveSmokeCase const& smoke)
 {
   auto provider = registry.create(smoke.provider_id);
   expect(provider.has_value() && *provider, smoke.label + " live smoke provider is registered");
@@ -193,7 +193,7 @@ void run_provider_live_smoke_tests()
   }
 
   auto registry = ava::provider::builtin_provider_registry();
-  ava::provider::CurlCliTransport transport;
+  ava::http::CurlCliTransport transport;
   for (auto const& smoke : cases)
   {
     run_live_smoke_case(registry, transport, smoke);

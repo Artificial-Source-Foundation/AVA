@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/provider_openai_test_suite.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/provider/provider.h"
 #include "ava/core/error.h"
@@ -12,7 +13,7 @@
 
 namespace ava::tests::provider_openai_suite {
 
-std::optional<ava::provider::HttpRequest> exercise_contract_request_serialization(ava::provider::OpenAIProvider const& provider)
+std::optional<ava::http::HttpRequest> exercise_contract_request_serialization(ava::provider::OpenAIProvider const& provider)
 {
   auto const request =
       provider.build_request(ava::provider::ProviderRequest{.provider_id = "openai",
@@ -299,7 +300,7 @@ std::optional<ava::provider::HttpRequest> exercise_contract_request_serializatio
   alternate_long_id_request.messages[0].content_parts[0].text = "different content";
   auto const long_id_response = provider.build_request(long_id_request, "oauth-token");
   auto const alternate_long_id_response = provider.build_request(alternate_long_id_request, "oauth-token");
-  auto compatibility_id = [](ava::core::Result<ava::provider::HttpRequest> const& response) {
+  auto compatibility_id = [](ava::core::Result<ava::http::HttpRequest> const& response) {
     constexpr std::string_view prefix = R"({"type":"message","id":")";
     if (!response)
       return std::string{};

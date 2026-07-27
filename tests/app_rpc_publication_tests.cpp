@@ -4,6 +4,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/rpc/input.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
@@ -397,8 +398,8 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
     if (session)
     {
       ava::provider::OpenAIProvider const provider("https://api.example.test");
-      ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"first\"}}"},
-                                           ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"second\"}}"}});
+      ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"first\"}}"},
+                                           ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"second\"}}"}});
       ava::app::runtime::RunOptions runtime_options;
       runtime_options.access_token = "token";
       BlockingInputBuf input_buffer;

@@ -1,13 +1,13 @@
 #include "sys.h"
+#include "ava/http/curl_transport.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_compaction.h"
 #include "ava/app/runtime_credentials.h"
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_retry.h"
-#include "ava/app/runtime/Session.h"
 #include "ava/agent/message_builder.h"
 #include "ava/session/logical_projection.h"
 #include "ava/session/validation.h"
-#include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
 #include "ava/core/json.h"
 #include "ava/core/string_utils.h"
@@ -329,7 +329,7 @@ std::pair<std::string, bool> retain_ranges_with_budget(std::vector<ava::provider
   return {std::move(tail), true};
 }
 
-ava::core::Result<std::string> parse_compaction_response_text(ava::provider::Provider const& provider, ava::provider::HttpResponse const& response, bool stream)
+ava::core::Result<std::string> parse_compaction_response_text(ava::provider::Provider const& provider, ava::http::HttpResponse const& response, bool stream)
 {
   auto events = provider.parse_response(response, stream);
   if (!events)
@@ -504,7 +504,7 @@ ava::core::Result<std::string> build_compaction_summary_prompt(std::vector<ava::
 ava::core::Result<std::string> generate_compaction_summary(runtime::Session const& session, std::vector<ava::session::SessionEntry> const& entries,
                                                            ava::session::CompactionConfig const& config, std::string_view instructions,
                                                            std::size_t estimated_tokens, ava::provider::Provider const& provider,
-                                                           ava::provider::Transport& transport, runtime::RunOptions const& options)
+                                                           ava::http::Transport& transport, runtime::RunOptions const& options)
 {
   if (session.is_offline() || options.offline)
   {
@@ -527,7 +527,7 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
     summary_options.credential_type = "bearer";
     summary_options.openai_oauth = false;
     summary_options.openai_account_id.clear();
-    ava::provider::CurlCliTransport auth_transport;
+    ava::http::CurlCliTransport auth_transport;
     auto prepared = prepare_runtime_credentials(session.paths(), effective_config->provider_id, std::move(summary_options), auth_transport, "compaction");
     if (!prepared)
       return std::unexpected(std::move(prepared.error()));
@@ -545,8 +545,8 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
     return std::unexpected(std::move(error));
   }
 
-  std::optional<ava::provider::RetryTransport> retry_transport;
-  ava::provider::Transport* summary_transport = &transport;
+  std::optional<ava::http::RetryTransport> retry_transport;
+  ava::http::Transport* summary_transport = &transport;
   if (summary_options.enable_transport_retries)
   {
     retry_transport.emplace(transport, runtime::runtime_retry_options(session, summary_options));
@@ -556,13 +556,13 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
   // Compaction is a provider request in the same runtime turn, so observe its
   // logical request with the already-established run/turn context. Do not
   // construct the decorator on the disabled path.
-  std::optional<ava::provider::ObservedTransport> observed_transport;
+  std::optional<ava::http::ObservedTransport> observed_transport;
   if (summary_options.observation && summary_options.observation->enabled())
   {
     try
     {
       observed_transport.emplace(*summary_transport,
-                                 ava::provider::TransportObservation{.observation = summary_options.observation, .context = summary_options.trace_context});
+                                 ava::http::TransportObservation{.observation = summary_options.observation, .context = summary_options.trace_context});
       summary_transport = &*observed_transport;
     }
     catch (...)
@@ -628,7 +628,7 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
 namespace ava::app::runtime {
 
 ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::SessionReadAuthority read_authority, std::string_view trigger,
-                                                ava::provider::Provider const& provider, ava::provider::Transport& transport, RunOptions const& options,
+                                                ava::provider::Provider const& provider, ava::http::Transport& transport, RunOptions const& options,
                                                 std::vector<std::string> const& replayed_user_messages)
 {
   if (options.access_token.empty())

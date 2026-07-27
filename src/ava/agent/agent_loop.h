@@ -1,5 +1,5 @@
 #pragma once
-
+#include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/message_builder.h"
@@ -161,7 +161,7 @@ struct AgentLoopOptions
   std::function<ava::core::Result<bool>(ava::session::SessionReadAuthority, std::string_view, std::vector<std::string> const& replayed_user_messages)>
       compact_context = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Provider>>()> background_provider_factory = nullptr;
-  std::function<ava::core::Result<std::unique_ptr<ava::provider::Transport>>()> background_transport_factory = nullptr;
+  std::function<ava::core::Result<std::unique_ptr<ava::http::Transport>>()> background_transport_factory = nullptr;
   // Production and tests use one application-scoped coordinator as the sole
   // task-subagent owner. BackgroundJobRegistry remains an internal engine.
   std::shared_ptr<SubagentCoordinator> subagent_coordinator = nullptr;
@@ -225,11 +225,11 @@ class AgentLoop
   explicit AgentLoop(AgentLoopOptions options);
 
   [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(std::string const& user_message, ava::session::SessionStore& store,
-                                                            ava::provider::Provider const& provider, ava::provider::Transport& transport);
+                                                            ava::provider::Provider const& provider, ava::http::Transport& transport);
   [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(std::string const& user_message,
                                                             std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
                                                             ava::session::SessionStore& store, ava::provider::Provider const& provider,
-                                                            ava::provider::Transport& transport);
+                                                            ava::http::Transport& transport);
   // Owns AgentLoopOptions, which contains provider credentials.
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
@@ -237,7 +237,7 @@ class AgentLoop
   [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn_impl(std::string const& user_message,
                                                                  std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
                                                                  ava::session::SessionStore& store, ava::provider::Provider const& provider,
-                                                                 ava::provider::Transport& transport, ava::observability::TraceContext const& trace_context);
+                                                                 ava::http::Transport& transport, ava::observability::TraceContext const& trace_context);
 
   AgentLoopOptions options_;
   bool ava_authority_roots_over_limit_ = false;

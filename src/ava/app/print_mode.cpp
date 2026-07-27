@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/curl_transport.h"
 #include "ava/app/EventEnvelope.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/runtime/Session.h"
@@ -7,7 +8,6 @@
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/permissions/permission_rules.h"
-#include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
 #include "ava/core/error.h"
 
@@ -136,7 +136,7 @@ ava::core::Result<std::string> merge_print_prompt(PrintPromptInputs const& input
 }
 
 ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session& session, std::string const& prompt, ava::provider::Provider const& provider,
-                                                                ava::provider::Transport& transport, PrintModeRunOptions const& options, std::ostream& out,
+                                                                ava::http::Transport& transport, PrintModeRunOptions const& options, std::ostream& out,
                                                                 std::ostream& err)
 {
   bool emitted_error = false;
@@ -223,11 +223,9 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
     return 1;
   }
 
-  ava::provider::CurlCliTransport default_transport;
-  ava::provider::Transport& transport =
-      options.transport_override ? options.transport_override->get() : static_cast<ava::provider::Transport&>(default_transport);
-  ava::provider::Transport& auth_transport =
-      options.transport_override ? options.transport_override->get() : static_cast<ava::provider::Transport&>(default_transport);
+  ava::http::CurlCliTransport default_transport;
+  ava::http::Transport& transport = options.transport_override ? options.transport_override->get() : static_cast<ava::http::Transport&>(default_transport);
+  ava::http::Transport& auth_transport = options.transport_override ? options.transport_override->get() : static_cast<ava::http::Transport&>(default_transport);
   auto registry = ava::provider::builtin_provider_registry();
   auto default_provider = registry.create(session->model().provider_id);
   if (!default_provider)

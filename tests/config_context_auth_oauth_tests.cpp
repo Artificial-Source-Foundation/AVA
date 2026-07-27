@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
@@ -862,7 +863,7 @@ void test_openai_oauth_helpers()
     expect(session->authorization_url.find("originator=ava") != std::string::npos, "OpenAI OAuth authorization URL identifies AVA originator");
   }
 
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "{\"access_token\":\"access\",\"refresh_token\":\"refresh\",\"expires_in\":120,"
@@ -888,7 +889,7 @@ void test_openai_oauth_helpers()
            "OpenAI OAuth code exchange form-encodes authorization code and verifier");
   }
 
-  ava::tests::FakeTransport device_start_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport device_start_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "{\"device_auth_id\":\"device-123\",\"user_code\":\"ABCD-EFGH\",\"interval\":\"1\"}",
@@ -904,7 +905,7 @@ void test_openai_oauth_helpers()
 
   if (device)
   {
-    ava::tests::FakeTransport pending_transport({ava::provider::HttpResponse{
+    ava::tests::FakeTransport pending_transport({ava::http::HttpResponse{
         .status_code = 403,
         .headers = {},
         .body = "{}",
@@ -912,13 +913,13 @@ void test_openai_oauth_helpers()
     auto pending = ava::config::poll_openai_oauth_device_authorization(*device, pending_transport, 1000);
     expect(pending && !pending->has_value(), "OpenAI headless OAuth treats 403 polling response as pending");
 
-    ava::tests::FakeTransport approved_transport({ava::provider::HttpResponse{
+    ava::tests::FakeTransport approved_transport({ava::http::HttpResponse{
                                                       .status_code = 200,
                                                       .headers = {},
                                                       .body = "{\"authorization_code\":\"device code\","
                                                               "\"code_verifier\":\"device-verifier\"}",
                                                   },
-                                                  ava::provider::HttpResponse{
+                                                  ava::http::HttpResponse{
                                                       .status_code = 200,
                                                       .headers = {},
                                                       .body = "{\"access_token\":\"device-access\","
@@ -939,7 +940,7 @@ void test_openai_oauth_helpers()
 
 void test_openai_oauth_refresh()
 {
-  ava::tests::FakeTransport refresh_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport refresh_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "{\"access_token\":\"refreshed-access\",\"refresh_token\":\"rotated-refresh\","
@@ -966,7 +967,7 @@ void test_openai_oauth_refresh()
            "OpenAI OAuth refresh form-encodes refresh token and client id");
   }
 
-  ava::tests::FakeTransport preserved_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport preserved_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "{\"access_token\":\"preserved-access\",\"expires_at\":2222}",
@@ -982,7 +983,7 @@ void test_openai_oauth_refresh()
              preserved->account_id == "acct_stable",
          "OpenAI OAuth refresh preserves existing refresh token when response omits rotation");
 
-  ava::tests::FakeTransport id_token_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport id_token_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "{\"access_token\":\"id-token-access\",\"refresh_token\":\"id-token-refresh\","
@@ -999,7 +1000,7 @@ void test_openai_oauth_refresh()
   expect(id_token_refreshed && id_token_refreshed->account_id == "acct_123",
          "OpenAI OAuth refresh falls back to id_token account id when account_id is absent");
 
-  ava::tests::FakeTransport malformed_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport malformed_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "not json",
@@ -1032,7 +1033,7 @@ void test_openai_oauth_refresh()
   expect(loaded && loaded->has_value(), "OpenAI OAuth refresh persistence test loads expired credential");
   if (loaded && *loaded)
   {
-    ava::tests::FakeTransport persist_transport({ava::provider::HttpResponse{
+    ava::tests::FakeTransport persist_transport({ava::http::HttpResponse{
         .status_code = 200,
         .headers = {},
         .body = "{\"access_token\":\"persisted-access\",\"refresh_token\":\"persisted-refresh\","
@@ -1057,7 +1058,7 @@ void test_openai_oauth_refresh()
   loaded = ava::config::load_openai_credential(paths);
   if (loaded && *loaded)
   {
-    ava::tests::FakeTransport failure_transport({ava::provider::HttpResponse{
+    ava::tests::FakeTransport failure_transport({ava::http::HttpResponse{
         .status_code = 400,
         .headers = {},
         .body = "{\"error\":\"invalid_grant\"}",
@@ -1125,7 +1126,7 @@ void test_anthropic_oauth_request_resolution()
     file << "\"account_id\":\"acct_old\",\"source\":\"claude\"}}";
   }
   ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
-  ava::tests::FakeTransport refresh_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport refresh_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "{\"access_token\":\"refreshed-oauth\",\"refresh_token\":\"rotated-refresh\","

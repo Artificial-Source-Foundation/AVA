@@ -1,6 +1,7 @@
 #include "sys.h"
-#include "ava/app/runtime_retry.h"
+#include "ava/http/transport.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_retry.h"
 #include "ava/session/session_store.h"
 
 #include <mutex>
@@ -29,13 +30,13 @@ Event base_retry_event(Session const& session, RunOptions const& options)
 
 }  // namespace
 
-ava::provider::RetryOptions runtime_retry_options(Session const& session, RunOptions const& options)
+ava::http::RetryOptions runtime_retry_options(Session const& session, RunOptions const& options)
 {
-  ava::provider::RetryOptions retry_options;
+  ava::http::RetryOptions retry_options;
   retry_options.cancel_requested = options.cancel_requested;
   retry_options.observation = {.observation = options.observation, .context = options.trace_context};
   retry_options.response_retry_decision = ava::provider::provider_retry_decision;
-  retry_options.on_retry = [&session, &options](ava::provider::RetryOptions::Event const& retry) {
+  retry_options.on_retry = [&session, &options](ava::http::RetryOptions::Event const& retry) {
     auto event = base_retry_event(session, options);
     event.type = retry.countdown_tick ? EventType::RetryTick : EventType::Retry;
     event.reason = retry.reason;

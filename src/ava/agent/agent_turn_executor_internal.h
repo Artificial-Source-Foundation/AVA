@@ -1,5 +1,5 @@
 #pragma once
-
+#include "ava/http/transport.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/message_builder.h"
@@ -109,7 +109,7 @@ class AgentTurnExecutor final
 {
  public:
   AgentTurnExecutor(AgentLoopOptions const& options, std::string const& user_message, std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
-                    ava::session::SessionStore& store, ava::provider::Provider const& provider, ava::provider::Transport& transport,
+                    ava::session::SessionStore& store, ava::provider::Provider const& provider, ava::http::Transport& transport,
                     ava::observability::TraceContext const& trace_context);
 
   [[nodiscard]] ava::core::Result<AgentLoopResult> run();
@@ -136,7 +136,7 @@ class AgentTurnExecutor final
   [[nodiscard]] ava::core::VoidResult replay_active_turn_user_messages();
   [[nodiscard]] ava::core::Result<bool> prepare_context_overflow_retry(ava::core::Error const& error);
   [[nodiscard]] ava::core::Result<ProviderTurn> request_provider_turn();
-  [[nodiscard]] ava::core::VoidResult receive_provider_events(ava::provider::HttpRequest const& built_request,
+  [[nodiscard]] ava::core::VoidResult receive_provider_events(ava::http::HttpRequest const& built_request,
                                                               ava::provider::ProviderRequest const& provider_request, ProviderEventAccumulator& accumulator);
   [[nodiscard]] ava::core::VoidResult initialize_tools();
   [[nodiscard]] ava::core::VoidResult persist_assistant_turn(ProviderTurn const& provider_turn, PendingCommittedToolResults& pending_results);
@@ -153,11 +153,11 @@ class AgentTurnExecutor final
   std::vector<ava::session::ImageAttachmentRef> const& image_attachments_;
   ava::session::SessionStore& store_;
   ava::provider::Provider const& provider_;
-  ava::provider::Transport& transport_;
+  ava::http::Transport& transport_;
   ava::observability::TraceContext const& trace_context_;
   AgentTurnSession session_;
-  std::optional<ava::provider::ObservedTransport> observed_transport_;
-  ava::provider::Transport* effective_transport_ = nullptr;
+  std::optional<ava::http::ObservedTransport> observed_transport_;
+  ava::http::Transport* effective_transport_ = nullptr;
   std::vector<ActiveTurnUserMessage> active_turn_user_messages_;
   bool context_overflow_retry_used_ = false;
   bool skip_auto_compaction_after_overflow_retry_ = false;

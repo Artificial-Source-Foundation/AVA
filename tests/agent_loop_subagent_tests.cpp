@@ -3,6 +3,7 @@
 #include "tests/support/agent_loop_test_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/command_jobs.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/session/assistant_output.h"
@@ -286,9 +287,9 @@ void test_agent_loop_coordinated_foreground_uses_fresh_worker_and_preserves_resu
                                               sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent received fresh child\"}\n\n"
                                                            "data: [DONE]\n\n")});
   auto const full_child_summary = std::string(17U * 1024U, 'x') + "FULL_FOREGROUND_TAIL";
-  auto child_responses = std::make_shared<std::vector<ava::provider::HttpResponse>>(std::initializer_list<ava::provider::HttpResponse>{
+  auto child_responses = std::make_shared<std::vector<ava::http::HttpResponse>>(std::initializer_list<ava::http::HttpResponse>{
       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"" + full_child_summary + "\"}\n\ndata: [DONE]\n\n")});
-  auto child_requests = std::make_shared<std::vector<ava::provider::HttpRequest>>();
+  auto child_requests = std::make_shared<std::vector<ava::http::HttpRequest>>();
   auto child_mutex = std::make_shared<std::mutex>();
   auto resume_state = std::make_shared<BlockingBackgroundTransport::State>();
   auto provider_creations = std::make_shared<std::atomic<unsigned>>(0);
@@ -309,14 +310,14 @@ void test_agent_loop_coordinated_foreground_uses_fresh_worker_and_preserves_resu
         return provider;
       },
       .background_transport_factory = [child_responses, child_requests, child_mutex, resume_state,
-                                       transport_creations]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
+                                       transport_creations]() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
         auto const creation = transport_creations->fetch_add(1, std::memory_order_relaxed) + 1;
         if (creation == 1)
         {
-          std::unique_ptr<ava::provider::Transport> transport = std::make_unique<SharedFakeTransport>(child_responses, child_requests, child_mutex);
+          std::unique_ptr<ava::http::Transport> transport = std::make_unique<SharedFakeTransport>(child_responses, child_requests, child_mutex);
           return transport;
         }
-        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
+        std::unique_ptr<ava::http::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
             resume_state, sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"resumed child result\"}\n\n"
                                        "data: [DONE]\n\n"));
         return transport;
@@ -440,9 +441,9 @@ void test_agent_loop_foreground_promotion_wakes_parent_without_restarting_child(
         std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
         return provider;
       },
-      .background_transport_factory = [child_state, transport_creations]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
+      .background_transport_factory = [child_state, transport_creations]() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
         transport_creations->fetch_add(1, std::memory_order_relaxed);
-        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
+        std::unique_ptr<ava::http::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
             child_state, sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"late child result\"}\n\n"
                                       "data: [DONE]\n\n"));
         return transport;
@@ -531,10 +532,10 @@ void test_agent_loop_promoted_failure_persists_sanitized_child_error()
         std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
         return provider;
       },
-      .background_transport_factory = [child_state]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
+      .background_transport_factory = [child_state]() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
         auto secret_body = std::string("{\"error\":{\"message\":\"credential=promoted-secret command=curl --token promoted-secret\"}}");
-        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
-            child_state, ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = std::move(secret_body)});
+        std::unique_ptr<ava::http::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
+            child_state, ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = std::move(secret_body)});
         return transport;
       },
       .subagent_coordinator = coordinator,
@@ -592,19 +593,19 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
     auto collector = std::make_shared<TraceCollector>();
     auto observation = std::make_shared<ava::observability::RunObservation>(collector);
     std::shared_ptr<ava::agent::SubagentCoordinator> coordinator;
-    std::shared_ptr<std::vector<ava::provider::HttpResponse>> background_responses;
-    std::shared_ptr<std::vector<ava::provider::HttpRequest>> background_requests;
+    std::shared_ptr<std::vector<ava::http::HttpResponse>> background_responses;
+    std::shared_ptr<std::vector<ava::http::HttpRequest>> background_requests;
     std::shared_ptr<std::mutex> background_mutex;
     ava::tests::FakeTransport transport(
-        background ? std::vector<ava::provider::HttpResponse>{sse_response(tool_call_sse("call_task", "task", task_arguments) + "data: [DONE]\n\n"),
-                                                              sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent queued\"}\n\n"
-                                                                           "data: [DONE]\n\n")}
-                   : std::vector<ava::provider::HttpResponse>{sse_response(tool_call_sse("call_task", "task", task_arguments) + "data: [DONE]\n\n"),
-                                                              sse_response(child_bash),
-                                                              sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child denied\"}\n\n"
-                                                                           "data: [DONE]\n\n"),
-                                                              sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent continued\"}\n\n"
-                                                                           "data: [DONE]\n\n")});
+        background ? std::vector<ava::http::HttpResponse>{sse_response(tool_call_sse("call_task", "task", task_arguments) + "data: [DONE]\n\n"),
+                                                          sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent queued\"}\n\n"
+                                                                       "data: [DONE]\n\n")}
+                   : std::vector<ava::http::HttpResponse>{sse_response(tool_call_sse("call_task", "task", task_arguments) + "data: [DONE]\n\n"),
+                                                          sse_response(child_bash),
+                                                          sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child denied\"}\n\n"
+                                                                       "data: [DONE]\n\n"),
+                                                          sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent continued\"}\n\n"
+                                                                       "data: [DONE]\n\n")});
     if (background)
     {
       auto coordinator_result = ava::agent::SubagentCoordinator::create();
@@ -612,10 +613,10 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
       if (!coordinator_result)
         return;
       coordinator = *coordinator_result;
-      background_responses = std::make_shared<std::vector<ava::provider::HttpResponse>>(std::vector<ava::provider::HttpResponse>{
+      background_responses = std::make_shared<std::vector<ava::http::HttpResponse>>(std::vector<ava::http::HttpResponse>{
           sse_response(child_bash), sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child denied\"}\n\n"
                                                  "data: [DONE]\n\n")});
-      background_requests = std::make_shared<std::vector<ava::provider::HttpRequest>>();
+      background_requests = std::make_shared<std::vector<ava::http::HttpRequest>>();
       background_mutex = std::make_shared<std::mutex>();
     }
 
@@ -638,8 +639,8 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
         }
         : decltype(ava::agent::AgentLoopOptions{}.background_provider_factory){},
         .background_transport_factory =
-            background ? [background_responses, background_requests, background_mutex]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
-          std::unique_ptr<ava::provider::Transport> child = std::make_unique<SharedFakeTransport>(background_responses, background_requests, background_mutex);
+            background ? [background_responses, background_requests, background_mutex]() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
+          std::unique_ptr<ava::http::Transport> child = std::make_unique<SharedFakeTransport>(background_responses, background_requests, background_mutex);
           return child;
         }
         : decltype(ava::agent::AgentLoopOptions{}.background_transport_factory){},
@@ -652,7 +653,7 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
     auto result = loop.run_turn("delegate authority child", store, provider, transport);
 
     bool child_completed = !background;
-    std::vector<ava::provider::HttpRequest> child_requests;
+    std::vector<ava::http::HttpRequest> child_requests;
     if (background)
     {
       auto jobs = coordinator->list(store.session_id());

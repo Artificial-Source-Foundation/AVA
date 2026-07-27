@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/provider_openai_test_suite.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/assistant_turn.h"
@@ -60,7 +61,7 @@ void test_openai_ordered_output_capture()
       "data: [DONE]\n\n");
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   auto const non_stream = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body =
@@ -148,7 +149,7 @@ void test_openai_ordered_output_capture()
          "assistant turn rejects unbalanced native text items while retaining legacy TextDelta synthesis");
 
   auto const zero_item =
-      provider.parse_response(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"status":"completed","output":[]})"}, false);
+      provider.parse_response(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"status":"completed","output":[]})"}, false);
   auto const zero_turn = zero_item ? ava::agent::parse_assistant_turn(*zero_item, {}) : ava::core::Result<ava::agent::ParsedAssistantTurn>{};
   expect(zero_item && zero_item->size() == 1 && zero_turn && zero_turn->ordered_items.empty(),
          "OpenAI non-stream parser preserves an explicit zero-item terminal response");
@@ -369,7 +370,7 @@ void test_openai_documented_message_reconciliation()
       "{\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}}}\n\n");
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   auto const non_stream = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body =
@@ -396,14 +397,14 @@ void test_openai_documented_message_reconciliation()
       "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_missing_phase\",\"type\":\"message\",\"phase\":null}}\n\n"
       "data: [DONE]\n\n");
   auto const null_phase = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body =
               R"({"status":"completed","output":[{"id":"msg_null_phase","type":"message","phase":null,"content":[{"type":"output_text","text":"null phase"}]}]})"},
       false);
   auto const non_stream_missing_phase = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body =
@@ -413,10 +414,9 @@ void test_openai_documented_message_reconciliation()
       "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_invalid_phase\",\"type\":\"message\",\"phase\":{}}}\n\n"
       "data: [DONE]\n\n");
   auto const unknown_non_stream_phase = provider.parse_response(
-      ava::provider::HttpResponse{
-          .status_code = 200,
-          .headers = {},
-          .body = R"({"status":"completed","output":[{"id":"msg_unknown_phase","type":"message","phase":"not_a_phase","content":[]}]})"},
+      ava::http::HttpResponse{.status_code = 200,
+                              .headers = {},
+                              .body = R"({"status":"completed","output":[{"id":"msg_unknown_phase","type":"message","phase":"not_a_phase","content":[]}]})"},
       false);
   expect(missing_phase && missing_phase->size() == 3 && (*missing_phase)[0].assistant_phase == ava::provider::AssistantPhase::Unknown &&
              (*missing_phase)[1].assistant_phase == ava::provider::AssistantPhase::Unknown && null_phase && null_phase->size() == 4 &&
@@ -435,7 +435,7 @@ void test_openai_documented_message_reconciliation()
       "\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"resolved\"}]}}\n\n"
       "data: [DONE]\n\n");
   auto const resolved_non_stream_phase = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body =
@@ -498,7 +498,7 @@ void test_openai_non_stream_output_order_and_strictness()
 {
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   auto const convenience_with_native_message = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body =
@@ -515,14 +515,14 @@ void test_openai_non_stream_output_order_and_strictness()
          "OpenAI non-stream parsing follows physical output order and never fabricates a convenience text item or index");
 
   auto const mismatched_native_index = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body =
               R"({"status":"completed","output":[{"id":"msg_wrong_index","type":"message","output_index":4,"content":[{"type":"output_text","text":"no"}]}]})"},
       false);
   auto const malformed_output = provider.parse_response(
-      ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"status":"completed","output":[{"type":"message"},false]})"}, false);
+      ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"status":"completed","output":[{"type":"message"},false]})"}, false);
   auto has_error = [](auto const& events, std::string_view message) {
     return events && std::any_of(events->begin(), events->end(), [message](auto const& event) {
              return event.type == ava::provider::StreamEventType::Error && event.error_message == message;

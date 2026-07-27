@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/provider/openai_reasoning.h"
 #include "ava/provider/openai_response_parser.h"
 #include "ava/provider/openai_response_parser_detail.h"
@@ -213,7 +214,7 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_sse(std::string_view ss
   return events;
 }
 
-ava::core::Result<std::vector<StreamEvent>> parse_openai_sse_response(HttpResponse const& response)
+ava::core::Result<std::vector<StreamEvent>> parse_openai_sse_response(ava::http::HttpResponse const& response)
 {
   if (response.status_code < 200 || response.status_code >= 300)
   {
@@ -221,7 +222,7 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_sse_response(HttpRespon
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI HTTP request failed with status " + std::to_string(response.status_code));
     error.with_context("status", std::to_string(response.status_code));
     error.with_context("provider_error_kind", to_string(kind));
-    if (auto const retry_after = retry_after_header(response))
+    if (auto const retry_after = ava::http::retry_after_header(response))
       error.with_context("retry_after", *retry_after);
     return std::unexpected(std::move(error));
   }

@@ -4,6 +4,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/acp/service.h"
 #include "ava/app/runtime_credentials.h"
 #include "ava/config/model_config.h"
@@ -425,7 +426,7 @@ void test_acp_session_lifecycle_real_prompt_and_provider_ownership()
   std::size_t bundle_count = 0;
   ava::app::RuntimeProviderRunBundleFactory factory = [&](ava::app::runtime::Session const&, ava::app::runtime::RunOptions options,
                                                           std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
-    auto transport = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::provider::HttpResponse>{ava::provider::HttpResponse{
+    auto transport = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::http::HttpResponse>{ava::http::HttpResponse{
         .status_code = 200, .headers = {}, .body = R"({"choices":[{"message":{"content":"owned response"},"finish_reason":"stop"}]})"}});
     {
       std::lock_guard lock(ownership_mutex);
@@ -433,8 +434,8 @@ void test_acp_session_lifecycle_real_prompt_and_provider_ownership()
     }
     options.access_token = "fake-test-key";
     options.stream = false;
-    std::unique_ptr<ava::provider::Transport> auth_transport = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::provider::HttpResponse>{});
-    std::unique_ptr<ava::provider::Transport> run_transport = std::move(transport);
+    std::unique_ptr<ava::http::Transport> auth_transport = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::http::HttpResponse>{});
+    std::unique_ptr<ava::http::Transport> run_transport = std::move(transport);
     auto created_provider = ava::provider::builtin_provider_registry().create("moonshot");
     if (!created_provider)
       return std::unexpected(std::move(created_provider.error()));

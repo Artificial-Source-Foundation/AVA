@@ -3,6 +3,7 @@
 #include "tests/support/agent_loop_test_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/usage_accounting.h"
 #include "ava/config/model_config.h"
@@ -209,7 +210,7 @@ void test_agent_loop_model_capability_gating()
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "capabilities"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
-      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"status\":\"completed\",\"output_text\":\"plain\"}"}});
+      {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"status\":\"completed\",\"output_text\":\"plain\"}"}});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,

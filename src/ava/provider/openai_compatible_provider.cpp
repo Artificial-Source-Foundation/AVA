@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/provider/openai_compatible_provider.h"
 #include "ava/provider/openai_compatible_request.h"
 #include "ava/provider/openai_provider.h"
@@ -426,7 +427,7 @@ OpenAICompatibleProvider::OpenAICompatibleProvider(OpenAICompatibleProviderOptio
 {
 }
 
-ava::core::Result<HttpRequest> OpenAICompatibleProvider::build_request(ProviderRequest const& request, std::string_view access_token) const
+ava::core::Result<ava::http::HttpRequest> OpenAICompatibleProvider::build_request(ProviderRequest const& request, std::string_view access_token) const
 {
   if (request.model_id.empty())
   {
@@ -481,14 +482,14 @@ ava::core::Result<HttpRequest> OpenAICompatibleProvider::build_request(ProviderR
                                              {"Accept", request.stream ? "text/event-stream" : "application/json"}};
   if (!options_.user_agent.empty())
     headers["User-Agent"] = options_.user_agent;
-  return HttpRequest{.method = "POST",
-                     .url = join_openai_compatible_url(options_.base_url, options_.chat_completions_path),
-                     .headers = std::move(headers),
-                     .body = openai_compatible_request_body_json(request, options_),
-                     .timeout_ms = 60000,
-                     .follow_redirects = true,
-                     .include_response_headers = false,
-                     .resolve_hosts = {}};
+  return ava::http::HttpRequest{.method = "POST",
+                                .url = join_openai_compatible_url(options_.base_url, options_.chat_completions_path),
+                                .headers = std::move(headers),
+                                .body = openai_compatible_request_body_json(request, options_),
+                                .timeout_ms = 60000,
+                                .follow_redirects = true,
+                                .include_response_headers = false,
+                                .resolve_hosts = {}};
 }
 
 std::unique_ptr<StreamParser> OpenAICompatibleProvider::create_stream_parser() const
@@ -496,7 +497,7 @@ std::unique_ptr<StreamParser> OpenAICompatibleProvider::create_stream_parser() c
   return std::make_unique<OpenAICompatibleStreamParser>(options_.reasoning_format);
 }
 
-ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleProvider::parse_response(HttpResponse const& response, bool stream) const
+ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleProvider::parse_response(ava::http::HttpResponse const& response, bool stream) const
 {
   if (response.status_code < 200 || response.status_code >= 300)
   {
@@ -505,7 +506,7 @@ ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleProvider::parse_resp
                                   options_.provider_name + " HTTP request failed with status " + std::to_string(response.status_code));
     error.with_context("status", std::to_string(response.status_code));
     error.with_context("provider_error_kind", to_string(kind));
-    if (auto const retry_after = retry_after_header(response))
+    if (auto const retry_after = ava::http::retry_after_header(response))
       error.with_context("retry_after", *retry_after);
     return std::unexpected(std::move(error));
   }

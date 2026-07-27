@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
 #include "ava/app/clipboard_image.h"
 #include "ava/app/onboarding.h"
@@ -103,7 +104,7 @@ void test_app_run_prompt_emits_events()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"runtime answer\"}\n\n"
@@ -159,7 +160,7 @@ void test_app_run_prompt_expands_file_references()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"reference answer\"}\n\n"
@@ -218,7 +219,7 @@ void test_app_run_prompt_sends_imported_image_attachment()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"image answer\"}\n\n"
@@ -293,7 +294,7 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
-      {ava::provider::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "0"}}, .body = "{\"error\":{\"message\":\"rate limited\"}}"},
+      {ava::http::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "0"}}, .body = "{\"error\":{\"message\":\"rate limited\"}}"},
        sse_response(final_text_sse("retried answer"))});
   std::vector<ava::app::runtime::Event> events;
   ava::app::runtime::RunOptions run_options;
@@ -322,17 +323,17 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
   expect(retry_options.response_retry_decision != nullptr, "runtime retry options install provider response retry classification");
   if (retry_options.response_retry_decision)
   {
-    expect(retry_options.response_retry_decision(ava::provider::HttpResponse{.status_code = 429, .headers = {}, .body = "rate limited"}) ==
-               ava::provider::ResponseRetryDecision::RateLimited,
+    expect(retry_options.response_retry_decision(ava::http::HttpResponse{.status_code = 429, .headers = {}, .body = "rate limited"}) ==
+               ava::http::ResponseRetryDecision::RateLimited,
            "runtime retry options classify generic 429 responses as rate-limited retries");
-    expect(retry_options.response_retry_decision(ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "try again"}) ==
-               ava::provider::ResponseRetryDecision::Transient,
+    expect(retry_options.response_retry_decision(ava::http::HttpResponse{.status_code = 503, .headers = {}, .body = "try again"}) ==
+               ava::http::ResponseRetryDecision::Transient,
            "runtime retry options classify generic 503 responses as transient retries");
-    expect(retry_options.response_retry_decision(ava::provider::HttpResponse{.status_code = 401, .headers = {}, .body = "unauthorized"}) ==
-               ava::provider::ResponseRetryDecision::NoRetry,
+    expect(retry_options.response_retry_decision(ava::http::HttpResponse{.status_code = 401, .headers = {}, .body = "unauthorized"}) ==
+               ava::http::ResponseRetryDecision::NoRetry,
            "runtime retry options classify authentication failures as non-retryable");
-    expect(retry_options.response_retry_decision(ava::provider::HttpResponse{
-               .status_code = 429, .headers = {}, .body = "insufficient_quota: billing hard limit"}) == ava::provider::ResponseRetryDecision::NoRetry,
+    expect(retry_options.response_retry_decision(ava::http::HttpResponse{
+               .status_code = 429, .headers = {}, .body = "insufficient_quota: billing hard limit"}) == ava::http::ResponseRetryDecision::NoRetry,
            "runtime retry options classify 429 quota bodies as non-retryable");
   }
   runtime_retry_cancel = true;
@@ -340,14 +341,14 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
   runtime_retry_cancel = false;
   if (retry_options.on_retry)
   {
-    auto emitted_tick = retry_options.on_retry(ava::provider::RetryOptions::Event{.attempt = 2,
-                                                                                  .max_attempts = 3,
-                                                                                  .delay_ms = 1000,
-                                                                                  .remaining_ms = 500,
-                                                                                  .reason = "rate_limited",
-                                                                                  .status_code = 429,
-                                                                                  .streaming = true,
-                                                                                  .countdown_tick = true});
+    auto emitted_tick = retry_options.on_retry(ava::http::RetryOptions::Event{.attempt = 2,
+                                                                              .max_attempts = 3,
+                                                                              .delay_ms = 1000,
+                                                                              .remaining_ms = 500,
+                                                                              .reason = "rate_limited",
+                                                                              .status_code = 429,
+                                                                              .streaming = true,
+                                                                              .countdown_tick = true});
     expect(emitted_tick.has_value() && events.size() == 1 && events[0].type == ava::app::runtime::EventType::RetryTick &&
                events[0].trigger == "provider_transport" && events[0].remaining_ms == 500 && events[0].delay_ms == 1000 && events[0].status == "streaming",
            "runtime retry options map provider countdown ticks to explicit backend retry_tick events");
@@ -385,8 +386,8 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
-      {ava::provider::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "0"}}, .body = "{\"error\":{\"message\":\"rate limited\"}}"},
-       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"OBSERVED SUMMARY\"}"},
+      {ava::http::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "0"}}, .body = "{\"error\":{\"message\":\"rate limited\"}}"},
+       ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"OBSERVED SUMMARY\"}"},
        sse_response(final_text_sse("observed answer"))});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "CANARY_RUNTIME_TOKEN";
@@ -463,7 +464,7 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
@@ -473,7 +474,7 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
                                                    "\\\"pwd\\\",\\\"max_bytes\\\":4}\"}\n\n"
                                                    "data: [DONE]\n\n",
                                        },
-                                       ava::provider::HttpResponse{
+                                       ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":"
@@ -598,7 +599,7 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
@@ -609,7 +610,7 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
                                                    "\\\"note.txt\\\"}\"}\n\n"
                                                    "data: [DONE]\n\n",
                                        },
-                                       ava::provider::HttpResponse{
+                                       ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":"

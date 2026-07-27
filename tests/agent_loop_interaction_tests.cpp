@@ -3,6 +3,7 @@
 #include "tests/support/agent_loop_test_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/stream_bridge.h"
 #include "ava/session/assistant_output.h"
@@ -38,8 +39,8 @@ class OverflowOnceProvider final : public ava::provider::Provider
  public:
   explicit OverflowOnceProvider(std::string base_url) : delegate_(std::move(base_url)) { }
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpRequest> build_request(ava::provider::ProviderRequest const& request,
-                                                                            std::string_view access_token) const override
+  [[nodiscard]] ava::core::Result<ava::http::HttpRequest> build_request(ava::provider::ProviderRequest const& request,
+                                                                        std::string_view access_token) const override
   {
     ++build_calls_;
     if (build_calls_ == 1)
@@ -51,8 +52,7 @@ class OverflowOnceProvider final : public ava::provider::Provider
 
   [[nodiscard]] std::unique_ptr<ava::provider::StreamParser> create_stream_parser() const override { return delegate_.create_stream_parser(); }
 
-  [[nodiscard]] ava::core::Result<std::vector<ava::provider::StreamEvent>> parse_response(ava::provider::HttpResponse const& response,
-                                                                                          bool stream) const override
+  [[nodiscard]] ava::core::Result<std::vector<ava::provider::StreamEvent>> parse_response(ava::http::HttpResponse const& response, bool stream) const override
   {
     return delegate_.parse_response(response, stream);
   }
@@ -331,8 +331,8 @@ void test_agent_loop_non_stream_response()
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "nonstream"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
-      .status_code = 200, .headers = {}, .body = "{\"status\":\"completed\",\"output_text\":\"plain response with data: literal\"}"}});
+  ava::tests::FakeTransport transport(
+      {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"status\":\"completed\",\"output_text\":\"plain response with data: literal\"}"}});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
@@ -360,12 +360,12 @@ void test_agent_loop_non_stream_error_prevents_tool_dispatch()
       ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "nonstream-provider-error"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
-      {ava::provider::HttpResponse{.status_code = 200,
-                                   .headers = {},
-                                   .body = "{\"output\":[{\"id\":\"fc_first\",\"type\":\"function_call\",\"call_id\":\"call_duplicate\","
-                                           "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"},{\"id\":\"fc_second\","
-                                           "\"type\":\"function_call\",\"call_id\":\"call_duplicate\",\"name\":\"read_file\","
-                                           "\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}]}"}});
+      {ava::http::HttpResponse{.status_code = 200,
+                               .headers = {},
+                               .body = "{\"output\":[{\"id\":\"fc_first\",\"type\":\"function_call\",\"call_id\":\"call_duplicate\","
+                                       "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"},{\"id\":\"fc_second\","
+                                       "\"type\":\"function_call\",\"call_id\":\"call_duplicate\",\"name\":\"read_file\","
+                                       "\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}]}"}});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
@@ -418,7 +418,7 @@ void test_agent_loop_invalid_utf8_function_arguments_prevent_dispatch()
   response.push_back(static_cast<char>(0xFF));
   response += "\\\"}\"}]}";
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(response)}});
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(response)}});
   int permission_resolver_calls = 0;
   int tool_events = 0;
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{

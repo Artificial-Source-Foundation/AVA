@@ -3,6 +3,7 @@
 #include "tests/support/agent_loop_test_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/command_jobs.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/session/assistant_output.h"
@@ -87,8 +88,8 @@ void test_agent_loop_background_task_starts_child_session()
         std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
         return provider;
       },
-      .background_transport_factory = [background_state]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
-        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
+      .background_transport_factory = [background_state]() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
+        std::unique_ptr<ava::http::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
             background_state, sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"background child\"}\n\n"
                                            "data: [DONE]\n\n"));
         return transport;
@@ -214,8 +215,8 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-bg-fail"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   std::mutex session_mutex;
-  auto background_responses = std::make_shared<std::vector<ava::provider::HttpResponse>>();
-  auto background_requests = std::make_shared<std::vector<ava::provider::HttpRequest>>();
+  auto background_responses = std::make_shared<std::vector<ava::http::HttpResponse>>();
+  auto background_requests = std::make_shared<std::vector<ava::http::HttpRequest>>();
   auto background_mutex = std::make_shared<std::mutex>();
   auto coordinator_result = ava::agent::SubagentCoordinator::create();
   expect(coordinator_result.has_value(), "background failure fixture creates coordinator");
@@ -246,9 +247,8 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
         return provider;
       },
       .background_transport_factory = [background_responses, background_requests,
-                                       background_mutex]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
-        std::unique_ptr<ava::provider::Transport> transport =
-            std::make_unique<SharedFakeTransport>(background_responses, background_requests, background_mutex);
+                                       background_mutex]() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
+        std::unique_ptr<ava::http::Transport> transport = std::make_unique<SharedFakeTransport>(background_responses, background_requests, background_mutex);
         return transport;
       },
       .subagent_coordinator = coordinator,
@@ -346,8 +346,8 @@ void test_agent_loop_background_task_cancel_requests_child_cancellation()
         std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
         return provider;
       },
-      .background_transport_factory = [background_state]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
-        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
+      .background_transport_factory = [background_state]() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
+        std::unique_ptr<ava::http::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
             background_state, sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"should not complete\"}\n\n"
                                            "data: [DONE]\n\n"));
         return transport;
@@ -425,8 +425,8 @@ void test_agent_loop_background_task_requires_coordinator()
         std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
         return provider;
       },
-      .background_transport_factory = []() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
-        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::provider::HttpResponse>{});
+      .background_transport_factory = []() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
+        std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::http::HttpResponse>{});
         return transport;
       },
       .append_entry = append_route_for_test(store),
@@ -485,8 +485,8 @@ void test_agent_loop_coordinator_start_failure_rolls_back_child()
         std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
         return provider;
       },
-      .background_transport_factory = []() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
-        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::provider::HttpResponse>{});
+      .background_transport_factory = []() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
+        std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::http::HttpResponse>{});
         return transport;
       },
       .subagent_coordinator = *coordinator,

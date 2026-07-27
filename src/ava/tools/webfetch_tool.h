@@ -1,7 +1,7 @@
 #pragma once
 
+#include "ava/http/transport.h"
 #include "ava/tools/file_tools.h"
-#include "ava/provider/provider.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -23,7 +23,7 @@ struct WebFetchOptions
   std::size_t max_lines = 200;
   int timeout_ms = 30000;
   WebFetchFormat format = WebFetchFormat::Markdown;
-  ava::provider::Transport* transport = nullptr;
+  ava::http::Transport* transport = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

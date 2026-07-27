@@ -1,17 +1,13 @@
 #pragma once
 
+#include "ava/http/transport.h"
 #include "ava/config/xdg_paths.h"
-
 #include "ava/core/result.h"
 
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
-
-namespace ava::provider {
-class Transport;
-}
 
 namespace ava::config {
 
@@ -52,17 +48,14 @@ struct ProviderCredential {
 [[nodiscard]] ava::core::Result<std::string> openai_access_token_for_request(OpenAICredential const& credential,
                                                                              long long now_seconds);
 [[nodiscard]] ava::core::Result<std::string> openai_access_token_for_request(OpenAICredential const& credential);
-[[nodiscard]] ava::core::Result<OpenAICredential> openai_credential_for_request(XdgPaths const& paths,
-                                                                                OpenAICredential const& credential,
-                                                                                ava::provider::Transport& transport,
-                                                                                long long now_seconds);
-[[nodiscard]] ava::core::Result<OpenAICredential> openai_credential_for_request(XdgPaths const& paths,
-                                                                                OpenAICredential const& credential,
-                                                                                ava::provider::Transport& transport);
-[[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(
-    XdgPaths const& paths, std::string_view provider_id, ava::provider::Transport& transport);
-[[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(
-    XdgPaths const& paths, std::string_view provider_id, ava::provider::Transport& transport, long long now_seconds);
+[[nodiscard]] ava::core::Result<OpenAICredential> openai_credential_for_request(XdgPaths const& paths, OpenAICredential const& credential,
+                                                                                ava::http::Transport& transport, long long now_seconds);
+[[nodiscard]] ava::core::Result<OpenAICredential> openai_credential_for_request(XdgPaths const& paths, OpenAICredential const& credential,
+                                                                                ava::http::Transport& transport);
+[[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(XdgPaths const& paths, std::string_view provider_id,
+                                                                                                   ava::http::Transport& transport);
+[[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(XdgPaths const& paths, std::string_view provider_id,
+                                                                                                   ava::http::Transport& transport, long long now_seconds);
 [[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_startup(
     XdgPaths const& paths, std::string_view provider_id);
 [[nodiscard]] ava::core::VoidResult store_provider_credential(XdgPaths const& paths,

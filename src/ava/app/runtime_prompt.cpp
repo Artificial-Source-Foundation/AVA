@@ -12,6 +12,7 @@
 #include "session_title_coordinator.h"
 #include "subagent_delivery_manager.h"
 #include "ava/diagnostics/runtime_diagnostics.h"
+#include "ava/http/curl_transport.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/tools/file_tools.h"
@@ -19,7 +20,6 @@
 #include "ava/plugin/static_resources.h"
 #include "ava/config/prompt_config.h"
 #include "ava/permissions/permission_rules.h"
-#include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
 #include "ava/context/markdown_resource.h"
 #include "ava/context/skill_loader.h"
@@ -773,7 +773,7 @@ ava::core::VoidResult apply_runtime_prompt_state(runtime::Session& session, runt
 }
 
 ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message, ava::provider::Provider const& provider,
-                                                          ava::provider::Transport& transport, runtime::RunOptions const& options)
+                                                          ava::http::Transport& transport, runtime::RunOptions const& options)
 {
   if (session.is_offline() || options.offline)
     return std::unexpected(offline_provider_error("prompt"));
@@ -816,7 +816,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& sess
 }
 
 ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Session& session, std::string const& user_message,
-                                                                   ava::provider::Provider const& provider, ava::provider::Transport& transport,
+                                                                   ava::provider::Provider const& provider, ava::http::Transport& transport,
                                                                    runtime::RunOptions const& options, ActiveRunGuard guard)
 {
   auto fail_run = [&guard, &session](ava::core::Error error) -> ava::core::Result<ava::agent::AgentLoopResult> {
@@ -927,8 +927,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
     if (runtime_options.trace_context.provider_id.empty())
       runtime_options.trace_context.provider_id = session.model().provider_id;
   }
-  std::optional<ava::provider::RetryTransport> retry_transport;
-  ava::provider::Transport* runtime_transport = &transport;
+  std::optional<ava::http::RetryTransport> retry_transport;
+  ava::http::Transport* runtime_transport = &transport;
   if (runtime_options.enable_transport_retries)
   {
     retry_transport.emplace(transport, runtime::runtime_retry_options(session, runtime_options));
@@ -1124,8 +1124,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .background_provider_factory = [provider_id = session.model().provider_id]() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
         return ava::provider::builtin_provider_registry().create(provider_id);
       },
-      .background_transport_factory = []() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
-        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<ava::provider::CurlCliTransport>();
+      .background_transport_factory = []() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
+        std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>();
         return transport;
       },
       .subagent_coordinator = session.subagent_coordinator(),

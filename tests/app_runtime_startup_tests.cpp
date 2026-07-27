@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/commands.h"
 #include "ava/app/line_shell_internal.h"
 #include "ava/app/project_trust.h"
@@ -615,7 +616,7 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
                                                                                   .tools_json = {},
                                                                                   .stream = true},
                                                    "token")
-                          : ava::core::Result<ava::provider::HttpRequest>(std::unexpected(messages.error()));
+                          : ava::core::Result<ava::http::HttpRequest>(std::unexpected(messages.error()));
   expect(resumed && entries && first_results == 1 && second_results == 1 && saw_unknown_nonretriable && validation.ok() && request,
          "resume closes only unresolved committed v4 functions, preserves exact bindings, validates replay, and builds the next provider request");
 

@@ -1,6 +1,6 @@
 #pragma once
-
 #include "ava/debug/print_members_on.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/config/model_config.h"
 #include "ava/config/session_title_config.h"
@@ -53,7 +53,7 @@ struct SessionTitleGenerationRequest
 
 using SessionTitleGenerator =
     std::function<ava::core::Result<std::string>(SessionTitleGenerationRequest&, std::stop_token, std::chrono::steady_clock::time_point)>;
-using SessionTitleTransportFactory = std::function<std::unique_ptr<ava::provider::Transport>()>;
+using SessionTitleTransportFactory = std::function<std::unique_ptr<ava::http::Transport>()>;
 
 struct SessionTitleCatalogChanges
 {

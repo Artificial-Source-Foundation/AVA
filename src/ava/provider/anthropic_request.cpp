@@ -1,8 +1,7 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/provider/anthropic_request.h"
-
 #include "ava/provider/provider_utils.h"
-
 #include "ava/core/json.h"
 
 #include <cstddef>
@@ -481,8 +480,8 @@ std::string normalize_anthropic_base_url(std::string base_url)
   return trim_trailing_slashes(base_url.empty() ? configured_base_url() : std::move(base_url));
 }
 
-ava::core::Result<HttpRequest> build_anthropic_http_request(std::string const& base_url, ProviderRequest const& request,
-                                                            std::string_view access_token)
+ava::core::Result<ava::http::HttpRequest> build_anthropic_http_request(std::string const& base_url, ProviderRequest const& request,
+                                                                       std::string_view access_token)
 {
   if (request.model_id.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model id is required"));
@@ -497,17 +496,17 @@ ava::core::Result<HttpRequest> build_anthropic_http_request(std::string const& b
   if (auto valid = validate_anthropic_content_parts(messages); !valid) return std::unexpected(std::move(valid.error()));
   if (auto valid = validate_cache_control_order(request, messages); !valid)
     return std::unexpected(std::move(valid.error()));
-  return HttpRequest{.method = "POST",
-                     .url = base_url + "/v1/messages",
-                     .headers = {{"x-api-key", std::string(access_token)},
-                                 {"anthropic-version", std::string(kAnthropicVersion)},
-                                 {"Content-Type", "application/json"},
-                                 {"Accept", request.stream ? "text/event-stream" : "application/json"}},
-                     .body = request_body_json(request, messages),
-                     .timeout_ms = 60000,
-                     .follow_redirects = false,
-                     .include_response_headers = false,
-                     .resolve_hosts = {}};
+  return ava::http::HttpRequest{.method = "POST",
+                                .url = base_url + "/v1/messages",
+                                .headers = {{"x-api-key", std::string(access_token)},
+                                            {"anthropic-version", std::string(kAnthropicVersion)},
+                                            {"Content-Type", "application/json"},
+                                            {"Accept", request.stream ? "text/event-stream" : "application/json"}},
+                                .body = request_body_json(request, messages),
+                                .timeout_ms = 60000,
+                                .follow_redirects = false,
+                                .include_response_headers = false,
+                                .resolve_hosts = {}};
 }
 
 }  // namespace ava::provider

@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_sessions.h"
@@ -153,10 +154,10 @@ class DeliveryCommandExecutor final : public ava::tools::CommandExecutor
   std::shared_ptr<std::atomic_int> calls_;
 };
 
-class DeliveryTransport final : public ava::provider::Transport
+class DeliveryTransport final : public ava::http::Transport
 {
  public:
-  DeliveryTransport(std::shared_ptr<DeliveryFactoryState> state, std::vector<ava::provider::HttpResponse> responses)
+  DeliveryTransport(std::shared_ptr<DeliveryFactoryState> state, std::vector<ava::http::HttpResponse> responses)
       : state_(std::move(state)), responses_(responses.begin(), responses.end())
   {
   }
@@ -168,7 +169,7 @@ class DeliveryTransport final : public ava::provider::Transport
     state_->changed.notify_all();
   }
 
-  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override
   {
     {
       std::lock_guard lock(state_->mutex);
@@ -183,7 +184,7 @@ class DeliveryTransport final : public ava::provider::Transport
 
  private:
   std::shared_ptr<DeliveryFactoryState> state_;
-  std::deque<ava::provider::HttpResponse> responses_;
+  std::deque<ava::http::HttpResponse> responses_;
 };
 
 std::string delivery_prompt_fingerprint(ava::agent::SubagentJobSnapshot const& job)
@@ -242,14 +243,14 @@ ava::app::RuntimeProviderRunBundleFactory delivery_factory(std::shared_ptr<Deliv
     // This fake factory models execution-time credential resolution without a
     // live provider or paid request.
     options.access_token = "freshly-resolved-delivery-token";
-    std::vector<ava::provider::HttpResponse> responses;
+    std::vector<ava::http::HttpResponse> responses;
     if (ask_question)
     {
-      responses.push_back(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = ava::tests::question_call_sse()});
+      responses.push_back(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = ava::tests::question_call_sse()});
     }
-    responses.push_back(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = final_response("parent integrated child summary")});
+    responses.push_back(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = final_response("parent integrated child summary")});
     std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://delivery.example.test");
-    std::unique_ptr<ava::provider::Transport> transport = std::make_unique<DeliveryTransport>(state, std::move(responses));
+    std::unique_ptr<ava::http::Transport> transport = std::make_unique<DeliveryTransport>(state, std::move(responses));
     options.stream = true;
     return ava::app::RuntimeProviderRunBundle{
         .provider = std::move(provider), .transport = std::move(transport), .auth_transport = nullptr, .options = std::move(options)};
@@ -712,11 +713,11 @@ void test_retry_after_synthetic_user_append_uses_same_marker()
       std::lock_guard lock(state->mutex);
       number = state->factories++;
     }
-    std::vector<ava::provider::HttpResponse> responses;
+    std::vector<ava::http::HttpResponse> responses;
     if (number > 0)
-      responses.push_back(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = final_response("retried integration")});
+      responses.push_back(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = final_response("retried integration")});
     std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://delivery.example.test");
-    std::unique_ptr<ava::provider::Transport> transport = std::make_unique<DeliveryTransport>(state, std::move(responses));
+    std::unique_ptr<ava::http::Transport> transport = std::make_unique<DeliveryTransport>(state, std::move(responses));
     options.access_token = "freshly-resolved-retry-token";
     return ava::app::RuntimeProviderRunBundle{
         .provider = std::move(provider), .transport = std::move(transport), .auth_transport = nullptr, .options = std::move(options)};

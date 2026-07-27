@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/config/auth.h"
 #include "ava/config/xdg_paths.h"
@@ -19,9 +20,9 @@
 
 namespace {
 
-ava::provider::HttpResponse sse_response(std::string body)
+ava::http::HttpResponse sse_response(std::string body)
 {
-  return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(body)};
+  return ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(body)};
 }
 
 void test_json_object_validator()
@@ -92,14 +93,14 @@ void test_anthropic_provider_contract()
              oauth_auth_request->headers.at("anthropic-beta") == "oauth-2025-04-20",
          "Anthropic OAuth auth context uses bearer authorization and OAuth beta marker");
 
-  ava::provider::HttpRequest existing_beta{.method = "POST",
-                                           .url = "https://anthropic.example.test/v1/messages",
-                                           .headers = {{"x-api-key", "old-key"}, {"anthropic-beta", "prompt-caching-2024-07-31, oauth-2025-04-20"}},
-                                           .body = "{}",
-                                           .timeout_ms = 60000,
-                                           .follow_redirects = false,
-                                           .include_response_headers = false,
-                                           .resolve_hosts = {}};
+  ava::http::HttpRequest existing_beta{.method = "POST",
+                                       .url = "https://anthropic.example.test/v1/messages",
+                                       .headers = {{"x-api-key", "old-key"}, {"anthropic-beta", "prompt-caching-2024-07-31, oauth-2025-04-20"}},
+                                       .body = "{}",
+                                       .timeout_ms = 60000,
+                                       .follow_redirects = false,
+                                       .include_response_headers = false,
+                                       .resolve_hosts = {}};
   auto applied = provider.apply_auth_options(
       existing_beta, ava::provider::ProviderAuthContext{.access_token = "oauth-context-token", .credential_type = "oauth", .account_id = "acct"});
   auto const& beta = existing_beta.headers.at("anthropic-beta");
@@ -934,7 +935,7 @@ void test_anthropic_parsing()
              (*private_error)[0].error_message.find("ANTHROPIC_SSE_OUTER_CANARY") == std::string::npos,
          "Anthropic SSE error diagnostics expose only a normalized provider message and reject embedded event-stream payloads");
 
-  auto non_stream = ava::provider::parse_anthropic_response(ava::provider::HttpResponse{
+  auto non_stream = ava::provider::parse_anthropic_response(ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body =
@@ -944,7 +945,7 @@ void test_anthropic_parsing()
              (*non_stream)[4].usage->total_tokens == 8 && (*non_stream)[4].usage->cache_write_tokens == 1 &&
              (*non_stream)[4].finish_reason == ava::provider::ProviderFinishReason::Completed,
          "Anthropic non-stream response parses text, tools, usage, and stop reason");
-  auto saturated_usage = ava::provider::parse_anthropic_response(ava::provider::HttpResponse{
+  auto saturated_usage = ava::provider::parse_anthropic_response(ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body =
@@ -953,7 +954,7 @@ void test_anthropic_parsing()
              saturated_usage->back().usage->total_tokens == 9223372036854775807LL,
          "Anthropic usage parsing saturates near-LLONG_MAX input and total token arithmetic");
 
-  auto non_stream_refusal = ava::provider::parse_anthropic_response(ava::provider::HttpResponse{
+  auto non_stream_refusal = ava::provider::parse_anthropic_response(ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = R"({"content":[{"type":"refusal","refusal":"I can't help with that."}],"stop_reason":"refusal","usage":{"input_tokens":1,"output_tokens":2}})"});
@@ -962,7 +963,7 @@ void test_anthropic_parsing()
              (*non_stream_refusal)[1].finish_reason == ava::provider::ProviderFinishReason::Refusal,
          "Anthropic non-stream response parses refusal content and stop reason");
 
-  auto non_stream_refusal_details = ava::provider::parse_anthropic_response(ava::provider::HttpResponse{
+  auto non_stream_refusal_details = ava::provider::parse_anthropic_response(ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body =
@@ -973,7 +974,7 @@ void test_anthropic_parsing()
              (*non_stream_refusal_details)[1].finish_reason == ava::provider::ProviderFinishReason::Refusal,
          "Anthropic non-stream response accepts refusal stop_details without content blocks");
 
-  auto non_stream_refusal_empty_details = ava::provider::parse_anthropic_response(ava::provider::HttpResponse{
+  auto non_stream_refusal_empty_details = ava::provider::parse_anthropic_response(ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = R"({"content":[],"stop_reason":"refusal","stop_details":{"type":"refusal","explanation":null},"usage":{"input_tokens":1,"output_tokens":2}})"});
@@ -1003,7 +1004,7 @@ void test_anthropic_parsing()
              (*pause_turn)[0].finish_reason == ava::provider::ProviderFinishReason::Error,
          "Anthropic SSE preserves pause_turn stop reason");
 
-  auto non_stream_reasoning = ava::provider::parse_anthropic_response(ava::provider::HttpResponse{
+  auto non_stream_reasoning = ava::provider::parse_anthropic_response(ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body =
@@ -1018,14 +1019,14 @@ void test_anthropic_parsing()
          "Anthropic non-stream response parses thinking and redacted thinking blocks");
 
   std::string const oversized_redacted_data(70 * 1024, 'r');
-  auto oversized_redacted = ava::provider::parse_anthropic_response(ava::provider::HttpResponse{
+  auto oversized_redacted = ava::provider::parse_anthropic_response(ava::http::HttpResponse{
       .status_code = 200, .headers = {}, .body = R"({"content":[{"type":"redacted_thinking","data":")" + oversized_redacted_data + R"("}]})"});
   expect(!oversized_redacted, "Anthropic non-stream response rejects oversized redacted thinking payloads");
 
-  auto malformed_success = ava::provider::parse_anthropic_response(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"content":[]})"});
+  auto malformed_success = ava::provider::parse_anthropic_response(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"content":[]})"});
   expect(!malformed_success, "Anthropic non-stream success without content is rejected");
 
-  auto http_error = ava::provider::parse_anthropic_sse_response(ava::provider::HttpResponse{
+  auto http_error = ava::provider::parse_anthropic_sse_response(ava::http::HttpResponse{
       .status_code = 529,
       .headers = {},
       .body =
@@ -1286,7 +1287,7 @@ void test_anthropic_agent_non_stream_reasoning_events()
   ava::session::SessionStore store(
       ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "anthropic-non-stream-reasoning"});
   ava::provider::AnthropicProvider const provider("https://anthropic.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body =
@@ -1424,9 +1425,9 @@ void test_anthropic_agent_non_stream_tool_loop_native_replay()
       ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "anthropic-non-stream-tool"});
   ava::provider::AnthropicProvider const provider("https://anthropic.example.test");
   ava::tests::FakeTransport transport(
-      {ava::provider::HttpResponse{
+      {ava::http::HttpResponse{
            .status_code = 200, .headers = {}, .body = R"({"content":[{"type":"tool_use","id":"toolu_1","name":"read_file","input":{"path":"note.txt"}}]})"},
-       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"content":[{"type":"text","text":"read non-stream"}]})"}});
+       ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"content":[{"type":"text","text":"read non-stream"}]})"}});
 
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,

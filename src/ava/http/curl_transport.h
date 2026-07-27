@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ava/provider/provider.h"
+#include "ava/http/transport.h"
 
-namespace ava::provider {
+namespace ava::http {
 
 class CurlCliTransport final : public Transport
 {
@@ -17,4 +17,4 @@ class CurlCliTransport final : public Transport
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
-}  // namespace ava::provider
+}  // namespace ava::http

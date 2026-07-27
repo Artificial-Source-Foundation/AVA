@@ -1,5 +1,5 @@
 #include "sys.h"
-#include "ava/provider/curl_transport.h"
+#include "ava/http/curl_transport.h"
 
 #include <algorithm>
 #include <array>
@@ -18,7 +18,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-namespace ava::provider {
+namespace ava::http {
 namespace {
 
 constexpr char kTrustedExecPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
@@ -749,4 +749,4 @@ ava::core::Result<HttpResponse> CurlCliTransport::send_streaming(HttpRequest con
   return final;
 }
 
-}  // namespace ava::provider
+}  // namespace ava::http

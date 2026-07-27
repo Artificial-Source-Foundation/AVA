@@ -1,5 +1,6 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/config/model_config.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/provider/gemini_provider.h"
@@ -163,7 +164,7 @@ void test_gemini_response_parsing()
 {
   ava::provider::GeminiProvider const provider("https://gemini.example.test");
   auto const response = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body =
@@ -178,7 +179,7 @@ void test_gemini_response_parsing()
              (*response)[4].usage->total_tokens == 5 && (*response)[4].usage->reasoning_tokens == 1 && (*response)[4].usage->cache_read_tokens == 1,
          "Gemini non-stream response parses text, functionCall, finish reason, and usage");
 
-  auto const missing_id_body = ava::provider::HttpResponse{
+  auto const missing_id_body = ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body =
@@ -192,12 +193,12 @@ void test_gemini_response_parsing()
          "Gemini missing function-call IDs use globally distinct per-response fallbacks while same-turn fragments merge");
 
   auto const missing_content =
-      provider.parse_response(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"candidates":[{"finishReason":"STOP"}]})"}, false);
+      provider.parse_response(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = R"({"candidates":[{"finishReason":"STOP"}]})"}, false);
   expect(!missing_content && missing_content.error().message().find("content is missing") != std::string::npos,
          "Gemini non-stream response requires content events");
 
   auto const http_error = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 403,
           .headers = {},
           .body =
@@ -244,7 +245,7 @@ void test_gemini_sse_parsing_and_fake_transport()
   expect(request.has_value(), "Gemini fake transport request builds");
   if (request)
   {
-    ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+    ava::tests::FakeTransport transport({ava::http::HttpResponse{
         .status_code = 200, .headers = {}, .body = R"({"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]})"}});
     auto fake_response = transport.send(*request);
     auto parsed = fake_response ? provider.parse_response(*fake_response, false) : ava::core::Result<std::vector<ava::provider::StreamEvent>>{};

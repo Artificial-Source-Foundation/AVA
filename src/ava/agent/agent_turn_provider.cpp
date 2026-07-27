@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_turn_executor_internal.h"
 #include "ava/agent/agent_turn_provider_internal.h"
 #include "ava/agent/assistant_turn.h"
@@ -33,7 +34,7 @@ bool is_checked_agent_loop_cancellation(ava::core::Error const& error)
 
 }  // namespace
 
-ava::core::VoidResult AgentTurnExecutor::receive_provider_events(ava::provider::HttpRequest const& built_request,
+ava::core::VoidResult AgentTurnExecutor::receive_provider_events(ava::http::HttpRequest const& built_request,
                                                                  ava::provider::ProviderRequest const& provider_request, ProviderEventAccumulator& accumulator)
 {
   if (auto not_canceled = session_.check_canceled("before_provider_transport"); !not_canceled)

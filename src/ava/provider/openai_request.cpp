@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/openai_reasoning.h"
 #include "ava/provider/openai_request.h"
@@ -480,7 +481,7 @@ std::string request_body_json(ProviderRequest const& request, bool include_max_o
   return body;
 }
 
-void apply_codex_oauth_request_options(HttpRequest& request)
+void apply_codex_oauth_request_options(ava::http::HttpRequest& request)
 {
   request.url = std::string(kCodexResponsesUrl);
   request.headers["OpenAI-Beta"] = "responses=experimental";
@@ -493,8 +494,8 @@ void apply_codex_oauth_request_options(HttpRequest& request)
 
 }  // namespace
 
-ava::core::Result<HttpRequest> build_openai_responses_request(ProviderRequest const& request, std::string_view access_token, std::string_view base_url,
-                                                              bool include_max_output_tokens)
+ava::core::Result<ava::http::HttpRequest> build_openai_responses_request(ProviderRequest const& request, std::string_view access_token,
+                                                                         std::string_view base_url, bool include_max_output_tokens)
 {
   if (request.model_id.empty())
   {
@@ -517,7 +518,7 @@ ava::core::Result<HttpRequest> build_openai_responses_request(ProviderRequest co
     return std::unexpected(std::move(valid_reasoning.error()));
   }
 
-  return HttpRequest{
+  return ava::http::HttpRequest{
       .method = "POST",
       .url = std::string(base_url) + "/v1/responses",
       .headers = {{"Authorization", "Bearer " + std::string(access_token)}, {"Content-Type", "application/json"}, {"Accept", "text/event-stream"}},
@@ -529,7 +530,7 @@ ava::core::Result<HttpRequest> build_openai_responses_request(ProviderRequest co
   };
 }
 
-ava::core::VoidResult apply_openai_auth_options(HttpRequest& request, ProviderAuthContext const& auth)
+ava::core::VoidResult apply_openai_auth_options(ava::http::HttpRequest& request, ProviderAuthContext const& auth)
 {
   if (auth.credential_type != "oauth")
     return {};
@@ -544,12 +545,12 @@ ava::core::VoidResult apply_openai_auth_options(HttpRequest& request, ProviderAu
 
 }  // namespace detail
 
-ava::core::Result<HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request, std::string_view access_token) const
+ava::core::Result<ava::http::HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request, std::string_view access_token) const
 {
   return detail::build_openai_responses_request(request, access_token, base_url_, true);
 }
 
-ava::core::Result<HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request, ProviderAuthContext const& auth) const
+ava::core::Result<ava::http::HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request, ProviderAuthContext const& auth) const
 {
   auto http_request = detail::build_openai_responses_request(request, auth.access_token, base_url_, auth.credential_type != "oauth");
   if (!http_request)
@@ -561,13 +562,13 @@ ava::core::Result<HttpRequest> OpenAIProvider::build_request(ProviderRequest con
   return http_request;
 }
 
-ava::core::VoidResult OpenAIProvider::apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const
+ava::core::VoidResult OpenAIProvider::apply_auth_options(ava::http::HttpRequest& request, ProviderAuthContext const& auth) const
 {
   return detail::apply_openai_auth_options(request, auth);
 }
 
-ava::core::Result<HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request, ava::config::OpenAICredential const& credential,
-                                                             long long now_seconds) const
+ava::core::Result<ava::http::HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request, ava::config::OpenAICredential const& credential,
+                                                                        long long now_seconds) const
 {
   auto access_token = ava::config::openai_access_token_for_request(credential, now_seconds);
   if (!access_token)
@@ -577,7 +578,7 @@ ava::core::Result<HttpRequest> OpenAIProvider::build_request(ProviderRequest con
                                                     .account_id = credential.account_id});
 }
 
-ava::core::Result<HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request, ava::config::OpenAICredential const& credential) const
+ava::core::Result<ava::http::HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request, ava::config::OpenAICredential const& credential) const
 {
   auto access_token = ava::config::openai_access_token_for_request(credential);
   if (!access_token)

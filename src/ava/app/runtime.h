@@ -1,10 +1,10 @@
 #pragma once
-
 #include "runtime/OpenOptions.h"
 #include "runtime/PromptState.h"
 #include "runtime/RunOptions.h"
-#include "ava/app/session_run_controller.h"
+#include "ava/http/transport.h"
 #include "ava/app/runtime/ReasoningSelection.h"
+#include "ava/app/session_run_controller.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
@@ -75,12 +75,12 @@ struct PreparedCompactionContext
 [[nodiscard]] ava::core::VoidResult replace_runtime_session(runtime::Session& destination, runtime::Session&& replacement);
 
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message,
-                                                                        ava::provider::Provider const& provider, ava::provider::Transport& transport,
+                                                                        ava::provider::Provider const& provider, ava::http::Transport& transport,
                                                                         runtime::RunOptions const& options);
 
 // Run a prompt using an admission guard already acquired from this session's controller.
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Session& session, std::string const& user_message,
-                                                                                 ava::provider::Provider const& provider, ava::provider::Transport& transport,
+                                                                                 ava::provider::Provider const& provider, ava::http::Transport& transport,
                                                                                  runtime::RunOptions const& options, ActiveRunGuard guard);
 
 [[nodiscard]] ava::core::Error offline_provider_error(std::string_view action);
@@ -104,7 +104,7 @@ struct PreparedCompactionContext
                                                                          std::vector<ava::session::SessionEntry> const& entries,
                                                                          ava::session::CompactionConfig const& config, std::string_view instructions,
                                                                          std::size_t estimated_tokens, ava::provider::Provider const& provider,
-                                                                         ava::provider::Transport& transport, runtime::RunOptions const& options);
+                                                                         ava::http::Transport& transport, runtime::RunOptions const& options);
 
 [[nodiscard]] std::string to_string(runtime::FreshnessSourceKind kind);
 

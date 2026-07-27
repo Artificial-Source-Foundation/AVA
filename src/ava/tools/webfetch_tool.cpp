@@ -1,7 +1,7 @@
 #include "sys.h"
-#include "ava/core/string_utils.h"
+#include "ava/http/curl_transport.h"
 #include "ava/tools/webfetch_tool.h"
-#include "ava/provider/curl_transport.h"
+#include "ava/core/string_utils.h"
 
 #include <algorithm>
 #include <cctype>
@@ -561,16 +561,16 @@ ava::core::Result<WebFetchResult> webfetch(ToolContext const& context, std::stri
     resolve_hosts.push_back(safe_url->host + ":" + safe_url->port + ":" + *resolved);
   }
 
-  ava::provider::CurlCliTransport default_transport;
-  auto& transport = options.transport ? *options.transport : static_cast<ava::provider::Transport&>(default_transport);
-  auto response = transport.send(ava::provider::HttpRequest{.method = "GET",
-                                                            .url = safe_url->url,
-                                                            .headers = {{"Accept", accept_header(options.format)}, {"User-Agent", "AVA/1.0 webfetch"}},
-                                                            .body = "",
-                                                            .timeout_ms = timeout_ms,
-                                                            .follow_redirects = false,
-                                                            .include_response_headers = true,
-                                                            .resolve_hosts = std::move(resolve_hosts)},
+  ava::http::CurlCliTransport default_transport;
+  auto& transport = options.transport ? *options.transport : static_cast<ava::http::Transport&>(default_transport);
+  auto response = transport.send(ava::http::HttpRequest{.method = "GET",
+                                                        .url = safe_url->url,
+                                                        .headers = {{"Accept", accept_header(options.format)}, {"User-Agent", "AVA/1.0 webfetch"}},
+                                                        .body = "",
+                                                        .timeout_ms = timeout_ms,
+                                                        .follow_redirects = false,
+                                                        .include_response_headers = true,
+                                                        .resolve_hosts = std::move(resolve_hosts)},
                                  context.cancel_requested);
   if (!response)
     return std::unexpected(std::move(response.error()));

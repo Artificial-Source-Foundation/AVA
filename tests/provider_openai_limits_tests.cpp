@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/provider_openai_test_suite.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/agent/assistant_turn.h"
 #include "ava/provider/finish_reason.h"
 #include "ava/provider/openai_response_parser.h"
@@ -22,7 +23,7 @@ void test_openai_responses_refusal_and_unsupported_output()
 {
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   auto const non_stream = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body =
@@ -59,13 +60,13 @@ void test_openai_responses_refusal_and_unsupported_output()
            error->error_message.find(discriminator) == std::string::npos && error->error_message.find(canary) == std::string::npos;
   };
   auto const non_stream_unsupported_item = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body = R"({"status":"completed","output":[{"id":"unknown","type":"image_generation_call","output_index":0,"private_canary":"NO_LEAK"}]})"},
       false);
   auto const non_stream_unsupported_content = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body =
@@ -120,7 +121,7 @@ void test_openai_provider_parser_budgets()
     output += "{\"id\":\"msg_" + std::to_string(index) + "\",\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"x\"}]}";
   }
   output += "]}";
-  auto non_stream = provider.parse_response(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = output}, false);
+  auto non_stream = provider.parse_response(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = output}, false);
   expect(non_stream && non_stream->size() == 1 && (*non_stream)[0].type == ava::provider::StreamEventType::Error &&
              (*non_stream)[0].error_message == "OpenAI response parser limit exceeded" && (*non_stream)[0].error_message.find("msg_") == std::string::npos,
          "OpenAI non-stream parser rejects oversized output arrays with one fixed terminal error before materializing provider events");

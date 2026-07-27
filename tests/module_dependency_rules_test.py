@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Check the temporary internal-module dependency exceptions.
+"""Check internal-module dependency direction and temporary exceptions.
 
-Only the seven production modules named by the policy are scanned.  The policy
+Only the eight production modules named by the policy are scanned. The policy
 is intentionally an exact include inventory rather than a module-pair waiver.
 """
 
@@ -15,15 +15,16 @@ import sys
 import tempfile
 import unittest
 
-MODULES = ("config", "provider", "session", "agent", "tools", "permissions", "app")
+MODULES = ("config", "http", "provider", "session", "agent", "tools", "permissions", "app")
 MODULE_SET = frozenset(MODULES)
 ALLOWED = {
     "app": MODULE_SET - {"app"},
-    "agent": frozenset({"config", "provider", "session", "tools", "permissions"}),
-    "provider": frozenset({"config"}),
+    "agent": frozenset({"config", "http", "provider", "session", "tools", "permissions"}),
+    "provider": frozenset({"config", "http"}),
     "session": frozenset({"config"}),
-    "tools": frozenset({"permissions"}),
-    "config": frozenset(),
+    "tools": frozenset({"http", "permissions"}),
+    "config": frozenset({"http"}),
+    "http": frozenset(),
     "permissions": frozenset(),
 }
 SOURCE_SUFFIXES = frozenset({".h", ".hpp", ".cpp"})
@@ -172,6 +173,18 @@ class ModuleDependencyRulesSelfTest(unittest.TestCase):
 
     def test_allowed_edge(self) -> None:
         self.assertEqual(self.run_check('#include "ava/config/model_config.h"\n', [], module="provider"), [])
+
+    def test_config_and_tools_may_depend_on_http(self) -> None:
+        self.assertEqual(self.run_check('#include "ava/http/transport.h"\n', [], module="config"), [])
+        self.assertEqual(self.run_check('#include "ava/http/transport.h"\n', [], module="tools"), [])
+
+    def test_http_cannot_depend_on_higher_layers(self) -> None:
+        for target in ("provider", "config", "tools", "agent", "app"):
+            with self.subTest(target=target):
+                self.assertEqual(
+                    self.run_check(f'#include "ava/{target}/fixture.h"\n', [], module="http"),
+                    [f"src/ava/http/fixture.cpp:1: implementation http -> {target} (ava/{target}/fixture.h)"],
+                )
 
     def test_forbidden_edge(self) -> None:
         self.assertEqual(

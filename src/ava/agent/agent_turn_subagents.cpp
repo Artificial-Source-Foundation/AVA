@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_turn_executor_internal.h"
 #include "ava/agent/job_control.h"
 #include "ava/session/session_branch.h"
@@ -260,7 +261,7 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
       std::string prompt;
       std::shared_ptr<CoordinatedTaskResultState> result_state;
       std::unique_ptr<ava::provider::Provider> provider_instance;
-      std::unique_ptr<ava::provider::Transport> transport_instance;
+      std::unique_ptr<ava::http::Transport> transport_instance;
       std::shared_ptr<SubagentInteractionGate> interaction_gate;
     };
     auto run_state = std::make_shared<CoordinatedTaskRunState>(CoordinatedTaskRunState{.child_store = std::move(child_store),

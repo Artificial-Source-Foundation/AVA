@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
-#include "ava/observability/run_observer.h"
+#include "ava/http/transport.h"
 #include "ava/provider/finish_reason.h"
 #include "ava/core/result.h"
 
@@ -146,30 +146,6 @@ struct TokenUsage
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct HttpRequest
-{
-  std::string method;
-  std::string url;
-  std::map<std::string, std::string> headers;
-  std::string body;
-  // Provider transports should honor this deadline and tests should preserve it verbatim.
-  int timeout_ms = 60000;
-  bool follow_redirects = true;
-  bool include_response_headers = false;
-  std::vector<std::string> resolve_hosts;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct HttpResponse
-{
-  int status_code = 0;
-  std::map<std::string, std::string> headers;
-  std::string body;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
 enum class StreamEventType
 {
   TextStart,
@@ -241,124 +217,22 @@ class Provider
 {
  public:
   virtual ~Provider() = default;
-  [[nodiscard]] virtual ava::core::Result<HttpRequest> build_request(ProviderRequest const& request, std::string_view access_token) const = 0;
-  [[nodiscard]] virtual ava::core::Result<HttpRequest> build_request(ProviderRequest const& request, ProviderAuthContext const& auth) const;
-  [[nodiscard]] virtual ava::core::VoidResult apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const;
+  [[nodiscard]] virtual ava::core::Result<ava::http::HttpRequest> build_request(ProviderRequest const& request, std::string_view access_token) const = 0;
+  [[nodiscard]] virtual ava::core::Result<ava::http::HttpRequest> build_request(ProviderRequest const& request, ProviderAuthContext const& auth) const;
+  [[nodiscard]] virtual ava::core::VoidResult apply_auth_options(ava::http::HttpRequest& request, ProviderAuthContext const& auth) const;
   [[nodiscard]] virtual std::unique_ptr<StreamParser> create_stream_parser() const;
-  [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response, bool stream) const;
+  [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> parse_response(ava::http::HttpResponse const& response, bool stream) const;
 
   AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS
 };
-
-struct TransportObservation
-{
-  std::shared_ptr<ava::observability::RunObservation> observation;
-  ava::observability::TraceContext context;
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-};
-
-class Transport
-{
- public:
-  using BodyChunkSink = std::function<ava::core::VoidResult(std::string_view)>;
-  using CancelCallback = std::function<bool()>;
-
-  virtual ~Transport() = default;
-  [[nodiscard]] virtual ava::core::Result<HttpResponse> send(HttpRequest const& request) = 0;
-  [[nodiscard]] virtual ava::core::Result<HttpResponse> send(HttpRequest const& request, CancelCallback cancel_requested);
-  [[nodiscard]] virtual bool supports_streaming() const noexcept;
-  [[nodiscard]] virtual ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
-                                                                       CancelCallback cancel_requested = nullptr);
-
-  AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS
-};
-
-enum class ResponseRetryDecision
-{
-  NoRetry,
-  RateLimited,
-  Transient,
-};
-
-struct RetryOptions
-{
-  // Deliberately separate from HttpRequest: this configuration observes retry
-  // composition, not provider protocol bytes.
-  TransportObservation observation = {};
-  int max_attempts = 3;
-  int base_delay_ms = 250;
-  int max_retry_after_ms = 60'000;
-  int countdown_tick_ms = 1000;
-  struct Event
-  {
-    std::size_t attempt = 0;
-    std::size_t max_attempts = 0;
-    std::size_t delay_ms = 0;
-    std::size_t remaining_ms = 0;
-    std::string reason = {};
-    int status_code = 0;
-    bool streaming = false;
-    bool countdown_tick = false;
-
-    AVA_DEBUG_PRINT_MEMBERS_ON
-  };
-  std::function<ava::core::VoidResult(Event const&)> on_retry = nullptr;
-  Transport::CancelCallback cancel_requested = nullptr;
-  // Closed HTTP response retry policy. Null means responses are never retried;
-  // transport IO retries remain independent of this callback.
-  std::function<ResponseRetryDecision(HttpResponse const&)> response_retry_decision = nullptr;
-
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-};
-
-class RetryTransport final : public Transport
-{
- public:
-  RetryTransport(Transport& inner, RetryOptions options = {});
-  [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request) override;
-  [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request, CancelCallback cancel_requested) override;
-  [[nodiscard]] bool supports_streaming() const noexcept override;
-  [[nodiscard]] ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
-                                                               CancelCallback cancel_requested = nullptr) override;
-  // RetryOptions contains runtime callbacks and observation state.
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-
- private:
-  Transport& inner_;
-  RetryOptions options_;
-};
-
-// The non-overridable observation boundary. New concrete transports only
-// implement Transport; callers compose this decorator when tracing is enabled.
-class ObservedTransport final : public Transport
-{
- public:
-  ObservedTransport(Transport& inner, TransportObservation observation);
-  [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request) override;
-  [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request, CancelCallback cancel_requested) override;
-  [[nodiscard]] bool supports_streaming() const noexcept override;
-  [[nodiscard]] ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
-                                                               CancelCallback cancel_requested = nullptr) override;
-
- private:
-  Transport& inner_;
-  TransportObservation observation_;
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-};
-
-void observe_transport_result(TransportObservation const& observation, HttpRequest const& request, ava::core::Result<HttpResponse> const& result,
-                              bool canceled = false, bool attempt = false) noexcept;
-void observe_transport_retry(TransportObservation const& observation, std::size_t next_attempt, std::size_t max_attempts, std::size_t delay_ms,
-                             std::string_view reason, int status_code, bool streaming) noexcept;
 
 [[nodiscard]] std::string to_string(AssistantPhase phase);
 [[nodiscard]] std::optional<AssistantPhase> assistant_phase_from_string(std::string_view value);
 [[nodiscard]] bool is_known_assistant_phase(AssistantPhase phase) noexcept;
 [[nodiscard]] std::string to_string(StreamEventType type);
 [[nodiscard]] std::string to_string(ProviderErrorKind kind);
-[[nodiscard]] ProviderErrorKind classify_provider_error(HttpResponse const& response);
-[[nodiscard]] ResponseRetryDecision provider_retry_decision(HttpResponse const& response);
-[[nodiscard]] std::optional<std::string> retry_after_header(HttpResponse const& response);
+[[nodiscard]] ProviderErrorKind classify_provider_error(ava::http::HttpResponse const& response);
+[[nodiscard]] ava::http::ResponseRetryDecision provider_retry_decision(ava::http::HttpResponse const& response);
 [[nodiscard]] bool is_context_overflow_error(ava::core::Error const& error);
 struct ImageInputPolicy
 {

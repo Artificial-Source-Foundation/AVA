@@ -1,7 +1,7 @@
 #pragma once
 
+#include "ava/http/transport.h"
 #include "ava/tools/file_tools.h"
-#include "ava/provider/provider.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -16,7 +16,7 @@ struct WebSearchOptions
   std::size_t max_results = 8;
   std::size_t context_max_chars = 10000;
   int timeout_ms = 25000;
-  ava::provider::Transport* transport = nullptr;
+  ava::http::Transport* transport = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

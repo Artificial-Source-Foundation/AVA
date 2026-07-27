@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_turn_executor_internal.h"
 #include "ava/agent/stream_bridge.h"
 #include "ava/agent/subagent_config.h"
@@ -13,7 +14,7 @@ namespace ava::agent::detail {
 
 AgentTurnExecutor::AgentTurnExecutor(AgentLoopOptions const& options, std::string const& user_message,
                                      std::vector<ava::session::ImageAttachmentRef> const& image_attachments, ava::session::SessionStore& store,
-                                     ava::provider::Provider const& provider, ava::provider::Transport& transport,
+                                     ava::provider::Provider const& provider, ava::http::Transport& transport,
                                      ava::observability::TraceContext const& trace_context)
     : options_(options),
       user_message_(user_message),
@@ -29,7 +30,7 @@ AgentTurnExecutor::AgentTurnExecutor(AgentLoopOptions const& options, std::strin
   {
     try
     {
-      observed_transport_.emplace(transport_, ava::provider::TransportObservation{.observation = options_.observation, .context = trace_context_});
+      observed_transport_.emplace(transport_, ava::http::TransportObservation{.observation = options_.observation, .context = trace_context_});
       effective_transport_ = &*observed_transport_;
     }
     catch (...)

@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/agent_loop_test_support.h"
+#include "ava/http/transport.h"
 #include "ava/core/json.h"
 
 #include <expected>
@@ -13,9 +14,9 @@ void TraceCollector::on_event(ava::observability::TraceEvent const& event)
   events.push_back(event);
 }
 
-ava::provider::HttpResponse sse_response(std::string const& body)
+ava::http::HttpResponse sse_response(std::string const& body)
 {
-  return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = body};
+  return ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = body};
 }
 
 std::string tool_call_sse(std::string_view id, std::string_view name, std::string_view arguments_json)
@@ -26,13 +27,13 @@ std::string tool_call_sse(std::string_view id, std::string_view name, std::strin
          "\"}\n\n";
 }
 
-SharedFakeTransport::SharedFakeTransport(std::shared_ptr<std::vector<ava::provider::HttpResponse>> responses,
-                                         std::shared_ptr<std::vector<ava::provider::HttpRequest>> requests, std::shared_ptr<std::mutex> mutex)
+SharedFakeTransport::SharedFakeTransport(std::shared_ptr<std::vector<ava::http::HttpResponse>> responses,
+                                         std::shared_ptr<std::vector<ava::http::HttpRequest>> requests, std::shared_ptr<std::mutex> mutex)
     : responses_(std::move(responses)), requests_(std::move(requests)), mutex_(std::move(mutex))
 {
 }
 
-ava::core::Result<ava::provider::HttpResponse> SharedFakeTransport::send(ava::provider::HttpRequest const& request)
+ava::core::Result<ava::http::HttpResponse> SharedFakeTransport::send(ava::http::HttpRequest const& request)
 {
   std::lock_guard lock(*mutex_);
   requests_->push_back(request);
@@ -71,23 +72,23 @@ bool BlockingBackgroundTransport::State::wait_for_cancel(std::chrono::millisecon
   return changed.wait_for(lock, timeout, [&] { return cancel_observed; });
 }
 
-std::vector<ava::provider::HttpRequest> BlockingBackgroundTransport::State::requests_snapshot()
+std::vector<ava::http::HttpRequest> BlockingBackgroundTransport::State::requests_snapshot()
 {
   std::lock_guard lock(mutex);
   return requests;
 }
 
-BlockingBackgroundTransport::BlockingBackgroundTransport(std::shared_ptr<State> state, ava::provider::HttpResponse response)
+BlockingBackgroundTransport::BlockingBackgroundTransport(std::shared_ptr<State> state, ava::http::HttpResponse response)
     : state_(std::move(state)), response_(std::move(response))
 {
 }
 
-ava::core::Result<ava::provider::HttpResponse> BlockingBackgroundTransport::send(ava::provider::HttpRequest const& request)
+ava::core::Result<ava::http::HttpResponse> BlockingBackgroundTransport::send(ava::http::HttpRequest const& request)
 {
   return send(request, nullptr);
 }
 
-ava::core::Result<ava::provider::HttpResponse> BlockingBackgroundTransport::send(ava::provider::HttpRequest const& request, CancelCallback cancel_requested)
+ava::core::Result<ava::http::HttpResponse> BlockingBackgroundTransport::send(ava::http::HttpRequest const& request, CancelCallback cancel_requested)
 {
   std::unique_lock lock(state_->mutex);
   state_->requests.push_back(request);

@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/session_run_controller.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
@@ -23,20 +24,20 @@
 
 namespace {
 
-ava::provider::HttpResponse sse_response(std::string const& body)
+ava::http::HttpResponse sse_response(std::string const& body)
 {
-  return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = body};
+  return ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = body};
 }
 
-class CallbackTransport final : public ava::provider::Transport
+class CallbackTransport final : public ava::http::Transport
 {
  public:
-  CallbackTransport(std::vector<ava::provider::HttpResponse> responses, std::function<void()> after_send)
+  CallbackTransport(std::vector<ava::http::HttpResponse> responses, std::function<void()> after_send)
       : responses_(std::move(responses)), after_send_(std::move(after_send))
   {
   }
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override
   {
     requests_.push_back(request);
     if (responses_.empty())
@@ -50,12 +51,12 @@ class CallbackTransport final : public ava::provider::Transport
     return response;
   }
 
-  [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept { return requests_; }
+  [[nodiscard]] std::vector<ava::http::HttpRequest> const& requests() const noexcept { return requests_; }
 
  private:
-  std::vector<ava::provider::HttpResponse> responses_;
+  std::vector<ava::http::HttpResponse> responses_;
   std::function<void()> after_send_;
-  std::vector<ava::provider::HttpRequest> requests_;
+  std::vector<ava::http::HttpRequest> requests_;
 };
 
 void test_agent_loop_cancellation_boundaries()

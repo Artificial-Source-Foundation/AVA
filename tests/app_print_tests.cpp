@@ -2,8 +2,9 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
-#include "ava/app/connect_openai.h"
+#include "ava/http/transport.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/connect_openai.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/runtime.h"
@@ -352,7 +353,7 @@ void test_app_print_text_mode_outputs_final_text_only()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"print answer\"}\n\n"
@@ -389,7 +390,7 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"safe \\u001b]52;c;QUJD\\u0007 text\\nnext\\tline\"}\n\n"
@@ -413,7 +414,7 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
   expect(error_session.has_value(), "print terminal sanitize error test opens runtime session");
   if (!error_session)
     return;
-  ava::tests::FakeTransport error_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport error_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.error\",\"error\":{\"message\":\"bad \\u001b]52;c;RElBRw==\\u0007 diagnostic\"}}\n\n"
@@ -478,7 +479,7 @@ void test_app_print_text_mode_reports_stdout_write_failure()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"print answer\"}\n\n"
@@ -519,7 +520,7 @@ void test_app_print_mode_uses_headless_permission_policy()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
@@ -532,7 +533,7 @@ void test_app_print_mode_uses_headless_permission_policy()
                                                    "\\\"}\"}\n\n"
                                                    "data: [DONE]\n\n",
                                        },
-                                       ava::provider::HttpResponse{
+                                       ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":"
@@ -579,7 +580,7 @@ void test_app_print_mode_default_permission_denial_is_actionable()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":"
@@ -592,7 +593,7 @@ void test_app_print_mode_default_permission_denial_is_actionable()
                                                    "\\\"}\"}\n\n"
                                                    "data: [DONE]\n\n",
                                        },
-                                       ava::provider::HttpResponse{
+                                       ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":"
@@ -796,14 +797,14 @@ void test_app_print_mode_refreshes_expired_oauth_before_provider_request()
   expect(stored.has_value(), "print OAuth refresh test stores expired credential");
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "{\"access_token\":\"print-refreshed-access\","
                                                    "\"refresh_token\":\"print-rotated-refresh\","
                                                    "\"expires_in\":3600,\"account_id\":\"acct_print\"}",
                                        },
-                                       ava::provider::HttpResponse{
+                                       ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":"
@@ -852,7 +853,7 @@ void test_app_print_offline_fails_before_auth_refresh_or_provider_request()
   expect(stored.has_value(), "print offline test stores expired credential");
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{}"}});
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{}"}});
 
   ava::app::PrintModeOptions options;
   options.open_options.workspace_dir = workspace;
@@ -1054,7 +1055,7 @@ void test_app_print_json_mode_outputs_runtime_events()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"json answer\"}\n\n"
@@ -1081,7 +1082,7 @@ void test_app_print_json_mode_outputs_runtime_events()
   expect(error_session.has_value(), "print json error test opens runtime session");
   if (!error_session)
     return;
-  ava::tests::FakeTransport error_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport error_transport({ava::http::HttpResponse{
       .status_code = 500,
       .headers = {},
       .body =

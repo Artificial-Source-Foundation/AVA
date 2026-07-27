@@ -1,6 +1,6 @@
 #include "sys.h"
+#include "ava/http/curl_transport.h"
 #include "ava/tools/websearch_tool.h"
-#include "ava/provider/curl_transport.h"
 #include "ava/core/error.h"
 #include "ava/core/json.h"
 #include "ava/core/string_utils.h"
@@ -158,16 +158,16 @@ ava::core::Result<WebSearchResult> websearch(ToolContext const& context, std::st
 
   std::string const url = "https://api.duckduckgo.com/?q=" + url_encode(*safe_query) + "&format=json&no_html=1&skip_disambig=1&no_redirect=1";
 
-  ava::provider::CurlCliTransport default_transport;
-  auto& transport = options.transport ? *options.transport : static_cast<ava::provider::Transport&>(default_transport);
-  auto response = transport.send(ava::provider::HttpRequest{.method = "GET",
-                                                            .url = url,
-                                                            .headers = {{"Accept", "application/json"}, {"User-Agent", "AVA/1.0 websearch"}},
-                                                            .body = "",
-                                                            .timeout_ms = timeout_ms,
-                                                            .follow_redirects = true,
-                                                            .include_response_headers = true,
-                                                            .resolve_hosts = {}},
+  ava::http::CurlCliTransport default_transport;
+  auto& transport = options.transport ? *options.transport : static_cast<ava::http::Transport&>(default_transport);
+  auto response = transport.send(ava::http::HttpRequest{.method = "GET",
+                                                        .url = url,
+                                                        .headers = {{"Accept", "application/json"}, {"User-Agent", "AVA/1.0 websearch"}},
+                                                        .body = "",
+                                                        .timeout_ms = timeout_ms,
+                                                        .follow_redirects = true,
+                                                        .include_response_headers = true,
+                                                        .resolve_hosts = {}},
                                  context.cancel_requested);
   if (!response)
     return std::unexpected(std::move(response.error()));

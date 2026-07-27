@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/agent_turn_executor_internal.h"
 
@@ -89,14 +90,14 @@ std::string to_string(ToolTimelineStatus status)
 }
 
 ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_message, ava::session::SessionStore& store,
-                                                       ava::provider::Provider const& provider, ava::provider::Transport& transport)
+                                                       ava::provider::Provider const& provider, ava::http::Transport& transport)
 {
   return run_turn(user_message, {}, store, provider, transport);
 }
 
 ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_message, std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
                                                        ava::session::SessionStore& store, ava::provider::Provider const& provider,
-                                                       ava::provider::Transport& transport)
+                                                       ava::http::Transport& transport)
 {
   if (ava_authority_roots_over_limit_)
   {
@@ -148,7 +149,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
 ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& user_message,
                                                             std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
                                                             ava::session::SessionStore& store, ava::provider::Provider const& provider,
-                                                            ava::provider::Transport& transport, ava::observability::TraceContext const& trace_context)
+                                                            ava::http::Transport& transport, ava::observability::TraceContext const& trace_context)
 {
   detail::AgentTurnExecutor executor(options_, user_message, image_attachments, store, provider, transport, trace_context);
   return executor.run();

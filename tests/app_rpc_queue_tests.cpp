@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/rpc/input.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/rpc_mode.h"
@@ -356,7 +357,7 @@ void test_app_rpc_prompt_start_failure_cleans_queued_messages()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  BlockingResponseTransport transport(ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":\"refresh failed\"}"});
+  BlockingResponseTransport transport(ava::http::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":\"refresh failed\"}"});
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
   ThreadSafeStringBuf output_buffer;

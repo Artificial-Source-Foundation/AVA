@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/curl_transport.h"
 #include "ava/app/browser_open.h"
 #include "ava/app/command_connect.h"
 #include "ava/app/command_format.h"
@@ -7,7 +8,6 @@
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/config/provider_profiles.h"
-#include "ava/provider/curl_transport.h"
 
 #include <algorithm>
 #include <atomic>
@@ -334,7 +334,7 @@ ava::core::Result<std::string> run_openai_browser_oauth(runtime::Session const& 
   if (!oauth_session)
     return std::unexpected(std::move(oauth_session.error()));
 
-  ava::provider::CurlCliTransport transport;
+  ava::http::CurlCliTransport transport;
   std::atomic_bool prompt_cancelled{false};
   auto cancel_requested = [&]() { return prompt_cancelled.load() || (request.cancel_requested && request.cancel_requested()); };
   auto credential_future =
@@ -362,7 +362,7 @@ ava::core::Result<std::string> run_openai_browser_oauth(runtime::Session const& 
 
 ava::core::Result<std::string> run_openai_headless_oauth(runtime::Session const& session, CommandRequest const& request)
 {
-  ava::provider::CurlCliTransport transport;
+  ava::http::CurlCliTransport transport;
   auto authorization = ava::config::start_openai_oauth_device_authorization(transport);
   if (!authorization)
     return std::unexpected(std::move(authorization.error()));

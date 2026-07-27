@@ -1,10 +1,10 @@
 #include "sys.h"
+#include "ava/http/curl_transport.h"
 #include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_credentials.h"
 #include "ava/app/runtime_model.h"
 #include "ava/app/session_title_coordinator.h"
-#include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
 #include "ava/core/json.h"
 
@@ -255,17 +255,17 @@ void clear_secret(std::string& value) noexcept
   value.clear();
 }
 
-class DeadlineTransport final : public ava::provider::Transport
+class DeadlineTransport final : public ava::http::Transport
 {
  public:
-  DeadlineTransport(std::unique_ptr<ava::provider::Transport> inner, std::stop_token stop_token, std::chrono::steady_clock::time_point deadline)
+  DeadlineTransport(std::unique_ptr<ava::http::Transport> inner, std::stop_token stop_token, std::chrono::steady_clock::time_point deadline)
       : inner_(std::move(inner)), stop_token_(stop_token), deadline_(deadline)
   {
   }
 
-  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override { return send(request, nullptr); }
+  ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override { return send(request, nullptr); }
 
-  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request, CancelCallback caller_cancel) override
+  ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request, CancelCallback caller_cancel) override
   {
     auto bounded = request;
     auto const now = std::chrono::steady_clock::now();
@@ -279,7 +279,7 @@ class DeadlineTransport final : public ava::provider::Transport
  private:
   bool canceled() const noexcept { return stop_token_.stop_requested() || std::chrono::steady_clock::now() >= deadline_; }
 
-  std::unique_ptr<ava::provider::Transport> inner_;
+  std::unique_ptr<ava::http::Transport> inner_;
   std::stop_token stop_token_;
   std::chrono::steady_clock::time_point deadline_;
 };
@@ -588,7 +588,7 @@ std::string fallback_session_title(std::string_view normalized_source)
 SessionTitleCoordinator::SessionTitleCoordinator(SessionTitleCoordinatorOptions options) : options_(std::move(options))
 {
   if (!options_.transport_factory)
-    options_.transport_factory = [] { return std::make_unique<ava::provider::CurlCliTransport>(); };
+    options_.transport_factory = [] { return std::make_unique<ava::http::CurlCliTransport>(); };
   if (!options_.generator)
   {
     auto transport_factory = options_.transport_factory;

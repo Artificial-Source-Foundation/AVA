@@ -1,16 +1,16 @@
 #pragma once
-
+#include "ava/http/transport.h"
 #include "ava/provider/openai_provider.h"
 
 #include <optional>
 
 namespace ava::tests::provider_openai_suite {
 
-std::optional<ava::provider::HttpRequest> exercise_contract_request_serialization(ava::provider::OpenAIProvider const& provider);
+std::optional<ava::http::HttpRequest> exercise_contract_request_serialization(ava::provider::OpenAIProvider const& provider);
 void exercise_contract_sse_validation(ava::provider::OpenAIProvider const& provider);
 void exercise_contract_http_retry(ava::provider::OpenAIProvider const& provider);
 void exercise_contract_terminal_parsing(ava::provider::OpenAIProvider const& provider);
-void exercise_contract_final_transport(std::optional<ava::provider::HttpRequest> const& request);
+void exercise_contract_final_transport(std::optional<ava::http::HttpRequest> const& request);
 
 void test_openai_provider_contract();
 void test_openai_ordered_output_capture();

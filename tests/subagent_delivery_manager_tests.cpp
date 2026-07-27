@@ -266,7 +266,7 @@ struct DeliveryFixture
 };
 
 DeliveryFixture make_fixture(std::string_view name, std::shared_ptr<DeliveryFactoryState> state, bool ask_question = false, std::size_t max_attempts = 3,
-                             std::function<void(std::stop_token)> admission_preflight = {})
+                             std::function<void(std::stop_token)> admission_preflight = {}, std::size_t max_retained_finished_jobs = 64)
 {
   DeliveryFixture fixture;
   fixture.root = temp_root() / std::string(name);
@@ -275,7 +275,9 @@ DeliveryFixture make_fixture(std::string_view name, std::shared_ptr<DeliveryFact
   auto workspace = fixture.root / "workspace";
   std::filesystem::create_directories(workspace);
   fixture.paths = ava::tests::app_test_paths(fixture.root);
-  auto coordinator = ava::agent::SubagentCoordinator::create({.ava_state_dir = fixture.paths.ava_state_dir});
+  ava::agent::SubagentCoordinatorOptions coordinator_options;
+  coordinator_options.registry_options.max_retained_finished_jobs = max_retained_finished_jobs;
+  auto coordinator = ava::agent::SubagentCoordinator::create(std::move(coordinator_options));
   expect(coordinator.has_value(), "delivery fixture creates coordinator");
   if (!coordinator)
     return fixture;
@@ -604,7 +606,7 @@ void test_bounded_delivery_retries()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto paths = ava::tests::app_test_paths(root);
-  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = paths.ava_state_dir});
+  auto coordinator_result = ava::agent::SubagentCoordinator::create();
   if (!coordinator_result)
   {
     expect(false, "bounded retry coordinator creates");
@@ -672,7 +674,21 @@ void test_bounded_delivery_retries()
       break;
     std::this_thread::yield();
   }
-  expect(attempts == 2 && factories == 2, "automatic delivery stops after its configured bounded attempt count");
+  auto const exhaustion_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  ava::core::Result<std::optional<ava::app::runtime::Session>> retained = std::optional<ava::app::runtime::Session>{};
+  while (std::chrono::steady_clock::now() < exhaustion_deadline)
+  {
+    auto pending_now = coordinator->pending_deliveries(session->store.session_id());
+    retained = manager->retained_session(session->store.session_id(), session->workspace_dir(), true);
+    if (pending_now && pending_now->empty() && retained && !*retained)
+      break;
+    std::this_thread::yield();
+  }
+  auto pending = coordinator->pending_deliveries(session->store.session_id());
+  auto result = coordinator->result(session->store.session_id(), started->job.identity.job_id);
+  expect(attempts == 2 && factories == 2 && pending && pending->empty() && result && result->job.delivery == ava::agent::SubagentDeliveryState::Attempting &&
+             retained && !*retained,
+         "automatic delivery internally settles bounded retry exhaustion, releases its capsule, and preserves the public job contract");
   manager->shutdown();
 }
 
@@ -685,7 +701,7 @@ void test_retry_after_synthetic_user_append_uses_same_marker()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto paths = ava::tests::app_test_paths(root);
-  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = paths.ava_state_dir});
+  auto coordinator_result = ava::agent::SubagentCoordinator::create();
   if (!coordinator_result)
     return;
   auto coordinator = *coordinator_result;
@@ -747,73 +763,66 @@ void test_retry_after_synthetic_user_append_uses_same_marker()
   manager->shutdown();
 }
 
-void test_recovered_pending_job_is_discovered_without_child_restart()
+void test_two_pending_deliveries_survive_coordinator_retention()
 {
-  auto first_state = std::make_shared<DeliveryFactoryState>();
-  auto fixture = make_fixture("subagent-delivery-recovered", first_state);
+  auto state = std::make_shared<DeliveryFactoryState>();
+  auto admission = std::make_shared<DeliveryAdmissionBarrier>();
+  auto fixture =
+      make_fixture("subagent-delivery-retention-one", state, false, 3, [admission](std::stop_token stop_token) { admission->arrive_and_wait(stop_token); }, 1);
   if (!fixture.session)
     return;
-  auto const parent_id = fixture.session->store.session_id();
-  std::atomic_int child_runs = 0;
-  auto started =
-      fixture.coordinator->start_background(parent_id, {.title = "recover", .description = "recover", .child_session_id = "child_recovered"}, [&](auto const&) {
-        ++child_runs;
-        return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed,
-                                                   .final_text = "recovered summary",
-                                                   .stop_reason = "completed",
-                                                   .error = std::nullopt,
-                                                   .provider_iterations = 0,
-                                                   .tool_calls = 0,
-                                                   .tool_iterations = 0};
-      });
-  if (!started)
-  {
-    expect(false, "recovered pending fixture starts child");
-    return;
-  }
-  auto terminal = fixture.coordinator->wait(parent_id, started->job.identity.job_id, std::chrono::seconds(2));
-  expect(terminal && terminal->job.delivery == ava::agent::SubagentDeliveryState::Pending, "recovered pending fixture durably reaches delivery pending");
-  fixture.manager->shutdown();
-  fixture.session.reset();
-  fixture.manager.reset();
-  fixture.coordinator.reset();
-
-  auto recovered_coordinator = ava::agent::SubagentCoordinator::create({.ava_state_dir = fixture.paths.ava_state_dir});
-  if (!recovered_coordinator)
-  {
-    expect(false, "startup recovers coordinator journal");
-    return;
-  }
-  auto recovered_state = std::make_shared<DeliveryFactoryState>();
-  auto recovered_manager =
-      ava::app::SubagentDeliveryManager::create({.coordinator = *recovered_coordinator, .provider_bundle_factory = delivery_factory(recovered_state)});
-  if (!recovered_manager)
-  {
-    expect(false, "startup creates recovered delivery manager");
-    return;
-  }
-  ava::app::runtime::OpenOptions reopen;
-  reopen.workspace_dir = fixture.root / "workspace";
-  reopen.current_dir = reopen.workspace_dir;
-  reopen.paths = fixture.paths;
-  reopen.requested_session_id = parent_id;
-  reopen.exact_session_id = true;
-  reopen.subagent_coordinator = *recovered_coordinator;
-  reopen.subagent_delivery_manager = *recovered_manager;
-  auto parent = ava::app::open_runtime_session(reopen);
-  if (!parent)
-  {
-    expect(false, "startup reopens recovered delivery parent");
-    return;
-  }
   ava::app::runtime::RunOptions options;
-  options.access_token = "recovered-token";
-  expect((*recovered_manager)->refresh_parent(*parent, options).has_value(), "startup registers recovered parent capsule");
-  expect(recovered_state->wait_completed(), "recovered pending delivery is discovered after parent registration");
-  auto acknowledged = (*recovered_coordinator)->snapshot(parent_id, started->job.identity.job_id);
-  expect(acknowledged && acknowledged->job.delivery == ava::agent::SubagentDeliveryState::Acknowledged && child_runs.load() == 1,
-         "startup retries only parent delivery and never restarts child execution");
-  (*recovered_manager)->shutdown();
+  options.access_token = "retention-token";
+  expect(fixture.manager->refresh_parent(*fixture.session, options).has_value(), "retention-one parent capsule refreshes");
+  auto first = start_completed(fixture, "child_retention_one");
+  auto second = start_completed(fixture, "child_retention_two");
+  if (first.job.identity.job_id.empty() || second.job.identity.job_id.empty())
+    return;
+  auto const parent = fixture.session->store.session_id();
+  auto first_terminal = fixture.coordinator->wait(parent, first.job.identity.job_id, std::chrono::seconds(2));
+  auto second_terminal = fixture.coordinator->wait(parent, second.job.identity.job_id, std::chrono::seconds(2));
+  expect(first_terminal && second_terminal && admission->wait_reached() && fixture.coordinator->pending_deliveries(parent)->size() == 2,
+         "both background completions remain protected while automatic delivery is deterministically blocked");
+  admission->release();
+  expect(state->wait_completed(2), "both protected completions deliver exactly once after the barrier releases");
+
+  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  while (std::chrono::steady_clock::now() < deadline)
+  {
+    auto retained = fixture.coordinator->snapshot(parent, second.job.identity.job_id);
+    if (retained && retained->job.delivery == ava::agent::SubagentDeliveryState::Acknowledged && fixture.coordinator->list(parent).size() == 1)
+      break;
+    std::this_thread::yield();
+  }
+  auto authority = fixture.session->read_authority();
+  auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(std::move(authority.error())));
+  std::size_t synthetic_markers = 0;
+  std::vector<std::string> committed_turn_ids;
+  if (entries)
+  {
+    for (auto const& entry : *entries)
+    {
+      if (entry.type == ava::session::EntryType::UserMessage)
+      {
+        auto provenance = ava::session::parse_synthetic_delivery_provenance(entry);
+        if (provenance && *provenance && (*provenance)->source == ava::session::kSyntheticSubagentDeliverySource)
+          ++synthetic_markers;
+      }
+      if (entry.type == ava::session::EntryType::AssistantTurnCommit)
+        committed_turn_ids.push_back(entry.id);
+    }
+  }
+  std::ranges::sort(committed_turn_ids);
+  auto const unique_commits = std::ranges::unique(committed_turn_ids);
+  committed_turn_ids.erase(unique_commits.begin(), unique_commits.end());
+  auto first_pruned = fixture.coordinator->snapshot(parent, first.job.identity.job_id);
+  auto second_retained = fixture.coordinator->snapshot(parent, second.job.identity.job_id);
+  auto pending = fixture.coordinator->pending_deliveries(parent);
+  expect(entries && synthetic_markers == 2 && committed_turn_ids.size() == 2 && !first_pruned && second_retained &&
+             second_retained->job.delivery == ava::agent::SubagentDeliveryState::Acknowledged && pending && pending->empty(),
+         "retention-one delivery commits two unique marker/assistant transactions, then prunes only the oldest acknowledged result without resurrection");
+  expect(!std::filesystem::exists(fixture.paths.ava_state_dir / "subagent-jobs"), "automatic delivery creates and reads no subagent journal tree");
+  fixture.manager->shutdown();
 }
 
 void test_forged_text_marker_cannot_ack_delivery()
@@ -854,7 +863,7 @@ void test_forged_text_marker_cannot_ack_delivery()
   fixture.manager->shutdown();
 }
 
-void test_restart_reconciliation_acks_existing_commit_without_rerun()
+void test_same_process_reconciliation_acks_existing_commit_without_rerun()
 {
   auto state = std::make_shared<DeliveryFactoryState>();
   auto fixture = make_fixture("subagent-delivery-reconcile", state);
@@ -864,11 +873,10 @@ void test_restart_reconciliation_acks_existing_commit_without_rerun()
   if (started.job.identity.job_id.empty())
     return;
   auto terminal = fixture.coordinator->wait(fixture.session->store.session_id(), started.job.identity.job_id, std::chrono::seconds(2));
-  expect(terminal && terminal->job.delivery == ava::agent::SubagentDeliveryState::Pending, "reconciliation fixture has durable pending delivery");
+  expect(terminal && terminal->job.delivery == ava::agent::SubagentDeliveryState::Pending, "reconciliation fixture has process-local pending delivery");
   auto const marker = "[AVA_SUBAGENT_DELIVERY_V1 delivery_id=" + started.job.identity.delivery_id + "]";
-  auto attempt =
-      fixture.coordinator->record_delivery_attempt(fixture.session->store.session_id(), started.job.identity.job_id, "attempt_before_crash", "stable");
-  expect(attempt.has_value(), "reconciliation fixture records pre-crash delivery attempt");
+  auto attempt = fixture.coordinator->record_delivery_attempt(fixture.session->store.session_id(), started.job.identity.job_id, "attempt_before_ack", "stable");
+  expect(attempt.has_value(), "reconciliation fixture records the delivery attempt before acknowledgement");
 
   auto appended_user = ava::agent::append_user_message(
       fixture.session->owner_append_route(), marker, {},
@@ -879,11 +887,12 @@ void test_restart_reconciliation_acks_existing_commit_without_rerun()
   turn.ordered_items.push_back(ava::agent::OrderedAssistantItem{.item = ava::agent::AssistantTextItem{.text = "already integrated"}});
   auto persisted = ava::agent::append_assistant_turn(fixture.session->owner_append_batch_route(), turn, fixture.session->model().provider_id,
                                                      fixture.session->model().model_id, {}, std::nullopt);
-  expect(appended_user && persisted, "reconciliation fixture commits marker and assistant transaction before simulated ack crash");
+  expect(appended_user && persisted, "reconciliation fixture commits marker and assistant transaction before acknowledgement");
 
   ava::app::runtime::RunOptions options;
   options.access_token = "must-not-be-used";
-  expect(fixture.manager->refresh_parent(*fixture.session, options).has_value(), "reconciliation registers retained parent after simulated restart");
+  expect(fixture.manager->refresh_parent(*fixture.session, options).has_value(),
+         "reconciliation registers retained parent after a same-process acknowledgement failure");
   auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
   ava::agent::SubagentDeliveryState delivery = ava::agent::SubagentDeliveryState::Attempting;
   while (std::chrono::steady_clock::now() < deadline)
@@ -895,10 +904,10 @@ void test_restart_reconciliation_acks_existing_commit_without_rerun()
       break;
     std::this_thread::yield();
   }
-  expect(delivery == ava::agent::SubagentDeliveryState::Acknowledged, "startup reconciliation acks an already committed delivery without rerunning it");
+  expect(delivery == ava::agent::SubagentDeliveryState::Acknowledged, "same-process reconciliation acks an already committed delivery without rerunning it");
   {
     std::lock_guard lock(state->mutex);
-    expect(state->factories == 0, "assistant-commit-before-ack crash reconciliation does not call a provider twice");
+    expect(state->factories == 0, "same-process assistant-commit-before-ack reconciliation does not call a provider twice");
   }
   fixture.manager->shutdown();
 }
@@ -914,7 +923,7 @@ void run_subagent_delivery_manager_tests()
   test_runtime_mutations_refresh_retained_delivery_configuration();
   test_bounded_delivery_retries();
   test_retry_after_synthetic_user_append_uses_same_marker();
-  test_recovered_pending_job_is_discovered_without_child_restart();
+  test_two_pending_deliveries_survive_coordinator_retention();
   test_forged_text_marker_cannot_ack_delivery();
-  test_restart_reconciliation_acks_existing_commit_without_rerun();
+  test_same_process_reconciliation_acks_existing_commit_without_rerun();
 }

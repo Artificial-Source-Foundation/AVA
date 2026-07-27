@@ -343,6 +343,8 @@ ava::core::Result<ava::tools::TaskSubagentResult> AgentTurnExecutor::run_task_su
       if (!coordinated)
       {
         auto error = std::move(coordinated.error());
+        // Roll back only with a positive proof that no coordinator state was
+        // published. The uncertain compatibility value must remain fail-closed.
         if (!request.task_id && subagent_publication_commit_state(error) == SubagentPublicationCommitState::ProvenUnpublished)
           ava::session::rollback_created_session_with_context(run_state->child_store, run_state->child_lease, error);
         return std::unexpected(std::move(error));

@@ -11,7 +11,6 @@ add_library(ava_agent
   "history_projection.cpp"
   "background_job_registry.cpp"
   "job_control.cpp"
-  "job_journal.cpp"
   "message_builder.cpp"
   "mode.cpp"
   "provider_output_validation.cpp"

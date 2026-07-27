@@ -33,7 +33,7 @@ void run_agent_loop_tests()
   test_agent_loop_background_task_failure_records_parent_and_child_errors();
   test_agent_loop_background_task_cancel_requests_child_cancellation();
   test_agent_loop_background_task_requires_registry_owner();
-  test_agent_loop_coordinator_start_journal_failure_rolls_back_child();
+  test_agent_loop_coordinator_start_failure_rolls_back_child();
   test_background_job_registry_worker_exception_marks_failed();
   test_background_job_registry_enforces_running_limit();
   test_background_job_registry_coerces_non_terminal_completion_to_failed();

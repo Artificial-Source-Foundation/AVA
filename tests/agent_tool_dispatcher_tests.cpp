@@ -1380,7 +1380,7 @@ void test_task_mode_and_job_tool_controls()
          "task rejects conflicting preferred and legacy mode fields before dispatch");
 
   std::filesystem::permissions(root, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
-  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = root / "state"});
+  auto coordinator_result = ava::agent::SubagentCoordinator::create();
   expect(coordinator_result.has_value(), "job dispatcher fixture creates coordinator");
   if (!coordinator_result)
     return;

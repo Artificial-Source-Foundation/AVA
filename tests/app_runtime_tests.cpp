@@ -17,6 +17,7 @@ void run_app_event_serialization_tests()
 void run_app_runtime_tests()
 {
   test_app_runtime_open_session_and_context_prompt();
+  test_app_runtime_preserves_legacy_subagent_job_tree();
   test_app_active_context_status_tracks_compaction_projection();
   test_app_runtime_no_session_mode();
   test_app_runtime_session_startup_options();

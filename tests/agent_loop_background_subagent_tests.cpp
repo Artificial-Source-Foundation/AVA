@@ -415,27 +415,24 @@ void test_agent_loop_background_task_requires_registry_owner()
   }
 }
 
-void test_agent_loop_coordinator_start_journal_failure_rolls_back_child()
+void test_agent_loop_coordinator_start_failure_rolls_back_child()
 {
-  auto const root = temp_root() / "agent-task-background-journal-failure";
+  auto const root = temp_root() / "agent-task-background-start-failure";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
   ava::agent::SubagentCoordinatorOptions coordinator_options;
-  coordinator_options.ava_state_dir = root / "state";
-  coordinator_options.journal_append_preflight = [](ava::agent::JobJournalRecord const& record) -> ava::core::VoidResult {
-    if (record.kind == ava::agent::JobJournalTransitionKind::Started)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "injected started journal failure"));
-    return {};
+  coordinator_options.registry_options.thread_start_preflight = []() -> ava::core::VoidResult {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "injected thread start failure"));
   };
   auto coordinator = ava::agent::SubagentCoordinator::create(std::move(coordinator_options));
-  expect(coordinator.has_value(), "journal-failure rollback fixture creates coordinator");
+  expect(coordinator.has_value(), "start-failure rollback fixture creates coordinator");
   if (!coordinator)
     return;
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto const session_root = root / "sessions";
   ava::session::SessionStore store(
-      ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-journal-failure"});
+      ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-start-failure"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
@@ -472,12 +469,12 @@ void test_agent_loop_coordinator_start_journal_failure_rolls_back_child()
   auto result = loop.run_turn("delegate rejected background", store, provider, transport);
   expect(result && result->final_text == "start rejected" && transport.requests().size() == 2,
          "parent continues after coordinator rejects background publication");
-  bool saw_failure = transport.requests().size() == 2 && transport.requests()[1].body.find("injected started journal failure") != std::string::npos;
+  bool saw_failure = transport.requests().size() == 2 && transport.requests()[1].body.find("injected thread start failure") != std::string::npos;
   std::size_t session_files = 0;
   if (std::filesystem::exists(session_root))
     for (auto const& entry : std::filesystem::recursive_directory_iterator(session_root))
       session_files += entry.is_regular_file() && entry.path().extension() == ".jsonl";
   expect(saw_failure, "coordinator start failure is returned to the parent tool continuation");
-  expect(session_files == 1, "journal failure rolls back the newly created child session file");
-  expect((*coordinator)->list("parent-journal-failure").empty(), "journal failure prevents live worker publication");
+  expect(session_files == 1, "proven-unpublished start failure rolls back the newly created child session file");
+  expect((*coordinator)->list("parent-start-failure").empty(), "start failure prevents live worker publication");
 }

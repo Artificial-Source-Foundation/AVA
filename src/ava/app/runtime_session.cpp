@@ -145,14 +145,12 @@ ava::core::VoidResult reconcile_committed_function_calls(std::shared_ptr<ava::se
       *read_authority, [append_target](ava::session::SessionEntry entry) { return append_target->append(entry); }, limits);
 }
 
-ava::core::Result<std::shared_ptr<SubagentDeliveryManager>> delivery_manager_for_options(runtime::OpenOptions const& options,
-                                                                                         std::shared_ptr<ava::core::AnchorSet> const& anchor_set)
+ava::core::Result<std::shared_ptr<SubagentDeliveryManager>> delivery_manager_for_options(runtime::OpenOptions const& options)
 {
   if (options.subagent_delivery_manager)
     return options.subagent_delivery_manager;
-  auto coordinator = options.subagent_coordinator
-                         ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options.subagent_coordinator)
-                         : ava::agent::SubagentCoordinator::create({.ava_state_dir = options.paths.ava_state_dir, .anchor_set = anchor_set});
+  auto coordinator = options.subagent_coordinator ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options.subagent_coordinator)
+                                                  : ava::agent::SubagentCoordinator::create();
   if (!coordinator)
     return std::unexpected(std::move(coordinator.error()));
   return SubagentDeliveryManager::create({.coordinator = std::move(*coordinator)});
@@ -364,7 +362,7 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
 
   if (!delivery_manager)
   {
-    auto created_manager = delivery_manager_for_options(options, anchor_set);
+    auto created_manager = delivery_manager_for_options(options);
     if (!created_manager)
       return std::unexpected(std::move(created_manager.error()));
     delivery_manager = std::move(*created_manager);
@@ -419,21 +417,8 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
       return std::unexpected(std::move(error));
     }
   }
-  // The exact parent session is now fully initialized and its lease is still
-  // held. Activate only this parent's journal at the final publication point
-  // so a later initialization failure cannot leak an attached owner lease.
   if (!sessionless)
-  {
-    auto activated = session.subagent_coordinator()->activate_parent(session.store.session_id());
-    if (!activated)
-    {
-      auto error = std::move(activated.error());
-      store = std::move(session.store);
-      lease = std::move(session.resources().lease);
-      return std::unexpected(std::move(error));
-    }
     session.subagent_delivery_manager()->attach_parent(session.store.session_id());
-  }
   return session;
 }
 
@@ -627,15 +612,9 @@ ava::core::VoidResult replace_runtime_session(runtime::Session& destination, run
     destination.resources().session_title_coordinator = std::move(title_coordinator);
 
   // This is an explicit visible-session detach boundary. The delivery manager
-  // keeps a capsule and journal owner when work remains; otherwise its exact
-  // generation release allows another AVA process to activate this history.
-  if (leaves_detached_parent)
-  {
-    if (delivery_manager)
-      delivery_manager->release_detached_parent(detached_parent_id);
-    else if (coordinator)
-      static_cast<void>(coordinator->release_parent_if_idle(detached_parent_id));
-  }
+  // keeps the exact parent capsule while process-local work still needs it.
+  if (leaves_detached_parent && delivery_manager)
+    delivery_manager->release_detached_parent(detached_parent_id);
   return {};
 }
 

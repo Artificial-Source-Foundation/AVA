@@ -12,6 +12,7 @@
 namespace ava::agent {
 
 inline constexpr long long kSubagentJobContractVersion = 1;
+inline constexpr std::size_t kMaxSubagentDeliveryAttemptHistory = 64;
 
 enum class SubagentJobMode
 {
@@ -37,13 +38,6 @@ enum class SubagentDeliveryState
   Acknowledged,
 };
 
-enum class SubagentTerminalState
-{
-  Completed,
-  Failed,
-  Canceled,
-};
-
 struct SubagentJobIdentity
 {
   std::string job_id = {};
@@ -64,9 +58,9 @@ struct SubagentDeliveryAttemptSnapshot
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
-// This is the stable backend DTO projected from the durable journal. Prompts,
-// credentials, and filesystem paths do not belong in the journal contract;
-// terminal delivery text is explicitly bounded and control-safe.
+// This is the stable process-local backend DTO. Prompts, credentials, and
+// filesystem paths do not belong in the public contract; terminal delivery
+// text is explicitly bounded and control-safe.
 struct SubagentJobSnapshot
 {
   long long schema_version = kSubagentJobContractVersion;
@@ -102,22 +96,9 @@ struct SubagentJobSnapshot
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
-struct SubagentJobProjection
-{
-  long long schema_version = kSubagentJobContractVersion;
-  std::vector<SubagentJobSnapshot> jobs;
-  std::vector<std::string> pending_delivery_ids;
-
-  [[nodiscard]] SubagentJobSnapshot const* find(std::string_view job_id) const noexcept;
-
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-};
-
 [[nodiscard]] std::string_view to_string(SubagentJobMode value) noexcept;
 [[nodiscard]] std::string_view to_string(SubagentExecutionState value) noexcept;
 [[nodiscard]] std::string_view to_string(SubagentDeliveryState value) noexcept;
-[[nodiscard]] std::string_view to_string(SubagentTerminalState value) noexcept;
 [[nodiscard]] ava::core::Result<SubagentJobMode> parse_subagent_job_mode(std::string_view value);
-[[nodiscard]] ava::core::Result<SubagentTerminalState> parse_subagent_terminal_state(std::string_view value);
 
 }  // namespace ava::agent

@@ -717,8 +717,7 @@ AcpSessionRegistry::AcpSessionRegistry(AcpSessionOptions options) : options_(std
   {
     auto coordinator = options_.open_options.subagent_coordinator
                            ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options_.open_options.subagent_coordinator)
-                           : ava::agent::SubagentCoordinator::create(
-                                 {.ava_state_dir = options_.paths.ava_state_dir, .anchor_set = service_anchor});
+                           : ava::agent::SubagentCoordinator::create();
     if (!coordinator)
     {
       coordinator_startup_error_ = std::move(coordinator.error());

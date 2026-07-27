@@ -109,7 +109,6 @@ set(AVA_TESTS_SOURCES
   "core_mode_json_permissions_tests.cpp"
   "diagnostics_tests.cpp"
   "events_tests.cpp"
-  "job_journal_tests.cpp"
   "lsp_tests.cpp"
   "mcp_tests.cpp"
   "permission_rules_tests.cpp"
@@ -214,7 +213,6 @@ set(AVA_TEST_SUITES
   agent_loop
   agent_tool_dispatcher
   tool_scheduler
-  job_journal
   lsp
   plugin
   mcp

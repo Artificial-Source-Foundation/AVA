@@ -190,14 +190,7 @@ void test_session_run_controller_owner_and_generation_routes()
 void test_runtime_session_destruction_does_not_own_background_coordinator()
 {
   auto const root = create_empty_root("session-run-controller-teardown");
-  auto const state = root / "state";
-  std::filesystem::create_directories(state);
-  std::filesystem::permissions(state, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
-  auto state_anchor = ava::core::AnchorSet::open({state});
-  expect(state_anchor.has_value(), "application coordinator opens the logical state root as startup authority");
-  if (!state_anchor)
-    return;
-  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = state, .anchor_set = *state_anchor});
+  auto coordinator_result = ava::agent::SubagentCoordinator::create();
   expect(coordinator_result.has_value(), "application coordinator creates for runtime teardown fixture");
   if (!coordinator_result)
     return;

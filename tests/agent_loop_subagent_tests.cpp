@@ -272,7 +272,7 @@ void test_agent_loop_coordinated_foreground_uses_fresh_worker_and_preserves_resu
   std::filesystem::permissions(root, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
   ava::session::SessionStore store(
       ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "parent-coordinated"});
-  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = root / "state"});
+  auto coordinator_result = ava::agent::SubagentCoordinator::create();
   expect(coordinator_result.has_value(), coordinator_result ? "coordinated foreground fixture creates coordinator"
                                                             : "coordinated foreground fixture creates coordinator: " + coordinator_result.error().format());
   if (!coordinator_result)
@@ -409,7 +409,7 @@ void test_agent_loop_foreground_promotion_wakes_parent_without_restarting_child(
   std::filesystem::permissions(root, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
   ava::session::SessionStore store(
       ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "parent-promote"});
-  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = root / "state"});
+  auto coordinator_result = ava::agent::SubagentCoordinator::create();
   expect(coordinator_result.has_value(),
          coordinator_result ? "promotion fixture creates coordinator" : "promotion fixture creates coordinator: " + coordinator_result.error().format());
   if (!coordinator_result)
@@ -503,7 +503,7 @@ void test_agent_loop_promoted_failure_persists_sanitized_child_error()
   auto const session_root = root / "sessions";
   ava::session::SessionStore store(
       ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-promoted-failure"});
-  auto coordinator_result = ava::agent::SubagentCoordinator::create({.ava_state_dir = root / "state"});
+  auto coordinator_result = ava::agent::SubagentCoordinator::create();
   if (!coordinator_result)
   {
     expect(false, "promoted failure fixture creates coordinator");

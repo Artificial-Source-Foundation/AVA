@@ -56,8 +56,8 @@ struct BackgroundJobSnapshot
 
 struct BackgroundJobStartOptions
 {
-  // Coordinators supply a durable identity before publication. Standalone
-  // registry callers may leave this empty to retain generated IDs.
+  // Coordinators supply their process-local identity before publication.
+  // Standalone registry callers may leave this empty to retain generated IDs.
   std::string job_id = {};
   std::string title = {};
   std::string description = {};
@@ -102,6 +102,9 @@ struct BackgroundJobRegistryOptions
   // Deterministic test seam for the otherwise platform-dependent jthread
   // construction failure path. Production leaves this empty.
   std::function<ava::core::VoidResult()> thread_start_preflight = nullptr;
+  // Deterministic test seam that waits for a started worker to publish its
+  // terminal registry state before start() returns. Production leaves it off.
+  bool wait_for_terminal_before_start_returns = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -134,6 +137,8 @@ class BackgroundJobRegistry final
 
   [[nodiscard]] std::shared_ptr<JobRecord> find_record_locked(std::string_view job_id) const;
   [[nodiscard]] std::size_t running_job_count_locked() const;
+  // Prunes only registry-owned execution records. Coordinator snapshots live
+  // in independently owned JobState objects and are never affected.
   void prune_retained_finished_jobs_locked();
   void complete(std::string const& job_id, BackgroundJobCompletion completion);
   void join_all();

@@ -2,7 +2,6 @@
 #include "tests/acp_test_declarations.h"
 #include "tests/support/acp_test_support.h"
 #include "tests/support/test_harness.h"
-#include "ava/app/EventEnvelope.h"
 #include "ava/app/acp/codec.h"
 #include "ava/app/acp/content.h"
 #include "ava/app/acp/envelope_intent.h"
@@ -71,7 +70,6 @@ void test_acp_prompt_content_capabilities_and_strict_validation()
 void test_acp_typed_session_update_mapper_ordering_and_limits()
 {
   using namespace ava::app::acp;
-  using ava::app::EventEnvelope;
   using ava::app::runtime::Event;
   using ava::app::runtime::EventType;
   auto root = std::filesystem::path("/workspace");
@@ -117,17 +115,6 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
              progress_update && *progress_update && (*progress_update)->find(R"("status":"in_progress")") != std::string::npos && result_update &&
              *result_update && (*result_update)->find(R"("status":"completed")") != std::string::npos,
          "typed ACP mapper preserves text/thought/tool ordering, stable ids, content, status, kind, locations, and final de-duplication");
-
-  RuntimeSessionUpdateMapper envelope_mapper(RuntimeSessionUpdateMapperOptions{.workspace_root = root, .message_id = "message_2"});
-  EventEnvelope envelope;
-  envelope.timestamp = "now";
-  envelope.session_id = "session";
-  envelope.name = "tool_progress";
-  envelope.payload_json = R"({"call_id":"call_2","tool":"bash","text":"running","status":"running"})";
-  envelope.payload_type = "tool";
-  auto envelope_update = envelope_mapper.map_and_encode(envelope);
-  expect(envelope_update && *envelope_update && (*envelope_update)->find(R"("kind":"execute")") != std::string::npos,
-         "typed ACP mapper accepts the protocol-neutral EventEnvelope seam without leaking unknown events");
 
   RuntimeSessionUpdateMapper bounded(
       RuntimeSessionUpdateMapperOptions{.workspace_root = root, .message_id = "bounded", .max_updates = 2, .max_encoded_bytes = 4096});

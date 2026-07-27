@@ -42,36 +42,7 @@ struct PersistedAssistantTurn
                                                                               std::optional<long double> const& cost_usd,
                                                                               std::optional<std::string_view> api_family = std::nullopt,
                                                                               std::optional<std::string_view> reasoning_format = std::nullopt);
-// Direct AgentLoop unit tests may use an ephemeral store without a runtime
-// batch route. This overload creates a guarded ephemeral append target rather
-// than bypassing its v4 append-state validation.
-[[nodiscard]] ava::core::Result<PersistedAssistantTurn> append_assistant_turn(ava::session::SessionStore& store, ParsedAssistantTurn const& turn,
-                                                                              std::string_view provider_id, std::string_view model_id,
-                                                                              ava::provider::TokenUsage const& usage,
-                                                                              std::optional<long double> const& cost_usd,
-                                                                              std::optional<std::string_view> api_family = std::nullopt,
-                                                                              std::optional<std::string_view> reasoning_format = std::nullopt);
 
-[[nodiscard]] ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text);
-[[nodiscard]] ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text,
-                                                                 std::vector<ava::session::ImageAttachmentRef> const& attachments,
-                                                                 std::optional<ava::session::SyntheticDeliveryProvenance> const& provenance = std::nullopt);
-[[nodiscard]] ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, std::string const& text, std::string const& replay_of);
-[[nodiscard]] ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, std::string const& text,
-                                                               std::vector<ava::session::ImageAttachmentRef> const& attachments, std::string const& replay_of);
-[[nodiscard]] ava::core::VoidResult append_assistant_message(ava::session::SessionStore& store, std::string const& text, std::size_t tool_call_count,
-                                                             ava::provider::TokenUsage const& usage, std::optional<long double> const& cost_usd);
-[[nodiscard]] ava::core::VoidResult append_reasoning_block(ava::session::SessionStore& store, ParsedReasoningBlock const& block, std::string_view provider_id,
-                                                           std::string_view model_id);
-[[nodiscard]] ava::core::VoidResult append_tool_call(ava::session::SessionStore& store, ProviderToolCall const& call);
-[[nodiscard]] ava::core::VoidResult append_tool_result(ava::session::SessionStore& store, ToolDispatchResult const& result,
-                                                       std::optional<std::string_view> assistant_output_entry_id = std::nullopt);
-[[nodiscard]] ava::core::VoidResult append_permission_decision(ava::session::SessionStore& store, ava::tools::PermissionAuditEvent const& event);
-[[nodiscard]] ava::core::VoidResult append_error(ava::session::SessionStore& store, ava::core::Error const& error);
-[[nodiscard]] ava::core::VoidResult append_cancel(ava::session::SessionStore& store, std::string_view boundary);
-
-// M2 active-session adapter. A null sink retains direct SessionStore behavior for
-// inactive legacy import/export and explicitly detached background persistence.
 [[nodiscard]] ava::core::Result<std::string> append_user_message(SessionAppendSink const& sink, std::string const& text,
                                                                  std::vector<ava::session::ImageAttachmentRef> const& attachments = {},
                                                                  std::optional<ava::session::SyntheticDeliveryProvenance> const& provenance = std::nullopt);

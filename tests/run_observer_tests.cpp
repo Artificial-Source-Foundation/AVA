@@ -1564,23 +1564,32 @@ void test_provider_stream_event_outcomes_are_exhaustive()
   auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<FixedClock>(1),
                                                                           std::make_shared<ava::observability::CounterIdGenerator>());
   auto store = ava::session::SessionStore::create_ephemeral(root);
+  expect(store.has_value(), "provider stream outcome fixture creates an ephemeral session");
+  if (!store)
+    return;
+  auto append_target = ava::session::SessionAppendTarget::create_ephemeral(*store);
+  expect(append_target.has_value(), "provider stream outcome fixture creates an explicit append target");
+  if (!append_target)
+    return;
+  auto read_authority = (*append_target)->read_authority();
+  expect(read_authority.has_value(), "provider stream outcome fixture creates an explicit read authority");
+  if (!read_authority)
+    return;
+
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
   AllEventsProvider provider;
+  auto target = *append_target;
   ava::agent::AgentLoopOptions options;
   options.workspace_dir = root;
   options.provider_id = "test";
   options.model_id = "test";
   options.stream = false;
   options.observation = observation;
-  if (store)
-  {
-    auto read_authority = ava::session::SessionReadAuthority::create_ephemeral(*store);
-    if (read_authority)
-      options.session_read_authority = std::move(*read_authority);
-  }
+  options.append_entry = [target](ava::session::SessionEntry entry) { return target->append(std::move(entry)); };
+  options.append_batch = [target](std::vector<ava::session::SessionEntry> entries) { return target->append_batch(std::move(entries)); };
+  options.session_read_authority = std::move(*read_authority);
   ava::agent::AgentLoop loop(std::move(options));
-  if (store)
-    static_cast<void>(loop.run_turn("all events", *store, provider, transport));
+  static_cast<void>(loop.run_turn("all events", *store, provider, transport));
   std::set<ava::observability::TraceOutcome> outcomes;
   std::lock_guard lock(collector->mutex);
   for (auto const& event : collector->events)

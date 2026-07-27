@@ -55,7 +55,11 @@ void test_agent_loop_background_task_starts_child_session()
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-bg"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   std::mutex session_mutex;
-  auto registry = std::make_shared<ava::agent::BackgroundJobRegistry>();
+  auto coordinator_result = ava::agent::SubagentCoordinator::create();
+  expect(coordinator_result.has_value(), "background start fixture creates coordinator");
+  if (!coordinator_result)
+    return;
+  auto coordinator = *coordinator_result;
   auto trace_collector = std::make_shared<TraceCollector>();
   auto observation = std::make_shared<ava::observability::RunObservation>(trace_collector);
   auto background_state = std::make_shared<BlockingBackgroundTransport::State>();
@@ -89,7 +93,7 @@ void test_agent_loop_background_task_starts_child_session()
                                            "data: [DONE]\n\n"));
         return transport;
       },
-      .background_jobs = registry,
+      .subagent_coordinator = coordinator,
       .session_mutex = &session_mutex,
       .append_entry = parent_append,
       .append_batch = append_batch_route_for_test(store),
@@ -102,13 +106,13 @@ void test_agent_loop_background_task_starts_child_session()
   if (transport.requests().size() == 2)
   {
     expect(transport.requests()[1].body.find("\\\"state\\\":\\\"running\\\"") != std::string::npos, "parent continuation receives running task state");
-    expect(transport.requests()[1].body.find("\\\"job_id\\\":\\\"job_") != std::string::npos, "parent continuation receives registry job id");
+    expect(transport.requests()[1].body.find("\\\"job_id\\\":\\\"job_") != std::string::npos, "parent continuation receives coordinator job id");
   }
 
-  auto running_jobs = registry->snapshot();
-  expect(running_jobs.size() == 1 && running_jobs.front().state == ava::agent::BackgroundJobState::Running &&
-             running_jobs.front().child_session_id.starts_with("session_"),
-         "background task appears as running in the registry");
+  auto running_jobs = coordinator->list(store.session_id());
+  expect(running_jobs.size() == 1 && running_jobs.front().job.execution == ava::agent::SubagentExecutionState::Running &&
+             running_jobs.front().job.identity.child_session_id.starts_with("session_"),
+         "background task appears as running in the coordinator");
   expect(background_state->wait_for_request(std::chrono::milliseconds(1000)), "background child reaches provider transport while registered");
   auto background_requests = background_state->requests_snapshot();
   bool const saw_background_request_without_lsp = !background_requests.empty() &&
@@ -121,7 +125,7 @@ void test_agent_loop_background_task_starts_child_session()
     ava::session::SessionStore competing_parent(
         ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-bg-contender"});
     auto const resume_arguments = std::string("{\\\"description\\\":\\\"Resume running child\\\",\\\"prompt\\\":\\\"Compete.\\\",") +
-                                  "\\\"subagent_type\\\":\\\"general\\\",\\\"task_id\\\":\\\"" + running_jobs.front().child_session_id + "\\\"}";
+                                  "\\\"subagent_type\\\":\\\"general\\\",\\\"task_id\\\":\\\"" + running_jobs.front().job.identity.child_session_id + "\\\"}";
     ava::tests::FakeTransport competing_transport(
         {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_compete\",\"name\":\"task\"}\n\n"
                       "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_compete\",\"delta\":\"" +
@@ -151,19 +155,25 @@ void test_agent_loop_background_task_starts_child_session()
   expect(foreground_resume_blocked, "foreground task_id resume fails while the background child owns its session lease");
 
   background_state->release_success();
-  ava::core::Result<ava::agent::BackgroundJobSnapshot> completed =
+  ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot> completed =
       std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing background job"));
   if (!running_jobs.empty())
   {
-    completed = registry->wait(running_jobs.front().job_id, std::chrono::milliseconds(1000));
+    completed = coordinator->wait(store.session_id(), running_jobs.front().job.identity.job_id, std::chrono::milliseconds(1000));
   }
-  expect(completed && completed->state == ava::agent::BackgroundJobState::Completed && completed->final_text == "background child",
-         "background task transitions to completed in the registry");
-  registry->join_finished();
+  expect(completed && completed->job.execution == ava::agent::SubagentExecutionState::Completed && completed->job.summary == "background child",
+         "background task transitions to completed in the coordinator");
+  auto result_snapshot =
+      completed
+          ? coordinator->result(store.session_id(), completed->job.identity.job_id)
+          : ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot>(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing")));
+  expect(
+      result_snapshot && result_snapshot->job.execution == ava::agent::SubagentExecutionState::Completed && result_snapshot->job.summary == "background child",
+      "background task result is queryable through the coordinator");
   bool saw_background_answer = false;
   if (completed)
   {
-    auto child_store = ava::session::SessionStore::open(workspace, completed->child_session_id, session_root);
+    auto child_store = ava::session::SessionStore::open(workspace, completed->job.identity.child_session_id, session_root);
     if (child_store)
     {
       auto child_entries = child_store->load();
@@ -207,7 +217,11 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
   auto background_responses = std::make_shared<std::vector<ava::provider::HttpResponse>>();
   auto background_requests = std::make_shared<std::vector<ava::provider::HttpRequest>>();
   auto background_mutex = std::make_shared<std::mutex>();
-  auto registry = std::make_shared<ava::agent::BackgroundJobRegistry>();
+  auto coordinator_result = ava::agent::SubagentCoordinator::create();
+  expect(coordinator_result.has_value(), "background failure fixture creates coordinator");
+  if (!coordinator_result)
+    return;
+  auto coordinator = *coordinator_result;
   ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
                                                     "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
@@ -237,7 +251,7 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
             std::make_unique<SharedFakeTransport>(background_responses, background_requests, background_mutex);
         return transport;
       },
-      .background_jobs = registry,
+      .subagent_coordinator = coordinator,
       .session_mutex = &session_mutex,
       .append_entry = parent_append,
       .append_batch = append_batch_route_for_test(store),
@@ -247,17 +261,23 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
   auto result = loop.run_turn("delegate failing background", store, provider, transport);
   expect(result && result->final_text == "queued failure" && result->tool_calls == 1, "agent loop can queue a background task that later fails");
 
-  auto jobs = registry->snapshot();
-  expect(jobs.size() == 1, "failed background task is registered");
-  ava::core::Result<ava::agent::BackgroundJobSnapshot> failed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing background job"));
+  auto jobs = coordinator->list(store.session_id());
+  expect(jobs.size() == 1, "failed background task is registered with the coordinator");
+  ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot> failed =
+      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing background job"));
   if (!jobs.empty())
   {
-    failed = registry->wait(jobs.front().job_id, std::chrono::milliseconds(1000));
+    failed = coordinator->wait(store.session_id(), jobs.front().job.identity.job_id, std::chrono::milliseconds(1000));
   }
-  expect(failed && failed->state == ava::agent::BackgroundJobState::Failed && failed->error &&
-             failed->error->find("fake transport has no response") != std::string::npos,
-         "failed background task is marked failed in the registry");
-  registry->join_finished();
+  expect(failed && failed->job.execution == ava::agent::SubagentExecutionState::Failed && failed->job.error && *failed->job.error == "subagent job failed" &&
+             failed->job.error_category && *failed->job.error_category == "provider",
+         "failed background task is marked failed with sanitized coordinator public error state");
+  auto result_snapshot =
+      failed ? coordinator->result(store.session_id(), failed->job.identity.job_id)
+             : ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot>(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing")));
+  expect(result_snapshot && result_snapshot->job.execution == ava::agent::SubagentExecutionState::Failed && result_snapshot->job.error &&
+             *result_snapshot->job.error == "subagent job failed",
+         "failed background task result remains queryable through the coordinator");
 
   bool saw_background_request = false;
   {
@@ -273,7 +293,7 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
   bool saw_child_error = false;
   if (failed)
   {
-    auto child_store = ava::session::SessionStore::open(workspace, failed->child_session_id, session_root);
+    auto child_store = ava::session::SessionStore::open(workspace, failed->job.identity.child_session_id, session_root);
     if (child_store)
     {
       auto child_entries = child_store->load();
@@ -297,7 +317,11 @@ void test_agent_loop_background_task_cancel_requests_child_cancellation()
   auto const session_root = root / "sessions";
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-bg-cancel"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  auto registry = std::make_shared<ava::agent::BackgroundJobRegistry>();
+  auto coordinator_result = ava::agent::SubagentCoordinator::create();
+  expect(coordinator_result.has_value(), "background cancel fixture creates coordinator");
+  if (!coordinator_result)
+    return;
+  auto coordinator = *coordinator_result;
   auto background_state = std::make_shared<BlockingBackgroundTransport::State>();
   ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
@@ -328,7 +352,7 @@ void test_agent_loop_background_task_cancel_requests_child_cancellation()
                                            "data: [DONE]\n\n"));
         return transport;
       },
-      .background_jobs = registry,
+      .subagent_coordinator = coordinator,
       .append_entry = parent_append,
       .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),
@@ -336,24 +360,28 @@ void test_agent_loop_background_task_cancel_requests_child_cancellation()
 
   auto result = loop.run_turn("delegate cancelable background", store, provider, transport);
   expect(result && result->final_text == "queued cancel" && result->tool_calls == 1, "agent loop can queue a cancelable background task");
-  auto jobs = registry->snapshot();
-  expect(jobs.size() == 1 && jobs.front().state == ava::agent::BackgroundJobState::Running, "cancelable background task is running in registry");
+  auto jobs = coordinator->list(store.session_id());
+  expect(jobs.size() == 1 && jobs.front().job.execution == ava::agent::SubagentExecutionState::Running, "cancelable background task is running in coordinator");
   expect(background_state->wait_for_request(std::chrono::milliseconds(1000)), "cancel test background child reaches provider transport");
   if (!jobs.empty())
   {
-    auto canceled = registry->cancel(jobs.front().job_id);
+    auto canceled = coordinator->cancel(store.session_id(), jobs.front().job.identity.job_id);
     background_state->notify();
-    expect(canceled && canceled->cancel_requested, "background registry cancel requests stop");
+    expect(canceled && canceled->job.cancel_requested, "background coordinator cancel requests stop");
     expect(background_state->wait_for_cancel(std::chrono::milliseconds(1000)), "background child transport observes cancellation");
-    auto final = registry->wait(jobs.front().job_id, std::chrono::milliseconds(1000));
-    expect(final && final->state == ava::agent::BackgroundJobState::Canceled, "background registry marks canceled child jobs canceled");
-    expect(final && !final->error, "background registry canceled job snapshots do not carry failure errors");
-    registry->join_finished();
+    auto final = coordinator->wait(store.session_id(), jobs.front().job.identity.job_id, std::chrono::milliseconds(1000));
+    expect(final && final->job.execution == ava::agent::SubagentExecutionState::Canceled, "background coordinator marks canceled child jobs canceled");
+    expect(final && !final->job.error, "background coordinator canceled job snapshots do not carry failure errors");
+    auto result_snapshot =
+        final ? coordinator->result(store.session_id(), final->job.identity.job_id)
+              : ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot>(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing")));
+    expect(result_snapshot && result_snapshot->job.execution == ava::agent::SubagentExecutionState::Canceled,
+           "canceled background task result remains queryable through the coordinator");
 
     bool saw_child_cancel = false;
     if (final)
     {
-      auto child_store = ava::session::SessionStore::open(workspace, final->child_session_id, session_root);
+      auto child_store = ava::session::SessionStore::open(workspace, final->job.identity.child_session_id, session_root);
       if (child_store)
       {
         auto child_entries = child_store->load();
@@ -366,18 +394,19 @@ void test_agent_loop_background_task_cancel_requests_child_cancellation()
   }
 }
 
-void test_agent_loop_background_task_requires_registry_owner()
+void test_agent_loop_background_task_requires_coordinator()
 {
-  auto const root = create_empty_root("agent-task-background-no-registry");
+  auto const root = create_empty_root("agent-task-background-no-coordinator");
 
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "no-registry"});
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "no-coordinator"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
                                                     "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
-                                                    "\\\"description\\\":\\\"No registry\\\",\\\"prompt\\\":\\\"Try background.\\\","
+                                                    "\\\"description\\\":\\\"No coordinator\\\",\\\"prompt\\\":\\\"Try background.\\\","
                                                     "\\\"subagent_type\\\":\\\"general\\\",\\\"background\\\":true}\"}\n\n"
                                                     "data: [DONE]\n\n"),
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"handled\"}\n\n"
@@ -407,11 +436,11 @@ void test_agent_loop_background_task_requires_registry_owner()
 
   auto result = loop.run_turn("delegate unavailable background", store, provider, transport);
   expect(result && result->final_text == "handled" && transport.requests().size() == 2,
-         "agent loop continues after unavailable background registry tool error");
+         "agent loop continues after unavailable background coordinator tool error");
   if (transport.requests().size() == 2)
   {
     expect(transport.requests()[1].body.find("background task subagents are unavailable") != std::string::npos,
-           "background task requires an explicit registry owner");
+           "background task requires an explicit coordinator owner");
   }
 }
 

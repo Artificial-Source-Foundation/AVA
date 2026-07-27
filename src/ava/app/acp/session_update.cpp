@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "ava/app/EventEnvelope.h"
 #include "ava/app/acp/protocol.h"
 #include "ava/app/acp/session_update.h"
 
@@ -152,57 +151,6 @@ std::string_view content_chunk_discriminator(AcpContentChunkKind kind)
   return "agent_message_chunk";
 }
 
-runtime::Event event_from_envelope(EventEnvelope const& envelope)
-{
-  runtime::Event event;
-  event.timestamp = envelope.timestamp;
-  event.session_id = envelope.session_id;
-  if (envelope.name == "user_message")
-    event.type = runtime::EventType::UserMessage;
-  else if (envelope.name == "assistant_message")
-    event.type = runtime::EventType::AssistantMessage;
-  else if (envelope.name == "message_update")
-    event.type = runtime::EventType::MessageUpdate;
-  else if (envelope.name == "reasoning_start")
-    event.type = runtime::EventType::ReasoningStart;
-  else if (envelope.name == "reasoning_delta")
-    event.type = runtime::EventType::ReasoningDelta;
-  else if (envelope.name == "reasoning_end")
-    event.type = runtime::EventType::ReasoningEnd;
-  else if (envelope.name == "tool_start")
-    event.type = runtime::EventType::ToolStart;
-  else if (envelope.name == "tool_progress")
-    event.type = runtime::EventType::ToolProgress;
-  else if (envelope.name == "tool_result")
-    event.type = runtime::EventType::ToolResult;
-  else
-    event.type = runtime::EventType::ProviderEvent;
-
-  auto payload = Json::parse(envelope.payload_json, nullptr, false, true);
-  if (!payload.is_object())
-    return event;
-  auto string_value = [&](char const* key) {
-    auto found = payload.find(key);
-    return found != payload.end() && found->is_string() ? found->get<std::string>() : std::string{};
-  };
-  event.text = string_value("text");
-  event.call_id = string_value("call_id");
-  event.tool_name = string_value("tool");
-  event.status = string_value("status");
-  event.tool_arguments_json = payload.contains("args") && payload["args"].is_object() ? payload["args"].dump() : std::string{};
-  event.tool_result_json = payload.contains("result") ? payload["result"].dump() : std::string{};
-  event.diff = string_value("diff");
-  if (auto found = payload.find("changed_paths"); found != payload.end() && found->is_array())
-    for (auto const& item : *found)
-      if (item.is_string())
-        event.changed_paths.push_back(item.get<std::string>());
-  if (auto found = payload.find("reasoning_redacted"); found != payload.end() && found->is_boolean())
-    event.reasoning_redacted = found->get<bool>();
-  if (auto found = payload.find("start_line"); found != payload.end() && found->is_number_unsigned())
-    event.start_line = found->get<std::size_t>();
-  return event;
-}
-
 }  // namespace
 
 std::string acp_tool_kind(std::string_view tool_name)
@@ -308,11 +256,6 @@ ava::core::Result<std::optional<SessionUpdate>> RuntimeSessionUpdateMapper::map(
   return std::optional<SessionUpdate>{};
 }
 
-ava::core::Result<std::optional<SessionUpdate>> RuntimeSessionUpdateMapper::map(EventEnvelope const& envelope)
-{
-  return map(event_from_envelope(envelope));
-}
-
 ava::core::Result<std::optional<std::string>> RuntimeSessionUpdateMapper::account_and_encode(std::optional<SessionUpdate> update)
 {
   if (!update)
@@ -335,14 +278,6 @@ ava::core::Result<std::optional<std::string>> RuntimeSessionUpdateMapper::accoun
 ava::core::Result<std::optional<std::string>> RuntimeSessionUpdateMapper::map_and_encode(runtime::Event const& event)
 {
   auto update = map(event);
-  if (!update)
-    return std::unexpected(std::move(update.error()));
-  return account_and_encode(std::move(*update));
-}
-
-ava::core::Result<std::optional<std::string>> RuntimeSessionUpdateMapper::map_and_encode(EventEnvelope const& envelope)
-{
-  auto update = map(envelope);
   if (!update)
     return std::unexpected(std::move(update.error()));
   return account_and_encode(std::move(*update));

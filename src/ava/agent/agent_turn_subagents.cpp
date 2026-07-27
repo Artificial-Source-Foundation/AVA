@@ -136,13 +136,13 @@ ava::core::Result<ava::tools::TaskSubagentResult> AgentTurnExecutor::run_task_su
   bool const has_provider_factory = static_cast<bool>(options_.background_provider_factory);
   bool const has_transport_factory = static_cast<bool>(options_.background_transport_factory);
   bool const has_coordinator = static_cast<bool>(options_.subagent_coordinator);
-  if (request.background && (!has_provider_factory || !has_transport_factory || (!has_coordinator && !options_.background_jobs)))
+  bool const use_coordinator = has_coordinator && has_provider_factory && has_transport_factory;
+  if (request.background && !use_coordinator)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "background task subagents are unavailable");
     error.with_context("subagent_type", request.subagent_type);
     return std::unexpected(std::move(error));
   }
-  bool const use_coordinator = has_coordinator && has_provider_factory && has_transport_factory;
   if (!request.background && (has_coordinator || has_provider_factory || has_transport_factory) && !use_coordinator)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "coordinated foreground task subagents are unavailable");
@@ -210,7 +210,6 @@ ava::core::Result<ava::tools::TaskSubagentResult> AgentTurnExecutor::run_task_su
   child_options.background_provider_factory = nullptr;
   child_options.background_transport_factory = nullptr;
   child_options.subagent_coordinator = nullptr;
-  child_options.background_jobs = nullptr;
   // A child owns a fresh lifecycle/session identity. Parent IDs are typed
   // correlation metadata only and never become child lifecycle IDs.
   child_options.trace_context = {.run_id = {},
@@ -221,7 +220,7 @@ ava::core::Result<ava::tools::TaskSubagentResult> AgentTurnExecutor::run_task_su
                                  .parent_turn_id = trace_context_.turn_id,
                                  .parent_session_id = store_.session_id()};
 
-  if (request.background || use_coordinator)
+  if (use_coordinator)
   {
     auto const task_id = child_store.session_id();
     auto const session_path = child_store.session_path();
@@ -332,47 +331,27 @@ ava::core::Result<ava::tools::TaskSubagentResult> AgentTurnExecutor::run_task_su
       return completion;
     };
 
-    ava::core::Result<SubagentCoordinatorJobSnapshot> coordinated =
-        std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "coordinator was not selected"));
-    std::string job_id;
-    std::string job_state;
-    if (use_coordinator)
+    auto coordinated = options_.subagent_coordinator->start(store_.session_id(), request.background ? SubagentJobMode::Background : SubagentJobMode::Foreground,
+                                                            std::move(start_options), std::move(worker), interaction_gate);
+    if (!coordinated)
     {
-      coordinated = options_.subagent_coordinator->start(store_.session_id(), request.background ? SubagentJobMode::Background : SubagentJobMode::Foreground,
-                                                         std::move(start_options), std::move(worker), interaction_gate);
-      if (!coordinated)
-      {
-        auto error = std::move(coordinated.error());
-        // Roll back only with a positive proof that no coordinator state was
-        // published. The uncertain compatibility value must remain fail-closed.
-        if (!request.task_id && subagent_publication_commit_state(error) == SubagentPublicationCommitState::ProvenUnpublished)
-          ava::session::rollback_created_session_with_context(run_state->child_store, run_state->child_lease, error);
-        return std::unexpected(std::move(error));
-      }
-      job_id = coordinated->job.identity.job_id;
-      job_state = std::string(to_string(coordinated->job.execution));
+      auto error = std::move(coordinated.error());
+      // Roll back only with a positive proof that no coordinator state was
+      // published. The uncertain compatibility value must remain fail-closed.
+      if (!request.task_id && subagent_publication_commit_state(error) == SubagentPublicationCommitState::ProvenUnpublished)
+        ava::session::rollback_created_session_with_context(run_state->child_store, run_state->child_lease, error);
+      return std::unexpected(std::move(error));
     }
-    else
-    {
-      auto job = options_.background_jobs->start(std::move(start_options), std::move(worker));
-      if (!job)
-      {
-        auto error = std::move(job.error());
-        if (!request.task_id)
-          ava::session::rollback_created_session_with_context(run_state->child_store, run_state->child_lease, error);
-        return std::unexpected(std::move(error));
-      }
-      job_id = job->job_id;
-      job_state = to_string(job->state);
-    }
+    auto const job_id = coordinated->job.identity.job_id;
+    auto const job_state = std::string(to_string(coordinated->job.execution));
 
     if (request.background)
     {
       return ava::tools::TaskSubagentResult{.task_id = task_id,
-                                            .job_id = std::move(job_id),
+                                            .job_id = job_id,
                                             .session_path = session_path,
                                             .subagent_type = request.subagent_type,
-                                            .state = std::move(job_state),
+                                            .state = job_state,
                                             .final_text = "",
                                             .stop_reason = "background",
                                             .provider_iterations = 0,

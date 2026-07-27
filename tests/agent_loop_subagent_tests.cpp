@@ -185,15 +185,15 @@ void test_agent_loop_foreground_task_child_uses_parent_permission_resolver()
   ava::session::SessionStore store(
       ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "parent-child-permission"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response(tool_call_sse(
-                                                "call_task", "task",
-                                                R"({"description":"check child permission","prompt":"Run the requested verification.","subagent_type":"general"})") +
-                                            "data: [DONE]\n\n"),
-                                       sse_response(tool_call_sse("call_child_bash", "bash", R"({"command":"true"})") + "data: [DONE]\n\n"),
-                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child handled permission\"}\n\n"
-                                                    "data: [DONE]\n\n"),
-                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent continued\"}\n\n"
-                                                    "data: [DONE]\n\n")});
+  ava::tests::FakeTransport transport(
+      {sse_response(tool_call_sse("call_task", "task",
+                                  R"({"description":"check child permission","prompt":"Run the requested verification.","subagent_type":"general"})") +
+                    "data: [DONE]\n\n"),
+       sse_response(tool_call_sse("call_child_bash", "bash", R"({"command":"true"})") + "data: [DONE]\n\n"),
+       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child handled permission\"}\n\n"
+                    "data: [DONE]\n\n"),
+       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent continued\"}\n\n"
+                    "data: [DONE]\n\n")});
   std::vector<ava::permissions::PermissionPrompt> prompts;
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
@@ -203,8 +203,7 @@ void test_agent_loop_foreground_task_child_uses_parent_permission_resolver()
       .model_id = "gpt-5.5",
       .system_prompt = "system prompt",
       .access_token = "token",
-      .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+      .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         prompts.push_back(prompt);
         return ava::permissions::PermissionResolution::Allow;
       },
@@ -592,7 +591,7 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
     int task_prompts = 0;
     auto collector = std::make_shared<TraceCollector>();
     auto observation = std::make_shared<ava::observability::RunObservation>(collector);
-    std::shared_ptr<ava::agent::BackgroundJobRegistry> registry;
+    std::shared_ptr<ava::agent::SubagentCoordinator> coordinator;
     std::shared_ptr<std::vector<ava::provider::HttpResponse>> background_responses;
     std::shared_ptr<std::vector<ava::provider::HttpRequest>> background_requests;
     std::shared_ptr<std::mutex> background_mutex;
@@ -608,7 +607,11 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
                                                                            "data: [DONE]\n\n")});
     if (background)
     {
-      registry = std::make_shared<ava::agent::BackgroundJobRegistry>();
+      auto coordinator_result = ava::agent::SubagentCoordinator::create();
+      expect(coordinator_result.has_value(), "task authority-root background fixture creates coordinator");
+      if (!coordinator_result)
+        return;
+      coordinator = *coordinator_result;
       background_responses = std::make_shared<std::vector<ava::provider::HttpResponse>>(std::vector<ava::provider::HttpResponse>{
           sse_response(child_bash), sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child denied\"}\n\n"
                                                  "data: [DONE]\n\n")});
@@ -625,8 +628,7 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
         .system_prompt = "system prompt",
         .access_token = "token",
         .ava_authority_roots = {workspace},
-        .permission_resolver =
-            [&task_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        .permission_resolver = [&task_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
           ++task_prompts;
           return ava::permissions::PermissionResolution::Allow;
         },
@@ -641,7 +643,7 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
           return child;
         }
         : decltype(ava::agent::AgentLoopOptions{}.background_transport_factory){},
-        .background_jobs = registry,
+        .subagent_coordinator = coordinator,
         .append_entry = append_route_for_test(store),
         .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
@@ -653,13 +655,12 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
     std::vector<ava::provider::HttpRequest> child_requests;
     if (background)
     {
-      auto jobs = registry->snapshot();
+      auto jobs = coordinator->list(store.session_id());
       if (!jobs.empty())
       {
-        auto completed = registry->wait(jobs.front().job_id, std::chrono::milliseconds(1000));
-        child_completed = completed && completed->state == ava::agent::BackgroundJobState::Completed && completed->final_text == "child denied";
+        auto completed = coordinator->wait(store.session_id(), jobs.front().job.identity.job_id, std::chrono::milliseconds(1000));
+        child_completed = completed && completed->job.execution == ava::agent::SubagentExecutionState::Completed && completed->job.summary == "child denied";
       }
-      registry->join_finished();
       std::lock_guard lock(*background_mutex);
       child_requests = *background_requests;
     }
@@ -673,8 +674,9 @@ void test_agent_loop_task_subagent_propagates_authority_roots_to_foreground_and_
         background ? child_requests.size() == 2 && child_requests[1].body.find("must not overlap with any AVA authority root") != std::string::npos
                    : transport.requests().size() == 4 && transport.requests()[2].body.find("must not overlap with any AVA authority root") != std::string::npos;
     expect(result && task_prompts == 0 && child_completed && child_error_propagated && !process_started,
-           background ? "background child copies AVA authority roots before its AgentLoop starts and blocks overlapping model commands without a launch prompt"
-                      : "foreground child copies AVA authority roots before its AgentLoop starts and blocks overlapping model commands without a launch prompt");
+           background
+               ? "background child copies AVA authority roots before its AgentLoop starts and blocks overlapping model commands without a launch prompt"
+               : "foreground child copies AVA authority roots before its AgentLoop starts and blocks overlapping model commands without a launch prompt");
   };
 
   run_case(false);

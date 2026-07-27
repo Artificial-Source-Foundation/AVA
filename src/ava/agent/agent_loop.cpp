@@ -102,10 +102,10 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "AgentLoop received more than 64 distinct AVA authority roots"));
   }
-  if (!store.is_ephemeral() && (!options_.append_entry || !options_.append_batch))
+  if (!options_.append_entry || !options_.append_batch)
   {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                            "persistent AgentLoop requires append and batch authority routes before producing records"));
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "AgentLoop requires append and batch authority routes before producing records"));
   }
   if (!options_.session_read_authority)
   {

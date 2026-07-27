@@ -2,7 +2,6 @@
 
 #include "ava/observability/run_observer.h"
 #include "ava/agent/agent_loop_session.h"
-#include "ava/agent/background_job_registry.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"
@@ -163,10 +162,9 @@ struct AgentLoopOptions
       compact_context = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Provider>>()> background_provider_factory = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Transport>>()> background_transport_factory = nullptr;
-  // Production uses one application-scoped coordinator. The raw registry is
-  // retained only as an explicit standalone AgentLoop test seam.
+  // Production and tests use one application-scoped coordinator as the sole
+  // task-subagent owner. BackgroundJobRegistry remains an internal engine.
   std::shared_ptr<SubagentCoordinator> subagent_coordinator = nullptr;
-  std::shared_ptr<BackgroundJobRegistry> background_jobs = nullptr;
   std::mutex* session_mutex = nullptr;
   // Immutable generation routes for records produced by this run. Persistent
   // provider assistant turns require the batch route so v4 staging and its

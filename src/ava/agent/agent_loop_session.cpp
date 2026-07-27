@@ -13,22 +13,6 @@
 namespace ava::agent {
 namespace {
 
-ava::core::VoidResult append_entry_with_id(ava::session::SessionStore& store, ava::session::EntryType type, std::string const& id, std::string data_json)
-{
-  if (!store.is_ephemeral())
-  {
-    return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent AgentLoop session writes require an append authority route"));
-  }
-  return store.append_ephemeral(
-      ava::session::SessionEntry{.id = id, .parent_id = "", .type = type, .timestamp = ava::session::now_timestamp(), .data_json = std::move(data_json)});
-}
-
-ava::core::VoidResult append_entry(ava::session::SessionStore& store, ava::session::EntryType type, std::string data_json)
-{
-  return append_entry_with_id(store, type, ava::core::make_id("entry"), std::move(data_json));
-}
-
 ava::core::VoidResult append_entry(SessionAppendSink const& sink, ava::session::EntryType type, std::string const& id, std::string data_json)
 {
   if (!sink)
@@ -249,100 +233,6 @@ ava::core::Result<PersistedAssistantTurn> append_assistant_turn(SessionAppendBat
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "assistant turn has no normalized finish reason"));
   }
   return append_assistant_turn_impl(sink, turn, provider_id, model_id, usage, cost_usd, api_family, reasoning_format);
-}
-
-ava::core::Result<PersistedAssistantTurn> append_assistant_turn(ava::session::SessionStore& store, ParsedAssistantTurn const& turn,
-                                                                std::string_view provider_id, std::string_view model_id, ava::provider::TokenUsage const& usage,
-                                                                std::optional<long double> const& cost_usd, std::optional<std::string_view> api_family,
-                                                                std::optional<std::string_view> reasoning_format)
-{
-  if (!store.is_ephemeral())
-  {
-    return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent assistant turn persistence requires a batch append authority route"));
-  }
-  auto target = ava::session::SessionAppendTarget::create_ephemeral(store);
-  if (!target)
-    return std::unexpected(std::move(target.error()));
-  return append_assistant_turn(
-      [target = std::move(*target)](std::vector<ava::session::SessionEntry> entries) { return target->append_batch(std::move(entries)); }, turn, provider_id,
-      model_id, usage, cost_usd, api_family, reasoning_format);
-}
-
-ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text)
-{
-  return append_user_message(store, text, {});
-}
-
-ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text,
-                                                   std::vector<ava::session::ImageAttachmentRef> const& attachments,
-                                                   std::optional<ava::session::SyntheticDeliveryProvenance> const& provenance)
-{
-  auto id = ava::core::make_id("entry");
-  auto appended = append_entry_with_id(store, ava::session::EntryType::UserMessage, id, user_message_data_json(text, attachments, provenance));
-  if (!appended)
-    return std::unexpected(std::move(appended.error()));
-  return id;
-}
-
-ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, std::string const& text, std::string const& replay_of)
-{
-  return append_replay_user_message(store, text, {}, replay_of);
-}
-
-ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, std::string const& text,
-                                                 std::vector<ava::session::ImageAttachmentRef> const& attachments, std::string const& replay_of)
-{
-  auto data = user_message_data_json(text, attachments);
-  data.pop_back();
-  data += ",\"internal_replay\":true,\"replay_of\":\"" + ava::core::json::escape(replay_of) + "\",\"reason\":\"context_compaction_active_prompt_replay\"}";
-  return append_entry(store, ava::session::EntryType::UserMessage, std::move(data));
-}
-
-ava::core::VoidResult append_assistant_message(ava::session::SessionStore& store, std::string const& text, std::size_t tool_call_count,
-                                               ava::provider::TokenUsage const& usage, std::optional<long double> const& cost_usd)
-{
-  return append_entry(store, ava::session::EntryType::AssistantMessage,
-                      "{\"text\":\"" + ava::core::json::escape(text) + "\",\"tool_calls\":" + std::to_string(tool_call_count) +
-                          ",\"usage\":" + usage_json(usage, cost_usd) + "}");
-}
-
-ava::core::VoidResult append_reasoning_block(ava::session::SessionStore& store, ParsedReasoningBlock const& block, std::string_view provider_id,
-                                             std::string_view model_id)
-{
-  if (block.text.empty() && block.signature.empty() && block.redacted_data.empty() && block.native_item_json.empty())
-    return {};
-  return append_entry(store, ava::session::EntryType::ReasoningBlock, reasoning_block_data_json(block, provider_id, model_id));
-}
-
-ava::core::VoidResult append_tool_call(ava::session::SessionStore& store, ProviderToolCall const& call)
-{
-  return append_entry(store, ava::session::EntryType::ToolCall,
-                      "{\"call_id\":\"" + ava::core::json::escape(call.id) + "\",\"name\":\"" + ava::core::json::escape(call.name) + "\",\"arguments\":\"" +
-                          ava::core::json::escape(call.arguments_json) + "\"}");
-}
-
-ava::core::VoidResult append_tool_result(ava::session::SessionStore& store, ToolDispatchResult const& result,
-                                         std::optional<std::string_view> assistant_output_entry_id)
-{
-  return append_entry(store, ava::session::EntryType::ToolResult, tool_result_data_json(result, assistant_output_entry_id));
-}
-
-ava::core::VoidResult append_permission_decision(ava::session::SessionStore& store, ava::tools::PermissionAuditEvent const& event)
-{
-  return append_entry(store, ava::session::EntryType::PermissionDecision, ava::tools::permission_audit_data_json(event));
-}
-
-ava::core::VoidResult append_error(ava::session::SessionStore& store, ava::core::Error const& error)
-{
-  return append_entry(store, ava::session::EntryType::Error,
-                      "{\"category\":\"" + ava::core::json::escape(ava::core::to_string(error.category())) + "\",\"message\":\"" +
-                          ava::core::json::escape(error.message()) + "\",\"details\":\"" + ava::core::json::escape(error.format()) + "\"}");
-}
-
-ava::core::VoidResult append_cancel(ava::session::SessionStore& store, std::string_view boundary)
-{
-  return append_entry(store, ava::session::EntryType::Cancel, "{\"reason\":\"cancel_requested\",\"boundary\":\"" + ava::core::json::escape(boundary) + "\"}");
 }
 
 ava::core::Result<std::string> append_user_message(SessionAppendSink const& sink, std::string const& text,

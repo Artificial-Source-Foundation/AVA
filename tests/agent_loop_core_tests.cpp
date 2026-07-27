@@ -233,7 +233,7 @@ void test_agent_loop_model_capability_gating()
          "agent loop disables streaming for models without streaming support");
 }
 
-void test_agent_loop_rejects_persistent_store_without_append_route()
+void test_agent_loop_rejects_store_without_append_routes()
 {
   auto const root = create_empty_root("agent-missing-append-route");
 
@@ -251,7 +251,61 @@ void test_agent_loop_rejects_persistent_store_without_append_route()
   auto result = loop.run_turn("hi", store, provider, transport);
   expect(!result && result.error().message().find("authority routes") != std::string::npos && transport.requests().empty() &&
              !std::filesystem::exists(store.session_path()),
-         "persistent AgentLoop without a bound append route fails before provider work or session mutation");
+         "AgentLoop without both bound append routes fails before provider work or session mutation");
+}
+
+void test_agent_loop_rejects_ephemeral_store_missing_entry_or_batch_route()
+{
+  auto const root = create_empty_root("agent-ephemeral-missing-append-route");
+
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto store = ava::session::SessionStore::create_ephemeral(workspace);
+  expect(store.has_value(), "ephemeral missing-route fixture creates a store");
+  if (!store)
+    return;
+  auto target = ava::session::SessionAppendTarget::create_ephemeral(*store);
+  expect(target.has_value(), "ephemeral missing-route fixture creates an append target");
+  if (!target)
+    return;
+  auto authority = (*target)->read_authority();
+  expect(authority.has_value(), "ephemeral missing-route fixture creates a read authority");
+  if (!authority)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport missing_entry_transport({});
+  auto append_target = *target;
+  ava::agent::AgentLoop missing_entry(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .append_batch = [append_target](std::vector<ava::session::SessionEntry> entries) { return append_target->append_batch(std::move(entries)); },
+      .session_read_authority = *authority,
+  });
+  auto missing_entry_result = missing_entry.run_turn("hi", *store, provider, missing_entry_transport);
+  expect(!missing_entry_result && missing_entry_result.error().message().find("authority routes") != std::string::npos &&
+             missing_entry_transport.requests().empty() && store->load() && store->load()->empty(),
+         "ephemeral AgentLoop missing the entry route fails before provider work or session mutation");
+
+  ava::tests::FakeTransport missing_batch_transport({});
+  ava::agent::AgentLoop missing_batch(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .append_entry = [append_target](ava::session::SessionEntry const& entry) { return append_target->append(entry); },
+      .session_read_authority = *authority,
+  });
+  auto missing_batch_result = missing_batch.run_turn("hi", *store, provider, missing_batch_transport);
+  expect(!missing_batch_result && missing_batch_result.error().message().find("authority routes") != std::string::npos &&
+             missing_batch_transport.requests().empty() && store->load() && store->load()->empty(),
+         "ephemeral AgentLoop missing the batch route fails before provider work or session mutation");
 }
 
 void test_agent_loop_rejects_replaced_history_before_provider_use()

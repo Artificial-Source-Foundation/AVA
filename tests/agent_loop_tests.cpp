@@ -13,7 +13,8 @@ void run_agent_loop_tests()
   test_agent_loop_uses_established_session_read_limits();
   test_agent_loop_authority_policy_applies_between_provider_iterations();
   test_agent_loop_model_capability_gating();
-  test_agent_loop_rejects_persistent_store_without_append_route();
+  test_agent_loop_rejects_store_without_append_routes();
+  test_agent_loop_rejects_ephemeral_store_missing_entry_or_batch_route();
   test_agent_loop_rejects_replaced_history_before_provider_use();
   test_agent_loop_image_attachment_load_failure_records_error();
   test_usage_accounting_saturates_without_signed_overflow();
@@ -32,7 +33,7 @@ void run_agent_loop_tests()
   test_agent_loop_background_task_starts_child_session();
   test_agent_loop_background_task_failure_records_parent_and_child_errors();
   test_agent_loop_background_task_cancel_requests_child_cancellation();
-  test_agent_loop_background_task_requires_registry_owner();
+  test_agent_loop_background_task_requires_coordinator();
   test_agent_loop_coordinator_start_failure_rolls_back_child();
   test_background_job_registry_worker_exception_marks_failed();
   test_background_job_registry_enforces_running_limit();

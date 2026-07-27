@@ -2,6 +2,7 @@
 #include "ava/app/EventEnvelope.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/plugin/diagnostics.h"
@@ -221,12 +222,13 @@ class PluginEventObserverState final
 PluginEventObserverOptions plugin_event_observer_options(runtime::Session& session, ava::permissions::PermissionResolver permission_resolver,
                                                          std::mutex* /*session_mutex*/)
 {
+  auto const resource_policy = runtime::make_extension_resource_policy(session);
   return PluginEventObserverOptions{
       .workspace_dir = session.workspace_dir(),
-      .plugin_global_plugins_dir = session.paths().ava_config_dir / "plugins",
-      .plugin_project_plugins_dir = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "plugins" : std::filesystem::path{},
-      .plugin_enablement_file = session.paths().ava_state_dir / "plugin-enablement.json",
-      .include_project_plugins = project_resources_trusted(session.project_trust()),
+      .plugin_global_plugins_dir = resource_policy.plugin_discovery.global_plugins_dir,
+      .plugin_project_plugins_dir = resource_policy.plugin_discovery.project_plugins_dir,
+      .plugin_enablement_file = resource_policy.plugin_enablement_file,
+      .include_project_plugins = resource_policy.include_project_resources,
       .mode = session.mode(),
       .permission_resolver = std::move(permission_resolver),
       // Permission audits are owner-routed outside active runs and replaced by

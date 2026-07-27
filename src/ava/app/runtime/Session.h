@@ -10,7 +10,6 @@
 #include "ava/app/project_trust.h"
 #include "ava/app/session_run_controller.h"
 #include "ava/agent/agent_loop.h"
-#include "ava/plugin/discovery.h"
 #include "ava/mcp/config.h"
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
@@ -250,19 +249,6 @@ class Session : protected Session_aggregate_base
   std::shared_ptr<ava::app::SessionTitleCoordinator> const& session_title_coordinator() const { return resources_.session_title_coordinator; }
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> const& diagnostics() const { return resources_.diagnostics; }
   std::shared_ptr<ava::mcp::McpConfig const> const& mcp_config() const { return resources_.mcp_config; }
-
-  // Build the plugin discovery directories scoped to this session.
-  //
-  // Global plugins resolve under the XDG config dir; project plugins are only
-  // included when the session's project resources are trusted, so an untrusted
-  // workspace never exposes its local plugins to discovery. The result is a
-  // fresh value each call and never touches the filesystem.
-  [[nodiscard]] ava::plugin::PluginDiscoveryOptions skill_plugin_discovery_options() const
-  {
-    return ava::plugin::PluginDiscoveryOptions{
-        .global_plugins_dir = paths().ava_config_dir / "plugins",
-        .project_plugins_dir = project_resources_trusted(project_trust()) ? workspace_dir() / ".ava" / "plugins" : std::filesystem::path{}};
-  }
 
   // Bind a lifetime-safe history snapshot route to this session's exact lease
   // (or to its shared in-memory state in sessionless mode).

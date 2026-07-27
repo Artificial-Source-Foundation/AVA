@@ -8,6 +8,7 @@
 #include "ava/app/project_trust.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/OpenOptions.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/subagent_delivery_manager.h"
@@ -49,6 +50,31 @@ namespace ava::tests::app_runtime_tests {
 
 using namespace ava::tests;
 
+void test_extension_resource_policy_derives_synthetic_paths_and_trust()
+{
+  ava::config::XdgPaths paths;
+  paths.ava_config_dir = "/synthetic-extension-policy/config-root";
+  paths.ava_state_dir = "/synthetic-extension-policy/state-root";
+  std::filesystem::path const workspace = "/synthetic-extension-policy/workspace-root";
+
+  auto const trusted = ava::app::runtime::make_extension_resource_policy(paths, workspace, true);
+  expect(trusted.include_project_resources && trusted.plugin_discovery.global_plugins_dir == paths.ava_config_dir / "plugins" &&
+             trusted.plugin_discovery.project_plugins_dir == workspace / ".ava" / "plugins" &&
+             trusted.plugin_enablement_file == paths.ava_state_dir / "plugin-enablement.json" && trusted.mcp_config.workspace_dir == workspace &&
+             trusted.mcp_config.global_config_file == paths.ava_config_dir / "mcp.json" &&
+             trusted.mcp_config.project_config_file == workspace / ".ava" / "mcp.json" && trusted.global_lsp_config_file == paths.ava_config_dir / "lsp.json" &&
+             trusted.project_lsp_config_file == workspace / ".ava" / "lsp.json",
+         "trusted extension resource policy derives every path from synthetic XDG and workspace inputs");
+
+  auto const untrusted = ava::app::runtime::make_extension_resource_policy(paths, workspace, false);
+  expect(!untrusted.include_project_resources && untrusted.plugin_discovery.global_plugins_dir == trusted.plugin_discovery.global_plugins_dir &&
+             untrusted.plugin_discovery.project_plugins_dir.empty() && untrusted.plugin_enablement_file == trusted.plugin_enablement_file &&
+             untrusted.mcp_config.workspace_dir == trusted.mcp_config.workspace_dir &&
+             untrusted.mcp_config.global_config_file == trusted.mcp_config.global_config_file && untrusted.mcp_config.project_config_file.empty() &&
+             untrusted.global_lsp_config_file == trusted.global_lsp_config_file && untrusted.project_lsp_config_file.empty(),
+         "untrusted extension resource policy preserves synthetic global paths and workspace while omitting every project path");
+}
+
 void test_app_runtime_open_session_and_context_prompt()
 {
   auto root = create_empty_root("app-runtime-open");
@@ -83,6 +109,10 @@ void test_app_runtime_open_session_and_context_prompt()
 
   expect(session->created && session->mode() == ava::agent::Mode::Plan && session->model().model_id == "gpt-5.5",
          "runtime session records created state, mode, and model");
+  auto const resource_policy = ava::app::runtime::make_extension_resource_policy(*session);
+  expect(!resource_policy.include_project_resources && resource_policy.plugin_discovery.global_plugins_dir == paths.ava_config_dir / "plugins" &&
+             resource_policy.plugin_discovery.project_plugins_dir.empty() && resource_policy.mcp_config.workspace_dir == workspace,
+         "runtime session extension resource policy overload derives paths and the fail-closed trust decision");
   expect(session->context_sources().size() == 3, "runtime session records workspace and global context metadata");
   expect(!session->base_prompt().from_override && !session->base_prompt().source_path && session->base_prompt().byte_count > 0 &&
              session->base_prompt().content_fingerprint != 0,

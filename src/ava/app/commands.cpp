@@ -14,6 +14,7 @@
 #include "ava/app/display_settings.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/project_trust.h"
+#include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_prompt.h"
 #include "ava/tools/file_tools.h"
@@ -1150,12 +1151,13 @@ std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(
 
 ava::core::Result<std::string> skill_prompt_message(runtime::Session& session, CommandRequest const& request, CommandRegistryEntry const& entry)
 {
-  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(session.skill_plugin_discovery_options(),
-                                                                    session.paths().ava_state_dir / "plugin-enablement.json", session.workspace_dir());
+  auto const resource_policy = runtime::make_extension_resource_policy(session);
+  auto plugin_diagnostics =
+      ava::plugin::collect_plugin_diagnostics(resource_policy.plugin_discovery, resource_policy.plugin_enablement_file, session.workspace_dir());
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = session.workspace_dir(),
       .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
-      .include_project_skills = project_resources_trusted(session.project_trust()),
+      .include_project_skills = resource_policy.include_project_resources,
   });
   auto const match = std::ranges::find_if(loaded.skills, [&](ava::context::LoadedSkill const& skill) { return skill.name == entry.skill_name; });
   if (match == loaded.skills.end())
@@ -1213,10 +1215,8 @@ ava::core::VoidResult ensure_mcp_prompt_permissions(ava::tools::ToolContext cons
 ava::core::Result<std::string> mcp_prompt_message(runtime::Session& session, CommandRequest const& request, CommandRegistryEntry const& entry,
                                                   std::string_view argument_text)
 {
-  auto config_options = ava::mcp::default_mcp_config_options(session.workspace_dir());
-  config_options.global_config_file = session.paths().ava_config_dir / "mcp.json";
-  config_options.project_config_file = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "mcp.json" : std::filesystem::path{};
-  auto config = ava::mcp::load_mcp_config(config_options);
+  auto const resource_policy = runtime::make_extension_resource_policy(session);
+  auto config = ava::mcp::load_mcp_config(resource_policy.mcp_config);
   if (!config)
     return std::unexpected(std::move(config.error()));
   auto const server = std::ranges::find_if(config->servers, [&](ava::mcp::McpServerConfig const& item) { return item.id == entry.mcp_server_id; });

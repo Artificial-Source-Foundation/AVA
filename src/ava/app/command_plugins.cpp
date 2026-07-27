@@ -2,6 +2,7 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_plugins.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/enablement.h"
@@ -73,21 +74,9 @@ std::string plugin_display_path(std::filesystem::path const& path, runtime::Sess
   return sanitize_inline_text(display_path(path, session.current_dir()));
 }
 
-ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::Session const& session)
+ava::plugin::PluginDiagnostics plugin_diagnostics(runtime::ExtensionResourcePolicy const& policy, runtime::Session const& session)
 {
-  return ava::plugin::PluginDiscoveryOptions{
-      .global_plugins_dir = session.paths().ava_config_dir / "plugins",
-      .project_plugins_dir = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "plugins" : std::filesystem::path{}};
-}
-
-std::filesystem::path plugin_enablement_file(runtime::Session const& session)
-{
-  return session.paths().ava_state_dir / "plugin-enablement.json";
-}
-
-ava::plugin::PluginDiagnostics plugin_diagnostics(runtime::Session const& session)
-{
-  return ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir());
+  return ava::plugin::collect_plugin_diagnostics(policy.plugin_discovery, policy.plugin_enablement_file, session.workspace_dir());
 }
 
 std::string plugin_scope_text(ava::plugin::PluginScope scope)
@@ -847,7 +836,8 @@ void cleanup_install_temp_dir(std::filesystem::path const& temp_dir)
   std::filesystem::remove_all(temp_dir, remove_error);
 }
 
-ava::core::Result<std::string> install_plugin_from_path(runtime::Session const& session, std::string_view path_text)
+ava::core::Result<std::string> install_plugin_from_path(runtime::Session const& session, runtime::ExtensionResourcePolicy const& policy,
+                                                        std::string_view path_text)
 {
   auto source_dir = plugin_install_source_dir(session, path_text);
   if (!source_dir)
@@ -857,13 +847,13 @@ ava::core::Result<std::string> install_plugin_from_path(runtime::Session const& 
   if (!manifest)
     return std::unexpected(std::move(manifest.error()));
 
-  auto const diagnostics = plugin_diagnostics(session);
+  auto const diagnostics = plugin_diagnostics(policy, session);
   if (find_plugin_status(diagnostics, manifest->id) || has_duplicate_plugin_failure(diagnostics, manifest->id))
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin id is already discovered").with_context("plugin", manifest->id));
   }
 
-  auto const global_root = plugin_discovery_options(session).global_plugins_dir;
+  auto const& global_root = policy.plugin_discovery.global_plugins_dir;
   if (auto ensured = ensure_global_plugin_install_root(global_root); !ensured)
     return std::unexpected(std::move(ensured.error()));
   if (auto separate = ensure_install_source_is_separate(*source_dir, global_root); !separate)
@@ -954,9 +944,10 @@ ava::core::VoidResult ensure_removable_global_plugin(ava::plugin::PluginStatus c
   return {};
 }
 
-ava::core::Result<std::string> remove_plugin_by_id(runtime::Session const& session, ava::plugin::PluginStatus const& status)
+ava::core::Result<std::string> remove_plugin_by_id(runtime::Session const& session, runtime::ExtensionResourcePolicy const& policy,
+                                                   ava::plugin::PluginStatus const& status)
 {
-  auto const global_root = plugin_discovery_options(session).global_plugins_dir;
+  auto const& global_root = policy.plugin_discovery.global_plugins_dir;
   if (auto root = ensure_global_plugin_install_root(global_root); !root)
     return std::unexpected(std::move(root.error()));
   if (auto removable = ensure_removable_global_plugin(status, global_root); !removable)
@@ -1018,6 +1009,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
 {
   CommandResult result;
   result.handled = true;
+  auto const resource_policy = runtime::make_extension_resource_policy(session);
   auto const usage = [&]() {
     add_output(result, missing_argument("/plugins "
                                         "<list|inspect|install|remove|enable|disable|validate|failures|prompts|prompt|skills|skill|dynamic-prompts|dynamic-"
@@ -1036,7 +1028,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
   {
     if (args.size() != 1)
       return usage();
-    add_output(result, format_plugin_list_text(plugin_diagnostics(session), session));
+    add_output(result, format_plugin_list_text(plugin_diagnostics(resource_policy, session), session));
     return result;
   }
 
@@ -1044,7 +1036,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
   {
     if (args.size() != 1)
       return usage();
-    add_output(result, format_plugin_failures_text(plugin_diagnostics(session), session));
+    add_output(result, format_plugin_failures_text(plugin_diagnostics(resource_policy, session), session));
     return result;
   }
 
@@ -1052,7 +1044,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
   {
     if (args.size() != 2)
       return usage();
-    auto const diagnostics = plugin_diagnostics(session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, session);
     auto const* status = find_plugin_status(diagnostics, args[1]);
     if (!status)
     {
@@ -1067,7 +1059,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
   {
     if (args.size() != 2)
       return usage();
-    auto const diagnostics = plugin_diagnostics(session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, session);
     auto const* status = find_plugin_status(diagnostics, args[1]);
     if (!status)
     {
@@ -1083,7 +1075,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
   {
     if (args.size() != 3)
       return usage();
-    auto const diagnostics = plugin_diagnostics(session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, session);
     auto const* status = find_plugin_status(diagnostics, args[1]);
     if (!status)
     {
@@ -1113,7 +1105,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
       return usage();
     auto const kind = subcommand == "dynamic-prompts" ? ava::plugin::PluginDynamicResourceKind::Prompt : ava::plugin::PluginDynamicResourceKind::Skill;
     auto const kind_name = std::string(ava::plugin::plugin_dynamic_resource_kind_name(kind));
-    auto const diagnostics = plugin_diagnostics(session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, session);
     std::vector<DynamicResourceListEntry> entries;
     std::vector<DynamicResourceFailure> failures;
 
@@ -1227,7 +1219,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
       return usage();
     auto const kind = subcommand == "dynamic-prompt" ? ava::plugin::PluginDynamicResourceKind::Prompt : ava::plugin::PluginDynamicResourceKind::Skill;
     auto const kind_name = std::string(ava::plugin::plugin_dynamic_resource_kind_name(kind));
-    auto const diagnostics = plugin_diagnostics(session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, session);
     auto const* status = find_plugin_status(diagnostics, args[1]);
     if (!status)
     {
@@ -1322,7 +1314,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
     auto const path_text = plugin_validate_argument(argument);
     if (path_text.empty())
       return usage();
-    auto installed = install_plugin_from_path(session, path_text);
+    auto installed = install_plugin_from_path(session, resource_policy, path_text);
     if (!installed)
     {
       add_output(result, installed.error().format());
@@ -1336,14 +1328,14 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
   {
     if (args.size() != 2)
       return usage();
-    auto const diagnostics = plugin_diagnostics(session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, session);
     auto const* status = find_plugin_status(diagnostics, args[1]);
     if (!status)
     {
       add_output(result, plugin_not_found_text(diagnostics, args[1]));
       return result;
     }
-    auto removed = remove_plugin_by_id(session, *status);
+    auto removed = remove_plugin_by_id(session, resource_policy, *status);
     if (!removed)
     {
       add_output(result, removed.error().format());
@@ -1358,14 +1350,14 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
     if (args.size() != 2)
       return usage();
     bool const enabled = subcommand == "enable";
-    auto const diagnostics = plugin_diagnostics(session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, session);
     auto const* status = find_plugin_status(diagnostics, args[1]);
     if (!status)
     {
       add_output(result, plugin_not_found_text(diagnostics, args[1]));
       return result;
     }
-    auto stored = ava::plugin::set_plugin_enabled(plugin_enablement_file(session), session.workspace_dir(), args[1], enabled, status->plugin.scope);
+    auto stored = ava::plugin::set_plugin_enabled(resource_policy.plugin_enablement_file, session.workspace_dir(), args[1], enabled, status->plugin.scope);
     if (!stored)
     {
       add_output(result, stored.error().format());
@@ -1398,6 +1390,7 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::Session& session, C
 {
   CommandResult result;
   result.handled = true;
+  auto const resource_policy = runtime::make_extension_resource_policy(session);
   auto run_args = parse_plugin_run_arguments(command_argument(request.command, "/plugin"));
   if (!run_args)
   {
@@ -1405,7 +1398,7 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::Session& session, C
     return result;
   }
 
-  auto const diagnostics = plugin_diagnostics(session);
+  auto const diagnostics = plugin_diagnostics(resource_policy, session);
   auto const* status = find_plugin_status(diagnostics, run_args->plugin_id);
   if (!status)
   {

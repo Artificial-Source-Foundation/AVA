@@ -80,6 +80,7 @@ target_sources(ava_app
     "subagent_delivery_manager.cpp"
     "runtime_session.cpp"
     "runtime/Session.cpp"
+    "runtime/ExtensionResourcePolicy.cpp"
     "runtime/markdown_files.cpp"
     "runtime/command_names.cpp"
 )

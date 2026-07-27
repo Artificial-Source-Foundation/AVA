@@ -1,14 +1,15 @@
 #include "sys.h"
 #include "Session.h"
 #include "ava/app/command_catalog.h"
-#include "ava/app/command_tools.h"
 #include "ava/app/command_format.h"
-#include "ava/core/string_utils.h"
+#include "ava/app/command_tools.h"
 #include "ava/app/runtime/command_names.h"
 #include "ava/app/runtime/markdown_files.h"
-#include "ava/context/skill_loader.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/static_resources.h"
+#include "ava/context/markdown_resource.h"
+#include "ava/context/skill_loader.h"
+#include "ava/core/string_utils.h"
 
 namespace ava::app::runtime {
 namespace {
@@ -104,21 +105,21 @@ void load_prompt_command_dir(RegistryBuilder& builder, std::filesystem::path con
                      CommandRegistryDiagnostic{.source = to_string(source), .path = file, .message = "command file name does not form a safe slash command"});
       continue;
     }
-    auto content = read_bounded_file(file);
+    auto content = ava::context::read_resource_file(file, {.max_bytes = kMaxCommandFileBytes, .resource_description = "command file"});
     if (!content)
     {
       add_diagnostic(builder,
                      CommandRegistryDiagnostic{.command = "/" + *name, .source = to_string(source), .path = file, .message = content.error().format()});
       continue;
     }
-    auto parsed = parse_markdown(*content);
-    auto description = markdown_field(parsed, "description");
-    auto hint = markdown_field(parsed, "argument-hint");
+    auto parsed = ava::context::parse_markdown(*content);
+    auto description = ava::context::markdown_field(parsed, "description");
+    auto hint = ava::context::markdown_field(parsed, "argument-hint");
     if (hint.empty())
-      hint = markdown_field(parsed, "argument_hint");
+      hint = ava::context::markdown_field(parsed, "argument_hint");
     if (hint.empty())
-      hint = markdown_field(parsed, "hint");
-    auto body = markdown_field(parsed, "template");
+      hint = ava::context::markdown_field(parsed, "hint");
+    auto body = ava::context::markdown_field(parsed, "template");
     if (body.empty())
       body = std::move(parsed.body);
     if (core::trim_view(body).empty())

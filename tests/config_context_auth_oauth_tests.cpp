@@ -31,6 +31,7 @@
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/registry.h"
 #include "ava/context/context_loader.h"
+#include "ava/context/markdown_resource.h"
 #include "ava/context/skill_loader.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -341,6 +342,68 @@ void test_context_loader()
     expect(!intermediate && intermediate.error().category() == ava::core::ErrorCategory::Io,
            "context loader rejects symlinked intermediate directories instead of following swapped ancestors");
   }
+}
+
+void test_markdown_resource_parser_and_reader()
+{
+  auto const lf = ava::context::parse_markdown("---\nname: demo\ndescription: \"quoted value\"\n---\nbody line\n");
+  expect(lf.frontmatter.at("name") == "demo" && lf.frontmatter.at("description") == "quoted value" && lf.body == "body line\n",
+         "markdown parser accepts LF opening delimiter, strips matching quotes, and keeps the body");
+
+  auto const crlf = ava::context::parse_markdown("---\r\nname: crlf\r\n---\r\ncrlf body\r\n");
+  expect(crlf.frontmatter.at("name") == "crlf" && crlf.body == "crlf body\r\n", "markdown parser accepts CRLF opening delimiter and closing newline variants");
+
+  auto const duplicates = ava::context::parse_markdown("---\nname: first\nname: second\n---\n");
+  expect(duplicates.frontmatter.at("name") == "second" && ava::context::markdown_field(duplicates, "name") == "second",
+         "markdown parser keeps the last duplicate frontmatter key");
+
+  constexpr std::string_view kNoFrontmatter = "plain body without delimiter\n";
+  auto const plain = ava::context::parse_markdown(kNoFrontmatter);
+  expect(plain.frontmatter.empty() && plain.body == kNoFrontmatter, "markdown parser preserves full content as body when frontmatter is absent");
+
+  constexpr std::string_view kUnclosed = "---\nname: open\nbody never closed\n";
+  auto const unclosed = ava::context::parse_markdown(kUnclosed);
+  expect(unclosed.frontmatter.empty() && unclosed.body == kUnclosed, "markdown parser preserves full content as body for malformed unclosed frontmatter");
+
+  auto const root = create_empty_root("markdown-resource");
+  auto const file = root / "resource.md";
+  {
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    out << "exact-size";
+  }
+  auto accepted = ava::context::read_resource_file(file, {.max_bytes = 10, .resource_description = "test resource"});
+  expect(accepted && *accepted == "exact-size", "resource reader accepts a file whose size equals max_bytes");
+
+  auto oversized = ava::context::read_resource_file(file, {.max_bytes = 9, .resource_description = "test resource"});
+  expect(
+      !oversized && oversized.error().message() == "test resource is too large" &&
+          std::ranges::any_of(oversized.error().context(),
+                              [](ava::core::ErrorContext const& item) { return item.key == "path" && item.value.find("resource.md") != std::string::npos; }) &&
+          std::ranges::any_of(oversized.error().context(), [](ava::core::ErrorContext const& item) { return item.key == "max_bytes" && item.value == "9"; }),
+      "resource reader rejects oversized files with resource, path, and max_bytes context");
+
+  auto const symlink_path = root / "linked.md";
+  std::error_code symlink_error;
+  std::filesystem::create_symlink(file, symlink_path, symlink_error);
+  expect(!symlink_error, "markdown resource test creates a final symlink");
+  if (!symlink_error)
+  {
+    auto linked = ava::context::read_resource_file(symlink_path, {.max_bytes = 64, .resource_description = "test resource"});
+    expect(!linked && linked.error().message() == "test resource is not a regular file", "resource reader rejects a final-path symlink");
+  }
+
+  auto const directory = root / "directory";
+  std::filesystem::create_directories(directory);
+  auto directory_read = ava::context::read_resource_file(directory, {.max_bytes = 64, .resource_description = "test resource"});
+  expect(!directory_read && directory_read.error().message() == "test resource is not a regular file", "resource reader rejects directories as non-regular");
+
+  auto const fifo_path = root / "blocking.fifo";
+  expect(::mkfifo(fifo_path.c_str(), 0600) == 0, "markdown resource test creates a FIFO fixture");
+  auto const fifo_start = std::chrono::steady_clock::now();
+  auto fifo_read = ava::context::read_resource_file(fifo_path, {.max_bytes = 64, .resource_description = "test resource"});
+  auto const fifo_elapsed = std::chrono::steady_clock::now() - fifo_start;
+  expect(!fifo_read && fifo_read.error().message() == "test resource is not a regular file" && fifo_elapsed < std::chrono::seconds(2),
+         "resource reader rejects FIFOs promptly without blocking");
 }
 
 void test_skill_loader()
@@ -1688,6 +1751,7 @@ void run_config_context_auth_oauth_tests()
 {
   test_xdg_paths();
   test_context_loader();
+  test_markdown_resource_parser_and_reader();
   test_skill_loader();
   test_auth_record_helpers();
   test_auth_load_and_store();

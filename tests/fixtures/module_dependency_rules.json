@@ -1,20 +1,6 @@
 {
   "exceptions": [
     {
-      "source": "src/ava/agent/subagent_config.cpp",
-      "include": "ava/app/runtime/command_names.h",
-      "kind": "implementation",
-      "reason": "Subagent configuration currently reads the application command-name catalog.",
-      "tracking": "module-dependency-boundaries"
-    },
-    {
-      "source": "src/ava/agent/subagent_config.cpp",
-      "include": "ava/app/runtime/markdown_files.h",
-      "kind": "implementation",
-      "reason": "Subagent configuration currently reads application markdown-file discovery helpers.",
-      "tracking": "module-dependency-boundaries"
-    },
-    {
       "source": "src/ava/config/model_config.h",
       "include": "ava/provider/provider.h",
       "kind": "public",

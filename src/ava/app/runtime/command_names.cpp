@@ -1,9 +1,7 @@
 #include "sys.h"
 #include "command_names.h"
 
-#include <array>
 #include <cctype>
-#include <fstream>
 #include <system_error>
 
 namespace ava::app::runtime {
@@ -58,57 +56,4 @@ std::optional<std::string> command_name_for_file(std::filesystem::path const& ro
   return name;
 }
 
-ava::core::Result<std::string> read_bounded_file(std::filesystem::path const& path, std::size_t max_bytes)
-{
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (status_error || std::filesystem::is_symlink(status) || !std::filesystem::is_regular_file(status))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "command file is not a regular file");
-    error.with_context("path", path.string());
-    if (status_error)
-      error.with_context("cause", status_error.message());
-    return std::unexpected(std::move(error));
-  }
-
-  std::error_code size_error;
-  auto const size = std::filesystem::file_size(path, size_error);
-  if (size_error || size > max_bytes)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "command file is too large");
-    error.with_context("path", path.string());
-    error.with_context("max_bytes", std::to_string(max_bytes));
-    if (size_error)
-      error.with_context("cause", size_error.message());
-    return std::unexpected(std::move(error));
-  }
-
-  std::ifstream file(path, std::ios::binary);
-  if (!file)
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to open command file").with_context("path", path.string()));
-  }
-
-  std::string content;
-  std::array<char, 4096> buffer{};
-  while (file)
-  {
-    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-    if (file.gcount() > 0)
-      content.append(buffer.data(), static_cast<std::size_t>(file.gcount()));
-    if (content.size() > max_bytes)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "command file is too large");
-      error.with_context("path", path.string());
-      error.with_context("max_bytes", std::to_string(max_bytes));
-      return std::unexpected(std::move(error));
-    }
-  }
-  if (!file.eof() && file.fail())
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed while reading command file").with_context("path", path.string()));
-  }
-  return content;
-}
-
-} // namespace ava::app::runtime
+}  // namespace ava::app::runtime

@@ -1,18 +1,16 @@
 #include "sys.h"
-
 #include "command_registry.h"
 #include "plugin_event_hooks.h"
+#include "runtime/Session.h"
+#include "runtime/command_names.h"
+#include "runtime/markdown_files.h"
 #include "runtime_compaction.h"
 #include "runtime_prompt.h"
 #include "runtime_reasoning.h"
 #include "runtime_retry.h"
-#include "runtime/Session.h"
 #include "runtime_sessions.h"
-#include "runtime/markdown_files.h"
-#include "runtime/command_names.h"
 #include "session_title_coordinator.h"
 #include "subagent_delivery_manager.h"
-
 #include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/subagent_config.h"
@@ -23,6 +21,7 @@
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
+#include "ava/context/markdown_resource.h"
 #include "ava/context/skill_loader.h"
 #include "ava/lsp/configured_provider.h"
 #include "ava/core/error.h"
@@ -32,9 +31,7 @@
 #include "ava/core/string_utils.h"
 
 #include <algorithm>
-#include <array>
 #include <cctype>
-#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -94,60 +91,10 @@ struct PluginRuntimeResources
   std::vector<PluginResourceLoadFailure> failures;
 };
 
-//FIXME: this is virtually identical to `read_bounded_file` and thus a duplicate: remove code duplication!
-ava::core::Result<std::string> read_freshness_file(std::filesystem::path const& path, std::size_t max_bytes)
-{
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (status_error || std::filesystem::is_symlink(status) || !std::filesystem::is_regular_file(status))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "freshness source is not a regular file");
-    error.with_context("path", path.string());
-    if (status_error)
-      error.with_context("cause", status_error.message());
-    return std::unexpected(std::move(error));
-  }
-
-  std::error_code size_error;
-  auto const size = std::filesystem::file_size(path, size_error);
-  if (size_error || size > max_bytes)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "freshness source is too large");
-    error.with_context("path", path.string());
-    error.with_context("max_bytes", std::to_string(max_bytes));
-    if (size_error)
-      error.with_context("cause", size_error.message());
-    return std::unexpected(std::move(error));
-  }
-
-  std::ifstream file(path, std::ios::binary);
-  if (!file)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to open freshness source").with_context("path", path.string()));
-
-  std::string content;
-  std::array<char, 4096> buffer{};
-  while (file)
-  {
-    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-    if (file.gcount() > 0)
-      content.append(buffer.data(), static_cast<std::size_t>(file.gcount()));
-    if (content.size() > max_bytes)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "freshness source is too large");
-      error.with_context("path", path.string());
-      error.with_context("max_bytes", std::to_string(max_bytes));
-      return std::unexpected(std::move(error));
-    }
-  }
-  if (!file.eof() && file.fail())
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed while reading freshness source").with_context("path", path.string()));
-  return content;
-}
-
 void add_freshness_file(std::vector<FreshnessSourceMetadata>& sources, FreshnessSourceKind kind, std::string scope, std::string source_id, std::string name,
                         std::filesystem::path const& path, std::size_t max_bytes = kMaxRuntimeFreshnessBytes)
 {
-  auto content = read_freshness_file(path, max_bytes);
+  auto content = ava::context::read_resource_file(path, {.max_bytes = max_bytes, .resource_description = "freshness source"});
   if (!content)
     return;
   sources.push_back(FreshnessSourceMetadata{.kind = kind,
@@ -169,11 +116,11 @@ void add_prompt_command_source_files(std::vector<PromptCommandSourceFile>& sourc
     auto name = command_name_for_file(root, file);
     if (!name)
       continue;
-    auto content = read_bounded_file(file);
+    auto content = ava::context::read_resource_file(file, {.max_bytes = kMaxCommandFileBytes, .resource_description = "command file"});
     if (!content)
       continue;
-    auto parsed = parse_markdown(*content);
-    auto body = markdown_field(parsed, "template");
+    auto parsed = ava::context::parse_markdown(*content);
+    auto body = ava::context::markdown_field(parsed, "template");
     if (body.empty())
       body = std::move(parsed.body);
     if (core::trim_view(body).empty())
@@ -240,7 +187,7 @@ ava::core::Result<std::optional<RuntimePromptResource>> load_prompt_resource(ava
     scope = "global";
   }
 
-  auto text = read_freshness_file(selected_path, kMaxRuntimeFreshnessBytes);
+  auto text = ava::context::read_resource_file(selected_path, {.max_bytes = kMaxRuntimeFreshnessBytes, .resource_description = "freshness source"});
   if (!text)
     return std::unexpected(std::move(text.error()));
   return RuntimePromptResource{

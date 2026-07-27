@@ -97,7 +97,7 @@ target_include_directories(ava_app
     "${AVA_GENERATED_INCLUDE_DIR}"
 )
 
-target_link_libraries(ava_app PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(ava_app PRIVATE ava_context nlohmann_json::nlohmann_json)
 
 ava_apply_debugging(ava_app)
 ava_apply_warnings(ava_app)

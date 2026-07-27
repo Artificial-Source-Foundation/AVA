@@ -1,15 +1,12 @@
 #include "sys.h"
 #include "ava/agent/subagent_config.h"
-#include "ava/app/runtime/command_names.h"
 #include "ava/config/xdg_paths.h"
-#include "ava/core/json.h"
+#include "ava/context/markdown_resource.h"
 #include "ava/core/string_utils.h"
-#include "ava/app/runtime/markdown_files.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
-#include <fstream>
 #include <map>
 #include <optional>
 #include <string_view>
@@ -119,13 +116,13 @@ void add_or_replace_subagent(std::vector<SubagentDefinition>& subagents, std::ve
 void load_subagent_file(std::vector<SubagentDefinition>& subagents, std::vector<SubagentDiagnostic>& diagnostics, std::filesystem::path const& path,
                         std::size_t max_file_bytes)
 {
-  auto content = app::runtime::read_bounded_file(path, max_file_bytes);
+  auto content = context::read_resource_file(path, {.max_bytes = max_file_bytes, .resource_description = "subagent file"});
   if (!content)
   {
     diagnostics.push_back(SubagentDiagnostic{.path = path, .message = content.error().format()});
     return;
   }
-  auto parsed = app::runtime::parse_markdown(*content);
+  auto parsed = context::parse_markdown(*content);
   auto mode = field(parsed.frontmatter, "mode").value_or("subagent");
   mode = core::trim(mode);
   std::ranges::transform(mode, mode.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });

@@ -5,6 +5,7 @@
 #include "ava/lsp/builtin_recipes.h"
 #include "ava/lsp/lsp_client.h"
 #include "ava/core/error.h"
+#include "ava/core/mode.h"
 
 #include <cstddef>
 #include <filesystem>
@@ -21,7 +22,7 @@ struct ConfiguredLspProviderFiles
   std::filesystem::path project_config_file;
   std::filesystem::path workspace_root;
   std::shared_ptr<ava::core::AnchorSet const> anchor_set = nullptr;
-  ava::agent::Mode mode = ava::agent::Mode::Build;
+  ava::core::Mode mode = ava::core::Mode::Build;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   BuiltinDiscoveryOptions builtin_discovery = {};
 

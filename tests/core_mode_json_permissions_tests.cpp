@@ -32,6 +32,7 @@
 #include "ava/core/atomic_file.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/mode.h"
 #include "ava/core/path.h"
 #include "ava/core/process_args.h"
 
@@ -50,6 +51,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 #include <fcntl.h>
@@ -61,14 +63,31 @@ namespace {
 
 void test_mode_parsing()
 {
+  static_assert(std::is_same_v<ava::agent::Mode, ava::core::Mode>, "agent::Mode must be an alias of core::Mode");
+
   auto const build = ava::agent::parse_mode("build");
   auto const plan = ava::agent::parse_mode("plan");
   auto const bad = ava::agent::parse_mode("other");
+  auto const core_build = ava::core::parse_mode("build");
+  auto const core_plan = ava::core::parse_mode("plan");
+  auto const core_bad = ava::core::parse_mode("other");
 
   expect(build && *build == ava::agent::Mode::Build, "build mode parses");
   expect(plan && *plan == ava::agent::Mode::Plan, "plan mode parses");
   expect(!bad, "unknown mode fails");
   expect(ava::agent::toggle_mode(ava::agent::Mode::Build) == ava::agent::Mode::Plan, "build toggles to plan");
+  expect(core_build && *core_build == ava::core::Mode::Build && *core_build == ava::agent::Mode::Build, "core build mode parses identically");
+  expect(core_plan && *core_plan == ava::core::Mode::Plan && *core_plan == ava::agent::Mode::Plan, "core plan mode parses identically");
+  expect(!core_bad, "core unknown mode fails");
+  expect(ava::agent::to_string(ava::agent::Mode::Build) == ava::core::to_string(ava::core::Mode::Build) &&
+             ava::agent::to_string(ava::agent::Mode::Build) == "build",
+         "agent/core build mode strings match");
+  expect(
+      ava::agent::to_string(ava::agent::Mode::Plan) == ava::core::to_string(ava::core::Mode::Plan) && ava::agent::to_string(ava::agent::Mode::Plan) == "plan",
+      "agent/core plan mode strings match");
+  expect(ava::agent::toggle_mode(ava::agent::Mode::Build) == ava::core::toggle_mode(ava::core::Mode::Build) &&
+             ava::agent::toggle_mode(ava::agent::Mode::Plan) == ava::core::toggle_mode(ava::core::Mode::Plan),
+         "agent/core toggle_mode remain identical");
 }
 
 class TestApplication final : public ava::core::Application

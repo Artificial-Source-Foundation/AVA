@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/permissions/permission.h"
+#include "ava/core/mode.h"
 
 #include <cstddef>
 #include <string>
@@ -39,7 +40,7 @@ class TuiSessionGrantRegistry final
   struct Grant
   {
     std::string session_id;
-    ava::agent::Mode mode = ava::agent::Mode::Build;
+    ava::core::Mode mode = ava::core::Mode::Build;
     std::string tool_name;
     std::string workspace_recipe_key;
 

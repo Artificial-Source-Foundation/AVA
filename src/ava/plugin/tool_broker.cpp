@@ -9,6 +9,7 @@
 #include "ava/permissions/permission.h"
 #include "ava/core/error.h"
 #include "ava/core/json.h"
+#include "ava/core/mode.h"
 #include "ava/core/path.h"
 
 #include <algorithm>
@@ -327,7 +328,7 @@ std::string session_status_proxy_content_json(ava::tools::ToolContext const& con
 {
   auto const current_dir = context.current_dir.empty() ? context.workspace_dir : context.current_dir;
   return "{\"operation\":\"session.status\",\"ok\":true,\"session_id\":\"" + ava::core::json::escape(context.session_id) + "\",\"mode\":\"" +
-         ava::core::json::escape(ava::agent::to_string(context.mode)) + "\",\"provider_id\":\"" + ava::core::json::escape(context.provider_id) +
+         ava::core::json::escape(ava::core::to_string(context.mode)) + "\",\"provider_id\":\"" + ava::core::json::escape(context.provider_id) +
          "\",\"model_id\":\"" + ava::core::json::escape(context.model_id) + "\",\"workspace\":\"" +
          ava::core::json::escape(context.workspace_dir.generic_string()) + "\",\"current_dir\":\"" + ava::core::json::escape(current_dir.generic_string()) +
          "\"}";

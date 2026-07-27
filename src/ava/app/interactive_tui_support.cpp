@@ -12,6 +12,7 @@
 #include "ava/session/stats.h"
 #include "ava/permissions/permission.h"
 #include "ava/permissions/permission_rules.h"
+#include "ava/core/mode.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -531,13 +532,13 @@ ava::core::Result<std::string> save_scoped_model_cycle(ava::app::runtime::Sessio
   return std::string("scoped model cycle saved: ") + std::to_string(scope_to_save->size()) + " models enabled";
 }
 
-ava::permissions::PermissionRuleMode permission_rule_mode_for_agent_mode(ava::agent::Mode mode)
+ava::permissions::PermissionRuleMode permission_rule_mode_for_agent_mode(ava::core::Mode mode)
 {
   switch (mode)
   {
-    case ava::agent::Mode::Build:
+    case ava::core::Mode::Build:
       return ava::permissions::PermissionRuleMode::Build;
-    case ava::agent::Mode::Plan:
+    case ava::core::Mode::Plan:
       return ava::permissions::PermissionRuleMode::Plan;
   }
   return ava::permissions::PermissionRuleMode::Any;

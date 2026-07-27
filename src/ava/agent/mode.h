@@ -1,19 +1,12 @@
 #pragma once
 
-#include "ava/core/result.h"
-
-#include <string>
+#include "ava/core/mode.h"
 
 namespace ava::agent {
 
-enum class Mode
-{
-  Build,
-  Plan,
-};
-
-[[nodiscard]] std::string to_string(Mode mode);
-[[nodiscard]] ava::core::Result<Mode> parse_mode(std::string_view value);
-[[nodiscard]] Mode toggle_mode(Mode mode) noexcept;
+using Mode = ava::core::Mode;
+using ava::core::parse_mode;
+using ava::core::to_string;
+using ava::core::toggle_mode;
 
 }  // namespace ava::agent

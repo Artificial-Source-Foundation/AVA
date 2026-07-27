@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/command/environment.h"
 #include "ava/permissions/permission.h"
+#include "ava/core/mode.h"
 #include "ava/core/open_beneath.h"
 #include "ava/core/path.h"
 
@@ -727,7 +728,7 @@ PermissionDecision decide(PermissionRequest const& request)
     return decision(PermissionAction::Ask, "target is outside the workspace", PermissionRisk::High);
   }
 
-  if (request.operation == Operation::EditFile && request.mode == ava::agent::Mode::Plan && !is_planning_markdown(checked_path))
+  if (request.operation == Operation::EditFile && request.mode == ava::core::Mode::Plan && !is_planning_markdown(checked_path))
   {
     return decision(PermissionAction::Deny, "plan mode can only edit planning markdown", PermissionRisk::High);
   }

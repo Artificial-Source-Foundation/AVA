@@ -1,10 +1,10 @@
 #include "sys.h"
-#include "ava/agent/mode.h"
+#include "ava/core/mode.h"
 
 #include <string_view>
 #include <utility>
 
-namespace ava::agent {
+namespace ava::core {
 
 std::string to_string(Mode mode)
 {
@@ -18,7 +18,7 @@ std::string to_string(Mode mode)
   return "build";
 }
 
-ava::core::Result<Mode> parse_mode(std::string_view value)
+Result<Mode> parse_mode(std::string_view value)
 {
   if (value == "build")
   {
@@ -29,7 +29,7 @@ ava::core::Result<Mode> parse_mode(std::string_view value)
     return Mode::Plan;
   }
 
-  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "unknown mode");
+  auto error = Error(ErrorCategory::InvalidArgument, "unknown mode");
   error.with_context("mode", std::string(value));
   return std::unexpected(std::move(error));
 }
@@ -39,4 +39,4 @@ Mode toggle_mode(Mode mode) noexcept
   return mode == Mode::Build ? Mode::Plan : Mode::Build;
 }
 
-}  // namespace ava::agent
+}  // namespace ava::core

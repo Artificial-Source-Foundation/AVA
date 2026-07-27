@@ -43,7 +43,7 @@ add_library(ava_tui
   "tool_cards.cpp"
 )
 
-target_link_libraries(ava_tui PRIVATE ${CURSES_LIBRARIES})
+target_link_libraries(ava_tui PUBLIC ava_core PRIVATE ${CURSES_LIBRARIES})
 message(STATUS "AVA_GENERATED_INCLUDE_DIR = ${AVA_GENERATED_INCLUDE_DIR}")
 target_include_directories(ava_tui
   PUBLIC

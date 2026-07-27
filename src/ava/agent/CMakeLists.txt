@@ -12,7 +12,6 @@ add_library(ava_agent
   "background_job_registry.cpp"
   "job_control.cpp"
   "message_builder.cpp"
-  "mode.cpp"
   "provider_output_validation.cpp"
   "question.cpp"
   "stream_bridge.cpp"
@@ -32,7 +31,7 @@ add_library(ava_agent
 )
 
 target_include_directories(ava_agent PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(ava_agent PUBLIC ava_observability PRIVATE ava_command ava_context ava_diagnostics nlohmann_json::nlohmann_json)
+target_link_libraries(ava_agent PUBLIC ava_core ava_observability PRIVATE ava_command ava_context ava_diagnostics nlohmann_json::nlohmann_json)
 ava_apply_debugging(ava_agent)
 ava_apply_warnings(ava_agent)
 ava_apply_sanitizers(ava_agent)

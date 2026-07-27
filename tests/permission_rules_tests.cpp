@@ -3,6 +3,7 @@
 #include "ava/command/private_group.h"
 #include "ava/tools/file_tools.h"
 #include "ava/permissions/permission_rules.h"
+#include "ava/core/mode.h"
 
 #include <array>
 #include <filesystem>
@@ -59,7 +60,7 @@ ava::permissions::PermissionPrompt read_prompt(ava::permissions::PermissionRuleS
 {
   return ava::permissions::PermissionPrompt{.permission_request_id = "permreq_test",
                                             .operation = ava::permissions::Operation::ReadFile,
-                                            .mode = ava::agent::Mode::Build,
+                                            .mode = ava::core::Mode::Build,
                                             .workspace_dir = store.workspace_dir,
                                             .target_path = target,
                                             .command = "",
@@ -213,7 +214,7 @@ ava::permissions::PermissionPrompt command_prompt(ava::permissions::PermissionRu
 {
   return ava::permissions::PermissionPrompt{.permission_request_id = "permreq_command",
                                             .operation = ava::permissions::Operation::RunCommand,
-                                            .mode = ava::agent::Mode::Build,
+                                            .mode = ava::core::Mode::Build,
                                             .workspace_dir = store.workspace_dir,
                                             .target_path = {},
                                             .command = std::move(command),

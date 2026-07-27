@@ -1,13 +1,13 @@
 #pragma once
 
 #include "ava/observability/run_observer.h"
-#include "ava/agent/mode.h"
 #include "ava/agent/question.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/agent/tool_visibility.h"
 #include "ava/tools/tool_io.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/AnchorSet.h"
+#include "ava/core/mode.h"
 #include "ava/core/result.h"
 
 #include <atomic>
@@ -40,7 +40,7 @@ struct PermissionAuditEvent
 {
   std::string permission_request_id = {};
   ava::permissions::Operation operation;
-  ava::agent::Mode mode = ava::agent::Mode::Build;
+  ava::core::Mode mode = ava::core::Mode::Build;
   std::string tool_name;
   ava::permissions::PermissionAction action = ava::permissions::PermissionAction::Deny;
   std::string reason;
@@ -110,7 +110,7 @@ struct ToolContext
 {
   std::filesystem::path workspace_dir;
   std::filesystem::path spill_dir = {};
-  ava::agent::Mode mode = ava::agent::Mode::Build;
+  ava::core::Mode mode = ava::core::Mode::Build;
   // Local sealed command execution is enabled by default. Legacy and
   // PromptOnly contexts remain explicit non-executing compatibility modes.
   ava::command::CommandRuntimeOptions command_runtime{.mode = ava::command::CommandRuntimeMode::Enabled};

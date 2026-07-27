@@ -6,6 +6,7 @@ add_library(ava_core
   "error.cpp"
   "ids.cpp"
   "json.cpp"
+  "mode.cpp"
   "open_beneath.cpp"
   "path.cpp"
   "process_args.cpp"

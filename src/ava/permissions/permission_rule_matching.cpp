@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/permissions/permission_rules_internal.h"
 #include "ava/core/ids.h"
+#include "ava/core/mode.h"
 
 #include <algorithm>
 #include <chrono>
@@ -87,16 +88,16 @@ ava::core::Result<PersistentPermissionRule> rule_from_draft(PermissionRuleStore 
   return rule;
 }
 
-bool mode_matches(PermissionRuleMode rule_mode, ava::agent::Mode prompt_mode)
+bool mode_matches(PermissionRuleMode rule_mode, ava::core::Mode prompt_mode)
 {
   switch (rule_mode)
   {
     case PermissionRuleMode::Any:
       return true;
     case PermissionRuleMode::Build:
-      return prompt_mode == ava::agent::Mode::Build;
+      return prompt_mode == ava::core::Mode::Build;
     case PermissionRuleMode::Plan:
-      return prompt_mode == ava::agent::Mode::Plan;
+      return prompt_mode == ava::core::Mode::Plan;
   }
   return false;
 }

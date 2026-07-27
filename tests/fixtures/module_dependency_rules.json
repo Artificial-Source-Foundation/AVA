@@ -15,34 +15,6 @@
       "tracking": "module-dependency-boundaries"
     },
     {
-      "source": "src/ava/config/prompt_config.h",
-      "include": "ava/agent/mode.h",
-      "kind": "public",
-      "reason": "Prompt configuration exposes the selected agent mode.",
-      "tracking": "module-dependency-boundaries"
-    },
-    {
-      "source": "src/ava/permissions/permission.h",
-      "include": "ava/agent/mode.h",
-      "kind": "public",
-      "reason": "Permission decisions expose the agent mode they apply to.",
-      "tracking": "module-dependency-boundaries"
-    },
-    {
-      "source": "src/ava/session/session_store.h",
-      "include": "ava/agent/mode.h",
-      "kind": "public",
-      "reason": "Session store APIs expose the persisted agent mode.",
-      "tracking": "module-dependency-boundaries"
-    },
-    {
-      "source": "src/ava/tools/file_tools.h",
-      "include": "ava/agent/mode.h",
-      "kind": "public",
-      "reason": "Tool definitions expose their agent-mode availability.",
-      "tracking": "module-dependency-boundaries"
-    },
-    {
       "source": "src/ava/tools/file_tools.h",
       "include": "ava/agent/question.h",
       "kind": "public",

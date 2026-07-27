@@ -8,6 +8,7 @@
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/mode.h"
 #include "ava/core/path.h"
 
 #include <algorithm>
@@ -475,7 +476,7 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event)
     data += "\"permission_request_id\":\"" + ava::core::json::escape(event.permission_request_id) + "\",";
   }
   data += "\"operation\":\"" + ava::core::json::escape(ava::permissions::to_string(event.operation)) + "\",\"mode\":\"" +
-          ava::core::json::escape(ava::agent::to_string(event.mode)) + "\",\"tool_name\":\"" + ava::core::json::escape(event.tool_name) + "\",\"action\":\"" +
+          ava::core::json::escape(ava::core::to_string(event.mode)) + "\",\"tool_name\":\"" + ava::core::json::escape(event.tool_name) + "\",\"action\":\"" +
           ava::core::json::escape(ava::permissions::to_string(event.action)) + "\",\"reason\":\"" + ava::core::json::escape(event.reason) + "\",\"risk\":\"" +
           ava::core::json::escape(ava::permissions::to_string(event.risk)) + "\"";
   if (event.operation != ava::permissions::Operation::RunCommand && event.operation != ava::permissions::Operation::NetworkFetch && !event.target_path.empty())

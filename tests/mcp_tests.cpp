@@ -14,6 +14,7 @@
 #include "ava/permissions/permission.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/json.h"
+#include "ava/core/mode.h"
 #include "ava/core/path.h"
 
 #include <algorithm>
@@ -166,7 +167,6 @@ void test_mcp_config_parsing()
 
   auto const root = create_empty_root("mcp-config");
 
-
   auto const workspace = root / "workspace";
   auto const global_path = root / "global" / "mcp.json";
   auto const project_path = workspace / ".ava" / "mcp.json";
@@ -234,7 +234,7 @@ void test_session_mcp_launch_identity_is_logical_and_exact()
   auto prompt = [&](std::string command) {
     return ava::permissions::PermissionPrompt{.permission_request_id = "permreq_mcp_identity",
                                               .operation = ava::permissions::Operation::McpServerLaunch,
-                                              .mode = ava::agent::Mode::Build,
+                                              .mode = ava::core::Mode::Build,
                                               .workspace_dir = workspace,
                                               .target_path = {},
                                               .command = std::move(command),
@@ -287,7 +287,7 @@ void test_mcp_permission_audit_golden_shape()
   ava::tools::PermissionAuditEvent event;
   event.permission_request_id = "permreq_ava080";
   event.operation = ava::permissions::Operation::McpToolCall;
-  event.mode = ava::agent::Mode::Build;
+  event.mode = ava::core::Mode::Build;
   event.tool_name = "mcp_demo_echo";
   event.action = ava::permissions::PermissionAction::Ask;
   event.reason = "MCP tool calls require explicit approval";
@@ -884,7 +884,6 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
   expect(!prompts.empty(), "MCP tool dispatcher still gates tool-level error calls through permission prompts");
 
   auto const text_root = create_empty_root("mcp-dispatcher-canceled-text-error");
-
 
   auto const text_workspace = text_root / "workspace";
   auto const text_project_config = text_workspace / ".ava" / "mcp.json";

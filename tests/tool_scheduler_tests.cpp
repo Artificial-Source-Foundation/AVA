@@ -2,6 +2,7 @@
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_scheduler.h"
 #include "ava/core/error.h"
+#include "ava/core/mode.h"
 
 #include <algorithm>
 #include <array>
@@ -984,7 +985,7 @@ void test_run_parallel_tool_schedule_dispatches_real_read_search_tools()
   auto schedule = ava::agent::build_sequential_tool_schedule(calls, ava::agent::builtin_tool_metadata());
   for (auto& slot : schedule) slot.parallel_readiness = ToolScheduleParallelReadiness::PreflightProvenNonInteractive;
 
-  ava::agent::ToolDispatcher const dispatcher(ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build});
+  ava::agent::ToolDispatcher const dispatcher(ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::core::Mode::Build});
   auto outcomes = ava::agent::run_parallel_tool_schedule(
       schedule,
       [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {

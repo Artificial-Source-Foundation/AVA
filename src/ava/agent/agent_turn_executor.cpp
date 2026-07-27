@@ -68,6 +68,7 @@ ava::core::VoidResult AgentTurnExecutor::initialize_tools()
                               .plugin_project_plugins_dir = options_.plugin_project_plugins_dir,
                               .plugin_enablement_file = options_.plugin_enablement_file,
                               .include_project_plugins = options_.include_project_resources,
+                              .include_plugin_tools = options_.include_plugin_tools,
                               .include_project_mcp_config = options_.include_project_resources,
                               .session_mcp_config = options_.session_mcp_config,
                               .exact_builtin_tool_names = options_.exact_builtin_tool_names,

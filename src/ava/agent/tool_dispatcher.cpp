@@ -1245,8 +1245,9 @@ ava::core::Result<ToolRegistry> build_tool_registry_result(ava::tools::ToolConte
       if (auto registered = registry.register_tool(*entry); !registered)
         return std::unexpected(std::move(registered.error()));
     }
-    if (auto registered = register_plugin_brokered_tools(registry, context); !registered)
-      return std::unexpected(std::move(registered.error()));
+    if (context.include_plugin_tools)
+      if (auto registered = register_plugin_brokered_tools(registry, context); !registered)
+        return std::unexpected(std::move(registered.error()));
     if (auto registered = register_mcp_brokered_tools(registry, context); !registered)
       return std::unexpected(std::move(registered.error()));
     return registry;
@@ -1261,8 +1262,9 @@ ava::core::Result<ToolRegistry> build_tool_registry_result(ava::tools::ToolConte
       std::abort();
     }
   }
-  if (auto registered = register_plugin_brokered_tools(registry, context); !registered)
-    return std::unexpected(std::move(registered.error()));
+  if (context.include_plugin_tools)
+    if (auto registered = register_plugin_brokered_tools(registry, context); !registered)
+      return std::unexpected(std::move(registered.error()));
   if (auto registered = register_mcp_brokered_tools(registry, context); !registered)
     return std::unexpected(std::move(registered.error()));
   registry.apply_visibility_filter(visibility);

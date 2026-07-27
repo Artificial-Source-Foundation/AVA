@@ -100,7 +100,7 @@ struct DeliveryFactoryState
   bool exact_file_access_cleared = false;
   bool command_executor_cleared = false;
   bool exact_builtin_tools_empty = false;
-  bool project_resources_isolated = false;
+  bool ambient_extensions_isolated = false;
   bool session_mcp_disabled = false;
   bool provider_request_has_no_tools = false;
   std::string observed_model_id;
@@ -233,7 +233,7 @@ ava::app::RuntimeProviderRunBundleFactory delivery_factory(std::shared_ptr<Deliv
       state->exact_file_access_cleared = !options.exact_file_access;
       state->command_executor_cleared = !options.command_executor;
       state->exact_builtin_tools_empty = options.exact_builtin_tool_names && options.exact_builtin_tool_names->empty();
-      state->project_resources_isolated = options.isolate_project_resources;
+      state->ambient_extensions_isolated = options.isolate_ambient_extensions;
       state->session_mcp_disabled = options.disable_session_mcp;
       state->observed_model_id = session.model().model_id;
       state->observed_reasoning_level = session.reasoning() ? session.reasoning()->level : std::string{};
@@ -369,7 +369,7 @@ void test_idle_delivery_and_terminal_before_registration()
     std::lock_guard lock(state->mutex);
     factories_after_ack = state->factories;
     expect(state->retained_credential_at_factory.empty() && state->permission_resolver_present && !state->question_resolver_present &&
-               state->exact_file_access_cleared && state->command_executor_cleared && state->exact_builtin_tools_empty && state->project_resources_isolated &&
+               state->exact_file_access_cleared && state->command_executor_cleared && state->exact_builtin_tools_empty && state->ambient_extensions_isolated &&
                state->session_mcp_disabled && state->provider_request_has_no_tools && state->delivery_run_request_id.starts_with("automatic_delivery_") &&
                (!snapshot || snapshot->job.delivery_attempt_history.empty() ||
                 state->delivery_run_request_id != snapshot->job.delivery_attempt_history.back().attempt_id),

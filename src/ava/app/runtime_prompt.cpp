@@ -410,6 +410,7 @@ ava::core::Result<PromptState> load_runtime_prompt_state(ava::config::XdgPaths c
   });
   if (!loaded_context)
     return std::unexpected(loaded_context.error());
+  auto ordinary_context_prompt = ava::context::format_context_for_prompt(*loaded_context);
 
   auto plugin_resources = load_plugin_runtime_resources(paths, workspace_dir, include_project_resources);
   add_plugin_prompt_context_files(*loaded_context, plugin_resources.prompts);
@@ -489,13 +490,15 @@ ava::core::Result<PromptState> load_runtime_prompt_state(ava::config::XdgPaths c
   add_skill_freshness_sources(freshness_sources, loaded_skills.skills);
   add_plugin_freshness_sources(freshness_sources, plugin_resources);
 
+  auto ambient_extension_free_system_prompt = system_prompt + ordinary_context_prompt;
   system_prompt += ava::context::format_context_for_prompt(*loaded_context) + ava::context::format_available_skills_for_prompt(loaded_skills.skills) +
                    ava::agent::format_available_subagents_for_prompt(loaded_subagents.subagents);
   return PromptState{.mode = mode,
                      .base_prompt = base_prompt_metadata(selected_prompt),
                      .context_sources = std::move(context_sources),
                      .freshness_sources = std::move(freshness_sources),
-                     .system_prompt = std::move(system_prompt)};
+                     .system_prompt = std::move(system_prompt),
+                     .ambient_extension_free_system_prompt = std::move(ambient_extension_free_system_prompt)};
 }
 
 }  // namespace ava::app::runtime
@@ -764,11 +767,13 @@ ava::core::VoidResult refresh_runtime_parent_configuration(runtime::Session cons
 
 ava::core::VoidResult apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state)
 {
-  session.resolve_prompt_state() = runtime::ResolvedPromptState{.mode = prompt_state.mode,
-                                                                .base_prompt = std::move(prompt_state.base_prompt),
-                                                                .context_sources = std::move(prompt_state.context_sources),
-                                                                .freshness_sources = std::move(prompt_state.freshness_sources),
-                                                                .system_prompt = std::move(prompt_state.system_prompt)};
+  session.resolve_prompt_state() =
+      runtime::ResolvedPromptState{.mode = prompt_state.mode,
+                                   .base_prompt = std::move(prompt_state.base_prompt),
+                                   .context_sources = std::move(prompt_state.context_sources),
+                                   .freshness_sources = std::move(prompt_state.freshness_sources),
+                                   .system_prompt = std::move(prompt_state.system_prompt),
+                                   .ambient_extension_free_system_prompt = std::move(prompt_state.ambient_extension_free_system_prompt)};
   return refresh_runtime_parent_configuration(session);
 }
 
@@ -868,7 +873,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   auto append_route = guard.append_route();
   auto append_batch_route = guard.append_batch_route();
   runtime::EventSink event_sink = options.event_sink;
-  if (!options.isolate_project_resources)
+  if (!options.isolate_ambient_extensions)
   {
     auto plugin_observer_options = plugin_event_observer_options(session, options.permission_resolver, options.session_mutex);
     plugin_observer_options.permission_audit_sink = [append_route](ava::tools::PermissionAuditEvent const& event) {
@@ -957,7 +962,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
 
   std::shared_ptr<ava::lsp::DiagnosticsProvider> configured_lsp_provider;
   std::vector<ava::agent::SubagentDefinition> subagents;
-  if (!runtime_options.isolate_project_resources)
+  if (!runtime_options.isolate_ambient_extensions)
   {
     auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
         .global_config_file = session.paths().ava_config_dir / "lsp.json",
@@ -982,7 +987,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .mode = session.mode(),
       .provider_id = session.model().provider_id,
       .model_id = session.model().model_id,
-      .system_prompt = session.system_prompt(),
+      .system_prompt = runtime_options.isolate_ambient_extensions ? session.ambient_extension_free_system_prompt() : session.system_prompt(),
       .access_token = options.access_token,
       .credential_type = options.openai_oauth && options.credential_type == "bearer" ? "oauth" : options.credential_type,
       .openai_oauth = options.openai_oauth,
@@ -990,12 +995,13 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .stream = runtime_options.stream,
       .model_supports_tools = session.model().supports_tools.value_or(true),
       .model_supports_streaming = session.model().supports_streaming.value_or(true),
-      .include_project_resources = !runtime_options.isolate_project_resources && project_resources_trusted(session.project_trust()),
-      .plugin_global_plugins_dir = runtime_options.isolate_project_resources ? std::filesystem::path{} : session.paths().ava_config_dir / "plugins",
-      .plugin_project_plugins_dir = !runtime_options.isolate_project_resources && project_resources_trusted(session.project_trust())
+      .include_project_resources = !runtime_options.isolate_ambient_extensions && project_resources_trusted(session.project_trust()),
+      .plugin_global_plugins_dir = runtime_options.isolate_ambient_extensions ? std::filesystem::path{} : session.paths().ava_config_dir / "plugins",
+      .plugin_project_plugins_dir = !runtime_options.isolate_ambient_extensions && project_resources_trusted(session.project_trust())
                                         ? session.workspace_dir() / ".ava" / "plugins"
                                         : std::filesystem::path{},
-      .plugin_enablement_file = runtime_options.isolate_project_resources ? std::filesystem::path{} : session.paths().ava_state_dir / "plugin-enablement.json",
+      .plugin_enablement_file = runtime_options.isolate_ambient_extensions ? std::filesystem::path{} : session.paths().ava_state_dir / "plugin-enablement.json",
+      .include_plugin_tools = !runtime_options.isolate_ambient_extensions,
       .session_mcp_config = runtime_options.disable_session_mcp ? std::make_shared<ava::mcp::McpConfig const>() : session.mcp_config(),
       .exact_builtin_tool_names = runtime_options.exact_builtin_tool_names,
       .require_descriptor_secure_workspace = runtime_options.require_descriptor_secure_workspace,

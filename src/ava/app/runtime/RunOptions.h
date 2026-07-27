@@ -35,7 +35,9 @@ struct RunOptions
   bool stream = true;
   bool enable_transport_retries = false;
   std::optional<std::vector<std::string>> exact_builtin_tool_names = std::nullopt;
-  bool isolate_project_resources = false;
+  // Suppress ambient plugins, skills, LSP, plugin hooks, and subagent catalogs;
+  // preserve explicit session MCP unless disable_session_mcp is set.
+  bool isolate_ambient_extensions = false;
   // Integration-only runs may explicitly suppress even a session-local
   // immutable MCP composition; ordinary ACP isolation retains its approved MCP.
   bool disable_session_mcp = false;

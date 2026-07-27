@@ -108,7 +108,7 @@ runtime::RunOptions detached_run_options(runtime::RunOptions const& source)
   result.stream = source.stream;
   result.enable_transport_retries = source.enable_transport_retries;
   result.exact_builtin_tool_names = std::vector<std::string>{};
-  result.isolate_project_resources = true;
+  result.isolate_ambient_extensions = true;
   result.disable_session_mcp = true;
   result.require_descriptor_secure_workspace = source.require_descriptor_secure_workspace;
   result.announce_execution_after_permission = source.announce_execution_after_permission;
@@ -125,15 +125,15 @@ runtime::Session detached_session(runtime::Session const& source, ava::session::
                                   std::shared_ptr<SubagentDeliveryManager> manager)
 {
   runtime::SessionResources session_resources{.lease = std::move(lease),
-                                                    .anchor_set = source.anchor_set(),
-                                                    .run_controller = source.run_controller(),
-                                                    .append_target = source.append_target(),
-                                                    .bound_read_authority = std::move(authority),
-                                                    .subagent_coordinator = source.subagent_coordinator(),
-                                                    .subagent_delivery_manager = std::move(manager),
-                                                    .session_title_coordinator = source.session_title_coordinator(),
-                                                    .diagnostics = source.diagnostics(),
-                                                    .mcp_config = source.mcp_config()};
+                                              .anchor_set = source.anchor_set(),
+                                              .run_controller = source.run_controller(),
+                                              .append_target = source.append_target(),
+                                              .bound_read_authority = std::move(authority),
+                                              .subagent_coordinator = source.subagent_coordinator(),
+                                              .subagent_delivery_manager = std::move(manager),
+                                              .session_title_coordinator = source.session_title_coordinator(),
+                                              .diagnostics = source.diagnostics(),
+                                              .mcp_config = source.mcp_config()};
   return runtime::Session(runtime::Session_aggregate_base{.invocation_inputs_ = source.invocation_inputs(),
                                                           .resolved_prompt_state_ = source.resolve_prompt_state(),
                                                           .model_selection_ = source.model_selection(),

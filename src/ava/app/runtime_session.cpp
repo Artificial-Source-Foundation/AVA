@@ -388,7 +388,8 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
                                                      .base_prompt = std::move(prompt_state->base_prompt),
                                                      .context_sources = std::move(prompt_state->context_sources),
                                                      .freshness_sources = std::move(prompt_state->freshness_sources),
-                                                     .system_prompt = std::move(prompt_state->system_prompt)};
+                                                     .system_prompt = std::move(prompt_state->system_prompt),
+                                                     .ambient_extension_free_system_prompt = std::move(prompt_state->ambient_extension_free_system_prompt)};
   runtime::ModelSelection model_selection{.model = std::move(model), .reasoning = std::move(reasoning), .scoped_model_cycle = registry.scoped_model_cycle};
   runtime::TrustState trust_state{.project_trust = std::move(project_trust)};
   runtime::SessionResources resources{.lease = std::move(lease),

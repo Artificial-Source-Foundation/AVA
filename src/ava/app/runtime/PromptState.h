@@ -11,8 +11,8 @@
 
 namespace ava::app::runtime {
 
-// Bundle the assembled prompt for one mode: the active agent mode, base prompt metadata, contributing context and freshness sources, and the resulting system
-// prompt text.
+// Bundle the assembled prompts for one mode: the active agent mode, base prompt metadata, contributing context and freshness sources, the ordinary system
+// prompt, and its ambient-extension-free runtime variant.
 //
 // select_runtime_prompt_state builds this aggregate; apply_runtime_prompt_state copies it back into a Session.
 struct PromptState
@@ -22,6 +22,7 @@ struct PromptState
   std::vector<ContextSourceMetadata> context_sources;
   std::vector<FreshnessSourceMetadata> freshness_sources;
   std::string system_prompt;
+  std::string ambient_extension_free_system_prompt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

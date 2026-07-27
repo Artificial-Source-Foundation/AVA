@@ -125,6 +125,7 @@ struct ToolContext
   std::filesystem::path plugin_project_plugins_dir = {};
   std::filesystem::path plugin_enablement_file = {};
   bool include_project_plugins = true;
+  bool include_plugin_tools = true;
   std::filesystem::path mcp_global_config_file = {};
   std::filesystem::path mcp_project_config_file = {};
   bool include_project_mcp_config = true;

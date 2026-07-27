@@ -14,6 +14,11 @@
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_retry.h"
 #include "ava/agent/mode.h"
+#include "ava/plugin/diagnostics.h"
+#include "ava/plugin/enablement.h"
+#include "ava/plugin/tool_broker.h"
+#include "ava/mcp/config.h"
+#include "ava/mcp/tool_broker.h"
 #include "ava/config/auth.h"
 #include "ava/session/attachments.h"
 #include "ava/session/record.h"
@@ -79,6 +84,125 @@ std::string app_tiny_png_bytes()
   bytes.push_back(static_cast<char>(0x1A));
   bytes += "\nava-runtime-image";
   return bytes;
+}
+
+std::string ambient_extension_plugin_manifest_json()
+{
+  return R"({
+  "schema_version": 1,
+  "id": "com.example.acp-isolation",
+  "name": "ACP isolation canary",
+  "version": "0.1.0",
+  "api_version": "ava.plugin.v1",
+  "description": "ACP ambient extension isolation fixture",
+  "entrypoint": {"command": "/bin/false", "args": []},
+  "capabilities": ["tools"],
+  "contributes": {
+    "tools": [{"name": "ambient_probe", "description": "ACP_PLUGIN_TOOL_CANARY_92f1", "input_schema": {"type": "object", "additionalProperties": false}}],
+    "prompts": [{"name": "ambient-prompt", "description": "Ambient prompt", "path": "prompts/ambient.md"}],
+    "skills": [{"name": "ambient-plugin-skill", "description": "ACP_PLUGIN_SKILL_CANARY_1b64", "path": "skills/ambient.md"}]
+  }
+})";
+}
+
+void test_app_run_prompt_isolates_ambient_extensions()
+{
+  auto const root = create_empty_root("app-runtime-ambient-extension-isolation");
+  auto const workspace = root / "workspace";
+  auto const home = root / "home";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(home);
+
+  ScopedEnvVar home_env("HOME", home.string());
+  ScopedEnvVar config_env("XDG_CONFIG_HOME", paths.config_home.string());
+  ScopedEnvVar state_env("XDG_STATE_HOME", paths.state_home.string());
+  ScopedEnvVar data_env("XDG_DATA_HOME", paths.data_home.string());
+
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), "ambient extension isolation fixture trusts its synthetic workspace");
+
+  write_app_test_file(workspace / "AGENTS.md", "ACP_ORDINARY_CONTEXT_CANARY_846d\n");
+  write_app_test_file(workspace / ".ava" / "skills" / "ordinary-canary" / "SKILL.md",
+                      "---\nname: ordinary-canary\ndescription: ACP_ORDINARY_SKILL_CANARY_193c\n---\nOrdinary skill body.\n");
+  write_app_test_file(workspace / ".ava" / "agents" / "ambient-agent.md",
+                      "---\nname: ambient-agent-canary\ndescription: ACP_SUBAGENT_CANARY_629e\nmode: subagent\n---\nCustom agent prompt.\n");
+
+  auto const plugin_id = "com.example.acp-isolation";
+  auto const plugin_dir = paths.ava_config_dir / "plugins" / plugin_id;
+  write_app_test_file(plugin_dir / "plugin.json", ambient_extension_plugin_manifest_json());
+  write_app_test_file(plugin_dir / "prompts" / "ambient.md", "ACP_PLUGIN_PROMPT_CANARY_e8ad\n");
+  write_app_test_file(plugin_dir / "skills" / "ambient.md", "ACP_PLUGIN_SKILL_BODY_CANARY_a53f\n");
+  auto enabled = ava::plugin::set_plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, plugin_id, true, ava::plugin::PluginScope::Global);
+  expect(enabled.has_value(), "ambient extension isolation fixture enables its synthetic global plugin");
+
+  auto const ambient_mcp_name = ava::mcp::mcp_model_tool_name("ambient_canary", "echo");
+  write_app_test_file(paths.ava_config_dir / "mcp.json", app_test_mcp_config_json("ambient_canary", "Ambient MCP canary", AVA_FAKE_MCP_SERVER_PATH));
+
+  auto diagnostics = ava::plugin::collect_plugin_diagnostics(
+      ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = paths.ava_config_dir / "plugins", .project_plugins_dir = workspace / ".ava" / "plugins"},
+      paths.ava_state_dir / "plugin-enablement.json", workspace);
+  bool const plugin_diagnostic_enabled = std::ranges::any_of(
+      diagnostics.plugins, [plugin_id](ava::plugin::PluginStatus const& status) { return status.plugin.manifest.id == plugin_id && status.enabled; });
+  expect(plugin_diagnostic_enabled, "ambient extension isolation fixture diagnostics report its plugin enabled");
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  open_options.prompt_overrides.system_prompt = "ACP_BASE_PROMPT_CANARY_5fa7";
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime opens the ambient extension isolation fixture");
+  if (!session)
+    return;
+
+  auto const ordinary_prompt = session->system_prompt();
+  expect(ordinary_prompt.find("ACP_BASE_PROMPT_CANARY_5fa7") != std::string::npos &&
+             ordinary_prompt.find("ACP_ORDINARY_CONTEXT_CANARY_846d") != std::string::npos &&
+             ordinary_prompt.find("ACP_PLUGIN_PROMPT_CANARY_e8ad") != std::string::npos &&
+             ordinary_prompt.find("ACP_PLUGIN_SKILL_CANARY_1b64") != std::string::npos &&
+             ordinary_prompt.find("ACP_ORDINARY_SKILL_CANARY_193c") != std::string::npos &&
+             ordinary_prompt.find("ACP_SUBAGENT_CANARY_629e") != std::string::npos && ordinary_prompt.find("<available_skills>") != std::string::npos &&
+             ordinary_prompt.find("<available_subagents>") != std::string::npos,
+         "ordinary runtime prompt retains base, context, plugin, skill, and subagent extension canaries");
+
+  session->resources().mcp_config = std::make_shared<ava::mcp::McpConfig const>();
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"isolated answer\"}\n\n"
+              "data: [DONE]\n\n",
+  }});
+  ava::app::runtime::RunOptions run_options;
+  run_options.access_token = "fake";
+  run_options.isolate_ambient_extensions = true;
+  run_options.exact_builtin_tool_names = std::vector<std::string>{"read_file", "list_directory"};
+  auto result = ava::app::run_prompt(*session, "isolated prompt", provider, transport, run_options);
+  expect(result && result->final_text == "isolated answer", "ambient-extension-free runtime prompt completes through the fake transport");
+  if (!result || transport.requests().size() != 1)
+    return;
+
+  auto const& request = transport.requests()[0].body;
+  expect(request.find("ACP_BASE_PROMPT_CANARY_5fa7") != std::string::npos && request.find("ACP_ORDINARY_CONTEXT_CANARY_846d") != std::string::npos,
+         "isolated runtime request preserves explicit base prompt and ordinary AGENTS context");
+  expect(request.find("ACP_PLUGIN_PROMPT_CANARY_e8ad") == std::string::npos && request.find("ACP_PLUGIN_SKILL_CANARY_1b64") == std::string::npos &&
+             request.find("ACP_PLUGIN_SKILL_BODY_CANARY_a53f") == std::string::npos,
+         "isolated runtime request omits plugin prompt and skill canaries");
+  expect(request.find("ACP_ORDINARY_SKILL_CANARY_193c") == std::string::npos && request.find("<available_skills>") == std::string::npos,
+         "isolated runtime request omits ordinary available-skill catalogs");
+  expect(request.find("ACP_SUBAGENT_CANARY_629e") == std::string::npos && request.find("ambient-agent-canary") == std::string::npos &&
+             request.find("<available_subagents>") == std::string::npos,
+         "isolated runtime request omits builtin and custom subagent catalogs");
+  expect(request.find(ava::plugin::plugin_model_tool_name(plugin_id, "ambient_probe")) == std::string::npos,
+         "isolated runtime request omits enabled ambient plugin model tools");
+  expect(request.find(ambient_mcp_name) == std::string::npos,
+         "isolated runtime request does not fall back to ambient MCP when session MCP is explicitly empty");
+  expect(request.find("\"name\":\"read_file\"") != std::string::npos && request.find("\"name\":\"list_directory\"") != std::string::npos &&
+             request.find("\"name\":\"write_file\"") == std::string::npos,
+         "isolated runtime exact composition preserves requested builtins and omits non-exact builtins");
+  expect(session->system_prompt() == ordinary_prompt, "isolated runtime request leaves the ordinary session system prompt unchanged");
 }
 
 void test_app_run_prompt_emits_events()

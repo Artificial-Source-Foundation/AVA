@@ -156,11 +156,13 @@ ava::core::Result<bool> switch_runtime_model(runtime::Session& session, ava::con
     return std::unexpected(std::move(appended.error()));
 
   session.model_selection().model = std::move(model);
-  session.resolve_prompt_state() = runtime::ResolvedPromptState{.mode = prompt_state->mode,
-                                                                .base_prompt = std::move(prompt_state->base_prompt),
-                                                                .context_sources = std::move(prompt_state->context_sources),
-                                                                .freshness_sources = std::move(prompt_state->freshness_sources),
-                                                                .system_prompt = std::move(prompt_state->system_prompt)};
+  session.resolve_prompt_state() =
+      runtime::ResolvedPromptState{.mode = prompt_state->mode,
+                                   .base_prompt = std::move(prompt_state->base_prompt),
+                                   .context_sources = std::move(prompt_state->context_sources),
+                                   .freshness_sources = std::move(prompt_state->freshness_sources),
+                                   .system_prompt = std::move(prompt_state->system_prompt),
+                                   .ambient_extension_free_system_prompt = std::move(prompt_state->ambient_extension_free_system_prompt)};
   session.model_selection().reasoning = std::nullopt;
   if (auto refreshed = refresh_runtime_parent_configuration(session); !refreshed)
     return std::unexpected(std::move(refreshed.error()));

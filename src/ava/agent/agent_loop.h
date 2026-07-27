@@ -129,6 +129,7 @@ struct AgentLoopOptions
   std::filesystem::path plugin_global_plugins_dir = {};
   std::filesystem::path plugin_project_plugins_dir = {};
   std::filesystem::path plugin_enablement_file = {};
+  bool include_plugin_tools = true;
   std::shared_ptr<ava::mcp::McpConfig const> session_mcp_config = nullptr;
   std::optional<std::vector<std::string>> exact_builtin_tool_names = std::nullopt;
   bool require_descriptor_secure_workspace = false;

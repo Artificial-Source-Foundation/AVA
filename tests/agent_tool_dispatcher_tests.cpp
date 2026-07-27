@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/app/commands.h"
@@ -21,6 +22,9 @@
 #include "ava/tools/secure_workspace.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/terminal.h"
+#include "ava/plugin/enablement.h"
+#include "ava/plugin/tool_broker.h"
+#include "ava/mcp/config.h"
 #include "ava/config/auth.h"
 #include "ava/config/model_config.h"
 #include "ava/config/openai_oauth.h"
@@ -105,6 +109,41 @@ bool schemas_contain_tool(std::vector<std::string> const& schemas, std::string_v
 {
   auto const needle = "\"name\":\"" + std::string(name) + "\"";
   return std::ranges::any_of(schemas, [&](std::string const& schema) { return schema.find(needle) != std::string::npos; });
+}
+
+void test_tool_dispatcher_plugin_tool_inclusion_control()
+{
+  auto const root = create_empty_root("dispatcher-plugin-tool-inclusion-control");
+  auto const workspace = root / "workspace";
+  auto const paths = ava::tests::app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  auto const plugin_id = "com.example.dispatch-isolation";
+  ava::tests::write_app_test_file(paths.ava_config_dir / "plugins" / plugin_id / "plugin.json",
+                                  ava::tests::app_test_plugin_manifest_json(plugin_id, "Dispatcher isolation canary"));
+  auto enabled = ava::plugin::set_plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, plugin_id, true, ava::plugin::PluginScope::Global);
+  expect(enabled.has_value(), "dispatcher plugin-tool inclusion fixture enables its global plugin");
+
+  ava::tools::ToolContext context;
+  context.workspace_dir = workspace;
+  context.plugin_global_plugins_dir = paths.ava_config_dir / "plugins";
+  context.plugin_project_plugins_dir = workspace / ".ava" / "plugins";
+  context.plugin_enablement_file = paths.ava_state_dir / "plugin-enablement.json";
+  context.session_mcp_config = std::make_shared<ava::mcp::McpConfig const>();
+  context.exact_builtin_tool_names = std::nullopt;
+  auto const plugin_tool_name = ava::plugin::plugin_model_tool_name(plugin_id, "todo_add");
+  auto contains = [](std::vector<ava::agent::ToolMetadata> const& metadata, std::string_view name) {
+    return std::ranges::any_of(metadata, [name](ava::agent::ToolMetadata const& tool) { return tool.name == name; });
+  };
+
+  auto included = ava::agent::ToolDispatcher::create_strict(context);
+  expect(included && contains(included->registered_tool_metadata(), "read_file") && contains(included->registered_tool_metadata(), plugin_tool_name),
+         "ordinary dispatcher includes builtins and enabled plugin tools by default");
+
+  context.include_plugin_tools = false;
+  auto excluded = ava::agent::ToolDispatcher::create_strict(context);
+  expect(excluded && contains(excluded->registered_tool_metadata(), "read_file") && !contains(excluded->registered_tool_metadata(), plugin_tool_name),
+         "ordinary dispatcher can exclude plugin tools while preserving builtins and empty immutable session MCP");
 }
 
 void test_tool_dispatcher()
@@ -1569,6 +1608,7 @@ void test_tool_dispatcher_plan_mode_denies_mutation()
 
 void run_agent_tool_dispatcher_tests()
 {
+  test_tool_dispatcher_plugin_tool_inclusion_control();
   test_tool_dispatcher();
   test_task_persistent_deny_preflight_blocks_runner();
   test_task_mode_and_job_tool_controls();

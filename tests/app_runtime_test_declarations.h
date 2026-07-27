@@ -28,6 +28,7 @@ void test_app_runtime_project_plugin_resources_follow_trust_gate();
 void test_app_runtime_enabled_plugin_resource_failures_are_context_visible();
 void test_app_runtime_plugin_install_remove_commands();
 void test_app_context_reports_lsp_config_load_errors();
+void test_app_run_prompt_isolates_ambient_extensions();
 void test_app_run_prompt_emits_events();
 void test_app_run_prompt_expands_file_references();
 void test_app_run_prompt_sends_imported_image_attachment();

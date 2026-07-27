@@ -63,7 +63,8 @@ struct InvocationInputs
 //
 // The agent mode and assembled prompt material currently in effect for the
 // session: base-prompt metadata, contributing context and freshness sources,
-// and the resulting system prompt text. This whole bundle is recomputed
+// the ordinary system prompt, and its ambient-extension-free runtime variant.
+// This whole bundle is recomputed
 // whenever the mode or model changes (see apply_runtime_prompt_state and
 // switch_runtime_model) and is otherwise the session's live resolved state.
 //
@@ -77,6 +78,7 @@ struct ResolvedPromptState
   std::vector<ContextSourceMetadata> context_sources;
   std::vector<FreshnessSourceMetadata> freshness_sources;
   std::string system_prompt;
+  std::string ambient_extension_free_system_prompt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -179,8 +181,8 @@ struct Session_aggregate_base
 class Session : protected Session_aggregate_base
 {
  public:
-  using Session_aggregate_base::store;
   using Session_aggregate_base::created;
+  using Session_aggregate_base::store;
 
   // Move constructors.
   Session(Session&& session) = default;
@@ -224,6 +226,7 @@ class Session : protected Session_aggregate_base
   std::vector<ContextSourceMetadata> const& context_sources() const { return resolved_prompt_state_.context_sources; }
   std::vector<FreshnessSourceMetadata> const& freshness_sources() const { return resolved_prompt_state_.freshness_sources; }
   std::string const& system_prompt() const { return resolved_prompt_state_.system_prompt; }
+  std::string const& ambient_extension_free_system_prompt() const { return resolved_prompt_state_.ambient_extension_free_system_prompt; }
   bool is_offline() const { return invocation_inputs_.is_offline_; }
   std::vector<std::filesystem::path> const& additional_writable_dirs() const { return invocation_inputs_.additional_writable_dirs; }
   // Resolved once at open time and reused by every runtime history reader.
@@ -256,8 +259,9 @@ class Session : protected Session_aggregate_base
   {
     if (resources_.bound_read_authority)
       return *resources_.bound_read_authority;
-    return invocation_inputs_.sessionless ? ava::session::SessionReadAuthority::create_ephemeral(store, invocation_inputs_.session_read_limits)
-                                           : ava::session::SessionReadAuthority::create_persistent(store, resources_.lease, invocation_inputs_.session_read_limits);
+    return invocation_inputs_.sessionless
+               ? ava::session::SessionReadAuthority::create_ephemeral(store, invocation_inputs_.session_read_limits)
+               : ava::session::SessionReadAuthority::create_persistent(store, resources_.lease, invocation_inputs_.session_read_limits);
   }
 
   // Append through the session owner so writes remain serialized with active runs.

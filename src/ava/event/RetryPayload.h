@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <string>
 
-namespace ava::app::runtime {
+namespace ava::event {
 
 // Extracted retry slice of an Event: human-readable text, status, the error classification fields, the triggering reason and the attempt/backoff accounting.
 struct RetryPayload
@@ -26,4 +26,4 @@ struct RetryPayload
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app::runtime
+}  // namespace ava::event

@@ -4,7 +4,7 @@
 
 #include <string>
 
-namespace ava::app::runtime {
+namespace ava::event {
 
 // Extracted reasoning slice of an Event: visible reasoning text/status, optional error/stop fields from the stream bridge, and frontend-safe reasoning
 // metadata.
@@ -21,4 +21,4 @@ struct ReasoningPayload
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app::runtime
+}  // namespace ava::event

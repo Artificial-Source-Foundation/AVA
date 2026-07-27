@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace ava::app::runtime {
+namespace ava::event {
 
 // Extracted provider-stream and TUI permission-audit slice of an Event: text/call/tool/status, error message/details, stop reason, reason, reasoning metadata,
 // and permission request ids. Omits tool-result/diff accounting and error category/code/trigger fields not produced for ProviderEvent today.
@@ -27,4 +27,4 @@ struct ProviderPayload
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app::runtime
+}  // namespace ava::event

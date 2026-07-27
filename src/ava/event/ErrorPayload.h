@@ -4,7 +4,7 @@
 
 #include <string>
 
-namespace ava::app::runtime {
+namespace ava::event {
 
 // Extracted error slice of an Event: human-readable text, status, the error classification fields, the content type and the triggering reason for the failure.
 struct ErrorPayload
@@ -22,4 +22,4 @@ struct ErrorPayload
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app::runtime
+}  // namespace ava::event

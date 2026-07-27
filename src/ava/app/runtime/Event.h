@@ -1,7 +1,8 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
-#include "ava/agent/mode.h"
+#include "ava/event/RuntimeEventType.h"
+#include "ava/core/mode.h"
 
 #include <cstddef>
 #include <string>
@@ -9,29 +10,8 @@
 
 namespace ava::app::runtime {
 
-// Categorize the kind of runtime lifecycle or notification event being emitted, driving event-sink dispatch and payload selection.
-enum class EventType
-{
-  SessionStart,
-  UserMessage,
-  AssistantMessage,
-  MessageUpdate,
-  MessageEnd,
-  ReasoningStart,
-  ReasoningDelta,
-  ReasoningEnd,
-  ProviderEvent,
-  ToolStart,
-  ToolProgress,
-  ToolResult,
-  CompactionStart,
-  CompactionEnd,
-  Retry,
-  RetryTick,
-  Canceled,
-  Error,
-  Done,
-};
+// Migration-only legacy name for the neutral typed runtime event taxonomy.
+using EventType = ava::event::RuntimeEventType;
 
 // One discrete runtime event for an agent run: its type, identifying and session fields, the active agent mode, and the broad set of text, flag and numeric
 // fields consumed by event sinks, payload extraction and JSON serialization.
@@ -40,7 +20,7 @@ struct Event
   EventType type = EventType::Done;
   std::string timestamp;
   std::string session_id;
-  ava::agent::Mode mode = ava::agent::Mode::Build;
+  ava::core::Mode mode = ava::core::Mode::Build;
   std::string provider_id;
   std::string model_id;
   std::string text;

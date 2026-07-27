@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <string>
 
-namespace ava::app::runtime {
+namespace ava::event {
 
 // Extracted compaction slice of an Event: provider/model identity, status, trigger/reason, attempt accounting, and token/summary sizing for start and end
 // events.
@@ -27,4 +27,4 @@ struct CompactionPayload
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app::runtime
+}  // namespace ava::event

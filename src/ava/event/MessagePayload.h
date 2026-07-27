@@ -4,7 +4,7 @@
 
 #include <string>
 
-namespace ava::app::runtime {
+namespace ava::event {
 
 // Extracted message slice of an Event: streamed or final text, status, optional error message, and stop reason as emitted by the runtime prompt message path.
 struct MessagePayload
@@ -17,4 +17,4 @@ struct MessagePayload
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app::runtime
+}  // namespace ava::event

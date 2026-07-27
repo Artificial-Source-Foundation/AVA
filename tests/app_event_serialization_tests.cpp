@@ -1,9 +1,10 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "ava/event/events.h"
 #include "ava/app/EventEnvelope.h"
 #include "ava/app/events.h"
 #include "ava/app/runtime/Event.h"
-#include "ava/agent/mode.h"
+#include "ava/core/mode.h"
 
 #include <algorithm>
 #include <array>
@@ -12,7 +13,9 @@
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #ifndef AVA_RUNTIME_EVENTS_V1_GOLDEN_DIR
@@ -22,6 +25,147 @@
 namespace ava::tests::app_runtime_tests {
 
 using namespace ava::tests;
+
+namespace {
+
+enum class RuntimeEventAlternativeTag
+{
+  SessionStart,
+  UserMessage,
+  AssistantMessage,
+  MessageUpdate,
+  MessageEnd,
+  ReasoningStart,
+  ReasoningDelta,
+  ReasoningEnd,
+  Provider,
+  ToolStart,
+  ToolProgress,
+  ToolResult,
+  CompactionStart,
+  CompactionEnd,
+  Retry,
+  RetryTick,
+  Cancellation,
+  Error,
+  Completion,
+};
+
+struct RuntimeEventContract
+{
+  ava::event::RuntimeEventType type;
+  ava::event::PayloadType payload_type;
+  RuntimeEventAlternativeTag alternative;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+constexpr std::array runtime_event_contracts = {
+    RuntimeEventContract{ava::event::RuntimeEventType::SessionStart, ava::event::PayloadType::Session, RuntimeEventAlternativeTag::SessionStart},
+    RuntimeEventContract{ava::event::RuntimeEventType::UserMessage, ava::event::PayloadType::Message, RuntimeEventAlternativeTag::UserMessage},
+    RuntimeEventContract{ava::event::RuntimeEventType::AssistantMessage, ava::event::PayloadType::Message, RuntimeEventAlternativeTag::AssistantMessage},
+    RuntimeEventContract{ava::event::RuntimeEventType::MessageUpdate, ava::event::PayloadType::Message, RuntimeEventAlternativeTag::MessageUpdate},
+    RuntimeEventContract{ava::event::RuntimeEventType::MessageEnd, ava::event::PayloadType::Message, RuntimeEventAlternativeTag::MessageEnd},
+    RuntimeEventContract{ava::event::RuntimeEventType::ReasoningStart, ava::event::PayloadType::Reasoning, RuntimeEventAlternativeTag::ReasoningStart},
+    RuntimeEventContract{ava::event::RuntimeEventType::ReasoningDelta, ava::event::PayloadType::Reasoning, RuntimeEventAlternativeTag::ReasoningDelta},
+    RuntimeEventContract{ava::event::RuntimeEventType::ReasoningEnd, ava::event::PayloadType::Reasoning, RuntimeEventAlternativeTag::ReasoningEnd},
+    RuntimeEventContract{ava::event::RuntimeEventType::ProviderEvent, ava::event::PayloadType::Provider, RuntimeEventAlternativeTag::Provider},
+    RuntimeEventContract{ava::event::RuntimeEventType::ToolStart, ava::event::PayloadType::Tool, RuntimeEventAlternativeTag::ToolStart},
+    RuntimeEventContract{ava::event::RuntimeEventType::ToolProgress, ava::event::PayloadType::Tool, RuntimeEventAlternativeTag::ToolProgress},
+    RuntimeEventContract{ava::event::RuntimeEventType::ToolResult, ava::event::PayloadType::Tool, RuntimeEventAlternativeTag::ToolResult},
+    RuntimeEventContract{ava::event::RuntimeEventType::CompactionStart, ava::event::PayloadType::Compaction, RuntimeEventAlternativeTag::CompactionStart},
+    RuntimeEventContract{ava::event::RuntimeEventType::CompactionEnd, ava::event::PayloadType::Compaction, RuntimeEventAlternativeTag::CompactionEnd},
+    RuntimeEventContract{ava::event::RuntimeEventType::Retry, ava::event::PayloadType::Retry, RuntimeEventAlternativeTag::Retry},
+    RuntimeEventContract{ava::event::RuntimeEventType::RetryTick, ava::event::PayloadType::Retry, RuntimeEventAlternativeTag::RetryTick},
+    RuntimeEventContract{ava::event::RuntimeEventType::Canceled, ava::event::PayloadType::Cancellation, RuntimeEventAlternativeTag::Cancellation},
+    RuntimeEventContract{ava::event::RuntimeEventType::Error, ava::event::PayloadType::Error, RuntimeEventAlternativeTag::Error},
+    RuntimeEventContract{ava::event::RuntimeEventType::Done, ava::event::PayloadType::Completion, RuntimeEventAlternativeTag::Completion},
+};
+
+template <typename>
+inline constexpr bool always_false = false;
+
+template <typename Payload>
+constexpr ava::event::PayloadType payload_type_for_payload()
+{
+  using namespace ava::event;
+  if constexpr (std::is_same_v<Payload, SessionPayload>)
+    return PayloadType::Session;
+  else if constexpr (std::is_same_v<Payload, MessagePayload>)
+    return PayloadType::Message;
+  else if constexpr (std::is_same_v<Payload, ReasoningPayload>)
+    return PayloadType::Reasoning;
+  else if constexpr (std::is_same_v<Payload, ProviderPayload>)
+    return PayloadType::Provider;
+  else if constexpr (std::is_same_v<Payload, ToolPayload>)
+    return PayloadType::Tool;
+  else if constexpr (std::is_same_v<Payload, CompactionPayload>)
+    return PayloadType::Compaction;
+  else if constexpr (std::is_same_v<Payload, RetryPayload>)
+    return PayloadType::Retry;
+  else if constexpr (std::is_same_v<Payload, CancellationPayload>)
+    return PayloadType::Cancellation;
+  else if constexpr (std::is_same_v<Payload, ErrorPayload>)
+    return PayloadType::Error;
+  else if constexpr (std::is_same_v<Payload, CompletionPayload>)
+    return PayloadType::Completion;
+  else
+    static_assert(always_false<Payload>, "unhandled runtime event payload family");
+}
+
+std::pair<RuntimeEventAlternativeTag, ava::event::PayloadType> runtime_event_alternative_identity(ava::event::RuntimeEvent const& event)
+{
+  return std::visit(
+      [](auto const& alternative) {
+        using namespace ava::event;
+        using Alternative = std::remove_cvref_t<decltype(alternative)>;
+        RuntimeEventAlternativeTag tag;
+        if constexpr (std::is_same_v<Alternative, SessionStartEvent>)
+          tag = RuntimeEventAlternativeTag::SessionStart;
+        else if constexpr (std::is_same_v<Alternative, UserMessageEvent>)
+          tag = RuntimeEventAlternativeTag::UserMessage;
+        else if constexpr (std::is_same_v<Alternative, AssistantMessageEvent>)
+          tag = RuntimeEventAlternativeTag::AssistantMessage;
+        else if constexpr (std::is_same_v<Alternative, MessageUpdateEvent>)
+          tag = RuntimeEventAlternativeTag::MessageUpdate;
+        else if constexpr (std::is_same_v<Alternative, MessageEndEvent>)
+          tag = RuntimeEventAlternativeTag::MessageEnd;
+        else if constexpr (std::is_same_v<Alternative, ReasoningStartEvent>)
+          tag = RuntimeEventAlternativeTag::ReasoningStart;
+        else if constexpr (std::is_same_v<Alternative, ReasoningDeltaEvent>)
+          tag = RuntimeEventAlternativeTag::ReasoningDelta;
+        else if constexpr (std::is_same_v<Alternative, ReasoningEndEvent>)
+          tag = RuntimeEventAlternativeTag::ReasoningEnd;
+        else if constexpr (std::is_same_v<Alternative, ProviderEvent>)
+          tag = RuntimeEventAlternativeTag::Provider;
+        else if constexpr (std::is_same_v<Alternative, ToolStartEvent>)
+          tag = RuntimeEventAlternativeTag::ToolStart;
+        else if constexpr (std::is_same_v<Alternative, ToolProgressEvent>)
+          tag = RuntimeEventAlternativeTag::ToolProgress;
+        else if constexpr (std::is_same_v<Alternative, ToolResultEvent>)
+          tag = RuntimeEventAlternativeTag::ToolResult;
+        else if constexpr (std::is_same_v<Alternative, CompactionStartEvent>)
+          tag = RuntimeEventAlternativeTag::CompactionStart;
+        else if constexpr (std::is_same_v<Alternative, CompactionEndEvent>)
+          tag = RuntimeEventAlternativeTag::CompactionEnd;
+        else if constexpr (std::is_same_v<Alternative, RetryEvent>)
+          tag = RuntimeEventAlternativeTag::Retry;
+        else if constexpr (std::is_same_v<Alternative, RetryTickEvent>)
+          tag = RuntimeEventAlternativeTag::RetryTick;
+        else if constexpr (std::is_same_v<Alternative, CancellationEvent>)
+          tag = RuntimeEventAlternativeTag::Cancellation;
+        else if constexpr (std::is_same_v<Alternative, ErrorEvent>)
+          tag = RuntimeEventAlternativeTag::Error;
+        else if constexpr (std::is_same_v<Alternative, CompletionEvent>)
+          tag = RuntimeEventAlternativeTag::Completion;
+        else
+          static_assert(always_false<Alternative>, "unhandled RuntimeEvent alternative");
+        return std::pair{tag, payload_type_for_payload<std::remove_cvref_t<decltype(alternative.payload)>>()};
+      },
+      event.payload());
+}
+
+}  // namespace
 
 std::vector<ava::app::runtime::Event> runtime_event_v1_examples()
 {
@@ -40,7 +184,7 @@ std::vector<ava::app::runtime::Event> runtime_event_v1_examples()
   events.reserve(19);
 
   auto session_start = make_event(EventType::SessionStart);
-  session_start.mode = ava::agent::Mode::Plan;
+  session_start.mode = ava::core::Mode::Plan;
   session_start.provider_id = "openai";
   session_start.model_id = "model-x";
   events.push_back(std::move(session_start));
@@ -248,6 +392,14 @@ void test_runtime_event_envelopes_match_v1_golden()
     context.message_id = "message_runtime_v1";
     context.request_id = "request_runtime_v1";
     context.correlation_id = "correlation_runtime_v1";
+    auto const typed_event = ava::app::to_runtime_event(events[index]);
+    auto const [alternative, payload_type] = runtime_event_alternative_identity(typed_event);
+    expect(typed_event.type() == runtime_event_contracts[index].type && typed_event.type() == events[index].type,
+           "legacy runtime event bag projects to the matching typed RuntimeEvent");
+    expect(ava::event::payload_type_for_event(typed_event.type()) == runtime_event_contracts[index].payload_type &&
+               payload_type == runtime_event_contracts[index].payload_type,
+           "legacy runtime event bag projects to the matching typed payload family");
+    expect(alternative == runtime_event_contracts[index].alternative, "legacy runtime event bag projects to the matching concrete alternative");
     auto const envelope = ava::app::to_event_envelope(events[index], context);
     actual_names.push_back(envelope.name);
     actual_payload_types.push_back(envelope.payload_type);
@@ -282,6 +434,12 @@ void test_compaction_retry_envelope_preserves_v1_counter_omissions()
              flat_json.find("\"snapshot_entries\":12") != std::string::npos && flat_json.find("\"current_entries\":13") != std::string::npos,
          "legacy flat compaction retry events retain internal token and snapshot counters");
 
+  auto const typed_event = ava::app::to_runtime_event(event);
+  auto const* retry_event = std::get_if<ava::event::RetryEvent>(&typed_event.payload());
+  expect(retry_event && retry_event->diagnostics.estimated_tokens == 9000 && retry_event->diagnostics.threshold_tokens == 8000 &&
+             retry_event->diagnostics.snapshot_entries == 12 && retry_event->diagnostics.current_entries == 13,
+         "legacy retry bag projection retains internal token and snapshot diagnostics in the typed RuntimeEvent");
+
   ava::app::EventEnvelopeContext context;
   context.event_id = "event_compaction_retry_v1";
   auto const envelope = ava::app::to_event_envelope(event, context);
@@ -294,13 +452,62 @@ void test_compaction_retry_envelope_preserves_v1_counter_omissions()
   }
 }
 
+void test_direct_typed_runtime_event_construction_covers_all_types()
+{
+  using namespace ava::event;
+
+  static_assert(!std::is_default_constructible_v<RuntimeEvent>);
+  static_assert(std::is_copy_constructible_v<RuntimeEvent>);
+  static_assert(std::is_move_constructible_v<RuntimeEvent>);
+  static_assert(!std::is_copy_assignable_v<RuntimeEvent>);
+  static_assert(!std::is_move_assignable_v<RuntimeEvent>);
+  static_assert(!std::is_constructible_v<RuntimeEvent, RuntimeEventMetadata, RuntimeEventPayload>);
+  static_assert(std::variant_size_v<RuntimeEventPayload> == 19);
+
+  RuntimeEventMetadata const metadata{.timestamp = "2026-08-01T12:36:00Z", .session_id = "session_typed"};
+  std::vector<RuntimeEvent> events;
+  events.reserve(19);
+  events.emplace_back(metadata, SessionStartEvent{});
+  events.emplace_back(metadata, UserMessageEvent{});
+  events.emplace_back(metadata, AssistantMessageEvent{});
+  events.emplace_back(metadata, MessageUpdateEvent{});
+  events.emplace_back(metadata, MessageEndEvent{});
+  events.emplace_back(metadata, ReasoningStartEvent{});
+  events.emplace_back(metadata, ReasoningDeltaEvent{});
+  events.emplace_back(metadata, ReasoningEndEvent{});
+  events.emplace_back(metadata, ProviderEvent{});
+  events.emplace_back(metadata, ToolStartEvent{});
+  events.emplace_back(metadata, ToolProgressEvent{});
+  events.emplace_back(metadata, ToolResultEvent{});
+  events.emplace_back(metadata, CompactionStartEvent{});
+  events.emplace_back(metadata, CompactionEndEvent{});
+  events.emplace_back(metadata, RetryEvent{});
+  events.emplace_back(metadata, RetryTickEvent{});
+  events.emplace_back(metadata, CancellationEvent{});
+  events.emplace_back(metadata, ErrorEvent{});
+  events.emplace_back(metadata, CompletionEvent{});
+
+  expect(events.size() == runtime_event_contracts.size(), "direct typed RuntimeEvent construction covers all 19 event types");
+  for (std::size_t index = 0; index < events.size(); ++index)
+  {
+    auto const [alternative, payload_type] = runtime_event_alternative_identity(events[index]);
+    expect(events[index].type() == runtime_event_contracts[index].type, "typed RuntimeEvent derives its type from its concrete alternative");
+    expect(payload_type == runtime_event_contracts[index].payload_type &&
+               payload_type_for_event(events[index].type()) == runtime_event_contracts[index].payload_type,
+           "typed RuntimeEvent stores the expected payload family");
+    expect(alternative == runtime_event_contracts[index].alternative, "typed RuntimeEvent stores the expected concrete alternative");
+    expect(events[index].metadata().timestamp == metadata.timestamp && events[index].metadata().session_id == metadata.session_id,
+           "typed RuntimeEvent retains required metadata");
+  }
+}
+
 void test_app_event_serialization()
 {
   ava::app::runtime::Event session_event;
   session_event.type = ava::app::runtime::EventType::SessionStart;
   session_event.timestamp = "2026-04-29T00:00:00Z";
   session_event.session_id = "session_1";
-  session_event.mode = ava::agent::Mode::Plan;
+  session_event.mode = ava::core::Mode::Plan;
   session_event.provider_id = "openai";
   session_event.model_id = "gpt-5.5";
   auto const jsonl = ava::app::serialize_event_jsonl(session_event);
@@ -321,6 +528,7 @@ void test_app_event_serialization()
          "runtime event JSONL contains one terminating newline only");
 
   test_runtime_event_envelopes_match_v1_golden();
+  test_direct_typed_runtime_event_construction_covers_all_types();
   test_compaction_retry_envelope_preserves_v1_counter_omissions();
 }
 

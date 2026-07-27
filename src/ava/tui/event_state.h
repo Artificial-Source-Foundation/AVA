@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/app/events.h"
+#include "ava/agent/mode.h"
 #include "ava/tui/composer.h"
 
 #include <cstddef>

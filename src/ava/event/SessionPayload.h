@@ -5,7 +5,7 @@
 
 #include <string>
 
-namespace ava::app::runtime {
+namespace ava::event {
 
 // Extracted session-start slice of an Event: the active mode plus the provider/model identity published when a run begins.
 struct SessionPayload
@@ -17,4 +17,4 @@ struct SessionPayload
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app::runtime
+}  // namespace ava::event

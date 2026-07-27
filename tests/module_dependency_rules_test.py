@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Check internal-module dependency direction and temporary exceptions.
 
-Only the ten production modules named by the policy are scanned. The policy
-is intentionally an exact include inventory rather than a module-pair waiver.
+Only the production modules named by the policy are scanned. Target roots are
+recognized separately so the neutral event boundary can be strict without
+changing the established policy for historically scanned modules.
 """
 
 from __future__ import annotations
@@ -15,10 +16,35 @@ import sys
 import tempfile
 import unittest
 
-MODULES = ("config", "http", "provider", "session", "agent", "tools", "permissions", "mcp", "plugin", "app")
-MODULE_SET = frozenset(MODULES)
+SCANNED_MODULES = ("config", "http", "provider", "session", "agent", "tools", "permissions", "mcp", "plugin", "event", "app")
+SCANNED_MODULE_SET = frozenset(SCANNED_MODULES)
+RECOGNIZED_FIRST_PARTY_ROOTS = frozenset(
+    {
+        "agent",
+        "app",
+        "command",
+        "config",
+        "containment",
+        "context",
+        "core",
+        "debug",
+        "desktop",
+        "diagnostics",
+        "event",
+        "http",
+        "lsp",
+        "mcp",
+        "observability",
+        "permissions",
+        "plugin",
+        "provider",
+        "session",
+        "tools",
+        "tui",
+    }
+)
 ALLOWED = {
-    "app": MODULE_SET - {"app"},
+    "app": SCANNED_MODULE_SET - {"app"},
     "agent": frozenset({"config", "http", "provider", "session", "tools", "permissions", "mcp", "plugin"}),
     "provider": frozenset({"config", "http"}),
     "session": frozenset({"config"}),
@@ -28,6 +54,7 @@ ALLOWED = {
     "permissions": frozenset(),
     "mcp": frozenset({"config", "tools", "permissions"}),
     "plugin": frozenset({"config", "tools", "permissions"}),
+    "event": frozenset({"core", "debug"}),
 }
 SOURCE_SUFFIXES = frozenset({".h", ".hpp", ".cpp"})
 IGNORED_TREE_NAMES = frozenset({"build", "generated", "reference", "tests", "vendor"})
@@ -61,9 +88,17 @@ def include_target(source: Path, including_path: Path, literal: str) -> str | No
     return relative.parts[0] if len(relative.parts) >= 2 else "<noncanonical>"
 
 
+def is_policy_target(module: str, target: str) -> bool:
+    if target == "<noncanonical>":
+        return True
+    if module == "event":
+        return target in RECOGNIZED_FIRST_PARTY_ROOTS
+    return target in SCANNED_MODULE_SET
+
+
 def collect_edges(source: Path) -> list[tuple[str, int, str, str, str, str]]:
     edges = []
-    for module in MODULES:
+    for module in SCANNED_MODULES:
         directory = source / "src" / "ava" / module
         if not directory.is_dir():
             continue
@@ -79,7 +114,7 @@ def collect_edges(source: Path) -> list[tuple[str, int, str, str, str, str]]:
                     continue
                 literal = matched.group(1) or matched.group(2)
                 target = include_target(source, path, literal)
-                if target is None or target == module or (target not in MODULE_SET and target != "<noncanonical>"):
+                if target is None or target == module or not is_policy_target(module, target):
                     continue
                 if target == "<noncanonical>" or target not in ALLOWED[module]:
                     edges.append((relative, line_number, source_kind(path), module, target, literal))
@@ -93,7 +128,7 @@ def relative_source(value: object) -> str:
     if path.is_absolute() or ".." in path.parts or path.as_posix() != value or not value.startswith("src/ava/"):
         raise PolicyError(f"exception source is not a normalized relative production path: {value!r}")
     parts = path.parts
-    if len(parts) < 4 or parts[2] not in MODULE_SET or path.suffix not in SOURCE_SUFFIXES:
+    if len(parts) < 4 or parts[2] not in SCANNED_MODULE_SET or path.suffix not in SOURCE_SUFFIXES:
         raise PolicyError(f"exception source has an unknown module or unsupported extension: {value!r}")
     return value
 
@@ -114,9 +149,12 @@ def exception_key(entry: object) -> tuple[str, str, str]:
         or ".." in include_parts
         or len(include_parts) < 3
         or include_parts[0] != "ava"
-        or include_parts[1] not in MODULE_SET
+        or include_parts[1] not in RECOGNIZED_FIRST_PARTY_ROOTS
     ):
-        raise PolicyError(f"exception include is not a canonical ava/<module>/... path with a known module: {include!r}")
+        raise PolicyError(f"exception include is not a canonical ava/<module>/... path with a recognized first-party root: {include!r}")
+    source_module = PurePosixPath(source).parts[2]
+    if not is_policy_target(source_module, include_parts[1]):
+        raise PolicyError(f"exception include root is not governed for source module {source_module}: {include!r}")
     if kind not in {"public", "implementation"}:
         raise PolicyError(f"exception kind must be public or implementation: {kind!r}")
     if not isinstance(reason, str) or not reason.strip():
@@ -198,8 +236,28 @@ class ModuleDependencyRulesSelfTest(unittest.TestCase):
                     [f"src/ava/{module}/fixture.cpp:1: implementation {module} -> agent (ava/agent/tool_registry.h)"],
                 )
 
+    def test_app_may_depend_on_event(self) -> None:
+        self.assertEqual(self.run_check('#include "ava/event/events.h"\n', [], module="app"), [])
+
+    def test_event_may_depend_on_core_and_debug(self) -> None:
+        self.assertEqual(self.run_check('#include "ava/core/result.h"\n#include "ava/debug/print_members_on.h"\n', [], module="event"), [])
+
+    def test_event_cannot_depend_on_tui(self) -> None:
+        self.assertEqual(
+            self.run_check('#include "ava/tui/runtime.h"\n', [], module="event"),
+            ["src/ava/event/fixture.cpp:1: implementation event -> tui (ava/tui/runtime.h)"],
+        )
+
+    def test_event_cannot_depend_on_command_or_context(self) -> None:
+        for target in ("command", "context"):
+            with self.subTest(target=target):
+                self.assertEqual(
+                    self.run_check(f'#include "ava/{target}/fixture.h"\n', [], module="event"),
+                    [f"src/ava/event/fixture.cpp:1: implementation event -> {target} (ava/{target}/fixture.h)"],
+                )
+
     def test_http_cannot_depend_on_higher_layers(self) -> None:
-        for target in ("provider", "config", "tools", "agent", "mcp", "plugin", "app"):
+        for target in ("provider", "config", "tools", "agent", "mcp", "plugin", "event", "app"):
             with self.subTest(target=target):
                 self.assertEqual(
                     self.run_check(f'#include "ava/{target}/fixture.h"\n', [], module="http"),
@@ -252,6 +310,27 @@ class ModuleDependencyRulesSelfTest(unittest.TestCase):
             self.run_check('#include "ava/config/model_config.h"\n', [exception]),
             ["stale exception (not a currently forbidden include): src/ava/config/fixture.cpp implementation ava/config/model_config.h"],
         )
+
+    def test_policy_rejects_unscanned_source_module_and_ungoverned_target(self) -> None:
+        unscanned_source = {
+            "source": "src/ava/command/fixture.cpp",
+            "include": "ava/event/events.h",
+            "kind": "implementation",
+            "reason": "Invalid unscanned source fixture.",
+            "tracking": "test-only",
+        }
+        with self.assertRaisesRegex(PolicyError, "unknown module"):
+            self.run_check('#include "ava/provider/provider.h"\n', [unscanned_source])
+
+        ungoverned_target = {
+            "source": "src/ava/config/fixture.cpp",
+            "include": "ava/core/result.h",
+            "kind": "implementation",
+            "reason": "Invalid ungoverned target fixture.",
+            "tracking": "test-only",
+        }
+        with self.assertRaisesRegex(PolicyError, "not governed"):
+            self.run_check('#include "ava/provider/provider.h"\n', [ungoverned_target])
 
     def test_policy_rejects_traversal_paths(self) -> None:
         include_traversal = {

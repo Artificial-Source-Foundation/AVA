@@ -4,7 +4,7 @@
 
 #include <string>
 
-namespace ava::app::runtime {
+namespace ava::event {
 
 // Extracted cancellation slice of an Event: human-readable text, status, the error classification fields and the triggering reason for the cancellation.
 struct CancellationPayload
@@ -21,4 +21,4 @@ struct CancellationPayload
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app::runtime
+}  // namespace ava::event

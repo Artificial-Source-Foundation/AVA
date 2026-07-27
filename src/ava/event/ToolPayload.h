@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace ava::app::runtime {
+namespace ava::event {
 
 // Extracted tool-related slice of an Event, carrying the call identifiers, arguments, (structured) result, status, error fields, diff, changed paths and the
 // byte/line accounting produced by file and search tools.
@@ -48,4 +48,4 @@ struct ToolPayload
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-}  // namespace ava::app::runtime
+}  // namespace ava::event

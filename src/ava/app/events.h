@@ -1,70 +1,45 @@
 #pragma once
 
+#include "EventEnvelope.h"
 #include "EventEnvelopeContext.h"
-#include "runtime/Event.h"       // runtime::EventType
+#include "runtime/Event.h"
+#include "ava/event/events.h"
 #include "ava/core/result.h"
 
 #include <functional>
 #include <string>
-#include <string_view>
-#include <vector>
+
+namespace ava::app::runtime {
+
+struct Event;
+using EventSink = std::function<ava::core::VoidResult(Event const&)>;
+
+// Migration-only aliases for app consumers that have not moved to ava::event yet.
+using PayloadType = ava::event::PayloadType;
+using SessionPayload = ava::event::SessionPayload;
+using MessagePayload = ava::event::MessagePayload;
+using ReasoningPayload = ava::event::ReasoningPayload;
+using ProviderPayload = ava::event::ProviderPayload;
+using ToolPayload = ava::event::ToolPayload;
+using CompactionPayload = ava::event::CompactionPayload;
+using RetryPayload = ava::event::RetryPayload;
+using CancellationPayload = ava::event::CancellationPayload;
+using ErrorPayload = ava::event::ErrorPayload;
+using CompletionPayload = ava::event::CompletionPayload;
+
+}  // namespace ava::app::runtime
 
 namespace ava::app {
 
-struct EventEnvelope;
+// Migration-only aliases and using-declarations preserve current app consumer syntax.
+using EventEnvelopeSink = ava::event::EventEnvelopeSink;
+using EventBus = ava::event::EventBus;
+using ava::event::payload_type_for_event;
+using ava::event::serialize_event_envelope_json;
+using ava::event::serialize_event_envelope_jsonl;
+using ava::event::serialize_payload_json;
+using ava::event::to_string;
 
-namespace runtime {
-struct SessionPayload;
-struct MessagePayload;
-struct ReasoningPayload;
-struct ProviderPayload;
-struct ToolPayload;
-struct CompactionPayload;
-struct RetryPayload;
-struct CancellationPayload;
-struct ErrorPayload;
-struct CompletionPayload;
-struct Event;
-
-using EventSink = std::function<ava::core::VoidResult(runtime::Event const&)>;
-
-enum class PayloadType
-{
-  Session,
-  Message,
-  Reasoning,
-  Provider,
-  Tool,
-  Compaction,
-  Retry,
-  Cancellation,
-  Error,
-  Completion,
-  Permission,
-  Question,
-  Queue,
-};
-
-} // namespace runtime
-
-using EventEnvelopeSink = std::function<ava::core::VoidResult(EventEnvelope const&)>;
-
-class EventBus
-{
- public:
-  void subscribe(EventEnvelopeSink sink);
-  // Subscribers are called synchronously in registration order. Publishing stops on the first failure.
-  [[nodiscard]] ava::core::VoidResult publish(EventEnvelope const& envelope) const;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-
- private:
-  std::vector<EventEnvelopeSink> sinks_;
-};
-
-[[nodiscard]] std::string to_string(runtime::EventType type);
-[[nodiscard]] std::string_view to_string(runtime::PayloadType type) noexcept;
-[[nodiscard]] runtime::PayloadType payload_type_for_event(runtime::EventType type) noexcept;
 [[nodiscard]] runtime::SessionPayload session_payload_from_event(runtime::Event const& event);
 [[nodiscard]] runtime::MessagePayload message_payload_from_event(runtime::Event const& event);
 [[nodiscard]] runtime::ReasoningPayload reasoning_payload_from_event(runtime::Event const& event);
@@ -75,23 +50,13 @@ class EventBus
 [[nodiscard]] runtime::CancellationPayload cancellation_payload_from_event(runtime::Event const& event);
 [[nodiscard]] runtime::ErrorPayload error_payload_from_event(runtime::Event const& event);
 [[nodiscard]] runtime::CompletionPayload completion_payload_from_event(runtime::Event const& event);
-[[nodiscard]] std::string serialize_payload_json(runtime::SessionPayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(runtime::MessagePayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(runtime::ReasoningPayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(runtime::ProviderPayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(runtime::ToolPayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(runtime::CompactionPayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(runtime::RetryPayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(runtime::CancellationPayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(runtime::ErrorPayload const& payload);
-[[nodiscard]] std::string serialize_payload_json(runtime::CompletionPayload const& payload);
+[[nodiscard]] ava::event::RuntimeEvent to_runtime_event(runtime::Event const& event);
+
 [[nodiscard]] std::string serialize_event_json(runtime::Event const& event);
 [[nodiscard]] std::string serialize_event_jsonl(runtime::Event const& event);
 [[nodiscard]] ava::core::VoidResult emit_event(runtime::EventSink const& sink, runtime::Event const& event);
 
 [[nodiscard]] EventEnvelope to_event_envelope(runtime::Event const& event, EventEnvelopeContext const& context = {});
-[[nodiscard]] std::string serialize_event_envelope_json(EventEnvelope const& envelope);
-[[nodiscard]] std::string serialize_event_envelope_jsonl(EventEnvelope const& envelope);
 // The returned sink captures `bus` by reference and must not outlive it.
 [[nodiscard]] runtime::EventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context = {}, runtime::EventSink legacy_sink = nullptr);
 

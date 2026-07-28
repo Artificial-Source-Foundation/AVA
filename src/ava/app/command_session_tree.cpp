@@ -19,7 +19,6 @@
 namespace ava::app {
 using session_command_support::contains_ascii_case_insensitive;
 using session_command_support::labels_text;
-using session_command_support::load_runtime_metadata;
 using session_command_support::reopen_session;
 using session_command_support::shorten_middle;
 using session_command_support::trim_ascii;
@@ -165,7 +164,7 @@ ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& s
 
   if (parts.size() == 1)
   {
-    auto metadata = load_runtime_metadata(*target);
+    auto metadata = target->load_runtime_metadata();
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
     auto text = metadata->labels.empty() ? std::string("session " + target->store.session_id() + " labels: <none>")
@@ -233,7 +232,7 @@ ava::core::Result<CommandResult> run_sessions_archive_command(runtime::Session& 
   if (!target)
     return std::unexpected(std::move(target.error()));
 
-  auto current_metadata = load_runtime_metadata(*target);
+  auto current_metadata = target->load_runtime_metadata();
   if (!current_metadata)
     return std::unexpected(std::move(current_metadata.error()));
   if (current_metadata->archived == archived)

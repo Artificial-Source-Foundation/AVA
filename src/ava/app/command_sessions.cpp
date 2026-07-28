@@ -16,7 +16,6 @@
 
 namespace ava::app {
 using session_command_support::labels_text;
-using session_command_support::load_runtime_metadata;
 using session_command_support::owned_replacement_options;
 using session_command_support::reopen_session;
 using session_command_support::trim_ascii;
@@ -116,7 +115,7 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::Session& sessi
 
   auto const previous_session_id = session.store.session_id();
   auto previous_session_title = std::string("Untitled session");
-  if (auto metadata = load_runtime_metadata(session); metadata && !metadata->effective_title().empty())
+  if (auto metadata = session.load_runtime_metadata(); metadata && !metadata->effective_title().empty())
     previous_session_title = sanitize_inline_text(metadata->effective_title());
 
   auto const trimmed_name = trim_ascii(name);
@@ -203,7 +202,7 @@ ava::core::Result<CommandResult> run_labels_command(runtime::Session& session, s
   auto const parts = split_command_arguments(labels);
   if (parts.empty())
   {
-    auto metadata = load_runtime_metadata(session);
+    auto metadata = session.load_runtime_metadata();
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
     auto text = metadata->labels.empty() ? std::string("session labels: <none>") : std::string("session labels: ") + labels_text(metadata->labels);

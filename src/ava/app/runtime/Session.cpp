@@ -429,6 +429,17 @@ ava::core::Result<ava::session::SessionMetadataView> Session::append_runtime_ses
   return ava::session::session_metadata_from_entries(store.session_id(), *entries);
 }
 
+ava::core::Result<ava::session::SessionMetadataView> Session::load_runtime_metadata() const
+{
+  auto read_authority = this->read_authority();
+  if (!read_authority)
+    return std::unexpected(std::move(read_authority.error()));
+  auto entries = read_authority->load();
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  return ava::session::session_metadata_from_entries(store.session_id(), *entries);
+}
+
 std::string Session::state_result_json(bool cancel_requested) const
 {
   using namespace rpc;
@@ -488,9 +499,6 @@ std::string Session::state_result_json(bool cancel_requested) const
 
 ava::core::Result<std::string> Session::messages_result_json() const
 {
-  // The badge makes MessagesResultSerializer construction exclusive to this member;
-  // the serialization logic itself lives with the rest of the RPC code in
-  // rpc/serialization.cpp, reachable only through this single entry point.
   return rpc::detail::MessagesResultSerializer({}, *this).run();
 }
 

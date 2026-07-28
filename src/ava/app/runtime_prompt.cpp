@@ -5,6 +5,7 @@
 #include "runtime_compaction.h"
 #include "runtime_event_adapters.h"
 #include "runtime_prompt.h"
+#include "runtime_prompt_file_references.h"
 #include "runtime_reasoning.h"
 #include "runtime_retry.h"
 #include "runtime_sessions.h"
@@ -15,7 +16,6 @@
 #include "ava/http/curl_transport.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/subagent_config.h"
-#include "ava/tools/file_tools.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/registry.h"
@@ -23,8 +23,6 @@
 #include "ava/core/error.h"
 #include "ava/core/ids.h"
 
-#include <algorithm>
-#include <cctype>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -114,139 +112,6 @@ std::optional<ava::diagnostics::RuntimeFailureClass> diagnostic_failure_class(av
       return std::nullopt;
   }
   return std::nullopt;
-}
-
-constexpr std::size_t kMaxPromptFileReferences = 5;
-constexpr std::size_t kPromptReferenceMaxBytes = 32 * 1024;
-constexpr std::size_t kPromptReferenceMaxLines = 300;
-
-struct PromptFileReference
-{
-  std::string path;
-};
-
-bool is_reference_start(std::string_view text, std::size_t index)
-{
-  return text[index] == '@' && (index == 0 || std::isspace(static_cast<unsigned char>(text[index - 1])) != 0);
-}
-
-bool is_trailing_reference_punctuation(char ch)
-{
-  switch (ch)
-  {
-    case '.':
-    case ',':
-    case ';':
-    case ':':
-    case '!':
-    case '?':
-    case ')':
-    case ']':
-    case '}':
-      return true;
-    default:
-      return false;
-  }
-}
-
-std::vector<PromptFileReference> prompt_file_references(std::string_view text)
-{
-  std::vector<PromptFileReference> references;
-  auto add_reference = [&references](std::string path) {
-    if (path.empty())
-      return;
-    if (std::ranges::any_of(references, [&](PromptFileReference const& existing) { return existing.path == path; }))
-      return;
-    references.push_back(PromptFileReference{.path = std::move(path)});
-  };
-  for (std::size_t index = 0; index < text.size(); ++index)
-  {
-    if (!is_reference_start(text, index))
-      continue;
-    if (index + 1 < text.size() && text[index + 1] == '"')
-    {
-      auto end = index + 2;
-      while (end < text.size() && text[end] != '"') ++end;
-      add_reference(std::string(text.substr(index + 2, end - index - 2)));
-      index = end;
-      continue;
-    }
-    auto end = index + 1;
-    while (end < text.size() && std::isspace(static_cast<unsigned char>(text[end])) == 0) ++end;
-    auto token_end = end;
-    while (token_end > index + 1 && is_trailing_reference_punctuation(text[token_end - 1])) --token_end;
-    if (token_end <= index + 1)
-      continue;
-    add_reference(std::string(text.substr(index + 1, token_end - index - 1)));
-  }
-  return references;
-}
-
-ava::tools::ToolContext prompt_file_reference_context(runtime::Session& session, runtime::RunOptions const& options)
-{
-  return ava::tools::ToolContext{.workspace_dir = session.workspace_dir(),
-                                 .spill_dir = session.store.session_path().parent_path() / "spill",
-                                 .mode = session.mode(),
-                                 .permission_resolver = options.permission_resolver,
-                                 .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
-                                   return ava::agent::append_permission_decision(session.owner_append_route(), event);
-                                 },
-                                 .cancel_requested = options.cancel_requested,
-                                 .permission_tool_name = "file_reference",
-                                 .permission_actor = "user",
-                                 .anchor_set = session.anchor_set(),
-                                 .ava_authority_roots = command_authority_roots_for_session(session),
-                                 .exact_file_access = options.exact_file_access,
-                                 .command_executor = options.command_executor,
-                                 .session_id = session.store.session_id(),
-                                 .provider_id = session.model().provider_id,
-                                 .model_id = session.model().model_id,
-                                 .current_dir = session.current_dir()};
-}
-
-ava::core::Result<std::string> expand_prompt_file_references(runtime::Session& session, std::string const& user_message, runtime::RunOptions const& options)
-{
-  auto references = prompt_file_references(user_message);
-  if (references.empty())
-    return user_message;
-  if (references.size() > kMaxPromptFileReferences)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "too many @ file references");
-    error.with_context("max_references", std::to_string(kMaxPromptFileReferences));
-    error.with_context("reference_count", std::to_string(references.size()));
-    return std::unexpected(std::move(error));
-  }
-
-  auto context = prompt_file_reference_context(session, options);
-  std::string expanded = user_message;
-  expanded += "\n\nReferenced files:";
-  for (auto const& reference : references)
-  {
-    auto read = ava::tools::read_file(context, session.current_dir() / reference.path,
-                                      ava::tools::ReadOptions{.max_bytes = kPromptReferenceMaxBytes, .offset_line = 1, .max_lines = kPromptReferenceMaxLines});
-    if (!read)
-    {
-      auto error = read.error();
-      error.with_context("file_reference", reference.path);
-      return std::unexpected(std::move(error));
-    }
-    expanded += "\n\n--- ";
-    expanded += reference.path;
-    expanded += " ---\n";
-    expanded += read->content;
-    if (read->truncated)
-    {
-      expanded += "\n[reference truncated";
-      if (read->next_offset_line > 0)
-        expanded += "; next offset " + std::to_string(read->next_offset_line);
-      if (read->byte_limited)
-        expanded += "; byte cap reached";
-      if (read->line_limited)
-        expanded += "; line cap reached";
-      expanded += "]";
-    }
-  }
-  return expanded;
 }
 
 }  // namespace

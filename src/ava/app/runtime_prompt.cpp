@@ -6,6 +6,7 @@
 #include "runtime/command_names.h"
 #include "runtime/markdown_files.h"
 #include "runtime_compaction.h"
+#include "runtime_event_adapters.h"
 #include "runtime_prompt.h"
 #include "runtime_reasoning.h"
 #include "runtime_retry.h"
@@ -13,6 +14,7 @@
 #include "session_title_coordinator.h"
 #include "subagent_delivery_manager.h"
 #include "ava/diagnostics/runtime_diagnostics.h"
+#include "ava/event/events.h"
 #include "ava/http/curl_transport.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/subagent_config.h"
@@ -20,6 +22,7 @@
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/static_resources.h"
 #include "ava/config/prompt_config.h"
+#include "ava/session/session_store.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/registry.h"
 #include "ava/context/markdown_resource.h"
@@ -34,6 +37,7 @@
 #include <algorithm>
 #include <cctype>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -506,24 +510,39 @@ ava::core::Result<PromptState> load_runtime_prompt_state(ava::config::XdgPaths c
 namespace ava::app {
 namespace {
 
-runtime::Event base_event(runtime::Session const& session, runtime::EventType type)
+ava::event::RuntimeEventMetadata runtime_event_metadata(runtime::Session const& session, std::mutex* mutex)
 {
-  runtime::Event event;
-  event.type = type;
-  event.timestamp = ava::session::now_timestamp();
-  event.session_id = session.store.session_id();
-  event.mode = session.mode();
-  event.provider_id = session.model().provider_id;
-  event.model_id = session.model().model_id;
-  return event;
+  auto build = [&] {
+    return ava::event::RuntimeEventMetadata{
+        .timestamp = ava::session::now_timestamp(),
+        .session_id = session.store.session_id(),
+    };
+  };
+  if (!mutex)
+    return build();
+  std::lock_guard lock(*mutex);
+  return build();
 }
 
-runtime::Event base_event_locked(runtime::Session const& session, runtime::EventType type, std::mutex* mutex)
+// SessionStart reads mode/provider/model under the same lock as metadata so the
+// published snapshot stays atomic with the timestamp/session id capture.
+ava::event::RuntimeEvent session_start_event(runtime::Session const& session, std::mutex* mutex)
 {
+  auto build = [&] {
+    return ava::event::RuntimeEvent{ava::event::RuntimeEventMetadata{
+                                        .timestamp = ava::session::now_timestamp(),
+                                        .session_id = session.store.session_id(),
+                                    },
+                                    ava::event::SessionStartEvent{.payload = ava::event::SessionPayload{
+                                                                      .mode = session.mode(),
+                                                                      .provider = session.model().provider_id,
+                                                                      .model = session.model().model_id,
+                                                                  }}};
+  };
   if (!mutex)
-    return base_event(session, type);
+    return build();
   std::lock_guard lock(*mutex);
-  return base_event(session, type);
+  return build();
 }
 
 bool is_agent_loop_canceled_error(ava::core::Error const& error)
@@ -947,17 +966,20 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   if (!expanded_user_message)
     return fail_run(std::move(expanded_user_message.error()));
 
-  auto session_event = base_event_locked(session, runtime::EventType::SessionStart, options.session_mutex);
-  if (auto emitted = emit_event(event_sink, session_event); !emitted)
+  if (auto emitted = ava::event::emit_event(event_sink, session_start_event(session, options.session_mutex)); !emitted)
   {
     return fail_run(std::move(emitted.error()));
   }
 
-  auto user_event = base_event_locked(session, runtime::EventType::UserMessage, options.session_mutex);
-  user_event.text = *expanded_user_message;
-  if (auto emitted = emit_event(event_sink, user_event); !emitted)
   {
-    return fail_run(std::move(emitted.error()));
+    ava::event::MessagePayload user_payload;
+    user_payload.text = *expanded_user_message;
+    if (auto emitted = ava::event::emit_event(event_sink, ava::event::RuntimeEvent{runtime_event_metadata(session, options.session_mutex),
+                                                                                   ava::event::UserMessageEvent{.payload = std::move(user_payload)}});
+        !emitted)
+    {
+      return fail_run(std::move(emitted.error()));
+    }
   }
 
   auto const resource_policy = make_extension_resource_policy(session);
@@ -1048,53 +1070,9 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
           [&session, &options, &event_sink, &sink_error](ava::agent::ToolTimelineEntry const& entry) {
             if (sink_error)
               return;
-            auto event = base_event_locked(
-                session, entry.status == ava::agent::ToolTimelineStatus::Running ? runtime::EventType::ToolStart : runtime::EventType::ToolResult,
-                options.session_mutex);
-            event.call_id = entry.call_id;
-            event.tool_name = entry.name;
-            event.text = entry.status == ava::agent::ToolTimelineStatus::Running ? entry.argument_summary : entry.result_summary;
-            event.tool_arguments_json = entry.arguments_json;
-            event.tool_result_json = entry.result_json;
-            event.tool_structured_result_json = entry.structured_result_json;
-            event.content_type = entry.content_type;
-            event.error_category = entry.error_category;
-            event.error_code = entry.error_code;
-            event.error_message = entry.error_message;
-            event.error_details = entry.error_details;
-            event.diff = entry.diff;
-            event.diff_truncated = entry.diff_truncated;
-            event.changed_paths = entry.changed_paths;
-            event.permission_request_ids = entry.permission_request_ids;
-            event.truncated = entry.truncated;
-            event.byte_limited = entry.byte_limited;
-            event.line_limited = entry.line_limited;
-            event.spill_path = entry.spill_path;
-            event.spill_truncated = entry.spill_truncated;
-            if (entry.output_bytes)
-              event.output_bytes = *entry.output_bytes;
-            if (entry.total_bytes)
-              event.total_bytes = *entry.total_bytes;
-            if (entry.output_lines)
-              event.output_lines = *entry.output_lines;
-            if (entry.total_lines)
-              event.total_lines = *entry.total_lines;
-            if (entry.start_line)
-              event.start_line = *entry.start_line;
-            if (entry.end_line)
-              event.end_line = *entry.end_line;
-            if (entry.next_offset_line)
-              event.next_offset_line = *entry.next_offset_line;
-            if (entry.omitted_bytes)
-              event.omitted_bytes = *entry.omitted_bytes;
-            if (entry.omitted_lines)
-              event.omitted_lines = *entry.omitted_lines;
-            if (entry.visible_matches)
-              event.visible_matches = *entry.visible_matches;
-            if (entry.total_matches)
-              event.total_matches = *entry.total_matches;
-            event.status = ava::agent::to_string(entry.status);
-            if (auto emitted = emit_event(event_sink, event); !emitted)
+            // Capture metadata before mapping payload fields, matching the old base-event path.
+            auto metadata = runtime_event_metadata(session, options.session_mutex);
+            if (auto emitted = ava::event::emit_event(event_sink, runtime_event_from_tool_timeline_entry(std::move(metadata), entry)); !emitted)
             {
               sink_error = std::move(emitted.error());
             }
@@ -1102,12 +1080,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .on_tool_progress = [&session, &options, &event_sink, &sink_error](ava::agent::ToolProgressEntry const& entry) -> ava::core::VoidResult {
         if (sink_error)
           return std::unexpected(*sink_error);
-        auto event = base_event_locked(session, runtime::EventType::ToolProgress, options.session_mutex);
-        event.call_id = entry.call_id;
-        event.tool_name = entry.name;
-        event.text = entry.text;
-        event.status = entry.status;
-        if (auto emitted = emit_event(event_sink, event); !emitted)
+        auto metadata = runtime_event_metadata(session, options.session_mutex);
+        if (auto emitted = ava::event::emit_event(event_sink, runtime_event_from_tool_progress_entry(std::move(metadata), entry)); !emitted)
         {
           sink_error = std::move(emitted.error());
           return std::unexpected(*sink_error);
@@ -1117,25 +1091,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .on_stream_event = [&session, &options, &event_sink, &sink_error](ava::provider::StreamEvent const& stream_event) -> ava::core::VoidResult {
         if (sink_error)
           return std::unexpected(*sink_error);
-        auto event = base_event_locked(session,
-                                       stream_event.type == ava::provider::StreamEventType::TextDelta        ? runtime::EventType::MessageUpdate
-                                       : stream_event.type == ava::provider::StreamEventType::ReasoningStart ? runtime::EventType::ReasoningStart
-                                       : stream_event.type == ava::provider::StreamEventType::ReasoningDelta ? runtime::EventType::ReasoningDelta
-                                       : stream_event.type == ava::provider::StreamEventType::ReasoningEnd   ? runtime::EventType::ReasoningEnd
-                                       : stream_event.type == ava::provider::StreamEventType::Done           ? runtime::EventType::MessageEnd
-                                                                                                             : runtime::EventType::ProviderEvent,
-                                       options.session_mutex);
-        event.text = stream_event.text;
-        event.call_id = stream_event.tool_call_id;
-        event.tool_name = stream_event.tool_name;
-        event.status = ava::provider::to_string(stream_event.type);
-        event.error_message = stream_event.error_message;
-        if (stream_event.finish_reason)
-          event.stop_reason = std::string(ava::provider::to_string(*stream_event.finish_reason));
-        event.reasoning_format = stream_event.reasoning_format;
-        event.reasoning_redacted = stream_event.redacted;
-        event.reasoning_signature_present = stream_event.reasoning_signature_present || !stream_event.reasoning_signature.empty();
-        if (auto emitted = emit_event(event_sink, event); !emitted)
+        auto metadata = runtime_event_metadata(session, options.session_mutex);
+        if (auto emitted = ava::event::emit_event(event_sink, runtime_event_from_provider_stream_event(std::move(metadata), stream_event)); !emitted)
         {
           sink_error = std::move(emitted.error());
           return std::unexpected(*sink_error);
@@ -1190,34 +1147,52 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   }
   if (!result)
   {
-    auto event = base_event_locked(session, is_agent_loop_canceled_error(result.error()) ? runtime::EventType::Canceled : runtime::EventType::Error,
-                                   options.session_mutex);
-    event.error_category = ava::core::to_string(result.error().category());
-    event.error_message = result.error().message();
-    event.error_details = result.error().format();
-    if (event.type == runtime::EventType::Canceled)
+    auto metadata = runtime_event_metadata(session, options.session_mutex);
+    if (is_agent_loop_canceled_error(result.error()))
     {
-      event.text = "stopped by user";
-      event.reason = result.error().message();
+      ava::event::CancellationPayload cancel_payload;
+      cancel_payload.text = "stopped by user";
+      cancel_payload.error_category = ava::core::to_string(result.error().category());
+      cancel_payload.error_message = result.error().message();
+      cancel_payload.error_details = result.error().format();
+      cancel_payload.reason = result.error().message();
+      static_cast<void>(ava::event::emit_event(
+          event_sink, ava::event::RuntimeEvent{std::move(metadata), ava::event::CancellationEvent{.payload = std::move(cancel_payload)}}));
     }
-    static_cast<void>(emit_event(event_sink, event));
+    else
+    {
+      ava::event::ErrorPayload error_payload;
+      error_payload.error_category = ava::core::to_string(result.error().category());
+      error_payload.error_message = result.error().message();
+      error_payload.error_details = result.error().format();
+      static_cast<void>(
+          ava::event::emit_event(event_sink, ava::event::RuntimeEvent{std::move(metadata), ava::event::ErrorEvent{.payload = std::move(error_payload)}}));
+    }
     return fail_run(result.error());
   }
 
-  auto assistant_event = base_event_locked(session, runtime::EventType::AssistantMessage, options.session_mutex);
-  assistant_event.text = result->final_text;
-  if (auto emitted = emit_event(event_sink, assistant_event); !emitted)
   {
-    return fail_run(std::move(emitted.error()));
+    ava::event::MessagePayload assistant_payload;
+    assistant_payload.text = result->final_text;
+    if (auto emitted = ava::event::emit_event(event_sink, ava::event::RuntimeEvent{runtime_event_metadata(session, options.session_mutex),
+                                                                                   ava::event::AssistantMessageEvent{.payload = std::move(assistant_payload)}});
+        !emitted)
+    {
+      return fail_run(std::move(emitted.error()));
+    }
   }
 
-  auto done_event = base_event_locked(session, runtime::EventType::Done, options.session_mutex);
-  done_event.stop_reason = std::string(ava::core::to_string(result->outcome));
-  done_event.provider_iterations = result->provider_iterations;
-  done_event.tool_calls = result->tool_calls;
-  if (auto emitted = emit_event(event_sink, done_event); !emitted)
   {
-    return fail_run(std::move(emitted.error()));
+    ava::event::CompletionPayload completion_payload;
+    completion_payload.stop_reason = std::string(ava::core::to_string(result->outcome));
+    completion_payload.provider_iterations = result->provider_iterations;
+    completion_payload.tool_calls = result->tool_calls;
+    if (auto emitted = ava::event::emit_event(event_sink, ava::event::RuntimeEvent{runtime_event_metadata(session, options.session_mutex),
+                                                                                   ava::event::CompletionEvent{.payload = std::move(completion_payload)}});
+        !emitted)
+    {
+      return fail_run(std::move(emitted.error()));
+    }
   }
   if (auto transitioned = guard.transition(RunPhase::Completing); !transitioned)
     return fail_run(std::move(transitioned.error()));

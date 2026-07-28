@@ -72,6 +72,7 @@ target_sources(ava_app
     "runtime_json.cpp"
     "runtime_model.cpp"
     "runtime_prompt.cpp"
+    "runtime_event_adapters.cpp"
     "runtime_reasoning.cpp"
     "runtime_retry.cpp"
     "runtime_sessions.cpp"

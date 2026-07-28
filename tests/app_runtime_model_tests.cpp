@@ -266,12 +266,12 @@ void test_runtime_model_switch_accepts_committed_openai_responses_reasoning()
          "foreign reasoning format and cross-provider targets receive visible answer text through portable request projection");
 
   auto controller = std::move(session->resources().run_controller);
-  auto rejected_append_switch = ava::app::switch_runtime_model(*session, *target);
+  auto rejected_append_switch = session->switch_runtime_model(*target);
   session->resources().run_controller = std::move(controller);
   expect(!rejected_append_switch && session->model().provider_id == "openai" && session->model().model_id == "gpt-5.5",
          "a model_change append failure is reported truthfully and leaves active runtime model state unchanged");
 
-  auto switched = ava::app::switch_runtime_model(*session, *target);
+  auto switched = session->switch_runtime_model(*target);
   auto entries = session->store.load();
   auto const appended_model_change = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
                                        return entry.type == ava::session::EntryType::ModelChange &&
@@ -332,7 +332,7 @@ void test_app_runtime_model_switch_persists_and_reopens()
   expect(model.has_value(), "runtime resolves configured Anthropic model");
   if (!model)
     return;
-  auto switched = ava::app::switch_runtime_model(*session, *model);
+  auto switched = session->switch_runtime_model(*model);
   expect(switched.has_value() && *switched, "runtime model switch reports a change");
   expect(session->model().provider_id == "anthropic" && session->model().model_id == "claude-test", "runtime model switch updates active session model");
 
@@ -500,7 +500,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
   expect(no_tools_model.has_value(), "runtime resolves no-tools model");
   if (!no_tools_model)
     return;
-  auto switched_no_tools = ava::app::switch_runtime_model(*session, *no_tools_model);
+  auto switched_no_tools = session->switch_runtime_model(*no_tools_model);
   expect(switched_no_tools.has_value() && *switched_no_tools, "runtime switches immediately to a model without tool support after tool history");
   expect(session->model().provider_id == "openai" && session->model().model_id == "no-tools",
          "tool-history model switch updates active state without scanning history");
@@ -525,7 +525,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
   expect(anthropic_replay.has_value(), "runtime resolves Anthropic replay model");
   if (!anthropic_replay)
     return;
-  auto switched_anthropic = ava::app::switch_runtime_model(*session, *anthropic_replay);
+  auto switched_anthropic = session->switch_runtime_model(*anthropic_replay);
   expect(switched_anthropic.has_value() && *switched_anthropic, "runtime allows switch to Anthropic model that can replay Anthropic reasoning");
   expect(session->model().provider_id == "anthropic" && session->model().model_id == "claude-replay", "compatible reasoning switch updates active model");
 
@@ -533,7 +533,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
   expect(kimi_model.has_value(), "runtime resolves Kimi model");
   if (!kimi_model)
     return;
-  auto switched_reasoning = ava::app::switch_runtime_model(*session, *kimi_model);
+  auto switched_reasoning = session->switch_runtime_model(*kimi_model);
   expect(switched_reasoning.has_value() && *switched_reasoning, "runtime switches immediately across incompatible reasoning providers");
   expect(session->model().provider_id == "kimi" && session->model().model_id == "kimi-k2-thinking",
          "cross-provider reasoning switch updates active state without scanning history");
@@ -552,7 +552,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
                                                                               .timestamp = ava::session::now_timestamp(),
                                                                               .data_json = "{\"summary\":\"old history\"}"});
   expect(appended_compaction.has_value(), "model switch compatibility test seeds compaction boundary");
-  auto switched_no_tools_after_compaction = ava::app::switch_runtime_model(*session, *no_tools_model);
+  auto switched_no_tools_after_compaction = session->switch_runtime_model(*no_tools_model);
   expect(switched_no_tools_after_compaction.has_value() && *switched_no_tools_after_compaction,
          "runtime ignores pre-compaction native history for switch compatibility");
   expect(session->model().provider_id == "openai" && session->model().model_id == "no-tools", "post-compaction switch updates active model");
@@ -569,7 +569,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
   expect(anthropic_image.has_value(), "runtime resolves Anthropic image model");
   if (!anthropic_image)
     return;
-  auto switched_large_image = ava::app::switch_runtime_model(*session, *anthropic_image);
+  auto switched_large_image = session->switch_runtime_model(*anthropic_image);
   expect(switched_large_image.has_value() && *switched_large_image,
          "runtime switches immediately despite historical images exceeding the target's provider-specific limit");
   expect(session->model().provider_id == "anthropic" && session->model().model_id == "claude-image",
@@ -599,7 +599,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
                                                                                                    "\"format\":\"reasoning_content\","
                                                                                                    "\"text\":\"display-only deepseek reasoning\"}"});
   expect(appended_deepseek_reasoning.has_value(), "model switch compatibility test seeds DeepSeek reasoning history");
-  auto switched_deepseek_to_kimi = ava::app::switch_runtime_model(*session, *kimi_model);
+  auto switched_deepseek_to_kimi = session->switch_runtime_model(*kimi_model);
   expect(switched_deepseek_to_kimi.has_value() && *switched_deepseek_to_kimi,
          "runtime switches immediately across providers that use the same reasoning format");
   expect(session->model().provider_id == "kimi" && session->model().model_id == "kimi-k2-thinking",
@@ -622,7 +622,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
                                                                                                "\"text\":\"compatible kimi reasoning\"}"});
   expect(appended_kimi_reasoning.has_value(), "model switch compatibility test seeds Kimi reasoning history");
 
-  auto switched_kimi = ava::app::switch_runtime_model(*session, *kimi_model);
+  auto switched_kimi = session->switch_runtime_model(*kimi_model);
   expect(switched_kimi.has_value() && !*switched_kimi, "switching to the already-active Kimi model remains an accepted no-op");
   expect(session->model().provider_id == "kimi" && session->model().model_id == "kimi-k2-thinking", "accepted Kimi no-op preserves the active model");
 
@@ -630,7 +630,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
   expect(moonshot_model.has_value(), "runtime resolves Moonshot model");
   if (!moonshot_model)
     return;
-  auto switched_moonshot = ava::app::switch_runtime_model(*session, *moonshot_model);
+  auto switched_moonshot = session->switch_runtime_model(*moonshot_model);
   expect(switched_moonshot.has_value() && *switched_moonshot, "runtime switches immediately without a native-reasoning preservation quirk");
   expect(session->model().provider_id == "moonshot" && session->model().model_id == "kimi-k2.6",
          "Moonshot switch updates active state while request projection owns replay safety");
@@ -708,16 +708,16 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
   auto const session_id = session->store.session_id();
 
   auto selected =
-      ava::app::set_runtime_reasoning(*session, ava::app::runtime::ReasoningSelection{.level = " low ", .budget_tokens = std::nullopt, .display = ""});
+      session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = " low ", .budget_tokens = std::nullopt, .display = ""});
   expect(selected.has_value() && *selected && session->reasoning() && session->reasoning()->level == "low",
          "runtime reasoning selection validates, normalizes, and updates state");
 
   auto duplicate =
-      ava::app::set_runtime_reasoning(*session, ava::app::runtime::ReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
+      session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
   expect(duplicate.has_value() && !*duplicate, "runtime reasoning selection is idempotent when unchanged");
 
   auto invalid =
-      ava::app::set_runtime_reasoning(*session, ava::app::runtime::ReasoningSelection{.level = "ultra", .budget_tokens = std::nullopt, .display = ""});
+      session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "ultra", .budget_tokens = std::nullopt, .display = ""});
   expect(!invalid.has_value(), "runtime reasoning selection rejects unsupported model levels");
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
@@ -754,24 +754,24 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
   expect(!reopened && reopened.error().message().find("already owned") != std::string::npos,
          "a second runtime cannot inspect reasoning by bypassing the active owner's lease");
 
-  auto cleared = ava::app::set_runtime_reasoning(*session, std::nullopt);
+  auto cleared = session->set_runtime_reasoning(std::nullopt);
   expect(cleared.has_value() && *cleared && !session->reasoning(), "runtime reasoning selection can be cleared");
 
   auto reselected =
-      ava::app::set_runtime_reasoning(*session, ava::app::runtime::ReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
+      session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
   expect(reselected.has_value() && *reselected, "runtime reasoning test re-enables reasoning before switch boundary");
   auto kimi_model = ava::app::resolve_runtime_model(paths, "kimi", "kimi-k2-thinking");
   auto openai_model = ava::app::resolve_runtime_model(paths, "openai", "gpt-5.5");
   expect(kimi_model.has_value() && openai_model.has_value(), "runtime reasoning test resolves switch boundary models");
   if (kimi_model && openai_model)
   {
-    auto switched_away = ava::app::switch_runtime_model(*session, *kimi_model);
+    auto switched_away = session->switch_runtime_model(*kimi_model);
     expect(switched_away.has_value() && *switched_away, "runtime reasoning test switches to Kimi model");
     auto kimi_budget =
-        ava::app::set_runtime_reasoning(*session, ava::app::runtime::ReasoningSelection{.level = "enabled", .budget_tokens = 1024, .display = "summarized"});
+        session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "enabled", .budget_tokens = 1024, .display = "summarized"});
     expect(!kimi_budget.has_value() && kimi_budget.error().format().find("Kimi reasoning supports level only") != std::string::npos,
            "runtime reasoning selection rejects unsupported OpenAI-compatible budget/display controls");
-    auto switched_back = ava::app::switch_runtime_model(*session, *openai_model);
+    auto switched_back = session->switch_runtime_model(*openai_model);
     expect(switched_back.has_value() && *switched_back && !session->reasoning(), "runtime model switches clear active reasoning selection");
     auto reopened_after_switch = ava::app::open_runtime_session(reopen_options);
     expect(!reopened_after_switch && reopened_after_switch.error().message().find("already owned") != std::string::npos,
@@ -782,10 +782,10 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
   expect(no_levels_model.has_value(), "runtime reasoning test resolves no-level custom model");
   if (no_levels_model)
   {
-    auto switched = ava::app::switch_runtime_model(*session, *no_levels_model);
+    auto switched = session->switch_runtime_model(*no_levels_model);
     expect(switched.has_value() && *switched, "runtime reasoning test switches to no-level custom model");
     auto no_level_selection =
-        ava::app::set_runtime_reasoning(*session, ava::app::runtime::ReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
+        session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
     expect(!no_level_selection.has_value() && no_level_selection.error().format().find("supported reasoning levels") != std::string::npos,
            "runtime reasoning selection rejects models without declared reasoning levels");
   }
@@ -794,10 +794,10 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
   expect(anthropic_default_max.has_value(), "runtime reasoning test resolves Anthropic default max model");
   if (anthropic_default_max)
   {
-    auto switched = ava::app::switch_runtime_model(*session, *anthropic_default_max);
+    auto switched = session->switch_runtime_model(*anthropic_default_max);
     expect(switched.has_value() && *switched, "runtime reasoning test switches to Anthropic default max model");
     auto over_budget =
-        ava::app::set_runtime_reasoning(*session, ava::app::runtime::ReasoningSelection{.level = "enabled", .budget_tokens = 4096, .display = "summarized"});
+        session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "enabled", .budget_tokens = 4096, .display = "summarized"});
     expect(!over_budget.has_value() && over_budget.error().format().find("reasoning budget must be below max output tokens") != std::string::npos,
            "runtime reasoning selection validates Anthropic budget against provider default max tokens");
   }
@@ -815,11 +815,11 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
                *session->reasoning()->budget_tokens == 4096,
            "runtime reasoning cycling uses API-family fallback profile for custom Anthropic-compatible models");
     auto missing_budget =
-        ava::app::set_runtime_reasoning(*session, ava::app::runtime::ReasoningSelection{.level = "enabled", .budget_tokens = std::nullopt, .display = ""});
+        session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "enabled", .budget_tokens = std::nullopt, .display = ""});
     expect(!missing_budget.has_value() && missing_budget.error().format().find("Anthropic-proxy enabled reasoning requires budget_tokens") != std::string::npos,
            "runtime reasoning validation labels missing-budget errors with the custom provider id");
     auto too_large_budget =
-        ava::app::set_runtime_reasoning(*session, ava::app::runtime::ReasoningSelection{.level = "enabled", .budget_tokens = 8192, .display = ""});
+        session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "enabled", .budget_tokens = 8192, .display = ""});
     expect(!too_large_budget.has_value() && too_large_budget.error().format().find("reasoning budget must be below max output tokens") != std::string::npos,
            "runtime reasoning validation applies fallback budget limits to custom providers");
   }

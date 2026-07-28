@@ -920,7 +920,7 @@ ReloadReportRow reload_prompt_settings(runtime::Session& session)
                                                          project_resources_trusted(session.project_trust()), session.prompt_overrides());
   if (!prompt_state)
     return reload_error_row("prompts", prompt_state.error());
-  if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
+  if (auto refreshed = session.apply_runtime_prompt_state(std::move(*prompt_state)); !refreshed)
     return reload_error_row("prompts", refreshed.error());
   ReloadReportRow row{.name = "prompts", .status = "loaded", .details = {}};
   append_reload_detail(row, "project_resources", project_resources_trusted(session.project_trust()) ? "enabled" : "skipped");
@@ -945,7 +945,7 @@ ReloadReportRow reload_trust_settings(runtime::Session& session)
     return row;
   }
   session.trust_state().project_trust = std::move(next_trust);
-  if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
+  if (auto refreshed = session.apply_runtime_prompt_state(std::move(*prompt_state)); !refreshed)
     return reload_error_row("trust", refreshed.error());
   ReloadReportRow row{.name = "trust", .status = "loaded", .details = {}};
   append_reload_detail(row, "trust_file", session.project_trust().trust_file.string());
@@ -1089,7 +1089,7 @@ ava::core::Result<CommandResult> reload_project_trust_state(runtime::Session& se
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
   session.trust_state().project_trust = std::move(next_trust);
-  if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
+  if (auto refreshed = session.apply_runtime_prompt_state(std::move(*prompt_state)); !refreshed)
     return std::unexpected(std::move(refreshed.error()));
   return handled_text(std::move(prefix) + "\n" + project_trust_summary(session.project_trust()));
 }

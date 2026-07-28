@@ -568,9 +568,9 @@ void test_runtime_mutations_refresh_retained_delivery_configuration()
   auto model = fixture.session->model();
   model.model_id = "gpt-5.5-delivery-refresh-test";
   model.display_name = "Delivery refresh test model";
-  auto switched = ava::app::switch_runtime_model(*fixture.session, std::move(model));
-  auto reasoned = ava::app::set_runtime_reasoning(
-      *fixture.session, ava::app::runtime::ReasoningSelection{.level = "low", .provider_level = std::nullopt, .budget_tokens = std::nullopt, .display = {}});
+  auto switched = fixture.session->switch_runtime_model(std::move(model));
+  auto reasoned = fixture.session->set_runtime_reasoning(
+      ava::app::runtime::ReasoningSelection{.level = "low", .provider_level = std::nullopt, .budget_tokens = std::nullopt, .display = {}});
   expect(switched && *switched && reasoned && *reasoned,
          "successful central model and reasoning mutations refresh parent configuration: " + (switched ? std::string("model-ok") : switched.error().format()) +
              "; " + (reasoned ? std::string("reasoning-ok") : reasoned.error().format()));

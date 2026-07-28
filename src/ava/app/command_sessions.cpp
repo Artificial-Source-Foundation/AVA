@@ -245,7 +245,7 @@ ava::core::Result<CommandResult> run_mode_command(runtime::Session& session)
   {
     return std::unexpected(std::move(appended.error()));
   }
-  if (auto refreshed = apply_runtime_prompt_state(session, std::move(*prompt_state)); !refreshed)
+  if (auto refreshed = session.apply_runtime_prompt_state(std::move(*prompt_state)); !refreshed)
     return std::unexpected(std::move(refreshed.error()));
   add_output(result, "mode switched to " + ava::agent::to_string(session.mode()));
   return result;

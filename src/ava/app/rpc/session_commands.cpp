@@ -493,8 +493,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!selected)
       return handled(write_error(context.output, command.id, selected.error()));
 
-    // FIXME: switch_runtime_model should become a member function of Session.
-    auto switched = switch_runtime_model(*session_w, std::move(*selected));
+    auto switched = session_w->switch_runtime_model(std::move(*selected));
     if (!switched)
       return handled(write_error(context.output, command.id, switched.error()));
     return handled(write_success(context.output, command.id, session_w->state_result_json(cancel_requested(context.run_state))));
@@ -526,8 +525,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     }
 
     session_ts::wat session_w(session);
-    // FIXME: turn set_runtime_reasoning into a member function of Session.
-    auto changed = set_runtime_reasoning(*session_w, std::move(selection));
+    auto changed = session_w->set_runtime_reasoning(std::move(selection));
     if (!changed)
       return handled(write_error(context.output, command.id, changed.error()));
     return handled(write_success(context.output, command.id, session_w->state_result_json(cancel_requested(context.run_state))));

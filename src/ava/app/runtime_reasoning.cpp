@@ -1,7 +1,6 @@
 #include "sys.h"
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_reasoning.h"
-#include "ava/app/runtime/Session.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/core/json.h"
 #include "ava/core/string_utils.h"
@@ -10,14 +9,11 @@
 #include <utility>
 
 namespace ava::app::runtime {
-namespace {
 
-bool same_reasoning_selection(std::optional<ReasoningSelection> const& left, std::optional<ReasoningSelection> const& right)
+ava::provider::ProviderReasoningOptions provider_reasoning_options(ReasoningSelection const& selection)
 {
-  if (!left || !right)
-    return !left && !right;
-  return left->level == right->level && left->provider_level == right->provider_level && left->budget_tokens == right->budget_tokens &&
-         left->display == right->display;
+  return ava::provider::ProviderReasoningOptions{
+      .type = selection.provider_level.value_or(selection.level), .budget_tokens = selection.budget_tokens, .display = selection.display};
 }
 
 ava::core::Result<ReasoningSelection> resolve_runtime_reasoning_selection(ava::config::ModelInfo const& model, ReasoningSelection selection)
@@ -56,14 +52,6 @@ ava::core::Result<ReasoningSelection> resolve_runtime_reasoning_selection(ava::c
   selection.level = std::string(level);
   selection.provider_level = resolved.provider_level;
   return selection;
-}
-
-}  // namespace
-
-ava::provider::ProviderReasoningOptions provider_reasoning_options(ReasoningSelection const& selection)
-{
-  return ava::provider::ProviderReasoningOptions{
-      .type = selection.provider_level.value_or(selection.level), .budget_tokens = selection.budget_tokens, .display = selection.display};
 }
 
 std::optional<ReasoningSelection> latest_persisted_reasoning(std::vector<ava::session::SessionEntry> const& entries, ava::config::ModelInfo const& model)
@@ -113,32 +101,3 @@ std::optional<ReasoningSelection> latest_persisted_reasoning(std::vector<ava::se
 }
 
 }  // namespace ava::app::runtime
-
-namespace ava::app {
-
-ava::core::Result<bool> set_runtime_reasoning(runtime::Session& session, std::optional<runtime::ReasoningSelection> selection)
-{
-  if (selection)
-  {
-    selection->level = core::trim(selection->level);
-    selection->display = core::trim(selection->display);
-    auto resolved = runtime::resolve_runtime_reasoning_selection(session.model(), std::move(*selection));
-    if (!resolved)
-    {
-      return std::unexpected(std::move(resolved.error()));
-    }
-    selection = std::move(*resolved);
-  }
-  if (runtime::same_reasoning_selection(session.reasoning(), selection))
-    return false;
-
-  auto appended = session.append_owned(runtime::make_reasoning_change_entry(session.model(), selection));
-  if (!appended)
-    return std::unexpected(std::move(appended.error()));
-  session.model_selection().reasoning = std::move(selection);
-  if (auto refreshed = session.refresh_parent_configuration(); !refreshed)
-    return std::unexpected(std::move(refreshed.error()));
-  return true;
-}
-
-}  // namespace ava::app

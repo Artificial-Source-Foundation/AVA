@@ -12,4 +12,11 @@ namespace ava::app::runtime {
                                                                                     ava::config::ModelInfo const& model);
 [[nodiscard]] ava::provider::ProviderReasoningOptions provider_reasoning_options(ReasoningSelection const& selection);
 
+// Resolve a candidate reasoning selection against the model's supported levels.
+//
+// Trims the level, confirms the model supports it (or has an explicit mapping), validates the
+// budget/display fields, and fills in `provider_level` when the model maps the level differently.
+// Returns failure with provider/model/level context when the model rejects the level.
+[[nodiscard]] ava::core::Result<ReasoningSelection> resolve_runtime_reasoning_selection(ava::config::ModelInfo const& model, ReasoningSelection selection);
+
 }  // namespace ava::app::runtime

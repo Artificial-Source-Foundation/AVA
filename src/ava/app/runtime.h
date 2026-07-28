@@ -51,14 +51,8 @@ struct PreparedCompactionContext
 
 [[nodiscard]] ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::Session const& session, ava::agent::Mode mode);
 
-[[nodiscard]] ava::core::VoidResult apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state);
-
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths, std::string_view provider_id,
-                                                                              std::string_view model_id);
-
-[[nodiscard]] ava::core::Result<bool> switch_runtime_model(runtime::Session& session, ava::config::ModelInfo model);
-
-[[nodiscard]] ava::core::Result<bool> set_runtime_reasoning(runtime::Session& session, std::optional<runtime::ReasoningSelection> selection);
+                                                                               std::string_view model_id);
 
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message,
                                                                         ava::provider::Provider const& provider, ava::provider::Transport& transport,

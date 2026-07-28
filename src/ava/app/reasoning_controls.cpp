@@ -109,7 +109,7 @@ ava::core::Result<std::string> cycle_runtime_reasoning(runtime::Session& session
 
   if (current_index && *current_index + 1 >= active_levels.size())
   {
-    auto cleared = set_runtime_reasoning(session, std::nullopt);
+    auto cleared = session.set_runtime_reasoning(std::nullopt);
     if (!cleared)
       return std::unexpected(std::move(cleared.error()));
     return *cleared ? std::string("reasoning cleared") : std::string("reasoning already cleared");
@@ -118,7 +118,7 @@ ava::core::Result<std::string> cycle_runtime_reasoning(runtime::Session& session
   auto const next_index = current_index ? *current_index + 1 : std::size_t{0};
   if (active_levels[next_index] == "disabled")
   {
-    auto cleared = set_runtime_reasoning(session, std::nullopt);
+    auto cleared = session.set_runtime_reasoning(std::nullopt);
     if (!cleared)
       return std::unexpected(std::move(cleared.error()));
     return *cleared ? std::string("reasoning cleared") : std::string("reasoning already cleared");
@@ -127,7 +127,7 @@ ava::core::Result<std::string> cycle_runtime_reasoning(runtime::Session& session
   auto selection = reasoning_selection_for_level(model, active_levels[next_index]);
   if (!selection)
     return std::unexpected(std::move(selection.error()));
-  auto selected = set_runtime_reasoning(session, *selection);
+  auto selected = session.set_runtime_reasoning(*selection);
   if (!selected)
     return std::unexpected(std::move(selected.error()));
   return *selected ? reasoning_selected_status(*selection) : "reasoning already " + selection->level;

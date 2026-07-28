@@ -342,6 +342,29 @@ class Session : protected Session_aggregate_base
   // reasoning update rejects the resolved selection.
   [[nodiscard]] ava::core::VoidResult apply_initial_reasoning_level(std::string_view requested_level);
 
+  // Move a freshly assembled PromptState into the session's resolved state and
+  // refresh bound parent capsules.
+  //
+  // `prompt_state` is consumed regardless of failure. Returns failure only when
+  // refresh_parent_configuration rejects the configuration update.
+  [[nodiscard]] ava::core::VoidResult apply_runtime_prompt_state(runtime::PromptState prompt_state);
+
+  // Switch the active model to `model`, re-deriving the prompt state for the
+  // current mode and clearing any active reasoning selection.
+  //
+  // Returns false (without writing) when `model` already matches the active
+  // provider/model pair. Returns failure when prompt-state loading, the model
+  // change append, or the parent configuration refresh rejects the switch.
+  [[nodiscard]] ava::core::Result<bool> switch_runtime_model(ava::config::ModelInfo model);
+
+  // Set the active reasoning selection, resolving it against the current model.
+  //
+  // A nullopt `selection` clears reasoning. Non-nullopt selections are trimmed
+  // and resolved through the model's supported levels. Returns false (without
+  // writing) when the resolved selection equals the active one. Returns failure
+  // when the model rejects the level or the append/refresh route rejects the change.
+  [[nodiscard]] ava::core::Result<bool> set_runtime_reasoning(std::optional<runtime::ReasoningSelection> selection);
+
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> load_runtime_metadata() const;
 
   [[nodiscard]] std::string state_result_json(bool cancel_requested) const;

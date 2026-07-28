@@ -373,7 +373,7 @@ int run_tui(ShellState state)
         auto model = forward ? ava::app::rpc::next_runtime_model(state.session) : ava::app::rpc::previous_runtime_model(state.session);
         if (!model)
           return std::unexpected(std::move(model.error()));
-        auto switched = ava::app::switch_runtime_model(state.session, std::move(*model));
+        auto switched = state.session.switch_runtime_model(std::move(*model));
         if (!switched)
           return std::unexpected(std::move(switched.error()));
         return state_snapshot(*switched ? "model cycled" : "model already selected");
@@ -533,7 +533,7 @@ int run_tui(ShellState state)
         auto model = ava::app::resolve_runtime_model(state.session.paths(), value.substr(0, separator), value.substr(separator + 1));
         if (!model)
           return std::unexpected(std::move(model.error()));
-        auto switched = ava::app::switch_runtime_model(state.session, std::move(*model));
+        auto switched = state.session.switch_runtime_model(std::move(*model));
         if (!switched)
           return std::unexpected(std::move(switched.error()));
         return state_snapshot(*switched ? "model switched" : "model already selected");

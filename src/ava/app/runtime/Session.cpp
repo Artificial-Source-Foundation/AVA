@@ -7,6 +7,11 @@
 #include "ava/app/command_tools.h"
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/rpc/serialization_detail.h"
+#include "ava/app/runtime.h"
+#include "ava/app/runtime_json.h"
+#include "ava/app/runtime_model.h"
+#include "ava/app/runtime_prompt.h"
+#include "ava/app/runtime_reasoning.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/static_resources.h"
@@ -64,6 +69,16 @@ void add_cli_reasoning_context(ava::core::Error& error, ava::config::ModelInfo c
 {
   error.with_context("option", "--thinking");
   error.with_context("supported_levels", cli_supported_reasoning_levels(model));
+}
+
+// Compare two optional reasoning selections for field-wise equality so the
+// setter can short-circuit a no-op change without writing an entry.
+bool same_reasoning_selection(std::optional<ReasoningSelection> const& left, std::optional<ReasoningSelection> const& right)
+{
+  if (!left || !right)
+    return !left && !right;
+  return left->level == right->level && left->provider_level == right->provider_level && left->budget_tokens == right->budget_tokens &&
+         left->display == right->display;
 }
 
 bool add_entry(RegistryBuilder& builder, CommandRegistryEntry entry)
@@ -525,7 +540,7 @@ ava::core::VoidResult Session::apply_initial_reasoning_level(std::string_view re
     selection = std::move(*selected);
   }
 
-  auto changed = set_runtime_reasoning(*this, std::move(selection));
+  auto changed = set_runtime_reasoning(std::move(selection));
   if (!changed)
   {
     auto error = std::move(changed.error());
@@ -533,6 +548,68 @@ ava::core::VoidResult Session::apply_initial_reasoning_level(std::string_view re
     return std::unexpected(std::move(error));
   }
   return {};
+}
+
+ava::core::VoidResult Session::apply_runtime_prompt_state(runtime::PromptState prompt_state)
+{
+  resolve_prompt_state() = ResolvedPromptState{.mode = prompt_state.mode,
+                                               .base_prompt = std::move(prompt_state.base_prompt),
+                                               .context_sources = std::move(prompt_state.context_sources),
+                                               .freshness_sources = std::move(prompt_state.freshness_sources),
+                                               .system_prompt = std::move(prompt_state.system_prompt)};
+  return refresh_parent_configuration();
+}
+
+ava::core::Result<bool> Session::switch_runtime_model(ava::config::ModelInfo model)
+{
+  if (this->model().provider_id == model.provider_id && this->model().model_id == model.model_id)
+    return false;
+
+  auto prompt_state = load_runtime_prompt_state(paths(), model, mode(), workspace_dir(), current_dir(),
+                                                project_resources_trusted(project_trust()), prompt_overrides());
+  if (!prompt_state)
+    return std::unexpected(std::move(prompt_state.error()));
+
+  auto const previous = this->model();
+  auto appended = append_owned(make_model_change_entry(previous, model));
+  if (!appended)
+    return std::unexpected(std::move(appended.error()));
+
+  model_selection().model = std::move(model);
+  resolve_prompt_state() = ResolvedPromptState{.mode = prompt_state->mode,
+                                               .base_prompt = std::move(prompt_state->base_prompt),
+                                               .context_sources = std::move(prompt_state->context_sources),
+                                               .freshness_sources = std::move(prompt_state->freshness_sources),
+                                               .system_prompt = std::move(prompt_state->system_prompt)};
+  model_selection().reasoning = std::nullopt;
+  if (auto refreshed = refresh_parent_configuration(); !refreshed)
+    return std::unexpected(std::move(refreshed.error()));
+  return true;
+}
+
+ava::core::Result<bool> Session::set_runtime_reasoning(std::optional<ReasoningSelection> selection)
+{
+  if (selection)
+  {
+    selection->level = core::trim(selection->level);
+    selection->display = core::trim(selection->display);
+    auto resolved = resolve_runtime_reasoning_selection(model(), std::move(*selection));
+    if (!resolved)
+    {
+      return std::unexpected(std::move(resolved.error()));
+    }
+    selection = std::move(*resolved);
+  }
+  if (same_reasoning_selection(reasoning(), selection))
+    return false;
+
+  auto appended = append_owned(make_reasoning_change_entry(model(), selection));
+  if (!appended)
+    return std::unexpected(std::move(appended.error()));
+  model_selection().reasoning = std::move(selection);
+  if (auto refreshed = refresh_parent_configuration(); !refreshed)
+    return std::unexpected(std::move(refreshed.error()));
+  return true;
 }
 
 ava::core::Result<ava::session::SessionMetadataView> Session::load_runtime_metadata() const

@@ -100,7 +100,9 @@ class SessionResultSerializer
   SessionResultSerializer& operator=(SessionResultSerializer const&) = delete;
 
   // Each method mirrors one Session member and propagates the underlying
-  // session-store / registry / stats / validation error unchanged.
+  // session-store / registry / stats / validation error unchanged. state_result_json
+  // is infallible and returns the assembled JSON directly.
+  [[nodiscard]] std::string state_result_json(bool cancel_requested) const;
   [[nodiscard]] ava::core::Result<std::string> list_sessions_result_json() const;
   [[nodiscard]] ava::core::Result<std::string> session_tree_result_json() const;
   [[nodiscard]] ava::core::Result<std::string> list_models_result_json() const;

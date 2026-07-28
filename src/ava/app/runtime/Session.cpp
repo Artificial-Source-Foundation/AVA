@@ -5,10 +5,7 @@
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_tools.h"
-#include "ava/app/rpc/protocol.h"
-#include "ava/app/rpc/serialization.h"
 #include "ava/app/rpc/serialization_detail.h"
-#include "ava/app/rpc/serialization_json.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/static_resources.h"
 #include "ava/context/skill_loader.h"
@@ -442,59 +439,7 @@ ava::core::Result<ava::session::SessionMetadataView> Session::load_runtime_metad
 
 std::string Session::state_result_json(bool cancel_requested) const
 {
-  using namespace rpc;
-
-  std::string json = "{";
-  json += "\"protocol_version\":";
-  json += std::to_string(rpc::kRpcProtocolVersion);
-  json += ',';
-  json += string_field_json("session_id", store.session_id());
-  json += ',';
-  json += string_field_json("session_path", store.session_path().string());
-  json += ',';
-  json += string_field_json("mode", ava::agent::to_string(mode()));
-  json += ',';
-  json += string_field_json("provider", model().provider_id);
-  json += ',';
-  json += string_field_json("model", model().model_id);
-  json += ',';
-  json += string_field_json("workspace_dir", workspace_dir().string());
-  json += ',';
-  json += string_field_json("current_dir", current_dir().string());
-  json += ',';
-  json += bool_field_json("created", created);
-  json += ',';
-  json += bool_field_json("sessionless", sessionless());
-  json += ',';
-  json += bool_field_json("cancel_requested", cancel_requested);
-  json += ',';
-  json += bool_field_json("reasoning_enabled", reasoning().has_value());
-  if (reasoning())
-  {
-    json += ',';
-    json += string_field_json("reasoning_level", reasoning()->level);
-    if (reasoning()->provider_level && *reasoning()->provider_level != reasoning()->level)
-    {
-      json += ',';
-      json += string_field_json("reasoning_provider_level", *reasoning()->provider_level);
-    }
-    if (reasoning()->budget_tokens)
-    {
-      json += ',';
-      json += integer_field_json("reasoning_budget_tokens", *reasoning()->budget_tokens);
-    }
-    if (!reasoning()->display.empty())
-    {
-      json += ',';
-      json += string_field_json("reasoning_display", reasoning()->display);
-    }
-  }
-  json += ',';
-  json += number_field_json("context_source_count", context_sources().size());
-  json += ",\"context_sources\":";
-  json += context_sources_json(*this);
-  json += '}';
-  return json;
+  return rpc::detail::SessionResultSerializer({}, *this).state_result_json(cancel_requested);
 }
 
 ava::core::Result<std::string> Session::messages_result_json() const

@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "ava/app/EventEnvelope.h"
 #include "ava/app/interactive_run_queue.h"
 #include "ava/session/session_store.h"
 #include "ava/core/error.h"
@@ -119,7 +118,7 @@ ava::core::Error no_queued_messages_error()
 
 }  // namespace
 
-InteractiveRunQueue::InteractiveRunQueue(std::string session_id, std::string active_request_id, EventEnvelopeSink event_sink)
+InteractiveRunQueue::InteractiveRunQueue(std::string session_id, std::string active_request_id, ava::event::EventEnvelopeSink event_sink)
     : session_id_(std::move(session_id)), active_request_id_(std::move(active_request_id)), event_sink_(std::move(event_sink))
 {
 }
@@ -284,7 +283,7 @@ ava::core::VoidResult InteractiveRunQueue::emit_event(std::string_view name, Int
   if (!event_sink_)
     return {};
 
-  EventEnvelope envelope;
+  ava::event::EventEnvelope envelope;
   envelope.schema_version = 1;
   envelope.event_id = ava::core::make_id("event");
   envelope.timestamp = ava::session::now_timestamp();

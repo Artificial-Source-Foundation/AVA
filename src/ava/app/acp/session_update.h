@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
-#include "ava/app/events.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/core/result.h"
 
 #include <cstddef>

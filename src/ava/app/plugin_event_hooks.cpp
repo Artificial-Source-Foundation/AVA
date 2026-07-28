@@ -1,6 +1,6 @@
 #include "sys.h"
-#include "ava/app/EventEnvelope.h"
 #include "ava/app/plugin_event_hooks.h"
+#include "ava/event/events.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/Session.h"

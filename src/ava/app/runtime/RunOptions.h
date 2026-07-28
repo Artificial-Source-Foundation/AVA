@@ -2,7 +2,7 @@
 
 #include "ava/debug/print_members_on.h"
 #include "ava/observability/run_observer.h"
-#include "ava/app/events.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/question.h"
 #include "ava/agent/run_phase.h"

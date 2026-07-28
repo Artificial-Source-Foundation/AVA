@@ -1,8 +1,8 @@
 #pragma once
 
 #include "ava/app/command_palette.h"
-#include "ava/app/events.h"
 #include "ava/app/project_trust.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/tui/keybindings.h"

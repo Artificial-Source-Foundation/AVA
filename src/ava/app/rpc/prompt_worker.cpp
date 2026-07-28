@@ -5,8 +5,8 @@
 #include "run_state.h"
 #include "serialization.h"
 #include "session_operators.h"
-#include "ava/app/events.h"
 #include "ava/app/runtime.h"
+#include "ava/event/events.h"
 #include "ava/app/runtime/Session.h"
 
 #include <optional>
@@ -112,9 +112,9 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
         return messages;
       };
 
-      EventBus event_bus;
+      ava::event::EventBus event_bus;
       subscribe_event_envelope_writer(event_bus, options.output);
-      prompt_options->event_sink = make_runtime_event_bus_adapter(event_bus, rpc_event_context(request_id));
+      prompt_options->event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc_event_context(request_id));
 
       ProviderHandle prompt_provider;
       {

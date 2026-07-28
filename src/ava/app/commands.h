@@ -1,8 +1,8 @@
 #pragma once
 
 #include "ava/app/command_catalog.h"
-#include "ava/app/events.h"
 #include "ava/app/runtime.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"

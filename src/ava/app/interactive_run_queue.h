@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ava/app/events.h"
+#include "ava/event/events.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -39,7 +39,7 @@ struct InteractiveRestoredMessage
 class InteractiveRunQueue
 {
  public:
-  InteractiveRunQueue(std::string session_id, std::string active_request_id, EventEnvelopeSink event_sink);
+  InteractiveRunQueue(std::string session_id, std::string active_request_id, ava::event::EventEnvelopeSink event_sink);
 
   [[nodiscard]] std::string const& active_request_id() const noexcept;
   [[nodiscard]] ava::core::VoidResult queue_steering(std::string message);
@@ -59,7 +59,7 @@ class InteractiveRunQueue
 
   std::string session_id_;
   std::string active_request_id_;
-  EventEnvelopeSink event_sink_;
+  ava::event::EventEnvelopeSink event_sink_;
   mutable std::mutex mutex_;
   bool active_ = true;
   std::size_t next_sequence_ = 1;

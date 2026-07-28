@@ -5,6 +5,7 @@
 #include "ava/agent/subagent_job.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
+#include "ava/debug/print_members_on.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -136,6 +137,8 @@ class SubagentCoordinator final
     ~StartAdmission();
     StartAdmission(StartAdmission const&) = delete;
     StartAdmission& operator=(StartAdmission const&) = delete;
+
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
    private:
     SubagentCoordinator& coordinator_;

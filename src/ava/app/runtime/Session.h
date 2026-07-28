@@ -311,6 +311,12 @@ class Session : protected Session_aggregate_base
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);
 
   [[nodiscard]] std::string state_result_json(bool cancel_requested) const;
+  [[nodiscard]] ava::core::Result<std::string> messages_result_json() const;
+  [[nodiscard]] ava::core::Result<std::string> list_sessions_result_json() const;
+  [[nodiscard]] ava::core::Result<std::string> session_tree_result_json() const;
+  [[nodiscard]] ava::core::Result<std::string> list_models_result_json() const;
+  [[nodiscard]] ava::core::Result<std::string> session_stats_result_json() const;
+  [[nodiscard]] ava::core::Result<std::string> session_validation_result_json() const;
 
   AVA_DEBUG_PRINT_MEMBERS_ON_BASE(Session_aggregate_base)
 };

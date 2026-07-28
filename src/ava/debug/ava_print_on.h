@@ -18,6 +18,9 @@ namespace app {
 using utils::has_print_on::operator<<;
 namespace rpc {
 using utils::has_print_on::operator<<;
+namespace detail {
+using utils::has_print_on::operator<<;
+} //  namespace detail
 } // namespace rpc
 namespace runtime {
 using utils::has_print_on::operator<<;

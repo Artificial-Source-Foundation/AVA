@@ -1,13 +1,14 @@
 #include "sys.h"
 #include "Session.h"
+#include "command_names.h"
+#include "markdown_files.h"
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_tools.h"
 #include "ava/app/rpc/protocol.h"
 #include "ava/app/rpc/serialization.h"
+#include "ava/app/rpc/serialization_detail.h"
 #include "ava/app/rpc/serialization_json.h"
-#include "ava/app/runtime/command_names.h"
-#include "ava/app/runtime/markdown_files.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/static_resources.h"
 #include "ava/context/skill_loader.h"
@@ -483,6 +484,39 @@ std::string Session::state_result_json(bool cancel_requested) const
   json += context_sources_json(*this);
   json += '}';
   return json;
+}
+
+ava::core::Result<std::string> Session::messages_result_json() const
+{
+  // The badge makes MessagesResultSerializer construction exclusive to this member;
+  // the serialization logic itself lives with the rest of the RPC code in
+  // rpc/serialization.cpp, reachable only through this single entry point.
+  return rpc::detail::MessagesResultSerializer({}, *this).run();
+}
+
+ava::core::Result<std::string> Session::list_sessions_result_json() const
+{
+  return rpc::detail::SessionResultSerializer({}, *this).list_sessions_result_json();
+}
+
+ava::core::Result<std::string> Session::session_tree_result_json() const
+{
+  return rpc::detail::SessionResultSerializer({}, *this).session_tree_result_json();
+}
+
+ava::core::Result<std::string> Session::list_models_result_json() const
+{
+  return rpc::detail::SessionResultSerializer({}, *this).list_models_result_json();
+}
+
+ava::core::Result<std::string> Session::session_stats_result_json() const
+{
+  return rpc::detail::SessionResultSerializer({}, *this).session_stats_result_json();
+}
+
+ava::core::Result<std::string> Session::session_validation_result_json() const
+{
+  return rpc::detail::SessionResultSerializer({}, *this).session_validation_result_json();
 }
 
 }  // namespace ava::app::runtime

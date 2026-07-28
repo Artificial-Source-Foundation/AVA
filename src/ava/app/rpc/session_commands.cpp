@@ -5,10 +5,9 @@
 #include "serialization_json.h"
 #include "session_commands.h"
 #include "session_operators.h"
-
 #include "ava/app/EventEnvelope.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_sessions.h"
 #include "ava/agent/job_control.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
@@ -269,19 +268,21 @@ std::string branch_summary_result_json(ava::session::BranchSummaryResult const& 
 
 ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext context)
 {
+  using session_ts = ava::app::runtime::session_ts;
+
   auto const& command = context.command;
+  auto& session = context.unlocked_session;
 
   if (command.type == "get_state")
   {
     bool const canceled = cancel_requested(context.run_state);
 
-    return handled(write_success(context.output, command.id, ava::app::runtime::session_ts::rat(context.unlocked_session)->state_result_json(canceled)));
+    return handled(write_success(context.output, command.id, session_ts::rat(session)->state_result_json(canceled)));
   }
 
   if (command.type == "list_sessions")
   {
-    // FIXME: turn list_sessions_result_json into a member function of Session.
-    auto sessions_json = list_sessions_result_json(*ava::app::runtime::session_ts::rat(context.unlocked_session));
+    auto sessions_json = session_ts::rat(session)->list_sessions_result_json();
     if (!sessions_json)
       return handled(write_error(context.output, command.id, sessions_json.error()));
     return handled(write_success(context.output, command.id, *sessions_json));
@@ -293,7 +294,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     std::shared_ptr<ava::agent::SubagentCoordinator> coordinator;
     std::string owner;
     {
-      ava::app::runtime::session_ts::rat session_r(context.unlocked_session);
+      session_ts::rat session_r(session);
       coordinator = session_r->subagent_coordinator();
       owner = session_r->store.session_id();
     }
@@ -334,8 +335,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
 
   if (command.type == "session_tree")
   {
-    // FIXME: turn session_tree_result_json into a member function of Session.
-    auto tree_json = session_tree_result_json(*ava::app::runtime::session_ts::rat(context.unlocked_session));
+    auto tree_json = session_ts::rat(session)->session_tree_result_json();
     if (!tree_json)
       return handled(write_error(context.output, command.id, tree_json.error()));
     return handled(write_success(context.output, command.id, *tree_json));
@@ -343,8 +343,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
 
   if (command.type == "list_models")
   {
-    // FIXME: turn list_models_result_json into a member function of Session.
-    auto models_json = list_models_result_json(*ava::app::runtime::session_ts::rat(context.unlocked_session));
+    auto models_json = session_ts::rat(session)->list_models_result_json();
     if (!models_json)
       return handled(write_error(context.output, command.id, models_json.error()));
     return handled(write_success(context.output, command.id, *models_json));
@@ -356,8 +355,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    // FIXME: turn messages_result_json into a member function of Session.
-    auto messages_json = messages_result_json(*ava::app::runtime::session_ts::rat(context.unlocked_session));
+    auto messages_json = session_ts::rat(session)->messages_result_json();
     if (!messages_json)
       return handled(write_error(context.output, command.id, messages_json.error()));
     return handled(write_success(context.output, command.id, *messages_json));
@@ -369,8 +367,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    // FIXME: turn session_stats_result_json into a member function of Session.
-    auto stats_json = session_stats_result_json(*ava::app::runtime::session_ts::rat(context.unlocked_session));
+    auto stats_json = session_ts::rat(session)->session_stats_result_json();
     if (!stats_json)
       return handled(write_error(context.output, command.id, stats_json.error()));
     return handled(write_success(context.output, command.id, *stats_json));
@@ -382,8 +379,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    // FIXME: turn session_validation_result_json into a member function of Session.
-    auto validation_json = session_validation_result_json(*ava::app::runtime::session_ts::rat(context.unlocked_session));
+    auto validation_json = session_ts::rat(session)->session_validation_result_json();
     if (!validation_json)
       return handled(write_error(context.output, command.id, validation_json.error()));
     return handled(write_success(context.output, command.id, *validation_json));
@@ -392,14 +388,13 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
   if (command.type == "session_metadata")
   {
     // FIXME: turn load_runtime_metadata into a member function of Session.
-    auto metadata = load_runtime_metadata(*ava::app::runtime::session_ts::rat(context.unlocked_session));
+    auto metadata = load_runtime_metadata(*session_ts::rat(session));
     if (!metadata)
       return handled(write_error(context.output, command.id, metadata.error()));
     return handled(write_success(context.output, command.id, ava::session::session_metadata_json(*metadata)));
   }
 
-  if (bool const command_is_set_session_name = command.type == "set_session_name",
-                 command_is_set_session_labels = command.type == "set_session_labels";
+  if (bool const command_is_set_session_name = command.type == "set_session_name", command_is_set_session_labels = command.type == "set_session_labels";
       command_is_set_session_name || command_is_set_session_labels)
   {
     auto active_rejected = reject_active_run_if_needed(context);
@@ -421,7 +416,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     }
 
     update.actor = "rpc";
-    auto metadata = ava::app::runtime::session_ts::wat(context.unlocked_session)->append_runtime_session_metadata(std::move(update));
+    auto metadata = session_ts::wat(session)->append_runtime_session_metadata(std::move(update));
     if (!metadata)
       return handled(write_error(context.output, command.id, metadata.error()));
     return handled(write_success(context.output, command.id, ava::session::session_metadata_json(*metadata)));
@@ -433,7 +428,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    auto store = ava::app::runtime::session_ts::rat(context.unlocked_session)->permission_rule_store();
+    auto store = session_ts::rat(session)->permission_rule_store();
     auto rules = ava::permissions::load_persistent_permission_rules(store);
     if (!rules)
       return handled(write_error(context.output, command.id, rules.error()));
@@ -452,7 +447,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     ava::permissions::PermissionRuleStore store;
     std::string session_id;
     {
-      ava::app::runtime::session_ts::rat session_r(context.unlocked_session);
+      session_ts::rat session_r(session);
       store = session_r->permission_rule_store();
       session_id = session_r->store.session_id();
     }
@@ -481,7 +476,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     ava::permissions::PermissionRuleStore store;
     std::string session_id;
     {
-      ava::app::runtime::session_ts::rat session_r(context.unlocked_session);
+      session_ts::rat session_r(session);
       store = session_r->permission_rule_store();
       session_id = session_r->store.session_id();
     }
@@ -503,7 +498,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    ava::app::runtime::session_ts::wat session_w(context.unlocked_session);
+    session_ts::wat session_w(session);
     // FIXME: resolve_requested_model and next_runtime_model should accept a session_ts::rat.
     ava::core::Result<ava::config::ModelInfo> selected =
         command.type == "set_model" ? resolve_requested_model(*session_w, command) : next_runtime_model(*session_w);
@@ -542,7 +537,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       }
     }
 
-    ava::app::runtime::session_ts::wat session_w(context.unlocked_session);
+    session_ts::wat session_w(session);
     // FIXME: turn set_runtime_reasoning into a member function of Session.
     auto changed = set_runtime_reasoning(*session_w, std::move(selection));
     if (!changed)
@@ -560,7 +555,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, invalid_rpc("clone_session does not support branch_from_entry_id")));
     }
 
-    ava::app::runtime::session_ts::wat session_w(context.unlocked_session);
+    session_ts::wat session_w(session);
     // FIXME: resolve_branch_source_session_id should accept a rat.
     auto source_session_id = resolve_branch_source_session_id(*session_w, context.open_options, command);
     if (!source_session_id)
@@ -633,7 +628,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, invalid_rpc("summarize_branch requires reason")));
     }
 
-    ava::app::runtime::session_ts::wat session_w(context.unlocked_session);
+    session_ts::wat session_w(session);
     // FIXME: resolve_branch_source_session_id should accept a rat.
     auto source_session_id = resolve_branch_source_session_id(*session_w, context.open_options, command);
     if (!source_session_id)
@@ -686,7 +681,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    ava::app::runtime::session_ts::wat session_w(context.unlocked_session);
+    session_ts::wat session_w(session);
     // FIXME: create_new_session should become a member function of Session.
     auto created = create_new_session(*session_w, context.open_options);
     if (!created)
@@ -708,7 +703,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    ava::app::runtime::session_ts::wat session_w(context.unlocked_session);
+    session_ts::wat session_w(session);
     // FIXME: open_requested_session should become a member function of Session.
     auto opened = open_requested_session(*session_w, context.open_options, *command.session_id);
     if (!opened)

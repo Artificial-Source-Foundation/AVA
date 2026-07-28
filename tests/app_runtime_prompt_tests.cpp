@@ -413,7 +413,7 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
 
   std::ifstream session_file(session->store.session_path(), std::ios::binary);
   std::string session_json((std::istreambuf_iterator<char>(session_file)), std::istreambuf_iterator<char>());
-  auto messages_json = ava::app::rpc::messages_result_json(*session);
+  auto messages_json = session->messages_result_json();
   auto prompt_json = ava::app::rpc::prompt_result_json(session->store.session_id(), *result);
   auto state_json = session->state_result_json(false);
   auto has_observer_fields = [](std::string_view json) {

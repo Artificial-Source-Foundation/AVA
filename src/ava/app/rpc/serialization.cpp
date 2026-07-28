@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "protocol.h"
 #include "serialization.h"
+#include "serialization_detail.h"
 #include "serialization_json.h"
 #include "serialization_models.h"
 #include "ava/app/runtime/Session.h"
@@ -36,31 +37,6 @@ ava::core::Result<std::vector<ava::session::SessionEntry>> load_runtime_entries(
   if (!read_authority)
     return std::unexpected(std::move(read_authority.error()));
   return read_authority->load();
-}
-
-std::string session_entry_json(ava::session::SessionEntry const& entry, bool include_ordered_output = true)
-{
-  auto const data_json =
-      entry.type == ava::session::EntryType::UserMessage
-          ? ava::session::sanitized_message_data_json(entry.data_json, true)
-          : (entry.type == ava::session::EntryType::AssistantMessage && ava::core::json::field_value_start(entry.data_json, "ordered_output")
-                 ? ava::session::sanitized_compatibility_assistant_message_data_json(entry.data_json, include_ordered_output)
-                 : (entry.type == ava::session::EntryType::AssistantMessage ? ava::session::sanitized_message_data_json(entry.data_json, false)
-                                                                            : entry.data_json));
-  std::string json = "{";
-  json += integer_field_json("version", entry.version);
-  json += ',';
-  json += string_field_json("id", entry.id);
-  json += ',';
-  json += string_field_json("parent_id", entry.parent_id);
-  json += ',';
-  json += string_field_json("type", ava::session::to_string(entry.type));
-  json += ',';
-  json += string_field_json("timestamp", entry.timestamp);
-  json += ",\"data\":";
-  json += data_json;
-  json += '}';
-  return json;
 }
 
 bool json_bool_field(std::string_view object, std::string_view key)
@@ -122,7 +98,43 @@ std::string sanitized_reasoning_entry_json(ava::session::SessionEntry const& ent
   return json;
 }
 
-std::string capped_session_entry_json(ava::session::SessionEntry const& entry, bool include_ordered_output = true)
+// Render a session entry as its v1-compatible JSON object, with optional ordered_output detail.
+//
+// User messages are always sanitized; assistant messages that carry ordered_output reuse
+// the compatibility sanitizer (so the legacy payload is preserved when include_ordered_output
+// is false, and the additive ordered block is included only when true); other entry types pass
+// their stored data_json through unchanged.
+std::string session_entry_json(ava::session::SessionEntry const& entry, bool include_ordered_output)
+{
+  auto const data_json =
+      entry.type == ava::session::EntryType::UserMessage
+          ? ava::session::sanitized_message_data_json(entry.data_json, true)
+          : (entry.type == ava::session::EntryType::AssistantMessage && ava::core::json::field_value_start(entry.data_json, "ordered_output")
+                 ? ava::session::sanitized_compatibility_assistant_message_data_json(entry.data_json, include_ordered_output)
+                 : (entry.type == ava::session::EntryType::AssistantMessage ? ava::session::sanitized_message_data_json(entry.data_json, false)
+                                                                            : entry.data_json));
+  std::string json = "{";
+  json += integer_field_json("version", entry.version);
+  json += ',';
+  json += string_field_json("id", entry.id);
+  json += ',';
+  json += string_field_json("parent_id", entry.parent_id);
+  json += ',';
+  json += string_field_json("type", ava::session::to_string(entry.type));
+  json += ',';
+  json += string_field_json("timestamp", entry.timestamp);
+  json += ",\"data\":";
+  json += data_json;
+  json += '}';
+  return json;
+}
+
+// Render a session entry, collapsing it to a metadata-only stub once it exceeds the per-entry cap.
+//
+// Reasoning blocks use their sanitized form; every other entry type uses session_entry_json.
+// Anything larger than 8192 bytes is replaced by a truncated envelope that records the original
+// size, so the caller can still count the entry without paying its byte cost in the response.
+std::string capped_session_entry_json(ava::session::SessionEntry const& entry, bool include_ordered_output)
 {
   auto json = entry.type == ava::session::EntryType::ReasoningBlock ? sanitized_reasoning_entry_json(entry) : session_entry_json(entry, include_ordered_output);
   if (json.size() <= 8192)
@@ -320,128 +332,6 @@ std::string tool_timeline_json(std::vector<ava::agent::ToolTimelineEntry> const&
 
 }  // namespace
 
-ava::core::Result<std::string> list_sessions_result_json(runtime::Session const& session)
-{
-  auto sessions = ava::session::SessionStore::list_sessions(session.workspace_dir(), session.paths().sessions_dir);
-  if (!sessions)
-    return std::unexpected(sessions.error());
-  std::string json = "{\"sessions\":[";
-  for (std::size_t index = 0; index < sessions->size(); ++index)
-  {
-    auto const& summary = (*sessions)[index];
-    if (index > 0)
-      json += ',';
-    json += '{';
-    json += string_field_json("session_id", summary.session_id);
-    json += ',';
-    json += string_field_json("path", summary.path.string());
-    json += ',';
-    json += string_field_json("last_updated", summary.last_updated);
-    json += ',';
-    json += number_field_json("entry_count", summary.entry_count);
-    json += ',';
-    json += string_field_json("title", summary.title);
-    json += '}';
-  }
-  json += "]}";
-  return json;
-}
-
-ava::core::Result<std::string> session_tree_result_json(runtime::Session const& session)
-{
-  auto tree = ava::session::build_session_tree(session.workspace_dir(), session.paths().sessions_dir, session.store.session_id());
-  if (!tree)
-    return std::unexpected(std::move(tree.error()));
-  std::string json = "{";
-  json += string_field_json("current_session_id", tree->current_session_id);
-  json += ",\"roots\":" + string_array_json(tree->roots);
-  json += ",\"leaves\":" + string_array_json(tree->leaves);
-  json += ",\"path\":" + string_array_json(tree->current_path);
-  json += ",\"sessions\":[";
-  for (std::size_t index = 0; index < tree->sessions.size(); ++index)
-  {
-    if (index > 0)
-      json += ',';
-    auto const& node = tree->sessions[index];
-    json += '{';
-    json += string_field_json("session_id", node.summary.session_id);
-    json += ',';
-    json += string_field_json("path", node.summary.path.string());
-    json += ',';
-    json += string_field_json("last_updated", node.summary.last_updated);
-    json += ',';
-    json += number_field_json("entry_count", node.summary.entry_count);
-    json += ',';
-    json += string_field_json("name", node.metadata.name);
-    json += ',';
-    json += string_field_json("title", node.metadata.effective_title());
-    json += ',';
-    json += string_field_json("generated_title", node.metadata.generated_title);
-    json += ',';
-    json += bool_field_json("has_manual_name", node.metadata.has_manual_name);
-    json += ",\"labels\":" + string_array_json(node.metadata.labels);
-    json += ',';
-    json += string_field_json("labels_updated", node.metadata.labels_updated);
-    json += ',';
-    json += bool_field_json("archived", node.metadata.archived);
-    json += ',';
-    json += string_field_json("parent_session_id", node.metadata.parent_session_id);
-    json += ',';
-    json += string_field_json("source_session_id", node.metadata.source_session_id);
-    json += ',';
-    json += string_field_json("branch_from_entry_id", node.metadata.branch_from_entry_id);
-    json += ',';
-    json += string_field_json("branch_origin", node.metadata.branch_origin);
-    json += ',';
-    json += string_field_json("actor", node.metadata.actor);
-    json += ",\"children\":" + string_array_json(node.children);
-    json += ',';
-    json += bool_field_json("leaf", node.children.empty());
-    json += ',';
-    json += bool_field_json("current", node.current);
-    json += '}';
-  }
-  json += "]}";
-  return json;
-}
-
-ava::core::Result<std::string> list_models_result_json(runtime::Session const& session)
-{
-  auto registry = ava::config::load_model_registry(session.paths());
-  if (!registry)
-    return std::unexpected(std::move(registry.error()));
-
-  auto models = effective_models(*registry);
-  bool current_in_catalog = false;
-  for (auto const& model : models)
-  {
-    current_in_catalog = current_in_catalog || (model.provider_id == session.model().provider_id && model.model_id == session.model().model_id);
-  }
-  std::string json = "{";
-  json += string_field_json("default_provider", registry->default_provider_id);
-  json += ',';
-  json += string_field_json("default_model", registry->default_model_id);
-  json += ',';
-  json += string_field_json("current_provider", session.model().provider_id);
-  json += ',';
-  json += string_field_json("current_model", session.model().model_id);
-  json += ",\"models\":[";
-  for (std::size_t index = 0; index < models.size(); ++index)
-  {
-    if (index > 0)
-      json += ',';
-    json += model_info_json(models[index], session, true);
-  }
-  if (!current_in_catalog)
-  {
-    if (!models.empty())
-      json += ',';
-    json += model_info_json(session.model(), session, false);
-  }
-  json += "]}";
-  return json;
-}
-
 std::string command_result_json(CommandResult const& result)
 {
   std::string json = "{";
@@ -560,284 +450,6 @@ std::string command_registry_result_json(CommandRegistry const& registry)
     json += string_field_json("winner_source_id", diagnostic.winner_source_id);
     json += ',';
     json += string_field_json("winner_path", diagnostic.winner_path.string());
-    json += '}';
-  }
-  json += "]}";
-  return json;
-}
-
-ava::core::Result<std::string> messages_result_json(runtime::Session const& session)
-{
-  struct MessageCandidate
-  {
-    ava::session::SessionEntry const* entry = nullptr;
-    std::string legacy_json;
-    bool has_ordered_output = false;
-  };
-
-  auto entries = load_runtime_entries(session);
-  if (!entries)
-    return std::unexpected(entries.error());
-  auto projected = ava::session::project_logical_session_history(*entries);
-  if (!projected)
-    return std::unexpected(std::move(projected.error()));
-
-  std::vector<MessageCandidate> candidates;
-  candidates.reserve(projected->size());
-  for (auto const& entry : *projected)
-  {
-    if (ava::session::is_internal_replay_user_message(entry))
-      continue;
-    if (entry.type != ava::session::EntryType::UserMessage && entry.type != ava::session::EntryType::AssistantMessage &&
-        entry.type != ava::session::EntryType::ReasoningBlock && entry.type != ava::session::EntryType::ToolCall &&
-        entry.type != ava::session::EntryType::ToolResult)
-    {
-      continue;
-    }
-    // First make the exact v1-compatible representation. Ordered output is
-    // strictly additive and must never determine the retained message set.
-    candidates.push_back(MessageCandidate{.entry = &entry,
-                                          .legacy_json = capped_session_entry_json(entry, false),
-                                          .has_ordered_output = entry.type == ava::session::EntryType::AssistantMessage &&
-                                                                ava::core::json::field_value_start(entry.data_json, "ordered_output").has_value()});
-  }
-
-  std::string const prefix = "{" + string_field_json("session_id", session.store.session_id()) + ",\"messages\":[";
-  auto const tail_json = [](bool truncated, std::size_t message_count, std::size_t ordered_output_omitted_count) {
-    std::string tail = "]," + bool_field_json("truncated", truncated) + "," + number_field_json("message_count", message_count) + "," +
-                       bool_field_json("ordered_output_truncated", ordered_output_omitted_count != 0) + "," +
-                       number_field_json("ordered_output_omitted_count", ordered_output_omitted_count);
-    tail += '}';
-    return tail;
-  };
-  auto const rendered_size = [&prefix, &tail_json](std::vector<std::string> const& rendered, bool truncated, std::size_t ordered_output_omitted_count) {
-    std::size_t size = prefix.size() + tail_json(truncated, rendered.size(), ordered_output_omitted_count).size();
-    for (std::size_t index = 0; index < rendered.size(); ++index) size += rendered[index].size() + (index == 0 ? 0U : 1U);
-    return size;
-  };
-
-  std::vector<MessageCandidate const*> selected;
-  std::vector<std::string> rendered;
-  selected.reserve(std::min(candidates.size(), kMaxRpcMessagesEntries));
-  rendered.reserve(std::min(candidates.size(), kMaxRpcMessagesEntries));
-  bool truncated = false;
-  std::size_t potential_ordered_output_omissions = 0;
-  for (std::size_t index = 0; index < candidates.size(); ++index)
-  {
-    if (selected.size() >= kMaxRpcMessagesEntries)
-    {
-      truncated = true;
-      break;
-    }
-    auto const candidate_truncated = index + 1 < candidates.size();
-    auto const candidate_ordered_output_omissions = potential_ordered_output_omissions + (candidates[index].has_ordered_output ? 1U : 0U);
-    rendered.push_back(candidates[index].legacy_json);
-    // Reserve the bounded additive marker/count while making the legacy-only
-    // selection. This prevents ordered detail from removing legacy payload.
-    if (rendered_size(rendered, candidate_truncated, candidate_ordered_output_omissions) > kMaxRpcMessagesResponseBytes)
-    {
-      rendered.pop_back();
-      truncated = true;
-      break;
-    }
-    potential_ordered_output_omissions = candidate_ordered_output_omissions;
-    selected.push_back(&candidates[index]);
-  }
-
-  std::size_t ordered_output_omitted_count = potential_ordered_output_omissions;
-
-  for (std::size_t index = 0; index < selected.size(); ++index)
-  {
-    auto const* candidate = selected[index];
-    if (!candidate->has_ordered_output)
-      continue;
-    auto detailed_json = session_entry_json(*candidate->entry, true);
-    // A detailed entry may never consume the legacy entry's 8 KiB allowance:
-    // otherwise a 5--8 KiB v1 assistant message becomes metadata-only.
-    if (detailed_json.size() > 8192 || detailed_json.find("\"ordered_output\"") == std::string::npos)
-      continue;
-    auto const saved = std::move(rendered[index]);
-    rendered[index] = std::move(detailed_json);
-    if (rendered_size(rendered, truncated, ordered_output_omitted_count - 1) <= kMaxRpcMessagesResponseBytes)
-    {
-      --ordered_output_omitted_count;
-      continue;
-    }
-    rendered[index] = std::move(saved);
-  }
-
-  std::string json = prefix;
-  for (std::size_t index = 0; index < rendered.size(); ++index)
-  {
-    if (index > 0)
-      json += ',';
-    json += rendered[index];
-  }
-  json += tail_json(truncated, rendered.size(), ordered_output_omitted_count);
-  return json;
-}
-
-ava::core::Result<std::string> session_stats_result_json(runtime::Session const& session)
-{
-  auto entries = load_runtime_entries(session);
-  if (!entries)
-    return std::unexpected(entries.error());
-  auto stats_result = ava::session::compute_session_stats(*entries);
-  if (!stats_result)
-    return std::unexpected(std::move(stats_result.error()));
-  auto const& stats = *stats_result;
-
-  std::string json = "{";
-  json += string_field_json("session_id", session.store.session_id());
-  json += ',';
-  json += string_field_json("session_path", session.store.session_path().string());
-  json += ',';
-  json += number_field_json("entry_count", stats.entry_count);
-  json += ',';
-  json += string_field_json("first_timestamp", stats.first_timestamp);
-  json += ',';
-  json += string_field_json("last_timestamp", stats.last_timestamp);
-  if (stats.input_tokens)
-  {
-    json += ',';
-    json += integer_field_json("input_tokens", *stats.input_tokens);
-  }
-  if (stats.output_tokens)
-  {
-    json += ',';
-    json += integer_field_json("output_tokens", *stats.output_tokens);
-  }
-  if (stats.reasoning_tokens)
-  {
-    json += ',';
-    json += integer_field_json("reasoning_tokens", *stats.reasoning_tokens);
-  }
-  if (stats.cache_read_tokens)
-  {
-    json += ',';
-    json += integer_field_json("cache_read_tokens", *stats.cache_read_tokens);
-  }
-  if (stats.cache_write_tokens)
-  {
-    json += ',';
-    json += integer_field_json("cache_write_tokens", *stats.cache_write_tokens);
-  }
-  if (stats.total_tokens)
-  {
-    json += ',';
-    json += integer_field_json("total_tokens", *stats.total_tokens);
-  }
-  if (stats.estimated_input_bytes)
-  {
-    json += ',';
-    json += integer_field_json("estimated_input_bytes", *stats.estimated_input_bytes);
-  }
-  if (stats.estimated_output_bytes)
-  {
-    json += ',';
-    json += integer_field_json("estimated_output_bytes", *stats.estimated_output_bytes);
-  }
-  if (stats.estimated_total_bytes)
-  {
-    json += ',';
-    json += integer_field_json("estimated_total_bytes", *stats.estimated_total_bytes);
-  }
-  if (stats.total_cost_usd)
-  {
-    json += ',';
-    json += decimal_field_json("total_cost_usd", *stats.total_cost_usd);
-  }
-  if (stats.known_cost_usd)
-  {
-    json += ',';
-    json += decimal_field_json("known_cost_usd", *stats.known_cost_usd);
-  }
-  json += ',';
-  json += bool_field_json("cost_complete", stats.cost_complete);
-  json += ',';
-  json += number_field_json("unknown_cost_entries", stats.unknown_cost_entries);
-  json += ',';
-  json += number_field_json("exact_usage_entries", stats.exact_usage_entries);
-  json += ',';
-  json += number_field_json("estimated_usage_entries", stats.estimated_usage_entries);
-  json += ",\"counts\":{";
-  json += number_field_json("session_start", stats.counts.session_start);
-  json += ',';
-  json += number_field_json("session_metadata", stats.counts.session_metadata);
-  json += ',';
-  json += number_field_json("user_message", stats.counts.user_message);
-  json += ',';
-  json += number_field_json("assistant_message", stats.counts.assistant_message);
-  json += ',';
-  json += number_field_json("tool_call", stats.counts.tool_call);
-  json += ',';
-  json += number_field_json("tool_result", stats.counts.tool_result);
-  json += ',';
-  json += number_field_json("permission_decision", stats.counts.permission_decision);
-  json += ',';
-  json += number_field_json("mode_change", stats.counts.mode_change);
-  json += ',';
-  json += number_field_json("model_change", stats.counts.model_change);
-  json += ',';
-  json += number_field_json("reasoning_block", stats.counts.reasoning_block);
-  json += ',';
-  json += number_field_json("reasoning_change", stats.counts.reasoning_change);
-  json += ',';
-  json += number_field_json("compaction", stats.counts.compaction);
-  json += ',';
-  json += number_field_json("branch_summary", stats.counts.branch_summary);
-  json += ',';
-  json += number_field_json("error", stats.counts.error);
-  json += ',';
-  json += number_field_json("cancel", stats.counts.cancel);
-  json += "}}";
-  return json;
-}
-
-ava::core::Result<std::string> session_validation_result_json(runtime::Session const& session)
-{
-  auto entries = load_runtime_entries(session);
-  if (!entries)
-    return std::unexpected(entries.error());
-  auto const validation = ava::session::validate_session_replay(*entries);
-
-  std::string json = "{";
-  json += string_field_json("session_id", session.store.session_id());
-  json += ',';
-  json += string_field_json("session_path", session.store.session_path().string());
-  json += ',';
-  json += bool_field_json("ok", validation.ok());
-  json += ',';
-  json += number_field_json("error_count", validation.error_count);
-  json += ',';
-  json += number_field_json("warning_count", validation.warning_count);
-  json += ",\"issues\":[";
-  for (std::size_t index = 0; index < validation.issues.size(); ++index)
-  {
-    auto const& issue = validation.issues[index];
-    if (index > 0)
-      json += ',';
-    json += '{';
-    json += string_field_json("severity", ava::session::to_string(issue.severity));
-    json += ',';
-    json += string_field_json("kind", ava::session::to_string(issue.kind));
-    json += ',';
-    json += number_field_json("entry_index", issue.entry_index);
-    if (!issue.entry_id.empty())
-    {
-      json += ',';
-      json += string_field_json("entry_id", issue.entry_id);
-    }
-    if (!issue.call_id.empty())
-    {
-      json += ',';
-      json += string_field_json("call_id", issue.call_id);
-    }
-    if (!issue.message.empty())
-    {
-      json += ',';
-      json += string_field_json("message", issue.message);
-    }
     json += '}';
   }
   json += "]}";
@@ -1067,5 +679,447 @@ std::string context_sources_json(runtime::Session const& session)
   json += ']';
   return json;
 }
+
+namespace detail {
+
+MessagesResultSerializer::MessagesResultSerializer(utils::Badge<runtime::Session>, runtime::Session const& session)
+    : session_(session), prefix_("{" + string_field_json("session_id", session.store.session_id()) + ",\"messages\":[")
+{
+}
+
+ava::core::Result<std::string> MessagesResultSerializer::run() &&
+{
+  if (auto loaded = load_and_project(); !loaded)
+    return std::unexpected(std::move(loaded.error()));
+  collect_candidates();
+  select_legacy_messages();
+  refill_ordered_output();
+  return assemble_json();
+}
+
+// Load the raw session entries and project them into the logical view that the
+// messages result reports. Both steps can fail on a corrupted or unreadable
+// store; the projected vector is retained as a member because candidate entries
+// hold pointers into it for the rest of the pipeline.
+ava::core::VoidResult MessagesResultSerializer::load_and_project()
+{
+  auto entries = load_runtime_entries(session_);
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  auto projected = ava::session::project_logical_session_history(*entries);
+  if (!projected)
+    return std::unexpected(std::move(projected.error()));
+  projected_ = std::move(*projected);
+  return {};
+}
+
+// Build one MessageCandidate per retained entry type, pre-rendered with the
+// capped legacy form. Ordered output presence is detected up front so the
+// refill phase knows which entries could be upgraded later.
+void MessagesResultSerializer::collect_candidates()
+{
+  candidates_.reserve(projected_.size());
+  for (auto const& entry : projected_)
+  {
+    if (ava::session::is_internal_replay_user_message(entry))
+      continue;
+    if (entry.type != ava::session::EntryType::UserMessage && entry.type != ava::session::EntryType::AssistantMessage &&
+        entry.type != ava::session::EntryType::ReasoningBlock && entry.type != ava::session::EntryType::ToolCall &&
+        entry.type != ava::session::EntryType::ToolResult)
+    {
+      continue;
+    }
+    // First make the exact v1-compatible representation. Ordered output is
+    // strictly additive and must never determine the retained message set.
+    candidates_.push_back(MessageCandidate{.entry = &entry,
+                                           .legacy_json = capped_session_entry_json(entry, false),
+                                           .has_ordered_output = entry.type == ava::session::EntryType::AssistantMessage &&
+                                                                 ava::core::json::field_value_start(entry.data_json, "ordered_output").has_value()});
+  }
+}
+
+// Greedily fit legacy-rendered candidates into the entry and byte budgets.
+// Truncation and the running ordered-output omission count are tested
+// hypothetically (the values that would hold if this candidate were committed)
+// so the reserve for the additive marker/count can never evict a legacy payload.
+void MessagesResultSerializer::select_legacy_messages()
+{
+  selected_.reserve(std::min(candidates_.size(), kMaxRpcMessagesEntries));
+  rendered_.reserve(std::min(candidates_.size(), kMaxRpcMessagesEntries));
+  std::size_t potential_ordered_output_omissions = 0;
+  for (std::size_t index = 0; index < candidates_.size(); ++index)
+  {
+    if (selected_.size() >= kMaxRpcMessagesEntries)
+    {
+      truncated_ = true;
+      break;
+    }
+    auto const candidate_truncated = index + 1 < candidates_.size();
+    auto const candidate_ordered_output_omissions = potential_ordered_output_omissions + (candidates_[index].has_ordered_output ? 1U : 0U);
+    rendered_.push_back(candidates_[index].legacy_json);
+    // Reserve the bounded additive marker/count while making the legacy-only
+    // selection. This prevents ordered detail from removing legacy payload.
+    if (rendered_size_for(candidate_truncated, candidate_ordered_output_omissions) > kMaxRpcMessagesResponseBytes)
+    {
+      rendered_.pop_back();
+      truncated_ = true;
+      break;
+    }
+    potential_ordered_output_omissions = candidate_ordered_output_omissions;
+    selected_.push_back(&candidates_[index]);
+  }
+  ordered_output_omitted_count_ = potential_ordered_output_omissions;
+}
+
+// Try to upgrade each selected ordered-output entry to its detailed form.
+// A detailed entry is rejected if it exceeds the legacy 8 KiB allowance or no
+// longer carries ordered_output; otherwise the upgrade is committed only when
+// the response still fits with one fewer ordered-output omission.
+void MessagesResultSerializer::refill_ordered_output()
+{
+  for (std::size_t index = 0; index < selected_.size(); ++index)
+  {
+    auto const* candidate = selected_[index];
+    if (!candidate->has_ordered_output)
+      continue;
+    auto detailed_json = session_entry_json(*candidate->entry, true);
+    // A detailed entry may never consume the legacy entry's 8 KiB allowance:
+    // otherwise a 5--8 KiB v1 assistant message becomes metadata-only.
+    if (detailed_json.size() > 8192 || detailed_json.find("\"ordered_output\"") == std::string::npos)
+      continue;
+    auto const saved = std::move(rendered_[index]);
+    rendered_[index] = std::move(detailed_json);
+    if (rendered_size_for(truncated_, ordered_output_omitted_count_ - 1) <= kMaxRpcMessagesResponseBytes)
+    {
+      --ordered_output_omitted_count_;
+      continue;
+    }
+    rendered_[index] = std::move(saved);
+  }
+}
+
+std::string MessagesResultSerializer::assemble_json() const
+{
+  std::string json = prefix_;
+  for (std::size_t index = 0; index < rendered_.size(); ++index)
+  {
+    if (index > 0)
+      json += ',';
+    json += rendered_[index];
+  }
+  json += tail_json_for(truncated_, rendered_.size(), ordered_output_omitted_count_);
+  return json;
+}
+
+std::size_t MessagesResultSerializer::rendered_size_for(bool truncated, std::size_t ordered_output_omitted_count) const
+{
+  std::size_t size = prefix_.size() + tail_json_for(truncated, rendered_.size(), ordered_output_omitted_count).size();
+  for (std::size_t index = 0; index < rendered_.size(); ++index) size += rendered_[index].size() + (index == 0 ? 0U : 1U);
+  return size;
+}
+
+std::string MessagesResultSerializer::tail_json_for(bool truncated, std::size_t message_count, std::size_t ordered_output_omitted_count) const
+{
+  std::string tail = "]," + bool_field_json("truncated", truncated) + "," + number_field_json("message_count", message_count) + "," +
+                     bool_field_json("ordered_output_truncated", ordered_output_omitted_count != 0) + "," +
+                     number_field_json("ordered_output_omitted_count", ordered_output_omitted_count);
+  tail += '}';
+  return tail;
+}
+
+SessionResultSerializer::SessionResultSerializer(utils::Badge<runtime::Session>, runtime::Session const& session) : session_(session)
+{
+}
+
+ava::core::Result<std::string> SessionResultSerializer::list_sessions_result_json() const
+{
+  auto sessions = ava::session::SessionStore::list_sessions(session_.workspace_dir(), session_.paths().sessions_dir);
+  if (!sessions)
+    return std::unexpected(sessions.error());
+  std::string json = "{\"sessions\":[";
+  for (std::size_t index = 0; index < sessions->size(); ++index)
+  {
+    auto const& summary = (*sessions)[index];
+    if (index > 0)
+      json += ',';
+    json += '{';
+    json += string_field_json("session_id", summary.session_id);
+    json += ',';
+    json += string_field_json("path", summary.path.string());
+    json += ',';
+    json += string_field_json("last_updated", summary.last_updated);
+    json += ',';
+    json += number_field_json("entry_count", summary.entry_count);
+    json += ',';
+    json += string_field_json("title", summary.title);
+    json += '}';
+  }
+  json += "]}";
+  return json;
+}
+
+ava::core::Result<std::string> SessionResultSerializer::session_tree_result_json() const
+{
+  auto tree = ava::session::build_session_tree(session_.workspace_dir(), session_.paths().sessions_dir, session_.store.session_id());
+  if (!tree)
+    return std::unexpected(std::move(tree.error()));
+  std::string json = "{";
+  json += string_field_json("current_session_id", tree->current_session_id);
+  json += ",\"roots\":" + string_array_json(tree->roots);
+  json += ",\"leaves\":" + string_array_json(tree->leaves);
+  json += ",\"path\":" + string_array_json(tree->current_path);
+  json += ",\"sessions\":[";
+  for (std::size_t index = 0; index < tree->sessions.size(); ++index)
+  {
+    if (index > 0)
+      json += ',';
+    auto const& node = tree->sessions[index];
+    json += '{';
+    json += string_field_json("session_id", node.summary.session_id);
+    json += ',';
+    json += string_field_json("path", node.summary.path.string());
+    json += ',';
+    json += string_field_json("last_updated", node.summary.last_updated);
+    json += ',';
+    json += number_field_json("entry_count", node.summary.entry_count);
+    json += ',';
+    json += string_field_json("name", node.metadata.name);
+    json += ',';
+    json += string_field_json("title", node.metadata.effective_title());
+    json += ',';
+    json += string_field_json("generated_title", node.metadata.generated_title);
+    json += ',';
+    json += bool_field_json("has_manual_name", node.metadata.has_manual_name);
+    json += ",\"labels\":" + string_array_json(node.metadata.labels);
+    json += ',';
+    json += string_field_json("labels_updated", node.metadata.labels_updated);
+    json += ',';
+    json += bool_field_json("archived", node.metadata.archived);
+    json += ',';
+    json += string_field_json("parent_session_id", node.metadata.parent_session_id);
+    json += ',';
+    json += string_field_json("source_session_id", node.metadata.source_session_id);
+    json += ',';
+    json += string_field_json("branch_from_entry_id", node.metadata.branch_from_entry_id);
+    json += ',';
+    json += string_field_json("branch_origin", node.metadata.branch_origin);
+    json += ',';
+    json += string_field_json("actor", node.metadata.actor);
+    json += ",\"children\":" + string_array_json(node.children);
+    json += ',';
+    json += bool_field_json("leaf", node.children.empty());
+    json += ',';
+    json += bool_field_json("current", node.current);
+    json += '}';
+  }
+  json += "]}";
+  return json;
+}
+
+ava::core::Result<std::string> SessionResultSerializer::list_models_result_json() const
+{
+  auto registry = ava::config::load_model_registry(session_.paths());
+  if (!registry)
+    return std::unexpected(std::move(registry.error()));
+
+  auto models = effective_models(*registry);
+  bool current_in_catalog = false;
+  for (auto const& model : models)
+  {
+    current_in_catalog = current_in_catalog || (model.provider_id == session_.model().provider_id && model.model_id == session_.model().model_id);
+  }
+  std::string json = "{";
+  json += string_field_json("default_provider", registry->default_provider_id);
+  json += ',';
+  json += string_field_json("default_model", registry->default_model_id);
+  json += ',';
+  json += string_field_json("current_provider", session_.model().provider_id);
+  json += ',';
+  json += string_field_json("current_model", session_.model().model_id);
+  json += ",\"models\":[";
+  for (std::size_t index = 0; index < models.size(); ++index)
+  {
+    if (index > 0)
+      json += ',';
+    json += model_info_json(models[index], session_, true);
+  }
+  if (!current_in_catalog)
+  {
+    if (!models.empty())
+      json += ',';
+    json += model_info_json(session_.model(), session_, false);
+  }
+  json += "]}";
+  return json;
+}
+
+ava::core::Result<std::string> SessionResultSerializer::session_stats_result_json() const
+{
+  auto entries = load_runtime_entries(session_);
+  if (!entries)
+    return std::unexpected(entries.error());
+  auto stats_result = ava::session::compute_session_stats(*entries);
+  if (!stats_result)
+    return std::unexpected(std::move(stats_result.error()));
+  auto const& stats = *stats_result;
+
+  std::string json = "{";
+  json += string_field_json("session_id", session_.store.session_id());
+  json += ',';
+  json += string_field_json("session_path", session_.store.session_path().string());
+  json += ',';
+  json += number_field_json("entry_count", stats.entry_count);
+  json += ',';
+  json += string_field_json("first_timestamp", stats.first_timestamp);
+  json += ',';
+  json += string_field_json("last_timestamp", stats.last_timestamp);
+  if (stats.input_tokens)
+  {
+    json += ',';
+    json += integer_field_json("input_tokens", *stats.input_tokens);
+  }
+  if (stats.output_tokens)
+  {
+    json += ',';
+    json += integer_field_json("output_tokens", *stats.output_tokens);
+  }
+  if (stats.reasoning_tokens)
+  {
+    json += ',';
+    json += integer_field_json("reasoning_tokens", *stats.reasoning_tokens);
+  }
+  if (stats.cache_read_tokens)
+  {
+    json += ',';
+    json += integer_field_json("cache_read_tokens", *stats.cache_read_tokens);
+  }
+  if (stats.cache_write_tokens)
+  {
+    json += ',';
+    json += integer_field_json("cache_write_tokens", *stats.cache_write_tokens);
+  }
+  if (stats.total_tokens)
+  {
+    json += ',';
+    json += integer_field_json("total_tokens", *stats.total_tokens);
+  }
+  if (stats.estimated_input_bytes)
+  {
+    json += ',';
+    json += integer_field_json("estimated_input_bytes", *stats.estimated_input_bytes);
+  }
+  if (stats.estimated_output_bytes)
+  {
+    json += ',';
+    json += integer_field_json("estimated_output_bytes", *stats.estimated_output_bytes);
+  }
+  if (stats.estimated_total_bytes)
+  {
+    json += ',';
+    json += integer_field_json("estimated_total_bytes", *stats.estimated_total_bytes);
+  }
+  if (stats.total_cost_usd)
+  {
+    json += ',';
+    json += decimal_field_json("total_cost_usd", *stats.total_cost_usd);
+  }
+  if (stats.known_cost_usd)
+  {
+    json += ',';
+    json += decimal_field_json("known_cost_usd", *stats.known_cost_usd);
+  }
+  json += ',';
+  json += bool_field_json("cost_complete", stats.cost_complete);
+  json += ',';
+  json += number_field_json("unknown_cost_entries", stats.unknown_cost_entries);
+  json += ',';
+  json += number_field_json("exact_usage_entries", stats.exact_usage_entries);
+  json += ',';
+  json += number_field_json("estimated_usage_entries", stats.estimated_usage_entries);
+  json += ",\"counts\":{";
+  json += number_field_json("session_start", stats.counts.session_start);
+  json += ',';
+  json += number_field_json("session_metadata", stats.counts.session_metadata);
+  json += ',';
+  json += number_field_json("user_message", stats.counts.user_message);
+  json += ',';
+  json += number_field_json("assistant_message", stats.counts.assistant_message);
+  json += ',';
+  json += number_field_json("tool_call", stats.counts.tool_call);
+  json += ',';
+  json += number_field_json("tool_result", stats.counts.tool_result);
+  json += ',';
+  json += number_field_json("permission_decision", stats.counts.permission_decision);
+  json += ',';
+  json += number_field_json("mode_change", stats.counts.mode_change);
+  json += ',';
+  json += number_field_json("model_change", stats.counts.model_change);
+  json += ',';
+  json += number_field_json("reasoning_block", stats.counts.reasoning_block);
+  json += ',';
+  json += number_field_json("reasoning_change", stats.counts.reasoning_change);
+  json += ',';
+  json += number_field_json("compaction", stats.counts.compaction);
+  json += ',';
+  json += number_field_json("branch_summary", stats.counts.branch_summary);
+  json += ',';
+  json += number_field_json("error", stats.counts.error);
+  json += ',';
+  json += number_field_json("cancel", stats.counts.cancel);
+  json += "}}";
+  return json;
+}
+
+ava::core::Result<std::string> SessionResultSerializer::session_validation_result_json() const
+{
+  auto entries = load_runtime_entries(session_);
+  if (!entries)
+    return std::unexpected(entries.error());
+  auto const validation = ava::session::validate_session_replay(*entries);
+
+  std::string json = "{";
+  json += string_field_json("session_id", session_.store.session_id());
+  json += ',';
+  json += string_field_json("session_path", session_.store.session_path().string());
+  json += ',';
+  json += bool_field_json("ok", validation.ok());
+  json += ',';
+  json += number_field_json("error_count", validation.error_count);
+  json += ',';
+  json += number_field_json("warning_count", validation.warning_count);
+  json += ",\"issues\":[";
+  for (std::size_t index = 0; index < validation.issues.size(); ++index)
+  {
+    auto const& issue = validation.issues[index];
+    if (index > 0)
+      json += ',';
+    json += '{';
+    json += string_field_json("severity", ava::session::to_string(issue.severity));
+    json += ',';
+    json += string_field_json("kind", ava::session::to_string(issue.kind));
+    json += ',';
+    json += number_field_json("entry_index", issue.entry_index);
+    if (!issue.entry_id.empty())
+    {
+      json += ',';
+      json += string_field_json("entry_id", issue.entry_id);
+    }
+    if (!issue.call_id.empty())
+    {
+      json += ',';
+      json += string_field_json("call_id", issue.call_id);
+    }
+    if (!issue.message.empty())
+    {
+      json += ',';
+      json += string_field_json("message", issue.message);
+    }
+    json += '}';
+  }
+  json += "]}";
+  return json;
+}
+
+}  // namespace detail
 
 }  // namespace ava::app::rpc

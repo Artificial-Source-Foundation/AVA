@@ -477,7 +477,7 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
   std::optional<std::string> single_json;
   if (appended_single)
   {
-    auto serialized = ava::app::rpc::messages_result_json(*single_session);
+    auto serialized = single_session->messages_result_json();
     if (serialized)
       single_json = std::move(*serialized);
   }
@@ -493,7 +493,7 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
   std::optional<std::string> near_cap_json;
   if (appended_near_cap)
   {
-    auto serialized = ava::app::rpc::messages_result_json(*near_cap_session);
+    auto serialized = near_cap_session->messages_result_json();
     if (serialized)
       near_cap_json = std::move(*serialized);
   }

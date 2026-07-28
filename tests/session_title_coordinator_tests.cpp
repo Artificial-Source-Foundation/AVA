@@ -5,9 +5,9 @@
 #include "ava/app/command_palette.h"
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_sessions.h"
 #include "ava/app/session_title_coordinator.h"
-#include "ava/app/runtime/Session.h"
 #include "ava/config/session_title_config.h"
 #include "ava/session/assistant_output.h"
 #include "ava/provider/openai_provider.h"
@@ -213,10 +213,10 @@ void test_title_config_uses_logical_runtime_anchors()
   options.current_dir = workspace;
   options.paths = paths;
   auto session = ava::app::open_runtime_session(options);
-  auto config_anchor = session ? session->anchor_set()->find_anchor(paths.ava_config_dir)
-                               : ava::core::Result<ava::core::AnchorSet::AnchorRef>(std::unexpected(session.error()));
-  auto state_anchor = session ? session->anchor_set()->find_anchor(paths.ava_state_dir)
-                              : ava::core::Result<ava::core::AnchorSet::AnchorRef>(std::unexpected(session.error()));
+  auto config_anchor =
+      session ? session->anchor_set()->find_anchor(paths.ava_config_dir) : ava::core::Result<ava::core::AnchorSet::AnchorRef>(std::unexpected(session.error()));
+  auto state_anchor =
+      session ? session->anchor_set()->find_anchor(paths.ava_state_dir) : ava::core::Result<ava::core::AnchorSet::AnchorRef>(std::unexpected(session.error()));
   expect(session && session->session_title_coordinator() && config_anchor && config_anchor->relative().empty() &&
              config_anchor->anchor().root == paths.ava_config_dir && state_anchor && state_anchor->relative().empty() &&
              state_anchor->anchor().root == paths.ava_state_dir,
@@ -339,8 +339,8 @@ void test_direct_provider_generation_is_isolated()
   }
   expect(metadata && metadata->effective_title() == "Direct Fake Provider Session Title" && isolated_request,
          "direct title provider makes one bounded tool-free request and persists only its sanitized title metadata");
-  auto list_json = ava::app::rpc::list_sessions_result_json(*session);
-  auto tree_json = ava::app::rpc::session_tree_result_json(*session);
+  auto list_json = session->list_sessions_result_json();
+  auto tree_json = session->session_tree_result_json();
   auto metadata_json = metadata ? ava::session::session_metadata_json(*metadata) : std::string{};
   expect(list_json && tree_json && list_json->find("\"title\":\"Direct Fake Provider Session Title\"") != std::string::npos &&
              tree_json->find("\"title\":\"Direct Fake Provider Session Title\"") != std::string::npos &&
@@ -373,8 +373,8 @@ void test_coordinator_dedupes_and_preserves_manual_rename_races()
   coordinator->schedule(*session, "First ordinary prompt", *seeded, options);
   coordinator->schedule(*session, "Second prompt must not replace first", *seeded, options);
   expect(state->wait_started(), "title race fake generator starts");
-  auto renamed = session->append_runtime_session_metadata(
-      ava::session::SessionMetadataUpdate{.name = "Manual Rename", .actor = "test", .generated_title = std::nullopt});
+  auto renamed =
+      session->append_runtime_session_metadata(ava::session::SessionMetadataUpdate{.name = "Manual Rename", .actor = "test", .generated_title = std::nullopt});
   expect(renamed.has_value(), renamed ? "manual rename wins title race" : renamed.error().format());
   state->allow_completion();
   expect(coordinator->wait_until_idle(3s), "title race coordinator becomes idle");
@@ -444,10 +444,10 @@ void test_session_specific_catalog_notifications_survive_navigation()
   auto new_authority = new_session->append_target()->read_authority();
   auto new_entries = new_authority ? new_authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(new_authority.error()));
   auto marked = new_entries ? new_session->append_target()->append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                                            .parent_id = new_entries->back().id,
-                                                                                            .type = ava::session::EntryType::UserMessage,
-                                                                                            .timestamp = "2099-01-01T00:00:00Z",
-                                                                                            .data_json = R"({"text":"deterministic recent current"})"})
+                                                                                              .parent_id = new_entries->back().id,
+                                                                                              .type = ava::session::EntryType::UserMessage,
+                                                                                              .timestamp = "2099-01-01T00:00:00Z",
+                                                                                              .data_json = R"({"text":"deterministic recent current"})"})
                             : ava::core::VoidResult(std::unexpected(new_entries.error()));
   expect(named && committed && late_committed && marked,
          "session-specific title catalog fixture persists names, old and late committed turns, and deterministic new-current activity");
